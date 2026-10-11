@@ -38,7 +38,7 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 
 ## WebSocket change hints
 
-WebSocket is a latency optimization, not a data synchronization channel. After the server transaction commits a change-log entry, it may notify authorized online devices with a minimal `dataset-changed` hint and latest sequence/project scope. The recipient then performs the normal authenticated cursor Pull.
+WebSocket is a latency optimization, not a data synchronization channel. After the server transaction commits an accepted Push, it notifies authenticated online devices with the minimal `dataset-changed` hint. The recipient then performs the normal authenticated cursor Pull.
 
 - Never send order payloads, attachments or authoritative state through the socket.
 - Subscribe with the authenticated account session; disconnect disabled accounts and revoked sessions.

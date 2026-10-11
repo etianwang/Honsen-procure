@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+import websocket from '@fastify/websocket'
 import { z } from 'zod'
 import { AuthenticationError, AuthService } from './auth/service.js'
 import { MasterDataError, MasterDataService } from './master-data/service.js'
@@ -13,6 +14,11 @@ export function createApp(
   sync?: SyncService,
 ) {
   const app = Fastify({ logger: false })
+  const sockets = new Set<{
+    send(data: string): void
+    close(code?: number): void
+  }>()
+  void app.register(websocket)
 
   async function authenticateRequest(request: {
     headers: { authorization?: unknown }
@@ -128,7 +134,12 @@ export function createApp(
     app.post('/api/sync/push', async (request, reply) => {
       try {
         const account = await authenticateRequest(request)
-        return await sync.push(account, request.body)
+        const response = await sync.push(account, request.body)
+        if (response.results.some((result) => result.status === 'accepted')) {
+          const hint = JSON.stringify({ type: 'dataset-changed' })
+          for (const socket of sockets) socket.send(hint)
+        }
+        return response
       } catch (error) {
         if (error instanceof AuthenticationError) {
           return reply.status(401).send({ code: 'UNAUTHENTICATED' })
@@ -152,6 +163,16 @@ export function createApp(
           return reply.status(400).send({ code: 'INVALID_REQUEST' })
         }
         throw error
+      }
+    })
+
+    app.get('/api/sync/ws', { websocket: true }, async (socket, request) => {
+      try {
+        await authenticateRequest(request)
+        sockets.add(socket)
+        socket.on('close', () => sockets.delete(socket))
+      } catch {
+        socket.close(1008)
       }
     })
   }

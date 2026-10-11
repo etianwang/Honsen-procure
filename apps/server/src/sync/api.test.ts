@@ -66,6 +66,17 @@ function captchaAnswer(question: string): string {
 }
 
 describe('sync API', () => {
+  it('registers the authenticated WebSocket hint route', async () => {
+    const app = createApp(
+      new AuthService(new AuthFixture(), { verify: async () => true }),
+      undefined,
+      new SyncService(new SyncFixture()),
+    )
+    await app.ready()
+    expect(app.hasRoute({ method: 'GET', url: '/api/sync/ws' })).toBe(true)
+    await app.close()
+  })
+
   it('requires a session and accepts a bounded push through the HTTPS boundary', async () => {
     const authStore = new AuthFixture()
     const syncStore = new SyncFixture()
