@@ -3,6 +3,12 @@
 **Last updated:** 2026-10-11  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## CI trigger-policy optimization — 2026-10-11
+
+- Selected scope: the existing `quality` workflow's event filters only. The workflow retains its name, PostgreSQL 16 service, tests, permissions, timeout, caches, artifacts, and concurrency settings; no business code or required-check name changed.
+- The active `Protect main` Ruleset requires the strict `quality` context, not a push-event run. Restricting CI to pushes on `main` and pull requests targeting `main` leaves the required PR check available and prevents duplicate task-branch push and PR runs.
+- The branch is intentionally unpushed pending local verification and explicit user authorization. No PR or merge is authorized by this record.
+
 ## CI quality-workflow recovery — 2026-10-11
 
 - Selected scope: repair and verify the existing single GitHub Actions quality workflow only. No business, database, Docker Compose, dependency, native Tauri, Windows Runner, or macOS Runner change was made.

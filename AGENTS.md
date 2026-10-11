@@ -54,6 +54,7 @@ Then compare the project with `docs/HONSEN_TOOLBOX_INTEGRATION.md` and report an
 - Never use `.env`, deployment credentials, a business database, or hardcoded system paths for tests. Use repository-relative paths and environment variables so Windows/WSL2 and macOS/Colima use the same commands.
 - `.gitattributes` governs cross-platform line endings: repository text defaults to LF, while Windows command scripts retain CRLF and binaries remain unmodified. Never mass-normalize or re-check out unrelated tracked files for a line-ending-only change.
 - Keep the single `.github/workflows/ci.yml` quality workflow. It must use `.nvmrc`, least-privilege read-only permissions, the isolated PostgreSQL 16 Actions service, and bounded same-ref concurrency. `npm run test` already includes the two PostgreSQL suites when `TEST_DATABASE_URL` is present; do not add `test:postgres` afterward and execute them twice.
+- Run `quality` for pushes to `main` and pull requests targeting `main` only. This preserves the protected `quality` context while preventing a task-branch push from duplicating the pull-request run.
 - Before commits, run the affected-package checks and the focused test command. Keep the Git worktree clean except for the selected task, make one local checkpoint commit after acceptance, and never push without explicit approval.
 - WSL distributions that default to `root` are supported only for bootstrap. Create and use a normal development user deliberately; do not change the default WSL user or Docker group membership without explicit approval.
 
