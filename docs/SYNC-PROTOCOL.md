@@ -28,7 +28,7 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 ## Pull
 
 - `GET /api/sync/pull?cursor=<sequence>&limit=<1..500>` requires the authenticated account session and returns ordered changes plus the cursor of the last returned change. The caller repeats the same cursor when a page fails to apply locally.
-- The desktop first records a received page in a local remote-entity staging store and advances the durable cursor in the same SQLite transaction. A locally dirty entity instead creates an immutable conflict record and retains the local value. Entity-specific projection from staging into catalog/order read tables is performed separately so an incomplete projection can never advance the cursor or discard remote evidence.
+- The desktop first records a received page in a local remote-entity staging store and advances the durable cursor in the same SQLite transaction. A locally dirty entity instead creates an immutable conflict record and retains the local value. Clean materials, suppliers and material prices are validated and projected into their local query tables inside that same transaction; unsupported entities remain staged until their projector exists. A projection failure rolls back the page, so it cannot advance the cursor or discard remote evidence.
 - Pull ordered changes with an opaque, durable sequence cursor; timestamps are not cursors.
 - Apply one response page to SQLite in a transaction. Do not advance the local cursor until all page changes have applied.
 - A pulled change may update a clean local record. It may not overwrite a locally dirty record with pending events; create a conflict record instead.

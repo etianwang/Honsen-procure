@@ -2852,6 +2852,7 @@ impl LocalAuthService {
                 "INSERT INTO local_sync_remote_entities (entity_type, entity_id, operation, server_version, payload_json, changed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(entity_type, entity_id) DO UPDATE SET operation = excluded.operation, server_version = excluded.server_version, payload_json = excluded.payload_json, changed_at = excluded.changed_at WHERE excluded.server_version >= local_sync_remote_entities.server_version",
                 params![change.entity_type, change.entity_id.to_string(), change.operation, change.version, remote_payload, change.changed_at],
             ).map_err(|_| AuthError::Database)?;
+            project_remote_catalog_change(&transaction, change, now)?;
             transaction.execute(
                 "INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)",
                 params![change.entity_type, change.entity_id.to_string(), change.version],
@@ -3617,6 +3618,116 @@ fn validate_material_price(price: &MaterialPriceInput) -> Result<i64, AuthError>
         .ok_or(AuthError::InvalidInput)
 }
 
+fn project_remote_catalog_change(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+    now: SystemTime,
+) -> Result<(), AuthError> {
+    match (change.entity_type.as_str(), change.operation.as_str()) {
+        ("material", "soft_delete") => {
+            transaction
+                .execute(
+                    "UPDATE local_materials SET is_active = 0, version = MAX(version, ?2), deleted_at = COALESCE(deleted_at, ?3) WHERE id = ?1",
+                    params![change.entity_id.to_string(), change.version, unix_seconds(now)],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        ("supplier", "soft_delete") => {
+            transaction
+                .execute(
+                    "UPDATE local_suppliers SET is_active = 0, version = MAX(version, ?2), deleted_at = COALESCE(deleted_at, ?3) WHERE id = ?1",
+                    params![change.entity_id.to_string(), change.version, unix_seconds(now)],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        ("material_price", "soft_delete") => {
+            transaction
+                .execute(
+                    "UPDATE local_material_prices SET is_active = 0, version = MAX(version, ?2), deleted_at = COALESCE(deleted_at, ?3) WHERE id = ?1",
+                    params![change.entity_id.to_string(), change.version, unix_seconds(now)],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        ("material", "upsert") => {
+            let material: MaterialInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if material.id != change.entity_id {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_material(&material)?;
+            let aliases =
+                serde_json::to_string(&material.aliases).map_err(|_| AuthError::InvalidInput)?;
+            transaction
+                .execute(
+                    "INSERT INTO local_materials (id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, is_active, version)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                     ON CONFLICT(id) DO UPDATE SET sku = excluded.sku, name_zh = excluded.name_zh, name_fr = excluded.name_fr,
+                       aliases_json = excluded.aliases_json, brand = excluded.brand, model = excluded.model,
+                       specification = excluded.specification, unit = excluded.unit, notes = excluded.notes,
+                       is_active = excluded.is_active, version = excluded.version, deleted_at = NULL",
+                    params![material.id.to_string(), material.sku, material.name_zh, material.name_fr, aliases, material.brand, material.model, material.specification, material.unit, material.notes, material.is_active as i64, change.version],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        ("supplier", "upsert") => {
+            let supplier: SupplierInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if supplier.id != change.entity_id {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_supplier(&supplier)?;
+            transaction
+                .execute(
+                    "INSERT INTO local_suppliers (id, business_code, name, contact_name, address, city, country, phone, whatsapp, email, payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                     ON CONFLICT(id) DO UPDATE SET business_code = excluded.business_code, name = excluded.name,
+                       contact_name = excluded.contact_name, address = excluded.address, city = excluded.city,
+                       country = excluded.country, phone = excluded.phone, whatsapp = excluded.whatsapp,
+                       email = excluded.email, payment_terms = excluded.payment_terms,
+                       delivery_lead_time = excluded.delivery_lead_time, is_preferred = excluded.is_preferred,
+                       is_blacklisted = excluded.is_blacklisted, is_active = excluded.is_active,
+                       version = excluded.version, deleted_at = NULL",
+                    params![supplier.id.to_string(), supplier.business_code, supplier.name, supplier.contact_name, supplier.address, supplier.city, supplier.country, supplier.phone, supplier.whatsapp, supplier.email, supplier.payment_terms, supplier.delivery_lead_time, supplier.is_preferred as i64, supplier.is_blacklisted as i64, supplier.is_active as i64, change.version],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        ("material_price", "upsert") => {
+            let price: MaterialPriceInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if price.id != change.entity_id {
+                return Err(AuthError::InvalidInput);
+            }
+            let unit_price_minor = validate_material_price(&price)?;
+            transaction
+                .execute(
+                    "UPDATE local_material_prices SET is_active = 0
+                     WHERE material_id = ?1 AND supplier_id = ?2 AND currency = ?3 AND id <> ?4
+                       AND is_active = 1 AND deleted_at IS NULL",
+                    params![
+                        price.material_id.to_string(),
+                        price.supplier_id.to_string(),
+                        price.currency,
+                        price.id.to_string()
+                    ],
+                )
+                .map_err(|_| AuthError::Database)?;
+            transaction
+                .execute(
+                    "INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, source_note, is_active, version)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)
+                     ON CONFLICT(id) DO UPDATE SET material_id = excluded.material_id, supplier_id = excluded.supplier_id,
+                       currency = excluded.currency, unit_price_minor = excluded.unit_price_minor, unit = excluded.unit,
+                       effective_at = excluded.effective_at, source_note = excluded.source_note, is_active = 1,
+                       version = excluded.version, deleted_at = NULL",
+                    params![price.id.to_string(), price.material_id.to_string(), price.supplier_id.to_string(), price.currency, unit_price_minor, price.unit, price.effective_at, price.source_note, change.version],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 struct CalculatedRequisition {
     subtotal: i64,
     line_discount: i64,
@@ -4360,19 +4471,84 @@ mod tests {
             )
             .unwrap();
         let entity_id = Uuid::new_v4();
+        let supplier_id = Uuid::new_v4();
+        let price_id = Uuid::new_v4();
+        let remote_material = MaterialInput {
+            id: entity_id,
+            sku: Some("REMOTE-001".into()),
+            name_zh: "remote fixture".into(),
+            name_fr: None,
+            aliases: vec![],
+            brand: None,
+            model: "fixture".into(),
+            specification: "fixture".into(),
+            unit: "pcs".into(),
+            notes: None,
+            is_active: true,
+            version: 1,
+        };
+        let remote_supplier = SupplierInput {
+            id: supplier_id,
+            business_code: "REMOTE-SUP-001".into(),
+            name: "remote supplier".into(),
+            contact_name: None,
+            address: None,
+            city: None,
+            country: None,
+            phone: None,
+            whatsapp: None,
+            email: None,
+            payment_terms: None,
+            delivery_lead_time: None,
+            is_preferred: false,
+            is_blacklisted: false,
+            is_active: true,
+            version: 1,
+        };
+        let remote_price = MaterialPriceInput {
+            id: price_id,
+            material_id: entity_id,
+            supplier_id,
+            currency: "XOF".into(),
+            unit_price_minor: "100".into(),
+            unit: "pcs".into(),
+            effective_at: "2026-10-11".into(),
+            source_note: None,
+            version: 1,
+        };
         service
             .apply_sync_pull_page(
                 SyncPullPageInput {
-                    changes: vec![SyncPullChangeInput {
-                        cursor: "1".into(),
-                        entity_type: "material".into(),
-                        entity_id,
-                        operation: "upsert".into(),
-                        version: 1,
-                        payload: serde_json::json!({ "nameZh": "remote fixture" }),
-                        changed_at: "2026-10-11T00:00:00Z".into(),
-                    }],
-                    next_cursor: "1".into(),
+                    changes: vec![
+                        SyncPullChangeInput {
+                            cursor: "1".into(),
+                            entity_type: "material".into(),
+                            entity_id,
+                            operation: "upsert".into(),
+                            version: 1,
+                            payload: serde_json::to_value(&remote_material).unwrap(),
+                            changed_at: "2026-10-11T00:00:00Z".into(),
+                        },
+                        SyncPullChangeInput {
+                            cursor: "2".into(),
+                            entity_type: "supplier".into(),
+                            entity_id: supplier_id,
+                            operation: "upsert".into(),
+                            version: 1,
+                            payload: serde_json::to_value(&remote_supplier).unwrap(),
+                            changed_at: "2026-10-11T00:00:01Z".into(),
+                        },
+                        SyncPullChangeInput {
+                            cursor: "3".into(),
+                            entity_type: "material_price".into(),
+                            entity_id: price_id,
+                            operation: "upsert".into(),
+                            version: 1,
+                            payload: serde_json::to_value(&remote_price).unwrap(),
+                            changed_at: "2026-10-11T00:00:02Z".into(),
+                        },
+                    ],
+                    next_cursor: "3".into(),
                 },
                 now,
             )
@@ -4384,7 +4560,7 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(cursor, "1");
+            assert_eq!(cursor, "3");
             let remote_count: i64 = connection
                 .query_row(
                     "SELECT COUNT(*) FROM local_sync_remote_entities",
@@ -4392,8 +4568,18 @@ mod tests {
                     |row| row.get(0),
                 )
                 .unwrap();
-            assert_eq!(remote_count, 1);
+            assert_eq!(remote_count, 3);
+            let local_name: String = connection
+                .query_row(
+                    "SELECT name_zh FROM local_materials WHERE id = ?1",
+                    [entity_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(local_name, "remote fixture");
         }
+        let catalog = service.search_catalog("remote fixture", now).unwrap();
+        assert_eq!(catalog[0].prices[0].unit_price_minor, "100");
         service
             .save_material(
                 MaterialInput {
@@ -4417,15 +4603,20 @@ mod tests {
             .apply_sync_pull_page(
                 SyncPullPageInput {
                     changes: vec![SyncPullChangeInput {
-                        cursor: "2".into(),
+                        cursor: "4".into(),
                         entity_type: "material".into(),
                         entity_id,
                         operation: "upsert".into(),
                         version: 2,
-                        payload: serde_json::json!({ "nameZh": "remote newer" }),
+                        payload: serde_json::to_value(MaterialInput {
+                            name_zh: "remote newer".into(),
+                            version: 2,
+                            ..remote_material
+                        })
+                        .unwrap(),
                         changed_at: "2026-10-11T00:01:00Z".into(),
                     }],
-                    next_cursor: "2".into(),
+                    next_cursor: "4".into(),
                 },
                 now,
             )
@@ -4442,7 +4633,15 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(cursor, "2");
+        assert_eq!(cursor, "4");
+        let local_name: String = connection
+            .query_row(
+                "SELECT name_zh FROM local_materials WHERE id = ?1",
+                [entity_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(local_name, "local fixture");
     }
 
     #[test]
