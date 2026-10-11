@@ -316,6 +316,25 @@ pub struct ReceiptView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncOutboxEventView {
+    pub event_id: Uuid,
+    pub entity_type: String,
+    pub entity_id: Uuid,
+    pub operation: String,
+    pub base_version: i64,
+    pub payload_json: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncAcknowledgementInput {
+    pub event_id: Uuid,
+    pub status: String,
+    pub server_version: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RequisitionTotalsView {
     pub subtotal_minor: String,
     pub line_discount_minor: String,
@@ -2656,6 +2675,54 @@ impl LocalAuthService {
             .collect()
     }
 
+    pub fn pending_sync_events(
+        &self,
+        limit: usize,
+        now: SystemTime,
+    ) -> Result<Vec<SyncOutboxEventView>, AuthError> {
+        self.require_catalog_read(now)?;
+        if limit == 0 || limit > 100 {
+            return Err(AuthError::InvalidInput);
+        }
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection
+            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL ORDER BY created_at, event_id LIMIT ?1")
+            .map_err(|_| AuthError::Database)?
+            .query_map([limit as i64], |row| Ok(SyncOutboxEventView {
+                event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, operation: row.get(3)?, base_version: row.get(4)?, payload_json: row.get(5)?
+            }))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
+    pub fn apply_sync_acknowledgements(
+        &self,
+        acknowledgements: Vec<SyncAcknowledgementInput>,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_catalog_read(now)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        for acknowledgement in acknowledgements {
+            if acknowledgement.status != "accepted"
+                || acknowledgement.server_version.unwrap_or(-1) < 1
+            {
+                continue;
+            }
+            let entity: Option<(String, String)> = transaction.query_row(
+                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND acknowledged_at IS NULL",
+                [acknowledgement.event_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional().map_err(|_| AuthError::Database)?;
+            if let Some((entity_type, entity_id)) = entity {
+                transaction.execute("UPDATE local_sync_outbox SET acknowledged_at = ?2, last_error = NULL WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![entity_type, entity_id, acknowledgement.server_version]).map_err(|_| AuthError::Database)?;
+            }
+        }
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
     fn require_master_data_mutation(&self, now: SystemTime) -> Result<(), AuthError> {
         for role in [
             Role::SuperAdministrator,
@@ -4413,6 +4480,47 @@ mod tests {
                 .unwrap();
             assert!(material_payload.contains("测试材料"));
         }
+        let pending = service.pending_sync_events(100, now).unwrap();
+        assert_eq!(pending.len(), 4);
+        let first_event = pending[0].clone();
+        service
+            .apply_sync_acknowledgements(
+                vec![
+                    SyncAcknowledgementInput {
+                        event_id: first_event.event_id,
+                        status: "accepted".into(),
+                        server_version: Some(3),
+                    },
+                    SyncAcknowledgementInput {
+                        event_id: pending[1].event_id,
+                        status: "conflict".into(),
+                        server_version: Some(2),
+                    },
+                ],
+                now,
+            )
+            .unwrap();
+        assert_eq!(service.pending_sync_events(100, now).unwrap().len(), 3);
+        service
+            .apply_sync_acknowledgements(
+                vec![SyncAcknowledgementInput {
+                    event_id: first_event.event_id,
+                    status: "accepted".into(),
+                    server_version: Some(1),
+                }],
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let version: i64 = connection
+            .query_row(
+                "SELECT server_version FROM local_sync_entity_versions WHERE entity_type = ?1 AND entity_id = ?2",
+                params![first_event.entity_type, first_event.entity_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, 3);
+        drop(connection);
         let country_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
         let department_id = Uuid::new_v4();
