@@ -3,10 +3,40 @@
 **Last updated:** 2026-10-11  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## CURRENT SESSION HANDOFF — 2026-10-11
+
+- **Project:** Honsen采购管理系统 / HONSEN Procure. Documentation checkpoint only; feature development is paused. M0–M3 IN PROGRESS; M4 BLOCKED for release. No milestone has full acceptance.
+- **Git:** branch `main`; HEAD when preparing this checkpoint: `077b064bc4b2ba139a8b173bed0f92d1ebf30a8e`. This checkpoint is committed separately as `docs: reconcile roadmap tasks and session handoff`; obtain its hash with `git log -1`. No push is authorized this round.
+- **Worktree at preparation:** modified `docs/ROADMAP.md`, `docs/BUILD-TASKS.md`, `memory.md` (this document-only commit), plus pre-existing `apps/desktop/src-tauri/src/lib.rs` (344 additions / 18 deletions, remains unstaged/uncommitted). After the document commit, only the Rust draft should remain dirty. Never reset, clean, overwrite or discard it.
+- **Task acceptance:** COMPLETED T00/T01/T03/T05/T06/T07; IN PROGRESS T02/T04/T08/T09/T10; NOT STARTED T11/T12/T13/T14; BLOCKED T15. The full register and 20 outstanding child items are in BUILD-TASKS; partial work must remain unchecked.
+- **Blockers/dependencies:** T02 disposable PostgreSQL integration has not passed its complete gate; T04 authorized actual initial records are absent; T15 needs approved Toolbox identity and T14. Original task dependencies remain unchanged. T08 formal-number acceptance needs T10; T09 archival acceptance needs T11. Treat these as cross-task integration checkpoints, not additional reverse scheduling edges. An explicit implementation-readiness versus final-acceptance plan must be confirmed before resuming dependent development; never wait for both sides to be fully complete or lower their acceptance criteria.
+- **T10 implemented at committed baseline:** server idempotent Push/version conflicts/change log/cursor Pull; local atomic mutation/outbox and acknowledgment handling; Rust HTTPS transport; paged Pull and catalog/master-data/immutable-comment projection; administrator choice resolver fixture; server WebSocket hints. These are partial implementations, not full T10 acceptance.
+- **T10 still open:** complete safe order/child/RFQ/receipt/attachment projection and staged dependency recovery; production resolver routing; startup/login sync, retry/backoff/connectivity; desktop WebSocket/session revocation; multi-device offline/reconnect/conflict DOM and disposable PostgreSQL integration evidence. Historical and confirmed orders/attachments must never be blindly overwritten.
+- **Rust draft recovery:** preserve and inspect `git diff -- apps/desktop/src-tauri/src/lib.rs` before any edit. Added `RemotePurchaseOrderPayload`/`RemotePurchaseOrderLine`, `project_remote_purchase_order_change`, `remote_order_references_exist`, `validate_remote_purchase_order`, `remote_minor`, `valid_json_object`, and expanded order serialization/test assertions. Calls to `project_staged_purchase_orders` / `project_staged_order_comments` currently lack definitions. When T10 resumption is explicitly approved and prerequisites/boundaries are settled, finish or reconcile these calls without discarding the draft, review dependency ordering and immutable-order guards, then run focused Rust/projector and required DOM gates. Do not claim it compiles now.
+- **Preservation check:** Rust file SHA-256 `69A561342492CA56E48FB6E4F32B335D7D2CCA6A2B484C52BB8A540B4FF92C1F`; unchanged since the progress audit. Recheck hash/diff on next-session entry before modifying it.
+- **Test evidence:** prior audit recorded 31 JavaScript tests, 11 Rust tests, 16 Playwright tests and format/lint/typecheck/build passing before the draft; two PostgreSQL integration suites skipped. These are historical executed-output records, not fresh/archived CI proof. This round only checks the three Markdown files with Prettier, Git whitespace/diff checks, original-goal retention and bidirectional mapping assertions; no build, full tests or business execution.
+- **Smallest next task:** T02-A: read `docs/POSTGRES-INTEGRATION-TESTING.md`, inspect the committed PostgreSQL test configuration, then establish an explicitly disposable WSL PostgreSQL test connection and run the focused committed integration suites. Do not use Neon production data or run deployment migrations. First report the proposed cross-task boundary plan; do not resume T10 just because a draft exists.
+- **Avoid repeating:** do not recreate T00 workspace/CI/DOM harness, T01 money/contracts, T03 local auth, T05 catalog/crop, T06 draft or T07 local workflow. Do not redo repository/product renaming or the approved code mapping. Read existing code/tests and extend only the selected outstanding child task; consult the bug ledger below before tests.
+
 ## Current position
 
+### Authoritative acceptance snapshot — 2026-10-11
+
+- This snapshot supersedes stale progress statements in the historical log below. Original goals, dependencies and gates remain in [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/BUILD-TASKS.md](docs/BUILD-TASKS.md); historical slice-completion notes do not accept a whole task.
+- Latest application-code baseline: `077b064` (`fix: drain paged sync pulls safely`), branch `main`, matching the locally recorded `origin/main` at checkpoint preparation; initial baseline `1f686df`. The document-only checkpoint advances local HEAD without pushing. No remote fetch or new CI result was obtained in this round.
+- **COMPLETED:** T00, T01, T03, T05, T06, T07. **IN PROGRESS:** T02, T04, T08, T09, T10. **NOT STARTED:** T11, T12, T13, T14. **BLOCKED:** T15 (unapproved permanent Toolbox identity and unmet T14). All partial/unstarted/blocked tasks remain unchecked.
+- **Milestones:** M0/M1/M2/M3 IN PROGRESS; M4 BLOCKED for release. M0's authorized initial-record deployment is BLOCKED and its complete CI execution acceptance remains open. No milestone is fully accepted.
+- **Recorded test evidence, not a new run:** the prior audit recorded pre-draft formatting/lint/typecheck/JavaScript tests/production build passing; desktop 2 + server 15 + shared 14 = 31 tests, Rust formatting/check + 11 tests, Playwright 16 tests. These are historical executed-output records, not archived CI artifacts. Two PostgreSQL integration suites were skipped. Disposable WSL migration application/table inspection is smoke evidence only, not successful authentication/session/sync integration acceptance. Configured PostgreSQL CI service is not evidence that CI passed. Test source locations are indexed in BUILD-TASKS.
+- **Working tree:** pre-existing `apps/desktop/src-tauri/src/lib.rs` draft has 344 insertions / 18 deletions. It expands purchase-order payload/line serialization, validation and remote order projection/references, and adds staged-order/comment projection calls. Static inspection found calls to `project_staged_purchase_orders` and `project_staged_order_comments` without definitions. Current draft is uncompiled/unaccepted; risks include unresolved calls, dependency ordering and historical-order overwrite/retention. It is neither completion evidence nor part of this documentation change. Preserve it without editing, reverting or overwriting. SHA-256 before this round: `69A561342492CA56E48FB6E4F32B335D7D2CCA6A2B484C52BB8A540B4FF92C1F`.
+- **Blocking acceptance:** T02 mandatory disposable PostgreSQL integration results; T04 authorized actual initial records; T08 final/provisional numbering and production routing/RFQ lifecycle; T09 complete multi-batch/closed retention plus T11 archival; T10 complete safe projections/startup/retry/desktop WebSocket/revocation/multi-device gates; T15 identity approval. Missing tests are outstanding acceptance, not evidence that implemented behavior passed.
+- **Dependency decisions required:** T08 number synchronization reaches T10, while T10 depends on T08; T09 real photo/file archival reaches T11, while T11 depends on T09. Preserve original requirements/dependencies and seek approval for an acceptance-boundary plan; do not pretend metadata or fixtures close these items. Historical downstream starts with incomplete T02/T04 are recorded, not sanctioned as future practice.
+- **Next action after confirmation:** T02-A/B/C isolated PostgreSQL acceptance → T04-A/B/C authorized setup → approved cross-task boundary plan and T08/T09 remaining acceptance → resume T10 only after its prerequisite gates. Child work is tracked under the original T numbers in BUILD-TASKS.
+- **Unified updates:** after each fully accepted task, update milestone status in ROADMAP, task/child state and evidence in BUILD-TASKS, and this handoff in memory together. Do not mark a partly accepted task complete. This round changes and commits only these three Markdown files; no business code, full tests, push or deployment.
+
+### Historical development log (retained; not current acceptance)
+
 - **2026-10-11:** Product Chinese display name is confirmed as **Honsen采购管理系统**; `HONSEN Procure` is the English companion name. The GitHub repository was renamed to `etianwang/Honsen-procure`. This changes product-facing documentation and repository naming only, not the unapproved Toolbox identity values or local credential-service name.
-- **T00–T07 are complete; T08 is in progress.** The full ordered task plan is [docs/BUILD-TASKS.md](docs/BUILD-TASKS.md).
+- **Historical implementation summary corrected:** T00/T01/T03/T05/T06/T07 are accepted; T02/T04/T08/T09/T10 still have outstanding acceptance. See the authoritative snapshot above and [docs/BUILD-TASKS.md](docs/BUILD-TASKS.md).
 - **2026-10-10:** Product owner approved the initial immutable-code mapping. `docs/MASTER-DATA-CODE-APPROVAL.md` now records countries, projects, sites, departments, teams, units and the CI 18% tax template. These remain controlled deployment data, never hard-coded migration seeds.
 - **2026-10-10:** T04 now rejects attempts to change an existing country/project/site/department/team/unit/tax-template business code. Both the PostgreSQL store and local SQLite/Rust boundary return structured immutable-code errors before mutation; this prevents a same-UUID upsert from silently reporting an unpersisted code.
 - **2026-10-10:** T04 local trusted commands now persist tax templates and append exchange-rate records only for an authorized session. They enforce supported currencies, integer basis points, date/rate syntax and a mandatory reason for a manual rate; Rust tests cover permitted persistence and manual-rate rejection without a reason.
@@ -75,15 +105,15 @@
 | UI foundation                     | Green HONSEN desktop workbench, compact sidebar, Home metrics/work queue and material list with four supplier quote cards were implemented as a temporary renderer slice.                                                       |
 | UI permissions                    | `canEditMaterials` allows only purchaser/administrator in the renderer. This is visual behavior only; future Rust/server authorization remains mandatory.                                                                       |
 
-## Current source inventory
+## Current source inventory — corrected 2026-10-11
 
 - `apps/desktop`: Vite + React + TypeScript temporary renderer, plus a Tauri host-boundary directory deliberately without a package identity.
-- `apps/desktop/src-tauri/src/lib.rs`: T03 Rust trusted boundary: local account cache, OS credential-vault verifier, CAPTCHA, offline login window, failed-login lockout, 30-minute lock and Tauri command authorization.
+- `apps/desktop/src-tauri/src/lib.rs`: trusted Rust/SQLite authentication, catalog/master-data, requisition/workflow/allocation/receiving and partial synchronization boundaries. Its existing uncommitted order-projection draft is not accepted.
 - `apps/desktop/src/pages/HomePage.tsx`: Home visual slice using demo records.
 - `apps/desktop/src/pages/MaterialsPage.tsx`: read-oriented materials list with four supplier quotes per row.
 - `apps/desktop/src/lib/permissions.ts`: minimal UI visibility helper with Vitest coverage.
 - `apps/desktop/package.json`: includes `antd`, `lucide-react` and `vitest`.
-- `packages/shared` now owns Zod transport contracts and BigInt money/quantity helpers. `apps/server` remains a T02 placeholder; there is still no Tauri Rust host or SQLite schema.
+- `packages/shared` owns Zod transport contracts and BigInt money/quantity helpers. `apps/server` has Fastify auth/master-data/sync services, PostgreSQL stores, versioned migrations and provisioning; it is no longer a placeholder. The desktop has a Rust host-boundary crate and versioned SQLite schema, but no accepted release package identity.
 
 ## Verified checks
 
@@ -141,11 +171,11 @@
 - Full T01 gate passed on 2026-10-10: format check, lint, typecheck, five unit tests, build and two Playwright browser flows. Success screenshots are in ignored `test-results/`; CI uploads the Playwright report artifact.
 - The local npm client rejected `workspace:*`; the desktop uses the explicit local `file:../../packages/shared` dependency. Do not treat `npm ls` as proof: all four runtime/type/test/build gates must pass.
 
-## T02 completion evidence
+## T02 historical partial-gate evidence — full acceptance still open
 
 - `apps/server` now has Fastify login/CAPTCHA routes, Argon2id password verification, account-session creation, PostgreSQL migration runner, account/master-data migration and initial-super-administrator provisioning command.
 - Server unit tests cover valid CAPTCHA login/session creation, invalid CAPTCHA rejection, locked account response and Argon2id verification. The desktop authentication fixture exercises visible invalid and first-login states in Playwright.
-- Full T02 gate passed on 2026-10-10: formatting, lint, typecheck, ten unit tests (seven server/shared plus existing desktop tests), build and three Playwright flows.
+- Recorded T02 local subset passed on 2026-10-10: formatting, lint, typecheck, ten unit tests (seven server/shared plus existing desktop tests), build and three Playwright flows. This was previously called the full gate; skipped PostgreSQL integration means full T02 acceptance remains open.
 - PostgreSQL migration integration tests are present but **skipped** because `TEST_DATABASE_URL` was not supplied. Before release/T14, run them against a disposable PostgreSQL database; no root `.env` value was read.
 
 ## T03 completion evidence
@@ -157,11 +187,11 @@
 - `?test=offline` is a development-only DOM fixture. Playwright signs in, triggers idle lock, re-authenticates, removes the native disabled attribute from a material-edit control and verifies the explicit rejection state without browser-console errors. This fixture is UI evidence; Rust unit tests remain the trust-boundary evidence.
 - T03 gates passed on 2026-10-10: `cargo fmt --check`, `cargo test`, `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build` and `npm run e2e` (four Chromium flows). The PostgreSQL integration tests remain skipped because `TEST_DATABASE_URL` is intentionally absent.
 
-## Next-task handoff: T04
+## Historical next-task handoff: T04 (superseded)
 
 Implement master-data administration: versioned local/cloud entities and project defaults. Seed only the approved display data in `INITIAL-MASTER-DATA.md`; immutable business codes must be created through the authorized super-administrator workflow. Add master-data input validation, Rust/server authorization, migration tests and the project-default switch DOM flow.
 
-### T04 completion record
+### T04 historical implementation record — full acceptance still open
 
 - Shared Zod contracts now validate immutable-code syntax, project print defaults, integer tax basis points and decimal-string exchange rates.
 - Cloud migration `002_project_defaults_and_master_data.sql` adds sites, units, tax templates, exchange rates and project print defaults. The PostgreSQL migration runner now records SHA-256 migration checksums; existing checksum-less local development rows are backfilled once, while mismatches fail.
@@ -182,11 +212,11 @@ Implement master-data administration: versioned local/cloud entities and project
 - The React material overview invokes `search_catalog` through a typed Tauri adapter. Its `?test=catalog` fixture is synthetic and exists only for the DOM gate; it does not provide production data.
 - Purchaser/administrator create/edit/deactivate material flows now invoke `save_material` through the typed Tauri adapter; the browser test checks the actual command name and submitted material name.
 
-## Next-task handoff: T06
+## Historical next-task handoff: T06 (superseded)
 
 Implement the local parent-requisition draft only: header data, exact integer-minor calculations, material lines, attachment metadata, automatic draft persistence, immutable line snapshots and a pending-confirmation submit transition. Keep the SQLite mutation and eventual T10 outbox design aligned; do not claim cloud synchronization before T10 exists.
 
-### T06 progress record — incomplete
+### T06 historical intermediate progress record — superseded by accepted local slice
 
 - `0006_local_requisitions.sql` is checksum-protected and adds `local_purchase_orders`, `local_purchase_order_items` and `local_order_attachments`. It stores money as non-negative integer minor units and constrains this task's state surface to `draft` and `pending_confirmation`.
 - Rust migration tests apply the new schema during normal local startup. Still required: shared draft/line contracts and exact calculation service, trusted draft/autosave/submit commands, UI and DOM proof, snapshot immutability, and attachment metadata validation.
@@ -204,9 +234,9 @@ Implement the local parent-requisition draft only: header data, exact integer-mi
 8. Do not invent Toolbox app identity or release settings. Internal automatic updates still require the exact Toolbox/Runner contract.
 9. Visible UI strings need complete `zh-CN`, `fr-FR` and `en-US` catalogs; current Chinese-only demo strings must be replaced during T13.
 
-## Known limits and risks
+## Known limits and risks — current interpretation
 
-- The temporary UI calls a frontend permission helper only. It provides no security until Rust/server enforcement exists.
+- Frontend permission helpers remain visibility-only. Rust/server authorization now exists for implemented boundaries; synthetic DOM fixtures and unmapped production routes are not end-to-end security acceptance.
 - Ant Design raises the initial renderer bundle to roughly 183 KB gzip. Defer route-level code splitting until there are real routes; do not prematurely fragment the current demo.
 - Toolbox packaging/update work remains blocked by a permanent `appId`, install directory, EXE name, installer choice and internal update URL.
 - COS/PostgreSQL values are intentionally not known to the codebase. Use runtime environment injection and never copy `.env` values to desktop code or tests.
@@ -217,7 +247,7 @@ Implement the local parent-requisition draft only: header data, exact integer-mi
 - Tauri release/bundle configuration was intentionally not generated because it requires the permanent Toolbox application identity.
 - Initial DOM-test defects were repaired under BUG-005 before accepting the task.
 
-## Next-task handoff: T01
+## Historical next-task handoff: T01 (superseded)
 
 Build shared contracts and exact money/quantity helpers only:
 

@@ -42,6 +42,96 @@ Manual browser clicking is useful for design review but does **not** replace the
 - COS/PostgreSQL secret values remain outside Git and are never copied into tests, screenshots or task notes.
 - Each task may use fixtures only; no real supplier contacts, prices, account credentials or production attachments.
 
+## Acceptance register — 2026-10-11
+
+This register supersedes old progress summaries, not the task scopes, dependencies or completion gate above. `[x] COMPLETED` means the task's accepted slice passed its required gates; `[ ]` means full acceptance is outstanding. Existing downstream implementation does not prove an incomplete prerequisite has passed. Historical test records are not fresh verification of the current dirty worktree.
+
+Evidence baseline: committed code at `077b064` (`fix: drain paged sync pulls safely`), initial baseline `1f686df`, committed test sources and dated records in `../memory.md`. The prior audit recorded passing formatting/lint/typecheck/test/build, 31 JavaScript tests (desktop 2, server 15, shared 14), Rust formatting/check and 11 tests, and 16 Playwright tests. Two PostgreSQL integration suites were skipped. These counts are historical executed-output records, not a fresh run or archived CI result. CI configuration is not evidence of a successful CI run. No full test/build was run during this documentation update.
+
+Evidence locations: `../tests/e2e/navigation.spec.ts` (DOM flows), `../apps/desktop/src-tauri/src/lib.rs` at HEAD (trusted-boundary tests), `../packages/shared/src/*.test.ts` (contracts/calculation), `../apps/server/src/auth/*.test.ts`, `../apps/server/src/db/*.test.ts`, `../apps/server/src/master-data/postgres-store.test.ts`, and `../apps/server/src/sync/*.test.ts` (API/PostgreSQL/sync). Source tests show coverage exists; only executed results establish a passed gate.
+
+| Task | Acceptance status | Milestones (primary first; others cross-stage) | Verifiable implementation / acceptance evidence                                                                                                                                  | Remaining work                                                                                                                      |
+| ---- | ----------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| T00  | [x] COMPLETED     | M0                                             | Workspace/package scripts, CI configuration, Playwright harness and committed shell navigation tests; recorded regression gate.                                                  | None within T00; released application identity is T15.                                                                              |
+| T01  | [x] COMPLETED     | M0, M2                                         | Shared Zod/currency/integer-money contracts and focused money tests; currency DOM fixture and recorded gate.                                                                     | None within T01.                                                                                                                    |
+| T02  | [ ] IN PROGRESS   | M0, M1, M3                                     | Server migrations, authentication/session/provisioning sources and API tests; disposable WSL migration application recorded. PostgreSQL integration suites skipped in last gate. | T02-A through T02-C below; mandatory PostgreSQL integration acceptance not proven.                                                  |
+| T03  | [x] COMPLETED     | M0, M1, M3                                     | Trusted Rust/SQLite cached authentication, idle/lockout tests and login/authorization DOM tests; recorded gate.                                                                  | None within accepted T03 slice; desktop live revocation orchestration remains T10, not proof of production multi-device acceptance. |
+| T04  | [ ] IN PROGRESS   | M0, M1                                         | Master-data API/Rust validation, immutable-code tests, project-default adapter and DOM tests; approved code mapping exists.                                                      | T04-A through T04-C; authorized actual deployment records absent.                                                                   |
+| T05  | [x] COMPLETED     | M0, M1                                         | Catalog migrations/repositories, immutable quotes, supplier/material maintenance, square crop and read-only DOM coverage; recorded gate.                                         | None within T05; cloud file archival remains T11.                                                                                   |
+| T06  | [x] COMPLETED     | M2                                             | Local requisition migration, exact totals/snapshots, trusted save/submit, autosave and draft DOM tests; recorded gate.                                                           | None within accepted local draft slice; file ingestion T11 and print T12 are not complete.                                          |
+| T07  | [x] COMPLETED     | M2                                             | Workflow/policy/comment/notification migrations, trusted reason/role guards, immutable audit diffs and workflow DOM tests; recorded gate.                                        | None within accepted local workflow slice; synchronized notification delivery remains dependent sync work.                          |
+| T08  | [ ] IN PROGRESS   | M2, M3                                         | Allocation/RFQ/child-terms migrations and trusted commands, exact locked-rate aggregation; allocation/RFQ/terms DOM fixtures.                                                    | T08-A through T08-D; production routing, number mapping and RFQ lifecycle acceptance outstanding.                                   |
+| T09  | [ ] IN PROGRESS   | M2, M4                                         | Receipt registration/conditional close and attachment-link migration; trusted receipt tests and receipt DOM fixture.                                                             | T09-A through T09-D; complete multi-batch/closed-retention acceptance and real archival outstanding.                                |
+| T10  | [ ] IN PROGRESS   | M3                                             | Transactional outbox, HTTPS Push/Pull, cursor paging, catalog/master/comment projection, resolver fixture and server WebSocket tests at `077b064`.                               | T10-A through T10-F; prerequisites T04–T09 remain open. Uncommitted Rust projector draft is not acceptance evidence.                |
+| T11  | [ ] NOT STARTED   | M2, M3, M4                                     | Metadata/link schemas are preparatory only; no accepted end-to-end attachment service.                                                                                           | Entire original service, compression, limits, archival and DOM gate.                                                                |
+| T12  | [ ] NOT STARTED   | M2, M4                                         | Saved snapshots are prerequisites, not PDF/export implementation.                                                                                                                | Entire original bilingual PDF/printing/Excel and DOM gate.                                                                          |
+| T13  | [ ] NOT STARTED   | M4, M1                                         | Existing audit tables/components are prerequisites, not the hardening task.                                                                                                      | Entire original backup/restore, retention, administration/audit, three-language and performance/accessibility acceptance.           |
+| T14  | [ ] NOT STARTED   | M4, M2, M3                                     | Focused existing tests do not constitute Windows production acceptance.                                                                                                          | Full original Windows acceptance and release-candidate gate after T00–T13.                                                          |
+| T15  | [ ] BLOCKED       | M4                                             | Toolbox integration document records unapproved identity; no accepted installer/Runner/registry E2E evidence.                                                                    | Approved appId/product directory/EXE/installer/asset/Runner/registry contract and T14 acceptance required.                          |
+
+## Bidirectional milestone mapping
+
+| Milestone | Tasks contributing to its original goals | Overall acceptance                                                |
+| --------- | ---------------------------------------- | ----------------------------------------------------------------- |
+| M0        | T00, T01, T02, T03, T04, T05             | [ ] IN PROGRESS; authorized initial-record deployment is BLOCKED. |
+| M1        | T02, T03, T04, T05, T13                  | [ ] IN PROGRESS                                                   |
+| M2        | T01, T06, T07, T08, T09, T11, T12, T14   | [ ] IN PROGRESS                                                   |
+| M3        | T02, T03, T08, T10, T11, T14             | [ ] IN PROGRESS                                                   |
+| M4        | T09, T11, T12, T13, T14, T15             | [ ] BLOCKED for release; unstarted hardening work remains.        |
+
+Cross-stage mappings describe acceptance contributions; they do not move or replace original goals. T13 supports M1 administration hardening; T11 supports order/receipt archival and synchronization; T14 supplies final cross-stage acceptance.
+
+## Independently tracked outstanding acceptance
+
+All child items inherit the original parent scope, dependencies and global gate. An unchecked child cannot be hidden by marking the parent complete.
+
+### T02 — original dependencies: T00, T01
+
+- [ ] T02-A — IN PROGRESS: run the committed PostgreSQL integration suites against an explicitly disposable database; preserve migration, authentication/session/provisioning and failure evidence. Existing WSL migration smoke alone is insufficient.
+- [ ] T02-B — NOT STARTED: verify clean/repeated migration and initial-super-admin setup, role/session restrictions and one-online-session behavior with the real PostgreSQL store; retain executed commands and no skipped mandatory suites.
+- [ ] T02-C — NOT STARTED: close the original CAPTCHA/login/first-login/restricted-navigation DOM gate and affected-package gates against that accepted foundation; link durable results before checking T02.
+
+### T04 — original dependencies: T02, T03
+
+- [ ] T04-A — BLOCKED: obtain the authorized deployment account/setup window and create the approved actual countries/projects/sites/departments/teams/units/taxes/defaults through the authorized workflow. Code approval does not mean records exist; no automatic production seeding.
+- [ ] T04-B — NOT STARTED: verify deployed immutable codes, project bindings/default language/currency/tax/address/contact behavior and permitted exchange-rate maintenance without copying real records or secrets into evidence.
+- [ ] T04-C — NOT STARTED: retain API/Rust/DOM and affected-package acceptance evidence after prerequisites pass; distinguish synthetic fixture evidence from authorized deployment acceptance.
+
+### T08 — original dependencies: T06, T07
+
+- [ ] T08-A — IN PROGRESS: connect confirmed-parent list/detail to allocation, RFQ and child-terms production routes; fixtures alone do not accept the production flow.
+- [ ] T08-B — NOT STARTED: accept provisional/final number mapping, local-time numbering, four-digit sequential collision retry and stable entity identity with independently reproducible tests.
+- [ ] T08-C — IN PROGRESS: complete and test RFQ send/close lifecycle and supplier/currency/terms guards, preserving sent snapshots and historical records.
+- [ ] T08-D — BLOCKED: resolve the acceptance dependency tension with T10 final-number synchronization without changing either original dependency or lowering acceptance; then retain full T08 DOM/integration/gate evidence. Requires an approved dependency-boundary plan before new dependent development.
+
+### T09 — original dependencies: T06, T08
+
+- [ ] T09-A — IN PROGRESS: accept two or more partial batches, cumulative per-line quantity/unit/date/receiver and required over-receipt reasons through trusted commands and production DOM flow.
+- [ ] T09-B — IN PROGRESS: accept completed-with-conditions reason, permanent closed-order immutability and prohibition of deletion/edit by every role.
+- [ ] T09-C — BLOCKED: demonstrate receipt photo/file ingestion, maximum ten photos, compression and archival with T11. T11 currently depends on T09; a dependency-boundary plan must be approved rather than silently treating metadata links as full archival acceptance.
+- [ ] T09-D — NOT STARTED: retain original receipt DOM proof, integration/retention/failure checks and affected-package gates after outstanding items pass.
+
+### T10 — original dependencies: T04–T09
+
+- [ ] T10-A — IN PROGRESS: complete safe, dependency-ordered projection/recovery for orders, children, RFQs, receipts and attachments. Do not overwrite confirmed/historical orders or archival data; the existing uncommitted `lib.rs` draft is unaccepted and untouched this round.
+- [ ] T10-B — NOT STARTED: accept startup login synchronization, bounded retry/backoff, connectivity state, reconnect/cursor recovery and server-acknowledged status with failure tests.
+- [ ] T10-C — NOT STARTED: connect desktop WebSocket hints and online-session revocation; server endpoint tests alone do not accept desktop orchestration.
+- [ ] T10-D — IN PROGRESS: mount authorized production conflict resolution and test administrator choice/reasons/version/outbox audit, including immutable-record restrictions.
+- [ ] T10-E — NOT STARTED: accept multi-device offline/reconnect/idempotent retry/conflict DOM and API scenarios on the disposable PostgreSQL foundation; no skipped required integration suites.
+- [ ] T10-F — BLOCKED: close T04–T09 prerequisite acceptance and retain every original T10 gate before declaring complete. Existing code is historical partial progress, not permission to bypass dependencies.
+
+## Unified progress rules
+
+Cross-task scheduling checkpoint: T08 formal-number acceptance consumes T10 synchronization; T09 receipt archival acceptance consumes T11 attachment service. These are integration-verification links, **not additional reverse scheduling prerequisites**. Preserve the original dependency table and all final gates. The proposed non-circular boundary is to verify local implementation readiness, then implement the downstream integration and finally close the linked parent acceptance; readiness never earns `[x]`. Because the original global rule requires full prerequisite acceptance, this execution-boundary clarification still requires explicit approval before feature development resumes. Until then, record the blocker instead of scheduling an impossible full-completion wait on both sides. This documentation checkpoint does not silently relax that rule.
+
+1. ROADMAP owns milestone-level progress and original objectives; this file owns task/child acceptance, original dependencies and evidence; memory owns the current handoff, blockers and next action.
+2. After an entire task passes all required gates, update all three files in the same change with commands/results, evidence location, skips and limitations. Partial implementation remains unchecked. A milestone is checked only when every original milestone objective passes, not merely when one contributing task passes.
+3. Preserve historical logs; explicitly label stale completion statements as historical. Committed source, executed results and durable artifacts outrank old checkbox claims. A pipeline definition or fixture is not a successful CI/production run.
+4. Do not erase original objectives or rewrite dependencies to make progress appear consistent. Historical T05–T10 work was started with incomplete prerequisites; suspend further dependent development until their gates and dependency-boundary decisions are resolved.
+5. M1's original admin-password wording remains preserved in ROADMAP. Apply the confirmed personal-account/role model; do not invent a separate shared-password bypass. Any conflicting interpretation requires confirmation.
+
 ## Suggested immediate next task
 
-Start **T00**. Its purpose is to make every later task verifiable: repository shape, CI gates and an automated DOM harness. It does not add production business behavior or package the application.
+First close **T02-A/B/C** using the isolated PostgreSQL test path, then obtain authority for **T04-A/B/C**. Resolve the explicit T08↔T10 numbering and T09↔T11 archival acceptance tensions without weakening original requirements; finish T08 and T09 prerequisite acceptance. Only then resume T10-A through T10-F under the approved boundary plan. T11–T15 remain in their original sequence.
+
+The original initial recommendation was to start T00 to establish repository shape, CI gates and an automated DOM harness without production behavior or packaging identity. That foundation is now accepted; it is not the current next task.
