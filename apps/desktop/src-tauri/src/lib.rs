@@ -2881,6 +2881,7 @@ impl LocalAuthService {
                 params![change.entity_type, change.entity_id.to_string(), change.operation, change.version, remote_payload, change.changed_at],
             ).map_err(|_| AuthError::Database)?;
             project_remote_catalog_change(&transaction, change, now)?;
+            project_remote_master_data_change(&transaction, change, now)?;
             transaction.execute(
                 "INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)",
                 params![change.entity_type, change.entity_id.to_string(), change.version],
@@ -3520,6 +3521,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0018_local_sync_remote_entities",
             include_str!("../migrations/0018_local_sync_remote_entities.sql"),
         ),
+        (
+            "0019_local_exchange_rate_tombstones",
+            include_str!("../migrations/0019_local_exchange_rate_tombstones.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -3752,6 +3757,245 @@ fn project_remote_catalog_change(
                 .map_err(|_| AuthError::Database)?;
         }
         _ => {}
+    }
+    Ok(())
+}
+
+fn project_remote_master_data_change(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+    now: SystemTime,
+) -> Result<(), AuthError> {
+    if change.operation == "soft_delete" {
+        let table = match change.entity_type.as_str() {
+            "country" => Some("local_countries"),
+            "project" => Some("local_projects"),
+            "site" => Some("local_sites"),
+            "department" => Some("local_departments"),
+            "team" => Some("local_teams"),
+            "unit" => Some("local_units"),
+            "tax_template" => Some("local_tax_templates"),
+            "exchange_rate" => Some("local_exchange_rates"),
+            _ => None,
+        };
+        if let Some(table) = table {
+            let query = format!(
+                "UPDATE {table} SET {} WHERE id = ?1",
+                if table == "local_exchange_rates" {
+                    "version = MAX(version, ?2), deleted_at = COALESCE(deleted_at, ?3)"
+                } else {
+                    "is_active = 0, version = MAX(version, ?2), deleted_at = COALESCE(deleted_at, ?3)"
+                }
+            );
+            let entity_id = change.entity_id.to_string();
+            if table == "local_exchange_rates" {
+                transaction
+                    .execute(
+                        &query,
+                        params![entity_id, change.version, unix_seconds(now)],
+                    )
+                    .map_err(|_| AuthError::Database)?;
+            } else {
+                transaction
+                    .execute(
+                        &query,
+                        params![entity_id, change.version, unix_seconds(now)],
+                    )
+                    .map_err(|_| AuthError::Database)?;
+            }
+        } else if change.entity_type == "project_defaults" {
+            transaction
+                .execute(
+                    "DELETE FROM local_project_print_defaults WHERE project_id = ?1",
+                    [change.entity_id.to_string()],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        return Ok(());
+    }
+    if change.operation != "upsert" {
+        return Ok(());
+    }
+    match change.entity_type.as_str() {
+        "country" | "project" | "site" | "department" | "team" | "unit" => {
+            let record: ReferenceMasterDataInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            project_remote_reference_master_data(transaction, &record, change)?;
+        }
+        "tax_template" => {
+            let template: TaxTemplateInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if template.id != change.entity_id {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_reference(&template.business_code, &template.name, template.version)?;
+            if template.rate_basis_points < 0
+                || template.rate_basis_points > 100_000
+                || !valid_iso_date(&template.effective_at)
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            assert_immutable_local_business_code(
+                transaction,
+                "local_tax_templates",
+                template.id,
+                &template.business_code,
+            )?;
+            transaction.execute("INSERT INTO local_tax_templates (id, business_code, name, country_id, rate_basis_points, effective_at, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(id) DO UPDATE SET name = excluded.name, country_id = excluded.country_id, rate_basis_points = excluded.rate_basis_points, effective_at = excluded.effective_at, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![template.id.to_string(), template.business_code, template.name, template.country_id.map(|value| value.to_string()), template.rate_basis_points, template.effective_at, template.is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
+        }
+        "exchange_rate" => {
+            let rate: ExchangeRateInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if rate.id != change.entity_id
+                || !valid_currency(&rate.from_currency)
+                || !valid_currency(&rate.to_currency)
+                || !valid_decimal_rate(&rate.rate_decimal)
+                || !valid_iso_date(&rate.effective_at)
+                || !matches!(rate.source.as_str(), "public_daily" | "manual")
+                || (rate.source == "manual"
+                    && rate
+                        .reason
+                        .as_ref()
+                        .is_none_or(|value| !valid_required_text(value, 1000)))
+                || rate.reason.as_ref().is_some_and(|value| value.len() > 1000)
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            transaction.execute("INSERT INTO local_exchange_rates (id, from_currency, to_currency, rate_decimal, effective_at, source, reason, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(id) DO UPDATE SET from_currency = excluded.from_currency, to_currency = excluded.to_currency, rate_decimal = excluded.rate_decimal, effective_at = excluded.effective_at, source = excluded.source, reason = excluded.reason, version = excluded.version, deleted_at = NULL", params![rate.id.to_string(), rate.from_currency, rate.to_currency, rate.rate_decimal, rate.effective_at, rate.source, rate.reason, change.version]).map_err(|_| AuthError::Database)?;
+        }
+        "project_defaults" => {
+            let defaults: ProjectDefaultsInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if defaults.project_id != change.entity_id {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_project_defaults(&defaults)?;
+            transaction.execute("INSERT INTO local_project_print_defaults (project_id, department_title, company_address, company_contact, default_currency, default_language_pair, default_tax_template_id, version, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ON CONFLICT(project_id) DO UPDATE SET department_title = excluded.department_title, company_address = excluded.company_address, company_contact = excluded.company_contact, default_currency = excluded.default_currency, default_language_pair = excluded.default_language_pair, default_tax_template_id = excluded.default_tax_template_id, version = excluded.version, updated_at = excluded.updated_at", params![defaults.project_id.to_string(), defaults.department_title, defaults.company_address, defaults.company_contact, defaults.default_currency, defaults.default_language_pair, defaults.default_tax_template_id.map(|value| value.to_string()), change.version, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn project_remote_reference_master_data(
+    transaction: &Transaction<'_>,
+    record: &ReferenceMasterDataInput,
+    change: &SyncPullChangeInput,
+) -> Result<(), AuthError> {
+    match record {
+        ReferenceMasterDataInput::Country {
+            id,
+            business_code,
+            name,
+            time_zone,
+            is_active,
+            version,
+        } => {
+            if *id != change.entity_id || change.entity_type != "country" {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_reference(business_code, name, *version)?;
+            assert_immutable_local_business_code(
+                transaction,
+                "local_countries",
+                *id,
+                business_code,
+            )?;
+            transaction.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET name = excluded.name, time_zone = excluded.time_zone, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, time_zone, *is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
+        }
+        ReferenceMasterDataInput::Project {
+            id,
+            country_id,
+            business_code,
+            name,
+            site,
+            department_name,
+            default_currency,
+            default_language_pair,
+            is_active,
+            version,
+        } => {
+            if *id != change.entity_id
+                || change.entity_type != "project"
+                || site.trim().is_empty()
+                || department_name.trim().is_empty()
+                || !valid_currency(default_currency)
+                || !matches!(default_language_pair.as_str(), "zh_fr" | "zh_en")
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_reference(business_code, name, *version)?;
+            assert_immutable_local_business_code(
+                transaction,
+                "local_projects",
+                *id,
+                business_code,
+            )?;
+            transaction.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(id) DO UPDATE SET country_id = excluded.country_id, name = excluded.name, site = excluded.site, department_name = excluded.department_name, default_currency = excluded.default_currency, default_language_pair = excluded.default_language_pair, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), country_id.to_string(), business_code, name, site, department_name, default_currency, default_language_pair, *is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
+        }
+        ReferenceMasterDataInput::Site {
+            id,
+            project_id,
+            business_code,
+            name,
+            is_active,
+            version,
+        } => {
+            if *id != change.entity_id || change.entity_type != "site" {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_reference(business_code, name, *version)?;
+            assert_immutable_local_business_code(transaction, "local_sites", *id, business_code)?;
+            transaction.execute("INSERT INTO local_sites (id, project_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), project_id.to_string(), business_code, name, *is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
+        }
+        ReferenceMasterDataInput::Department {
+            id,
+            business_code,
+            name,
+            is_active,
+            version,
+        } => {
+            if *id != change.entity_id || change.entity_type != "department" {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_reference(business_code, name, *version)?;
+            assert_immutable_local_business_code(
+                transaction,
+                "local_departments",
+                *id,
+                business_code,
+            )?;
+            transaction.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, *is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
+        }
+        ReferenceMasterDataInput::Team {
+            id,
+            department_id,
+            business_code,
+            name,
+            is_active,
+            version,
+        } => {
+            if *id != change.entity_id || change.entity_type != "team" {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_reference(business_code, name, *version)?;
+            assert_immutable_local_business_code(transaction, "local_teams", *id, business_code)?;
+            transaction.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET department_id = excluded.department_id, name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), department_id.to_string(), business_code, name, *is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
+        }
+        ReferenceMasterDataInput::Unit {
+            id,
+            business_code,
+            name,
+            is_active,
+            version,
+        } => {
+            if *id != change.entity_id || change.entity_type != "unit" {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_reference(business_code, name, *version)?;
+            assert_immutable_local_business_code(transaction, "local_units", *id, business_code)?;
+            transaction.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, *is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
+        }
     }
     Ok(())
 }
@@ -4670,6 +4914,219 @@ mod tests {
             )
             .unwrap();
         assert_eq!(local_name, "local fixture");
+    }
+
+    #[test]
+    fn pulled_master_data_projects_to_local_reference_tables() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let purchaser_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: purchaser_id,
+                    username: "master-sync".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "master-sync",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let country_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let department_id = Uuid::new_v4();
+        let team_id = Uuid::new_v4();
+        let unit_id = Uuid::new_v4();
+        let tax_id = Uuid::new_v4();
+        let rate_id = Uuid::new_v4();
+        let records = vec![
+            (
+                "country",
+                country_id,
+                serde_json::to_value(ReferenceMasterDataInput::Country {
+                    id: country_id,
+                    business_code: "SYNC-CI".into(),
+                    name: "sync country".into(),
+                    time_zone: "Africa/Abidjan".into(),
+                    is_active: true,
+                    version: 1,
+                })
+                .unwrap(),
+            ),
+            (
+                "project",
+                project_id,
+                serde_json::to_value(ReferenceMasterDataInput::Project {
+                    id: project_id,
+                    country_id,
+                    business_code: "SYNC-P".into(),
+                    name: "sync project".into(),
+                    site: "sync site".into(),
+                    department_name: "sync department".into(),
+                    default_currency: "XOF".into(),
+                    default_language_pair: "zh_fr".into(),
+                    is_active: true,
+                    version: 1,
+                })
+                .unwrap(),
+            ),
+            (
+                "department",
+                department_id,
+                serde_json::to_value(ReferenceMasterDataInput::Department {
+                    id: department_id,
+                    business_code: "SYNC-D".into(),
+                    name: "sync department".into(),
+                    is_active: true,
+                    version: 1,
+                })
+                .unwrap(),
+            ),
+            (
+                "team",
+                team_id,
+                serde_json::to_value(ReferenceMasterDataInput::Team {
+                    id: team_id,
+                    department_id,
+                    business_code: "SYNC-T".into(),
+                    name: "sync team".into(),
+                    is_active: true,
+                    version: 1,
+                })
+                .unwrap(),
+            ),
+            (
+                "unit",
+                unit_id,
+                serde_json::to_value(ReferenceMasterDataInput::Unit {
+                    id: unit_id,
+                    business_code: "SYNC-U".into(),
+                    name: "sync unit".into(),
+                    is_active: true,
+                    version: 1,
+                })
+                .unwrap(),
+            ),
+            (
+                "tax_template",
+                tax_id,
+                serde_json::to_value(TaxTemplateInput {
+                    id: tax_id,
+                    business_code: "SYNC-TAX".into(),
+                    name: "sync tax".into(),
+                    country_id: Some(country_id),
+                    rate_basis_points: 1800,
+                    effective_at: "2026-10-11".into(),
+                    is_active: true,
+                    version: 1,
+                })
+                .unwrap(),
+            ),
+            (
+                "exchange_rate",
+                rate_id,
+                serde_json::to_value(ExchangeRateInput {
+                    id: rate_id,
+                    from_currency: "EUR".into(),
+                    to_currency: "XOF".into(),
+                    rate_decimal: "655.957".into(),
+                    effective_at: "2026-10-11".into(),
+                    source: "public_daily".into(),
+                    reason: None,
+                    version: 1,
+                })
+                .unwrap(),
+            ),
+            (
+                "project_defaults",
+                project_id,
+                serde_json::to_value(ProjectDefaultsInput {
+                    project_id,
+                    department_title: "sync department".into(),
+                    company_address: "sync address".into(),
+                    company_contact: "sync contact".into(),
+                    default_currency: "XOF".into(),
+                    default_language_pair: "zh_fr".into(),
+                    default_tax_template_id: Some(tax_id),
+                })
+                .unwrap(),
+            ),
+        ];
+        let changes = records
+            .into_iter()
+            .enumerate()
+            .map(
+                |(index, (entity_type, entity_id, payload))| SyncPullChangeInput {
+                    cursor: (index + 1).to_string(),
+                    entity_type: entity_type.into(),
+                    entity_id,
+                    operation: "upsert".into(),
+                    version: 1,
+                    payload,
+                    changed_at: "2026-10-11T00:00:00Z".into(),
+                },
+            )
+            .collect();
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes,
+                    next_cursor: "8".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let (country_count, project_count, team_count, defaults_count, rate_count): (i64, i64, i64, i64, i64) = connection.query_row("SELECT (SELECT COUNT(*) FROM local_countries), (SELECT COUNT(*) FROM local_projects), (SELECT COUNT(*) FROM local_teams), (SELECT COUNT(*) FROM local_project_print_defaults), (SELECT COUNT(*) FROM local_exchange_rates)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))).unwrap();
+        assert_eq!(
+            (
+                country_count,
+                project_count,
+                team_count,
+                defaults_count,
+                rate_count
+            ),
+            (1, 1, 1, 1, 1)
+        );
+        drop(connection);
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "9".into(),
+                        entity_type: "exchange_rate".into(),
+                        entity_id: rate_id,
+                        operation: "soft_delete".into(),
+                        version: 2,
+                        payload: serde_json::json!({}),
+                        changed_at: "2026-10-11T00:01:00Z".into(),
+                    }],
+                    next_cursor: "9".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let deleted: Option<i64> = connection
+            .query_row(
+                "SELECT deleted_at FROM local_exchange_rates WHERE id = ?1",
+                [rate_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(deleted.is_some());
     }
 
     #[test]
@@ -6005,5 +6462,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remote_entities_table_exists, 1);
+        let exchange_rate_tombstone_column_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_exchange_rates') WHERE name = 'deleted_at'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exchange_rate_tombstone_column_exists, 1);
     }
 }
