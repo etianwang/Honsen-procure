@@ -56,6 +56,8 @@ WebSocket is a latency optimization, not a data synchronization channel. After t
 
 The resolver creates a normal new local mutation/outbox event against the version chosen as its base. It never changes historical conflict evidence.
 
+Only an administrator or super administrator may resolve a conflict. For catalog, reference data and immutable comments, **keep local** supersedes the rejected event and creates a new event against the server version; **use server** applies the preserved server operation transactionally. Purchase-order conflicts are never directly overwritten and remain subject to their revision workflow.
+
 ## Retry and observability
 
 - Retry with bounded exponential backoff and jitter; restart/network recovery can trigger an earlier safe retry.

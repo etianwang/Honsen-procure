@@ -347,6 +347,26 @@ pub struct SyncPullView {
     pub next_cursor: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConflictView {
+    pub id: Uuid,
+    pub entity_type: String,
+    pub entity_id: Uuid,
+    pub server_version: i64,
+    pub local_payload_json: String,
+    pub server_payload_json: String,
+    pub server_operation: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveSyncConflictInput {
+    pub conflict_id: Uuid,
+    pub resolution: String,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncPullChangeInput {
@@ -836,6 +856,14 @@ impl LocalAuthService {
         match self.require_role(Role::Purchaser, now) {
             Ok(()) => Ok(()),
             Err(AuthError::Forbidden) => self.require_role(Role::Administrator, now),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn require_conflict_resolution(&self, now: SystemTime) -> Result<(), AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Ok(()) => Ok(()),
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now),
             Err(error) => Err(error),
         }
     }
@@ -2806,7 +2834,7 @@ impl LocalAuthService {
         }
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL ORDER BY created_at, event_id LIMIT ?1")
+            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, event_id LIMIT ?1")
             .map_err(|_| AuthError::Database)?
             .query_map([limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -2832,7 +2860,7 @@ impl LocalAuthService {
                 continue;
             }
             let entity: Option<(String, String)> = transaction.query_row(
-                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND acknowledged_at IS NULL",
+                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL",
                 [acknowledgement.event_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional().map_err(|_| AuthError::Database)?;
             if let Some((entity_type, entity_id)) = entity {
@@ -2874,7 +2902,7 @@ impl LocalAuthService {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String)> = transaction.query_row(
-                "SELECT event_id, base_version, payload_json FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL ORDER BY created_at, event_id LIMIT 1",
+                "SELECT event_id, base_version, payload_json FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, event_id LIMIT 1",
                 params![change.entity_type, change.entity_id.to_string()],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             ).optional().map_err(|_| AuthError::Database)?;
@@ -2885,8 +2913,8 @@ impl LocalAuthService {
                 ).map_err(|_| AuthError::Database)?;
                 if !conflict_exists {
                     transaction.execute(
-                        "INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                        params![Uuid::new_v4().to_string(), event_id, change.entity_type, change.entity_id.to_string(), base_version, change.version, local_payload, remote_payload, unix_seconds(now)],
+                        "INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        params![Uuid::new_v4().to_string(), event_id, change.entity_type, change.entity_id.to_string(), base_version, change.version, local_payload, remote_payload, change.operation, unix_seconds(now)],
                     ).map_err(|_| AuthError::Database)?;
                 }
                 continue;
@@ -2907,6 +2935,57 @@ impl LocalAuthService {
             "UPDATE local_sync_state SET last_pull_cursor = ?1, last_success_at = ?2 WHERE singleton = 1",
             params![page.next_cursor, unix_seconds(now)],
         ).map_err(|_| AuthError::Database)?;
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
+    pub fn list_sync_conflicts(&self, now: SystemTime) -> Result<Vec<SyncConflictView>, AuthError> {
+        self.require_conflict_resolution(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.prepare("SELECT id, entity_type, entity_id, server_version, local_payload_json, server_payload_json, server_operation FROM local_sync_conflicts WHERE resolved_at IS NULL ORDER BY created_at, id")
+            .map_err(|_| AuthError::Database)?
+            .query_map([], |row| Ok(SyncConflictView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, server_version: row.get(3)?, local_payload_json: row.get(4)?, server_payload_json: row.get(5)?, server_operation: row.get(6)? }))
+            .map_err(|_| AuthError::Database)?.collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)
+    }
+
+    pub fn resolve_sync_conflict(
+        &self,
+        input: ResolveSyncConflictInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_conflict_resolution(now)?;
+        if !matches!(input.resolution.as_str(), "keep_local" | "use_server")
+            || !valid_required_text(&input.reason, 1000)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let row: (String, String, String, i64, String, String, String) = transaction.query_row("SELECT c.entity_type, c.entity_id, c.event_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c WHERE c.id = ?1 AND c.resolved_at IS NULL", [input.conflict_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).map_err(|_| AuthError::InvalidInput)?;
+        let entity_id = Uuid::parse_str(&row.1).map_err(|_| AuthError::Database)?;
+        if !is_directly_resolvable_sync_entity(&row.0) {
+            return Err(AuthError::InvalidInput);
+        }
+        transaction.execute("UPDATE local_sync_outbox SET superseded_at = ?2, last_error = 'resolved_by_administrator' WHERE event_id = ?1", params![row.2, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![row.0, row.1, row.3]).map_err(|_| AuthError::Database)?;
+        if input.resolution == "keep_local" {
+            transaction.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, ?2, ?3, 'upsert', ?4, ?5, ?6)", params![Uuid::new_v4().to_string(), row.0, entity_id.to_string(), row.3, row.4, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        } else {
+            let payload = serde_json::from_str(&row.5).map_err(|_| AuthError::Database)?;
+            let change = SyncPullChangeInput {
+                cursor: "0".into(),
+                entity_type: row.0.clone(),
+                entity_id,
+                operation: row.6.clone(),
+                version: row.3,
+                payload,
+                changed_at: "resolved".into(),
+            };
+            project_remote_catalog_change(&transaction, &change, now)?;
+            project_remote_master_data_change(&transaction, &change, now)?;
+            project_remote_order_comment(&transaction, &change)?;
+        }
+        transaction.execute("UPDATE local_sync_conflicts SET resolved_at = ?2, resolved_by = ?3, resolution_reason = ?4 WHERE id = ?1", params![input.conflict_id.to_string(), unix_seconds(now), actor_id.to_string(), input.reason]).map_err(|_| AuthError::Database)?;
         transaction.commit().map_err(|_| AuthError::Database)
     }
 
@@ -3189,6 +3268,23 @@ pub mod commands {
     ) -> Result<super::SyncPullView, CommandError> {
         auth.pull_sync_https(SystemTime::now())
             .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_sync_conflicts(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::SyncConflictView>, CommandError> {
+        auth.list_sync_conflicts(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn resolve_sync_conflict(
+        auth: State<'_, LocalAuthService>,
+        input: super::ResolveSyncConflictInput,
+    ) -> Result<(), CommandError> {
+        auth.resolve_sync_conflict(input, SystemTime::now())
             .map_err(Into::into)
     }
 
@@ -3541,6 +3637,14 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0019_local_exchange_rate_tombstones",
             include_str!("../migrations/0019_local_exchange_rate_tombstones.sql"),
         ),
+        (
+            "0020_local_sync_outbox_superseded",
+            include_str!("../migrations/0020_local_sync_outbox_superseded.sql"),
+        ),
+        (
+            "0021_local_sync_conflict_server_operation",
+            include_str!("../migrations/0021_local_sync_conflict_server_operation.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -3775,6 +3879,25 @@ fn project_remote_catalog_change(
         _ => {}
     }
     Ok(())
+}
+
+fn is_directly_resolvable_sync_entity(entity_type: &str) -> bool {
+    matches!(
+        entity_type,
+        "country"
+            | "project"
+            | "site"
+            | "department"
+            | "team"
+            | "unit"
+            | "tax_template"
+            | "exchange_rate"
+            | "project_defaults"
+            | "material"
+            | "supplier"
+            | "material_price"
+            | "order_comment"
+    )
 }
 
 fn project_remote_master_data_change(
@@ -4266,7 +4389,7 @@ fn insert_local_sync_outbox(
         .unwrap_or(0);
     let pending_count: i64 = transaction
         .query_row(
-            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL",
+            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL",
             params![entity_type, entity_id.to_string()],
             |row| row.get(0),
         )
@@ -4970,6 +5093,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(local_name, "local fixture");
+        drop(connection);
+        let administrator_id = Uuid::new_v4();
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: administrator_id,
+                    username: "sync-administrator".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "sync-administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let conflict = service
+            .list_sync_conflicts(now)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        service
+            .resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: conflict.id,
+                    resolution: "use_server".into(),
+                    reason: "fixture choose server".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let resolved_name: String = connection
+            .query_row(
+                "SELECT name_zh FROM local_materials WHERE id = ?1",
+                [entity_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let pending_material_events: i64 = connection.query_row("SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'material' AND acknowledged_at IS NULL AND superseded_at IS NULL", [], |row| row.get(0)).unwrap();
+        assert_eq!(resolved_name, "remote newer");
+        assert_eq!(pending_material_events, 0);
     }
 
     #[test]
