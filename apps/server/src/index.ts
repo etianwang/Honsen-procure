@@ -5,6 +5,8 @@ import { createPostgresPool, waitForDatabase } from './db/pool.js'
 import { PostgresAuthStore } from './db/postgres-auth-store.js'
 import { PostgresMasterDataStore } from './master-data/postgres-store.js'
 import { MasterDataService } from './master-data/service.js'
+import { PostgresSyncStore } from './sync/postgres-store.js'
+import { SyncService } from './sync/service.js'
 
 const databaseUrl = process.env.POSTGRES_URL
 if (!databaseUrl)
@@ -17,6 +19,7 @@ const app = createApp(
     verify: argon2.verify,
   }),
   new MasterDataService(new PostgresMasterDataStore(pool)),
+  new SyncService(new PostgresSyncStore(pool)),
 )
 
 app.addHook('onClose', async () => pool.end())

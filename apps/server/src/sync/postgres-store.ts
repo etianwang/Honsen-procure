@@ -1,0 +1,259 @@
+import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
+import type { Pool, PoolClient } from 'pg'
+import type { SyncStore } from './types.js'
+
+const globallyVisibleEntityTypes = [
+  'country',
+  'project',
+  'site',
+  'department',
+  'team',
+  'unit',
+  'tax_template',
+  'exchange_rate',
+  'project_defaults',
+  'material',
+  'supplier',
+  'material_price',
+]
+
+type StoredEvent = {
+  event_id: string
+  result_status: SyncEventResult['status']
+  server_version: string | null
+}
+
+type StoredEntity = {
+  version: string
+  payload_json: Record<string, unknown>
+}
+
+export class PostgresSyncStore implements SyncStore {
+  constructor(private readonly pool: Pool) {}
+
+  async pushEvent(input: {
+    event: SyncEvent
+    installationId: string
+    actorId: string
+  }): Promise<SyncEventResult> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        input.event.eventId,
+      ])
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `${input.event.entityType}:${input.event.entityId}`,
+      ])
+      const prior = await client.query<StoredEvent>(
+        `SELECT event_id, result_status, server_version
+         FROM sync_events WHERE event_id = $1`,
+        [input.event.eventId],
+      )
+      if (prior.rows[0]) {
+        await client.query('COMMIT')
+        return eventResult(prior.rows[0])
+      }
+
+      const entity = await client.query<StoredEntity>(
+        `SELECT version, payload_json
+         FROM sync_entities
+         WHERE entity_type = $1 AND entity_id = $2
+         FOR UPDATE`,
+        [input.event.entityType, input.event.entityId],
+      )
+      const current = entity.rows[0]
+      const currentVersion = current ? Number(current.version) : 0
+      if (currentVersion !== input.event.baseVersion) {
+        const result = {
+          eventId: input.event.eventId,
+          status: 'conflict' as const,
+          serverVersion: currentVersion,
+        }
+        await this.recordConflict(client, input, current, result)
+        await client.query('COMMIT')
+        return result
+      }
+
+      const serverVersion = currentVersion + 1
+      const deleted = input.event.operation === 'soft_delete'
+      await client.query(
+        `INSERT INTO sync_entities
+           (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (entity_type, entity_id) DO UPDATE SET
+           version = EXCLUDED.version,
+           is_deleted = EXCLUDED.is_deleted,
+           payload_json = EXCLUDED.payload_json,
+           updated_by = EXCLUDED.updated_by,
+           updated_at = NOW()`,
+        [
+          input.event.entityType,
+          input.event.entityId,
+          serverVersion,
+          deleted,
+          input.event.payload,
+          input.actorId,
+        ],
+      )
+      await client.query(
+        `INSERT INTO sync_events
+           (event_id, installation_id, actor_id, entity_type, entity_id, operation, base_version, result_status, server_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'accepted', $8)`,
+        [
+          input.event.eventId,
+          input.installationId,
+          input.actorId,
+          input.event.entityType,
+          input.event.entityId,
+          input.event.operation,
+          input.event.baseVersion,
+          serverVersion,
+        ],
+      )
+      await client.query(
+        `INSERT INTO server_change_log
+           (entity_type, entity_id, operation, version, payload_json, actor_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          input.event.entityType,
+          input.event.entityId,
+          input.event.operation,
+          serverVersion,
+          input.event.payload,
+          input.actorId,
+        ],
+      )
+      await client.query('COMMIT')
+      return {
+        eventId: input.event.eventId,
+        status: 'accepted',
+        serverVersion,
+      }
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async pullChanges(input: {
+    actor: { id: string; roles: import('@honsen/shared').Role[] }
+    cursor: string
+    limit: number
+  }): Promise<{ changes: SyncChange[]; nextCursor: string }> {
+    const canReadAll = input.actor.roles.some((role) =>
+      ['super_administrator', 'administrator', 'purchaser', 'viewer'].includes(
+        role,
+      ),
+    )
+    const result = await this.pool.query<{
+      sequence: string
+      entity_type: SyncChange['entityType']
+      entity_id: string
+      operation: SyncChange['operation']
+      version: string
+      payload_json: Record<string, unknown>
+      changed_at: Date
+    }>(
+      `SELECT sequence, entity_type, entity_id, operation, version, payload_json, changed_at
+       FROM server_change_log c
+       WHERE sequence > $1
+         AND (
+           $2
+           OR entity_type = ANY($3::text[])
+           OR EXISTS (
+             SELECT 1 FROM user_project_bindings b
+             WHERE b.user_id = $4
+               AND b.deleted_at IS NULL
+               AND b.project_id::text = c.payload_json->>'projectId'
+           )
+         )
+       ORDER BY sequence
+       LIMIT $5`,
+      [
+        input.cursor,
+        canReadAll,
+        globallyVisibleEntityTypes,
+        input.actor.id,
+        input.limit,
+      ],
+    )
+    const changes = result.rows.map((row) => ({
+      cursor: row.sequence,
+      entityType: row.entity_type,
+      entityId: row.entity_id,
+      operation: row.operation,
+      version: Number(row.version),
+      payload: row.payload_json,
+      changedAt: row.changed_at.toISOString(),
+    }))
+    return {
+      changes,
+      nextCursor: changes.at(-1)?.cursor ?? input.cursor,
+    }
+  }
+
+  async hasActiveProjectBinding(
+    accountId: string,
+    projectId: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM user_project_bindings
+       WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL`,
+      [accountId, projectId],
+    )
+    return result.rowCount === 1
+  }
+
+  private async recordConflict(
+    client: PoolClient,
+    input: {
+      event: SyncEvent
+      installationId: string
+      actorId: string
+    },
+    current: StoredEntity | undefined,
+    result: SyncEventResult,
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO sync_events
+         (event_id, installation_id, actor_id, entity_type, entity_id, operation, base_version, result_status, server_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'conflict', $8)`,
+      [
+        input.event.eventId,
+        input.installationId,
+        input.actorId,
+        input.event.entityType,
+        input.event.entityId,
+        input.event.operation,
+        input.event.baseVersion,
+        result.serverVersion,
+      ],
+    )
+    await client.query(
+      `INSERT INTO sync_conflicts
+         (event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        input.event.eventId,
+        input.event.entityType,
+        input.event.entityId,
+        input.event.baseVersion,
+        result.serverVersion,
+        input.event.payload,
+        current?.payload_json ?? {},
+      ],
+    )
+  }
+}
+
+function eventResult(row: StoredEvent): SyncEventResult {
+  return {
+    eventId: row.event_id,
+    status: row.result_status,
+    serverVersion:
+      row.server_version === null ? null : Number(row.server_version),
+  }
+}

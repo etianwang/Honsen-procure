@@ -15,6 +15,8 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 
 ## Push
 
+- `POST /api/sync/push` accepts a maximum of 100 versioned events and requires the authenticated account session. The request carries a non-secret installation UUID only for event/session tracking; it is not a credential.
+- Each result has the original `eventId`, `accepted`, `conflict` or `validation_error` status, plus the server version when one exists. A batch can therefore contain a safe retry beside a rejected event without losing either result.
 - Send pending events in stable creation order over HTTPS using the authenticated account session.
 - The server validates the account/project scope, request payload, event-id idempotency and expected entity version inside one PostgreSQL transaction.
 - On acceptance it commits the mutation and a change-log entry atomically, assigns the next entity version, and returns the event acknowledgment.
@@ -24,6 +26,7 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 
 ## Pull
 
+- `GET /api/sync/pull?cursor=<sequence>&limit=<1..500>` requires the authenticated account session and returns ordered changes plus the cursor of the last returned change. The caller repeats the same cursor when a page fails to apply locally.
 - Pull ordered changes with an opaque, durable sequence cursor; timestamps are not cursors.
 - Apply one response page to SQLite in a transaction. Do not advance the local cursor until all page changes have applied.
 - A pulled change may update a clean local record. It may not overwrite a locally dirty record with pending events; create a conflict record instead.
