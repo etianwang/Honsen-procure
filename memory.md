@@ -3,6 +3,13 @@
 **Last updated:** 2026-10-11  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## T02-C CAPTCHA/login DOM acceptance — 2026-10-11
+
+- **T02-C COMPLETED.** Fastify CAPTCHA/login API coverage, the test-only invalid/first-login fixture, and the offline engineer DOM-tampering denial all passed.
+- Fresh full-gate evidence: formatting, lint, strict TypeScript, production build, workspace tests (desktop 2, server 19 including disposable PostgreSQL, shared 14), Playwright 16/16, Rust format and 12/12 tests. The first Rust command failed only because it was launched outside its crate; rerunning in `apps/desktop/src-tauri` passed.
+- The `honsen-procure-t02c` disposable Compose container/network is removed with `down --volumes`; no 5432 listener or other Docker resource is used.
+- **DEFERRED:** T04-A needs authorized deployment records. T08/T09 dependency-boundary work requires product approval. **WARNING:** LoginPage remains an explicitly labelled development preview; this acceptance covers the stated fixture/API gate, not a new online desktop-login flow.
+
 ## T02-B PostgreSQL authentication-store acceptance — 2026-10-11
 
 - Selected child: **T02-B — COMPLETED**. Scope is limited to the PostgreSQL authentication store and initial-super-administrator provisioning path; callers are `AuthService` and the production server bootstrap, with no desktop/Rust/UI/shared-contract/Toolbox change and no schema migration.
