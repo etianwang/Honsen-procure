@@ -46,6 +46,16 @@ Then compare the project with `docs/HONSEN_TOOLBOX_INTEGRATION.md` and report an
 - When authorized, push the task branch and create its pull request. Wait for the GitHub Actions `quality` check to pass; fix CI failures on that same task branch and never bypass required checks.
 - Only after all merge conditions and explicit user approval may the task branch be Squash Merged. Then synchronize local `main` from `origin/main` and delete only the confirmed merged task branch.
 
+## Codex shortcut commands
+
+The following operations are authorized only when the user explicitly issues the matching command. Otherwise, the Git workflow above still prohibits automatic Push, pull-request creation, and merge.
+
+- **「开始任务」**: synchronize and inspect `main`, create an independent task branch, then execute the approved task plan.
+- **「收尾任务」**: run the required acceptance checks, update progress documents, and create a local Git commit; do not Push automatically.
+- **「提交 PR」**: inspect the worktree and remote state, push the current task branch, create a pull request targeting `main`, then wait for and report the GitHub Actions `quality` result; never merge automatically.
+- **「合并 PR」**: confirm the pull request is mergeable, `quality` passed, and branch-protection requirements are met; perform a Squash Merge, synchronize local `main`, verify the merge, and then remove only the confirmed merged task branch.
+- **「跨设备交接」**: confirm local commits are pushed to the remote task branch, report how the other computer can continue, and never merge an unfinished task without explicit approval.
+
 ## Cross-platform development and test environment
 
 - Use Node.js `24.18.0` from `.nvmrc` and `npm ci` with the committed `package-lock.json`; do not regenerate the lock file without a dependency change.
