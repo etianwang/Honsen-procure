@@ -1,4 +1,6 @@
+import { once } from 'node:events'
 import { describe, expect, it } from 'vitest'
+import WebSocket from 'ws'
 import { createApp } from '../app.js'
 import { AuthService } from '../auth/service.js'
 import type { AuthStore, LoginAccount } from '../auth/types.js'
@@ -75,6 +77,67 @@ describe('sync API', () => {
     await app.ready()
     expect(app.hasRoute({ method: 'GET', url: '/api/sync/ws' })).toBe(true)
     await app.close()
+  })
+
+  it('notifies authenticated WebSocket clients after an accepted push', async () => {
+    const authStore = new AuthFixture()
+    const app = createApp(
+      new AuthService(authStore, { verify: async () => true }),
+      undefined,
+      new SyncService(new SyncFixture()),
+    )
+    const captcha = (
+      await app.inject({ method: 'GET', url: '/api/auth/captcha' })
+    ).json<{ id: string; question: string }>()
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'x-installation-id': '00000000-0000-4000-8000-000000000099' },
+      payload: {
+        username: account.username,
+        password: 'fixture-password',
+        captchaId: captcha.id,
+        captchaAnswer: captchaAnswer(captcha.question),
+      },
+    })
+    const token = login.json<{ accessToken: string }>().accessToken
+    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const socket = new WebSocket(
+      `${address.replace(/^http/, 'ws')}/api/sync/ws`,
+      {
+        headers: { authorization: `Bearer ${token}` },
+      },
+    )
+
+    try {
+      await once(socket, 'open')
+      const message = once(socket, 'message')
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/sync/push',
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          deviceId: '00000000-0000-4000-8000-000000000098',
+          events: [
+            {
+              eventId: '00000000-0000-4000-8000-000000000003',
+              entityType: 'material',
+              entityId: '00000000-0000-4000-8000-000000000004',
+              operation: 'upsert',
+              baseVersion: 0,
+              payload: {},
+            },
+          ],
+        },
+      })
+
+      expect(response.statusCode).toBe(200)
+      const [hint] = await message
+      expect(JSON.parse(hint.toString())).toEqual({ type: 'dataset-changed' })
+    } finally {
+      socket.close()
+      await app.close()
+    }
   })
 
   it('requires a session and accepts a bounded push through the HTTPS boundary', async () => {

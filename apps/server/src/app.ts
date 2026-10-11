@@ -18,7 +18,6 @@ export function createApp(
     send(data: string): void
     close(code?: number): void
   }>()
-  void app.register(websocket)
 
   async function authenticateRequest(request: {
     headers: { authorization?: unknown }
@@ -166,14 +165,21 @@ export function createApp(
       }
     })
 
-    app.get('/api/sync/ws', { websocket: true }, async (socket, request) => {
-      try {
-        await authenticateRequest(request)
-        sockets.add(socket)
-        socket.on('close', () => sockets.delete(socket))
-      } catch {
-        socket.close(1008)
-      }
+    app.register(async (websocketApp) => {
+      await websocketApp.register(websocket)
+      websocketApp.get(
+        '/api/sync/ws',
+        { websocket: true },
+        async (socket, request) => {
+          try {
+            await authenticateRequest(request)
+            sockets.add(socket)
+            socket.on('close', () => sockets.delete(socket))
+          } catch {
+            socket.close(1008)
+          }
+        },
+      )
     })
   }
 
