@@ -1,0 +1,24 @@
+# Keep repository text portable across Windows, WSL2, Linux, and macOS.
+* text=auto eol=lf
+
+# Windows command scripts require CRLF when they are introduced.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Never apply line-ending conversion to binary assets or release artifacts.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.7z binary
+*.exe binary
+*.dll binary
+*.wasm binary
+*.db binary
+*.sqlite binary
