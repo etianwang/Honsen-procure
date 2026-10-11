@@ -1471,6 +1471,24 @@ impl LocalAuthService {
             ),
             now,
         )?;
+        let parent_payload = order_sync_payload(&transaction, parent_order_id)?;
+        insert_local_sync_outbox(
+            &transaction,
+            "purchase_order",
+            parent_order_id,
+            &parent_payload,
+            now,
+        )?;
+        for child in &children {
+            let child_payload = order_sync_payload(&transaction, child.child_order_id)?;
+            insert_local_sync_outbox(
+                &transaction,
+                "purchase_order",
+                child.child_order_id,
+                &child_payload,
+                now,
+            )?;
+        }
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(children)
     }
@@ -1739,6 +1757,23 @@ impl LocalAuthService {
             ).map_err(|_| AuthError::Database)?;
         }
         append_order_audit(&transaction, input.source_order_id, actor_id, "rfq_created", None, None, Some(&serde_json::json!({ "rfqId": input.id, "supplierId": input.supplier_id, "currency": input.currency }).to_string()), now)?;
+        let project_id: String = transaction
+            .query_row(
+                "SELECT project_id FROM local_purchase_orders WHERE id = ?1",
+                [input.source_order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        let rfq_payload = serde_json::json!({ "id": input.id, "sourceOrderId": input.source_order_id, "supplierId": input.supplier_id, "projectId": project_id, "displayNo": input.display_no, "currency": input.currency }).to_string();
+        insert_local_sync_outbox(&transaction, "rfq", input.id, &rfq_payload, now)?;
+        let source_payload = order_sync_payload(&transaction, input.source_order_id)?;
+        insert_local_sync_outbox(
+            &transaction,
+            "purchase_order",
+            input.source_order_id,
+            &source_payload,
+            now,
+        )?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(RfqView {
             id: input.id,
