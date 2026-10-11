@@ -1914,6 +1914,31 @@ impl LocalAuthService {
             Some(&serde_json::json!({ "receiptId": input.id, "completed": complete }).to_string()),
             now,
         )?;
+        let project_id: String = transaction
+            .query_row(
+                "SELECT project_id FROM local_purchase_orders WHERE id = ?1",
+                [input.order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        let receipt_payload = serde_json::json!({
+            "id": input.id,
+            "orderId": input.order_id,
+            "projectId": project_id,
+            "receiverId": input.receiver_id,
+            "receivedAt": input.received_at,
+            "completed": complete,
+        })
+        .to_string();
+        insert_local_sync_outbox(&transaction, "receipt", input.id, &receipt_payload, now)?;
+        let order_payload = order_sync_payload(&transaction, input.order_id)?;
+        insert_local_sync_outbox(
+            &transaction,
+            "purchase_order",
+            input.order_id,
+            &order_payload,
+            now,
+        )?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(ReceiptView {
             id: input.id,
