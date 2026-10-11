@@ -16,6 +16,7 @@ import { SupplierAllocationFixturePage } from './pages/SupplierAllocationFixture
 import { SupplierChildTermsFixturePage } from './pages/SupplierChildTermsFixturePage'
 import { RfqFixturePage } from './pages/RfqFixturePage'
 import { ReceiptFixturePage } from './pages/ReceiptFixturePage'
+import { SyncConflictFixturePage } from './pages/SyncConflictFixturePage'
 import {
   RequisitionPage,
   type RequisitionContext,
@@ -104,6 +105,8 @@ function App() {
     new URLSearchParams(window.location.search).get('test') === 'rfq'
   const isReceiptFixture =
     new URLSearchParams(window.location.search).get('test') === 'receipt'
+  const isSyncConflictFixture =
+    new URLSearchParams(window.location.search).get('test') === 'sync-conflict'
   const [page, setPage] = useState<AppPage>('home')
   const [isPreviewOpen, setPreviewOpen] = useState(false)
 
@@ -118,7 +121,9 @@ function App() {
         },
       }}
     >
-      {isReceiptFixture ? (
+      {isSyncConflictFixture ? (
+        <SyncConflictFixturePage />
+      ) : isReceiptFixture ? (
         <ReceiptFixturePage />
       ) : isSupplierTermsFixture ? (
         <SupplierChildTermsFixturePage />

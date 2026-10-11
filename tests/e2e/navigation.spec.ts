@@ -765,6 +765,19 @@ test('receiver records partial delivery and closes a supplier order with conditi
   await expect(browserErrors).toEqual([])
 })
 
+test('administrator resolves a sync conflict through the accessible control', async ({
+  page,
+}) => {
+  await page.goto('/?test=sync-conflict')
+  await expect(page.getByText('云端版本 2 · upsert')).toBeVisible()
+  await page.getByLabel('处理原因').fill('云端材料资料已核对')
+  await page.getByRole('button', { name: '采用云端' }).click()
+  await expect(page.getByRole('status')).toHaveText(
+    '冲突已解决，并保留审计记录。',
+  )
+  await expect(page.getByText('没有待处理的同步冲突。')).toBeVisible()
+})
+
 test('purchaser rejects with a reason and posts an immutable internal comment', async ({
   page,
 }) => {
