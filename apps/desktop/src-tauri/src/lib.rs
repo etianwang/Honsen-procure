@@ -23,6 +23,7 @@ const CAPTCHA_WINDOW: Duration = Duration::from_secs(5 * 60);
 const LOCK_WINDOW: Duration = Duration::from_secs(15 * 60);
 const MAX_FAILURES: i64 = 5;
 const MAX_MATERIAL_IMAGE_BYTES: usize = 100 * 1024 * 1024;
+const SYNC_PULL_PAGE_LIMIT: usize = 500;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -3084,7 +3085,7 @@ impl LocalAuthService {
             .credential_vault
             .load_sync_token(account_id)?
             .ok_or(AuthError::NoActiveSession)?;
-        let cursor: String = self
+        let mut cursor: String = self
             .connection
             .lock()
             .map_err(|_| AuthError::Database)?
@@ -3095,33 +3096,42 @@ impl LocalAuthService {
             )
             .map_err(|_| AuthError::Database)?;
         let endpoint = sync_pull_endpoint()?;
-        let response = reqwest::Client::builder()
+        let client = reqwest::Client::builder()
             .https_only(true)
             .timeout(Duration::from_secs(20))
             .build()
-            .map_err(|_| AuthError::SyncTransport)?
-            .get(endpoint)
-            .bearer_auth(token)
-            .query(&[("cursor", cursor), ("limit", "500".to_owned())])
-            .send()
-            .await
             .map_err(|_| AuthError::SyncTransport)?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(AuthError::NoActiveSession);
+        let mut applied_count = 0;
+        loop {
+            let response = client
+                .get(endpoint.clone())
+                .bearer_auth(&token)
+                .query(&[("cursor", cursor.as_str()), ("limit", "500")])
+                .send()
+                .await
+                .map_err(|_| AuthError::SyncTransport)?;
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(AuthError::NoActiveSession);
+            }
+            if !response.status().is_success() {
+                return Err(AuthError::SyncTransport);
+            }
+            let page = response
+                .json::<SyncPullPageInput>()
+                .await
+                .map_err(|_| AuthError::SyncTransport)?;
+            let has_more = pull_page_has_more(&cursor, &page)?;
+            let next_cursor = page.next_cursor.clone();
+            applied_count += page.changes.len();
+            self.apply_sync_pull_page(page, now)?;
+            cursor = next_cursor;
+            if !has_more {
+                break;
+            }
         }
-        if !response.status().is_success() {
-            return Err(AuthError::SyncTransport);
-        }
-        let page = response
-            .json::<SyncPullPageInput>()
-            .await
-            .map_err(|_| AuthError::SyncTransport)?;
-        let applied_count = page.changes.len();
-        let next_cursor = page.next_cursor.clone();
-        self.apply_sync_pull_page(page, now)?;
         Ok(SyncPullView {
             applied_count,
-            next_cursor,
+            next_cursor: cursor,
         })
     }
 
@@ -4343,6 +4353,20 @@ fn parse_sync_cursor(value: &str) -> Result<i64, AuthError> {
     value.parse().map_err(|_| AuthError::InvalidInput)
 }
 
+fn pull_page_has_more(cursor: &str, page: &SyncPullPageInput) -> Result<bool, AuthError> {
+    let current = parse_sync_cursor(cursor).map_err(|_| AuthError::SyncTransport)?;
+    let next = parse_sync_cursor(&page.next_cursor).map_err(|_| AuthError::SyncTransport)?;
+    if page.changes.is_empty() {
+        return (next == current)
+            .then_some(false)
+            .ok_or(AuthError::SyncTransport);
+    }
+    if next <= current {
+        return Err(AuthError::SyncTransport);
+    }
+    Ok(page.changes.len() == SYNC_PULL_PAGE_LIMIT)
+}
+
 fn sync_push_endpoint() -> Result<reqwest::Url, AuthError> {
     let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
     sync_endpoint_from(&value, "push")
@@ -4889,6 +4913,50 @@ mod tests {
         );
         assert_eq!(
             sync_endpoint_from("https://user:secret@sync.example.test", "push").unwrap_err(),
+            AuthError::SyncTransport,
+        );
+    }
+
+    #[test]
+    fn pull_continues_only_after_a_full_advancing_page() {
+        let change = SyncPullChangeInput {
+            cursor: "501".into(),
+            entity_type: "material".into(),
+            entity_id: Uuid::new_v4(),
+            operation: "upsert".into(),
+            version: 1,
+            payload: serde_json::json!({}),
+            changed_at: "2026-10-11T00:00:00Z".into(),
+        };
+        assert!(
+            pull_page_has_more(
+                "1",
+                &SyncPullPageInput {
+                    changes: vec![change.clone(); SYNC_PULL_PAGE_LIMIT],
+                    next_cursor: "501".into(),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            !pull_page_has_more(
+                "501",
+                &SyncPullPageInput {
+                    changes: vec![change],
+                    next_cursor: "502".into(),
+                },
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            pull_page_has_more(
+                "502",
+                &SyncPullPageInput {
+                    changes: vec![],
+                    next_cursor: "503".into(),
+                },
+            )
+            .unwrap_err(),
             AuthError::SyncTransport,
         );
     }
