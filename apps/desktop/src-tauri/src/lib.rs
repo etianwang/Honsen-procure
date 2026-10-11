@@ -1,0 +1,5001 @@
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use argon2::password_hash::SaltString;
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use keyring::Entry;
+use rand_core::OsRng;
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use thiserror::Error;
+use uuid::Uuid;
+
+const OFFLINE_LOGIN_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
+const IDLE_LOCK_WINDOW: Duration = Duration::from_secs(30 * 60);
+const CAPTCHA_WINDOW: Duration = Duration::from_secs(5 * 60);
+const LOCK_WINDOW: Duration = Duration::from_secs(15 * 60);
+const MAX_FAILURES: i64 = 5;
+const MAX_MATERIAL_IMAGE_BYTES: usize = 100 * 1024 * 1024;
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    SuperAdministrator,
+    Administrator,
+    Purchaser,
+    Engineer,
+    Viewer,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CachedAccount {
+    pub id: Uuid,
+    pub username: String,
+    pub roles: Vec<Role>,
+    pub enabled: bool,
+    pub requires_password_change: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CaptchaChallenge {
+    pub id: Uuid,
+    pub question: String,
+    pub expires_at_unix_seconds: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AuthenticatedSession {
+    pub user_id: Uuid,
+    pub username: String,
+    pub roles: Vec<Role>,
+    pub requires_password_change: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDefaultsInput {
+    pub project_id: Uuid,
+    pub department_title: String,
+    pub company_address: String,
+    pub company_contact: String,
+    pub default_currency: String,
+    pub default_language_pair: String,
+    pub default_tax_template_id: Option<Uuid>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxTemplateInput {
+    pub id: Uuid,
+    pub business_code: String,
+    pub name: String,
+    pub country_id: Option<Uuid>,
+    pub rate_basis_points: i32,
+    pub effective_at: String,
+    pub is_active: bool,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangeRateInput {
+    pub id: Uuid,
+    pub from_currency: String,
+    pub to_currency: String,
+    pub rate_decimal: String,
+    pub effective_at: String,
+    pub source: String,
+    pub reason: Option<String>,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialInput {
+    pub id: Uuid,
+    pub sku: Option<String>,
+    pub name_zh: String,
+    pub name_fr: Option<String>,
+    pub aliases: Vec<String>,
+    pub brand: Option<String>,
+    pub model: String,
+    pub specification: String,
+    pub unit: String,
+    pub notes: Option<String>,
+    pub is_active: bool,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupplierInput {
+    pub id: Uuid,
+    pub business_code: String,
+    pub name: String,
+    pub contact_name: Option<String>,
+    pub address: Option<String>,
+    pub city: Option<String>,
+    pub country: Option<String>,
+    pub phone: Option<String>,
+    pub whatsapp: Option<String>,
+    pub email: Option<String>,
+    pub payment_terms: Option<String>,
+    pub delivery_lead_time: Option<String>,
+    pub is_preferred: bool,
+    pub is_blacklisted: bool,
+    pub is_active: bool,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialPriceInput {
+    pub id: Uuid,
+    pub material_id: Uuid,
+    pub supplier_id: Uuid,
+    pub currency: String,
+    pub unit_price_minor: String,
+    pub unit: String,
+    pub effective_at: String,
+    pub source_note: Option<String>,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialImageInput {
+    pub id: Uuid,
+    pub material_id: Uuid,
+    pub source_file_name: String,
+    pub source_base64: String,
+    pub square_crop_base64: String,
+    pub crop_json: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind")]
+pub enum AdjustmentInput {
+    #[serde(rename = "fixed_minor")]
+    FixedMinor { minor: String },
+    #[serde(rename = "percent_basis_points")]
+    PercentBasisPoints {
+        #[serde(rename = "basisPoints")]
+        basis_points: i32,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequisitionLineInput {
+    pub id: Uuid,
+    pub material_id: Option<Uuid>,
+    pub material_snapshot: MaterialSnapshotInput,
+    pub supplier_id: Option<Uuid>,
+    pub currency: String,
+    pub quantity: String,
+    pub unit: String,
+    pub unit_price_minor: String,
+    pub line_discount: AdjustmentInput,
+    pub line_freight: AdjustmentInput,
+    pub freight_included: bool,
+    pub sort_order: i32,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialSnapshotInput {
+    pub name_zh: String,
+    pub name_fr: Option<String>,
+    pub model: String,
+    pub specification: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequisitionDraftInput {
+    pub id: Uuid,
+    pub display_no: String,
+    pub country_id: Uuid,
+    pub project_id: Uuid,
+    pub site: String,
+    pub department_id: Uuid,
+    pub team_id: Uuid,
+    pub applicant_id: Uuid,
+    pub currency: String,
+    pub primary_currency: String,
+    pub language_pair: String,
+    pub urgency: String,
+    pub urgency_reason: Option<String>,
+    pub order_date: String,
+    pub delivery_address: String,
+    pub expected_delivery_date: Option<String>,
+    pub notes: Option<String>,
+    pub order_discount: AdjustmentInput,
+    pub order_freight: AdjustmentInput,
+    pub tax_rate_basis_points: i32,
+    pub lines: Vec<RequisitionLineInput>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SupplierChildAllocationInput {
+    pub parent_item_id: Uuid,
+    pub supplier_id: Uuid,
+    pub currency: String,
+    pub child_display_no: String,
+    pub locked_exchange_rate_decimal: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupplierChildOrderView {
+    pub child_order_id: Uuid,
+    pub supplier_id: Uuid,
+    pub currency: String,
+    pub source_total_minor: String,
+    pub primary_total_minor: String,
+    pub locked_exchange_rate_decimal: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SupplierChildLineTermsInput {
+    pub order_item_id: Uuid,
+    pub line_discount: AdjustmentInput,
+    pub line_freight: AdjustmentInput,
+    pub freight_included: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SupplierChildTermsInput {
+    pub order_id: Uuid,
+    pub lines: Vec<SupplierChildLineTermsInput>,
+    pub order_discount: AdjustmentInput,
+    pub order_freight: AdjustmentInput,
+    pub tax_rate_basis_points: i32,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRfqInput {
+    pub id: Uuid,
+    pub source_order_id: Uuid,
+    pub supplier_id: Uuid,
+    pub display_no: String,
+    pub currency: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RfqView {
+    pub id: Uuid,
+    pub source_order_id: Uuid,
+    pub supplier_id: Uuid,
+    pub display_no: String,
+    pub currency: String,
+    pub item_count: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptItemInput {
+    pub order_item_id: Uuid,
+    pub quantity: String,
+    pub unit: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordReceiptInput {
+    pub id: Uuid,
+    pub order_id: Uuid,
+    pub received_at: String,
+    pub receiver_id: Uuid,
+    pub over_receipt_reason: Option<String>,
+    #[serde(default)]
+    pub attachment_ids: Vec<Uuid>,
+    pub items: Vec<ReceiptItemInput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptView {
+    pub id: Uuid,
+    pub order_id: Uuid,
+    pub workflow_status: String,
+    pub received_item_count: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequisitionTotalsView {
+    pub subtotal_minor: String,
+    pub line_discount_minor: String,
+    pub order_discount_minor: String,
+    pub freight_minor: String,
+    pub tax_minor: String,
+    pub total_minor: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderCommentView {
+    pub id: Uuid,
+    pub order_id: Uuid,
+    pub author_id: Uuid,
+    pub body: String,
+    pub created_at: i64,
+    pub notification_count: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderAuditView {
+    pub id: Uuid,
+    pub order_id: Uuid,
+    pub actor_id: Uuid,
+    pub action: String,
+    pub reason: Option<String>,
+    pub previous_json: Option<String>,
+    pub next_json: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalPolicyView {
+    pub allow_self_approval: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogPriceView {
+    pub price_id: Uuid,
+    pub supplier_id: Uuid,
+    pub supplier_name: String,
+    pub is_preferred_supplier: bool,
+    pub currency: String,
+    pub unit_price_minor: String,
+    pub unit: String,
+    pub effective_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogMaterialView {
+    pub id: Uuid,
+    pub sku: Option<String>,
+    pub name_zh: String,
+    pub name_fr: Option<String>,
+    pub aliases: Vec<String>,
+    pub brand: Option<String>,
+    pub model: String,
+    pub specification: String,
+    pub unit: String,
+    pub notes: Option<String>,
+    pub version: i64,
+    pub prices: Vec<CatalogPriceView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupplierView {
+    pub id: Uuid,
+    pub business_code: String,
+    pub name: String,
+    pub contact_name: Option<String>,
+    pub address: Option<String>,
+    pub city: Option<String>,
+    pub country: Option<String>,
+    pub phone: Option<String>,
+    pub whatsapp: Option<String>,
+    pub email: Option<String>,
+    pub payment_terms: Option<String>,
+    pub delivery_lead_time: Option<String>,
+    pub is_preferred: bool,
+    pub is_blacklisted: bool,
+    pub is_active: bool,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDefaultsView {
+    pub project_id: Uuid,
+    pub project_name: String,
+    pub site: String,
+    pub department_title: Option<String>,
+    pub company_address: Option<String>,
+    pub company_contact: Option<String>,
+    pub default_currency: String,
+    pub default_language_pair: String,
+    pub default_tax_template_id: Option<Uuid>,
+    pub tax_template_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReferenceMasterDataInput {
+    Country {
+        id: Uuid,
+        business_code: String,
+        name: String,
+        time_zone: String,
+        is_active: bool,
+        version: i64,
+    },
+    Project {
+        id: Uuid,
+        country_id: Uuid,
+        business_code: String,
+        name: String,
+        site: String,
+        department_name: String,
+        default_currency: String,
+        default_language_pair: String,
+        is_active: bool,
+        version: i64,
+    },
+    Site {
+        id: Uuid,
+        project_id: Uuid,
+        business_code: String,
+        name: String,
+        is_active: bool,
+        version: i64,
+    },
+    Department {
+        id: Uuid,
+        business_code: String,
+        name: String,
+        is_active: bool,
+        version: i64,
+    },
+    Team {
+        id: Uuid,
+        department_id: Uuid,
+        business_code: String,
+        name: String,
+        is_active: bool,
+        version: i64,
+    },
+    Unit {
+        id: Uuid,
+        business_code: String,
+        name: String,
+        is_active: bool,
+        version: i64,
+    },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum AuthError {
+    #[error("invalid credentials or captcha")]
+    InvalidCredentials,
+    #[error("the offline verification window has expired")]
+    OfflineWindowExpired,
+    #[error("account is locked")]
+    AccountLocked,
+    #[error("no active session")]
+    NoActiveSession,
+    #[error("role is not authorized")]
+    Forbidden,
+    #[error("database error")]
+    Database,
+    #[error("password hashing error")]
+    PasswordHashing,
+    #[error("secure credential storage error")]
+    SecureStorage,
+    #[error("invalid input")]
+    InvalidInput,
+    #[error("business code cannot change")]
+    ImmutableBusinessCode,
+}
+
+#[derive(Debug)]
+struct LocalCaptcha {
+    id: Uuid,
+    answer: u8,
+    expires_at: SystemTime,
+}
+
+trait CredentialVault: Send + Sync {
+    fn save_verifier(&self, account_id: Uuid, verifier: &str) -> Result<(), AuthError>;
+    fn load_verifier(&self, account_id: Uuid) -> Result<Option<String>, AuthError>;
+}
+
+struct MemoryCredentialVault(Mutex<HashMap<Uuid, String>>);
+
+impl MemoryCredentialVault {
+    fn new() -> Self {
+        Self(Mutex::new(HashMap::new()))
+    }
+}
+
+impl CredentialVault for MemoryCredentialVault {
+    fn save_verifier(&self, account_id: Uuid, verifier: &str) -> Result<(), AuthError> {
+        self.0
+            .lock()
+            .map_err(|_| AuthError::SecureStorage)?
+            .insert(account_id, verifier.to_owned());
+        Ok(())
+    }
+
+    fn load_verifier(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|_| AuthError::SecureStorage)?
+            .get(&account_id)
+            .cloned())
+    }
+}
+
+struct OsCredentialVault;
+
+impl CredentialVault for OsCredentialVault {
+    fn save_verifier(&self, account_id: Uuid, verifier: &str) -> Result<(), AuthError> {
+        Entry::new("HONSEN Materials offline verifier", &account_id.to_string())
+            .map_err(|_| AuthError::SecureStorage)?
+            .set_password(verifier)
+            .map_err(|_| AuthError::SecureStorage)
+    }
+
+    fn load_verifier(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
+        let entry = Entry::new("HONSEN Materials offline verifier", &account_id.to_string())
+            .map_err(|_| AuthError::SecureStorage)?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(_) => Err(AuthError::SecureStorage),
+        }
+    }
+}
+
+pub struct LocalAuthService {
+    connection: Mutex<Connection>,
+    media_directory: PathBuf,
+    captcha: Mutex<Option<LocalCaptcha>>,
+    credential_vault: Box<dyn CredentialVault>,
+}
+
+impl LocalAuthService {
+    pub fn open_in_memory() -> Result<Self, AuthError> {
+        Self::open(
+            Connection::open_in_memory().map_err(|_| AuthError::Database)?,
+            Box::new(MemoryCredentialVault::new()),
+            std::env::temp_dir().join(format!("honsen-materials-{}", Uuid::new_v4())),
+        )
+    }
+
+    pub fn open_path(path: &str) -> Result<Self, AuthError> {
+        Self::open(
+            Connection::open(path).map_err(|_| AuthError::Database)?,
+            Box::new(OsCredentialVault),
+            Path::new(path).with_extension("media"),
+        )
+    }
+
+    fn open(
+        mut connection: Connection,
+        credential_vault: Box<dyn CredentialVault>,
+        media_directory: PathBuf,
+    ) -> Result<Self, AuthError> {
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .map_err(|_| AuthError::Database)?;
+        migrate(&mut connection)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+            media_directory,
+            captcha: Mutex::new(None),
+            credential_vault,
+        })
+    }
+
+    pub fn cache_verified_account(
+        &self,
+        account: CachedAccount,
+        password: &str,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let password_hash = hash_password(password)?;
+        let roles = serde_json::to_string(&account.roles).map_err(|_| AuthError::Database)?;
+        self.credential_vault
+            .save_verifier(account.id, &password_hash)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.execute(
+            "INSERT INTO local_accounts (id, username, roles_json, enabled, requires_password_change, cached_verified_at, failed_attempts, locked_until)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL)
+             ON CONFLICT(id) DO UPDATE SET username = excluded.username, roles_json = excluded.roles_json, enabled = excluded.enabled, requires_password_change = excluded.requires_password_change, cached_verified_at = excluded.cached_verified_at, failed_attempts = 0, locked_until = NULL",
+            params![account.id.to_string(), account.username, roles, account.enabled as i64, account.requires_password_change as i64, unix_seconds(now)],
+        ).map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn issue_captcha(&self, now: SystemTime) -> Result<CaptchaChallenge, AuthError> {
+        let first = (Uuid::new_v4().as_u128() % 9 + 1) as u8;
+        let second = (Uuid::new_v4().as_u128() % 9 + 1) as u8;
+        let id = Uuid::new_v4();
+        let expires_at = now + CAPTCHA_WINDOW;
+        *self.captcha.lock().map_err(|_| AuthError::Database)? = Some(LocalCaptcha {
+            id,
+            answer: first + second,
+            expires_at,
+        });
+        Ok(CaptchaChallenge {
+            id,
+            question: format!("{first} + {second} = ?"),
+            expires_at_unix_seconds: unix_seconds(expires_at),
+        })
+    }
+
+    pub fn offline_login(
+        &self,
+        username: &str,
+        password: &str,
+        captcha_id: Uuid,
+        captcha_answer: u8,
+        now: SystemTime,
+    ) -> Result<AuthenticatedSession, AuthError> {
+        let captcha = self.captcha.lock().map_err(|_| AuthError::Database)?.take();
+        let valid_captcha = matches!(captcha, Some(challenge) if challenge.id == captcha_id && challenge.answer == captcha_answer && challenge.expires_at >= now);
+        if !valid_captcha {
+            return Err(AuthError::InvalidCredentials);
+        }
+
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account = connection.query_row(
+            "SELECT id, username, roles_json, enabled, requires_password_change, cached_verified_at, failed_attempts, locked_until FROM local_accounts WHERE username = ?1",
+            [username],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?, row.get::<_, i64>(6)?, row.get::<_, Option<i64>>(7)?)),
+        ).optional().map_err(|_| AuthError::Database)?;
+        let Some((
+            id,
+            username,
+            roles_json,
+            enabled,
+            requires_password_change,
+            cached_verified_at,
+            failed_attempts,
+            locked_until,
+        )) = account
+        else {
+            return Err(AuthError::InvalidCredentials);
+        };
+        if enabled == 0 {
+            return Err(AuthError::InvalidCredentials);
+        }
+        if locked_until.is_some_and(|value| value > unix_seconds(now)) {
+            return Err(AuthError::AccountLocked);
+        }
+        if unix_seconds(now) - cached_verified_at > OFFLINE_LOGIN_WINDOW.as_secs() as i64 {
+            return Err(AuthError::OfflineWindowExpired);
+        }
+        let account_id = Uuid::parse_str(&id).map_err(|_| AuthError::Database)?;
+        let password_hash = self
+            .credential_vault
+            .load_verifier(account_id)?
+            .ok_or(AuthError::InvalidCredentials)?;
+        if !verify_password(&password_hash, password) {
+            register_failure(&connection, &id, failed_attempts, now)?;
+            return Err(AuthError::InvalidCredentials);
+        }
+
+        let roles =
+            serde_json::from_str::<Vec<Role>>(&roles_json).map_err(|_| AuthError::Database)?;
+        connection
+            .execute(
+                "UPDATE local_accounts SET failed_attempts = 0, locked_until = NULL WHERE id = ?1",
+                [&id],
+            )
+            .map_err(|_| AuthError::Database)?;
+        connection
+            .execute("DELETE FROM local_session", [])
+            .map_err(|_| AuthError::Database)?;
+        connection.execute("INSERT INTO local_session (user_id, started_at, last_active_at) VALUES (?1, ?2, ?2)", params![id, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        Ok(AuthenticatedSession {
+            user_id: account_id,
+            username,
+            roles,
+            requires_password_change: requires_password_change != 0,
+        })
+    }
+
+    pub fn require_role(&self, role: Role, now: SystemTime) -> Result<(), AuthError> {
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let session = connection.query_row("SELECT s.user_id, s.last_active_at, a.roles_json FROM local_session s JOIN local_accounts a ON a.id = s.user_id", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))).optional().map_err(|_| AuthError::Database)?;
+        let Some((user_id, last_active_at, roles_json)) = session else {
+            return Err(AuthError::NoActiveSession);
+        };
+        if unix_seconds(now) - last_active_at > IDLE_LOCK_WINDOW.as_secs() as i64 {
+            connection
+                .execute("DELETE FROM local_session", [])
+                .map_err(|_| AuthError::Database)?;
+            return Err(AuthError::NoActiveSession);
+        }
+        let roles =
+            serde_json::from_str::<Vec<Role>>(&roles_json).map_err(|_| AuthError::Database)?;
+        if !roles.contains(&role) {
+            return Err(AuthError::Forbidden);
+        }
+        connection
+            .execute(
+                "UPDATE local_session SET last_active_at = ?1 WHERE user_id = ?2",
+                params![unix_seconds(now), user_id],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn require_material_mutation(&self, now: SystemTime) -> Result<(), AuthError> {
+        match self.require_role(Role::Purchaser, now) {
+            Ok(()) => Ok(()),
+            Err(AuthError::Forbidden) => self.require_role(Role::Administrator, now),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn save_project_defaults(
+        &self,
+        defaults: ProjectDefaultsInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        validate_project_defaults(&defaults)?;
+        self.require_master_data_mutation(now)?;
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .execute(
+                "INSERT INTO local_project_print_defaults (project_id, department_title, company_address, company_contact, default_currency, default_language_pair, default_tax_template_id, version, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)
+                 ON CONFLICT(project_id) DO UPDATE SET department_title = excluded.department_title, company_address = excluded.company_address, company_contact = excluded.company_contact, default_currency = excluded.default_currency, default_language_pair = excluded.default_language_pair, default_tax_template_id = excluded.default_tax_template_id, version = local_project_print_defaults.version + 1, updated_at = excluded.updated_at",
+                params![
+                    defaults.project_id.to_string(),
+                    defaults.department_title,
+                    defaults.company_address,
+                    defaults.company_contact,
+                    defaults.default_currency,
+                    defaults.default_language_pair,
+                    defaults.default_tax_template_id.map(|value| value.to_string()),
+                    unix_seconds(now)
+                ],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn list_project_defaults(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<ProjectDefaultsView>, AuthError> {
+        self.require_master_data_mutation(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT p.id, p.name, p.site, d.department_title, d.company_address, d.company_contact,
+                        COALESCE(d.default_currency, p.default_currency), COALESCE(d.default_language_pair, p.default_language_pair),
+                        d.default_tax_template_id, t.name
+                 FROM local_projects p
+                 LEFT JOIN local_project_print_defaults d ON d.project_id = p.id
+                 LEFT JOIN local_tax_templates t ON t.id = d.default_tax_template_id AND t.deleted_at IS NULL
+                 WHERE p.is_active = 1 AND p.deleted_at IS NULL
+                 ORDER BY p.name",
+            )
+            .map_err(|_| AuthError::Database)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                ))
+            })
+            .map_err(|_| AuthError::Database)?;
+        rows.map(|row| {
+            let (
+                project_id,
+                project_name,
+                site,
+                department_title,
+                company_address,
+                company_contact,
+                default_currency,
+                default_language_pair,
+                default_tax_template_id,
+                tax_template_name,
+            ) = row.map_err(|_| AuthError::Database)?;
+            Ok(ProjectDefaultsView {
+                project_id: Uuid::parse_str(&project_id).map_err(|_| AuthError::Database)?,
+                project_name,
+                site,
+                department_title,
+                company_address,
+                company_contact,
+                default_currency,
+                default_language_pair,
+                default_tax_template_id: default_tax_template_id
+                    .map(|value| Uuid::parse_str(&value).map_err(|_| AuthError::Database))
+                    .transpose()?,
+                tax_template_name,
+            })
+        })
+        .collect()
+    }
+
+    pub fn save_reference_master_data(
+        &self,
+        record: ReferenceMasterDataInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_master_data_mutation(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        match record {
+            ReferenceMasterDataInput::Country {
+                id,
+                business_code,
+                name,
+                time_zone,
+                is_active,
+                version,
+            } => {
+                validate_reference(&business_code, &name, version)?;
+                assert_immutable_local_business_code(
+                    &connection,
+                    "local_countries",
+                    id,
+                    &business_code,
+                )?;
+                connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET name = excluded.name, time_zone = excluded.time_zone, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, time_zone, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+            }
+            ReferenceMasterDataInput::Project {
+                id,
+                country_id,
+                business_code,
+                name,
+                site,
+                department_name,
+                default_currency,
+                default_language_pair,
+                is_active,
+                version,
+            } => {
+                validate_reference(&business_code, &name, version)?;
+                assert_immutable_local_business_code(
+                    &connection,
+                    "local_projects",
+                    id,
+                    &business_code,
+                )?;
+                if site.trim().is_empty()
+                    || department_name.trim().is_empty()
+                    || !matches!(default_currency.as_str(), "XOF" | "CNY" | "USD" | "EUR")
+                    || !matches!(default_language_pair.as_str(), "zh_fr" | "zh_en")
+                {
+                    return Err(AuthError::InvalidInput);
+                }
+                connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(id) DO UPDATE SET country_id = excluded.country_id, name = excluded.name, site = excluded.site, department_name = excluded.department_name, default_currency = excluded.default_currency, default_language_pair = excluded.default_language_pair, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), country_id.to_string(), business_code, name, site, department_name, default_currency, default_language_pair, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+            }
+            ReferenceMasterDataInput::Site {
+                id,
+                project_id,
+                business_code,
+                name,
+                is_active,
+                version,
+            } => {
+                validate_reference(&business_code, &name, version)?;
+                assert_immutable_local_business_code(
+                    &connection,
+                    "local_sites",
+                    id,
+                    &business_code,
+                )?;
+                connection.execute("INSERT INTO local_sites (id, project_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), project_id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+            }
+            ReferenceMasterDataInput::Department {
+                id,
+                business_code,
+                name,
+                is_active,
+                version,
+            } => {
+                validate_reference(&business_code, &name, version)?;
+                assert_immutable_local_business_code(
+                    &connection,
+                    "local_departments",
+                    id,
+                    &business_code,
+                )?;
+                connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+            }
+            ReferenceMasterDataInput::Team {
+                id,
+                department_id,
+                business_code,
+                name,
+                is_active,
+                version,
+            } => {
+                validate_reference(&business_code, &name, version)?;
+                assert_immutable_local_business_code(
+                    &connection,
+                    "local_teams",
+                    id,
+                    &business_code,
+                )?;
+                connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET department_id = excluded.department_id, name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), department_id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+            }
+            ReferenceMasterDataInput::Unit {
+                id,
+                business_code,
+                name,
+                is_active,
+                version,
+            } => {
+                validate_reference(&business_code, &name, version)?;
+                assert_immutable_local_business_code(
+                    &connection,
+                    "local_units",
+                    id,
+                    &business_code,
+                )?;
+                connection.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn save_tax_template(
+        &self,
+        template: TaxTemplateInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_master_data_mutation(now)?;
+        validate_reference(&template.business_code, &template.name, template.version)?;
+        if template.rate_basis_points < 0
+            || template.rate_basis_points > 100_000
+            || !valid_iso_date(&template.effective_at)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        assert_immutable_local_business_code(
+            &connection,
+            "local_tax_templates",
+            template.id,
+            &template.business_code,
+        )?;
+        connection
+            .execute(
+                "INSERT INTO local_tax_templates (id, business_code, name, country_id, rate_basis_points, effective_at, is_active, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, country_id = excluded.country_id, rate_basis_points = excluded.rate_basis_points, effective_at = excluded.effective_at, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL",
+                params![template.id.to_string(), template.business_code, template.name, template.country_id.map(|value| value.to_string()), template.rate_basis_points, template.effective_at, template.is_active as i64, template.version],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn save_exchange_rate(
+        &self,
+        rate: ExchangeRateInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_master_data_mutation(now)?;
+        if !valid_currency(&rate.from_currency)
+            || !valid_currency(&rate.to_currency)
+            || !valid_decimal_rate(&rate.rate_decimal)
+            || !valid_iso_date(&rate.effective_at)
+            || rate.version < 1
+            || !matches!(rate.source.as_str(), "public_daily" | "manual")
+            || (rate.source == "manual"
+                && rate
+                    .reason
+                    .as_ref()
+                    .is_none_or(|value| value.trim().is_empty() || value.len() > 1000))
+            || rate.reason.as_ref().is_some_and(|value| value.len() > 1000)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .execute(
+                "INSERT INTO local_exchange_rates (id, from_currency, to_currency, rate_decimal, effective_at, source, reason, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![rate.id.to_string(), rate.from_currency, rate.to_currency, rate.rate_decimal, rate.effective_at, rate.source, rate.reason, rate.version],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn save_material(&self, material: MaterialInput, now: SystemTime) -> Result<(), AuthError> {
+        self.require_material_mutation(now)?;
+        validate_material(&material)?;
+        let aliases =
+            serde_json::to_string(&material.aliases).map_err(|_| AuthError::InvalidInput)?;
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .execute(
+                "INSERT INTO local_materials (id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, is_active, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 ON CONFLICT(id) DO UPDATE SET sku = excluded.sku, name_zh = excluded.name_zh, name_fr = excluded.name_fr,
+                   aliases_json = excluded.aliases_json, brand = excluded.brand, model = excluded.model,
+                   specification = excluded.specification, unit = excluded.unit, notes = excluded.notes,
+                   is_active = excluded.is_active, version = excluded.version, deleted_at = NULL",
+                params![material.id.to_string(), material.sku, material.name_zh, material.name_fr, aliases, material.brand, material.model, material.specification, material.unit, material.notes, material.is_active as i64, material.version],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn save_supplier(&self, supplier: SupplierInput, now: SystemTime) -> Result<(), AuthError> {
+        self.require_material_mutation(now)?;
+        validate_supplier(&supplier)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        assert_immutable_local_business_code(
+            &connection,
+            "local_suppliers",
+            supplier.id,
+            &supplier.business_code,
+        )?;
+        connection
+            .execute(
+                "INSERT INTO local_suppliers (id, business_code, name, contact_name, address, city, country, phone, whatsapp, email, payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, contact_name = excluded.contact_name,
+                   address = excluded.address, city = excluded.city, country = excluded.country, phone = excluded.phone,
+                   whatsapp = excluded.whatsapp, email = excluded.email, payment_terms = excluded.payment_terms,
+                   delivery_lead_time = excluded.delivery_lead_time, is_preferred = excluded.is_preferred,
+                   is_blacklisted = excluded.is_blacklisted, is_active = excluded.is_active, version = excluded.version,
+                   deleted_at = NULL",
+                params![supplier.id.to_string(), supplier.business_code, supplier.name, supplier.contact_name, supplier.address, supplier.city, supplier.country, supplier.phone, supplier.whatsapp, supplier.email, supplier.payment_terms, supplier.delivery_lead_time, supplier.is_preferred as i64, supplier.is_blacklisted as i64, supplier.is_active as i64, supplier.version],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn add_material_price(
+        &self,
+        price: MaterialPriceInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_material_mutation(now)?;
+        let unit_price_minor = validate_material_price(&price)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let material_is_active: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_materials WHERE id = ?1 AND is_active = 1 AND deleted_at IS NULL)",
+                [price.material_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        let supplier_is_active: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_suppliers WHERE id = ?1 AND is_active = 1 AND deleted_at IS NULL)",
+                [price.supplier_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if !material_is_active || !supplier_is_active {
+            return Err(AuthError::InvalidInput);
+        }
+        transaction
+            .execute(
+                "UPDATE local_material_prices SET is_active = 0
+                 WHERE material_id = ?1 AND supplier_id = ?2 AND currency = ?3 AND is_active = 1 AND deleted_at IS NULL",
+                params![price.material_id.to_string(), price.supplier_id.to_string(), price.currency],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, source_note, is_active, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)",
+                params![price.id.to_string(), price.material_id.to_string(), price.supplier_id.to_string(), price.currency, unit_price_minor, price.unit, price.effective_at, price.source_note, price.version],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn save_material_image(
+        &self,
+        image: MaterialImageInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_material_mutation(now)?;
+        if image.source_file_name.trim().is_empty()
+            || image.source_file_name.len() > 255
+            || image.crop_json.len() > 10_000
+            || serde_json::from_str::<serde_json::Value>(&image.crop_json).is_err()
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let source = decode_material_image(&image.source_base64)?;
+        let square = decode_material_image(&image.square_crop_base64)?;
+        if !square.starts_with(b"\x89PNG\r\n\x1a\n") {
+            return Err(AuthError::InvalidInput);
+        }
+        fs::create_dir_all(&self.media_directory).map_err(|_| AuthError::Database)?;
+        let source_path = self.media_directory.join(format!("{}-source", image.id));
+        let square_path = self
+            .media_directory
+            .join(format!("{}-square.png", image.id));
+        fs::write(&source_path, source).map_err(|_| AuthError::Database)?;
+        if let Err(error) = fs::write(&square_path, square) {
+            let _ = fs::remove_file(&source_path);
+            return Err(match error.kind() {
+                std::io::ErrorKind::InvalidInput => AuthError::InvalidInput,
+                _ => AuthError::Database,
+            });
+        }
+        let result = (|| {
+            let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+            let material_exists: bool = transaction
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM local_materials WHERE id = ?1 AND deleted_at IS NULL)",
+                    [image.material_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Database)?;
+            if !material_exists {
+                return Err(AuthError::InvalidInput);
+            }
+            transaction
+                .execute(
+                    "UPDATE local_material_images SET deleted_at = ?1 WHERE material_id = ?2 AND deleted_at IS NULL",
+                    params![unix_seconds(now), image.material_id.to_string()],
+                )
+                .map_err(|_| AuthError::Database)?;
+            transaction
+                .execute(
+                    "INSERT INTO local_material_images (id, material_id, source_path, square_crop_path, crop_json, created_at, source_file_name)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![image.id.to_string(), image.material_id.to_string(), source_path.to_string_lossy(), square_path.to_string_lossy(), image.crop_json, unix_seconds(now), image.source_file_name],
+                )
+                .map_err(|_| AuthError::Database)?;
+            transaction.commit().map_err(|_| AuthError::Database)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&source_path);
+            let _ = fs::remove_file(&square_path);
+        }
+        result
+    }
+
+    pub fn get_material_square_image(
+        &self,
+        material_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Option<String>, AuthError> {
+        self.require_catalog_read(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let path = connection
+            .query_row(
+                "SELECT square_crop_path FROM local_material_images
+                 WHERE material_id = ?1 AND deleted_at IS NULL
+                 ORDER BY created_at DESC LIMIT 1",
+                [material_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        path.map(|path| {
+            let bytes = fs::read(path).map_err(|_| AuthError::Database)?;
+            if bytes.len() > MAX_MATERIAL_IMAGE_BYTES || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                return Err(AuthError::Database);
+            }
+            Ok(format!("data:image/png;base64,{}", BASE64.encode(bytes)))
+        })
+        .transpose()
+    }
+
+    pub fn save_requisition_draft(
+        &self,
+        draft: RequisitionDraftInput,
+        now: SystemTime,
+    ) -> Result<RequisitionTotalsView, AuthError> {
+        self.save_requisition(draft, None, now)
+    }
+
+    pub fn revise_confirmed_requisition(
+        &self,
+        draft: RequisitionDraftInput,
+        reason: String,
+        now: SystemTime,
+    ) -> Result<RequisitionTotalsView, AuthError> {
+        self.save_requisition(draft, Some(reason), now)
+    }
+
+    pub fn allocate_supplier_child_orders(
+        &self,
+        parent_order_id: Uuid,
+        allocations: Vec<SupplierChildAllocationInput>,
+        now: SystemTime,
+    ) -> Result<Vec<SupplierChildOrderView>, AuthError> {
+        if !self.require_order_mutation(now)? || allocations.is_empty() {
+            return Err(AuthError::Forbidden);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut groups: Vec<(
+            Uuid,
+            String,
+            String,
+            String,
+            Vec<SupplierChildAllocationInput>,
+        )> = Vec::new();
+        let mut allocated_items = HashSet::new();
+        for allocation in allocations {
+            if !allocated_items.insert(allocation.parent_item_id)
+                || !valid_currency(&allocation.currency)
+                || !valid_required_text(&allocation.child_display_no, 128)
+                || !valid_non_zero_decimal_rate(&allocation.locked_exchange_rate_decimal)
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            if let Some(group) = groups
+                .iter_mut()
+                .find(|group| group.0 == allocation.supplier_id && group.1 == allocation.currency)
+            {
+                if group.2 != allocation.child_display_no
+                    || group.3 != allocation.locked_exchange_rate_decimal
+                {
+                    return Err(AuthError::InvalidInput);
+                }
+                group.4.push(allocation);
+            } else {
+                groups.push((
+                    allocation.supplier_id,
+                    allocation.currency.clone(),
+                    allocation.child_display_no.clone(),
+                    allocation.locked_exchange_rate_decimal.clone(),
+                    vec![allocation],
+                ));
+            }
+        }
+
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let parent: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+        ) = transaction
+            .query_row(
+                "SELECT country_id, project_id, site, department_id, team_id, applicant_id, primary_currency, language_pair, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, workflow_status FROM local_purchase_orders WHERE id = ?1 AND parent_order_id IS NULL AND deleted_at IS NULL",
+                [parent_order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?, row.get(13)?, row.get(14)?)),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if parent.14 != "confirmed" {
+            return Err(AuthError::InvalidInput);
+        }
+
+        let mut item_statement = transaction
+            .prepare(
+                "SELECT id, material_id, material_snapshot_json, quantity_decimal, unit, unit_price_minor, currency FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id",
+            )
+            .map_err(|_| AuthError::Database)?;
+        let parent_items = item_statement
+            .query_map([parent_order_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    (
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, String>(6)?,
+                    ),
+                ))
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<HashMap<_, _>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        drop(item_statement);
+        if parent_items.is_empty() || parent_items.len() != allocated_items.len() {
+            return Err(AuthError::InvalidInput);
+        }
+        for allocation in groups.iter().flat_map(|group| &group.4) {
+            let item = parent_items
+                .get(&allocation.parent_item_id.to_string())
+                .ok_or(AuthError::InvalidInput)?;
+            if item.5 != allocation.currency {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        let allocated_count: i64 = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM local_supplier_order_allocations WHERE parent_order_id = ?1",
+                [parent_order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if allocated_count != 0 {
+            return Err(AuthError::InvalidInput);
+        }
+
+        let mut children = Vec::with_capacity(groups.len());
+        let mut parent_primary_total = 0i128;
+        for (supplier_id, currency, display_no, exchange_rate, group_allocations) in groups {
+            let supplier_name = transaction
+                .query_row(
+                    "SELECT name FROM local_suppliers WHERE id = ?1 AND is_active = 1 AND is_blacklisted = 0 AND deleted_at IS NULL",
+                    [supplier_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?
+                .ok_or(AuthError::InvalidInput)?;
+            let duplicate_display_no: Option<String> = transaction
+                .query_row(
+                    "SELECT id FROM local_purchase_orders WHERE display_no = ?1 AND deleted_at IS NULL",
+                    [&display_no],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?;
+            if duplicate_display_no.is_some() {
+                return Err(AuthError::InvalidInput);
+            }
+            let supplier_snapshot = serde_json::to_string(
+                &serde_json::json!({ "id": supplier_id, "name": supplier_name }),
+            )
+            .map_err(|_| AuthError::Database)?;
+            let child_order_id = Uuid::new_v4();
+            let mut source_total = 0i128;
+            let mut child_items = Vec::with_capacity(group_allocations.len());
+            for allocation in group_allocations {
+                let item = parent_items
+                    .get(&allocation.parent_item_id.to_string())
+                    .ok_or(AuthError::InvalidInput)?;
+                let line_total = divide_half_up(
+                    i128::from(item.4) * parse_quantity_hundredths(&item.2)?,
+                    100,
+                )?;
+                source_total = source_total
+                    .checked_add(line_total)
+                    .ok_or(AuthError::InvalidInput)?;
+                child_items.push((allocation.parent_item_id, item.clone(), as_i64(line_total)?));
+            }
+            let source_total = as_i64(source_total)?;
+            let primary_total =
+                convert_minor_by_rate(source_total, &currency, &parent.6, &exchange_rate)?;
+            parent_primary_total = parent_primary_total
+                .checked_add(i128::from(primary_total))
+                .ok_or(AuthError::InvalidInput)?;
+            transaction
+                .execute(
+                    "INSERT INTO local_purchase_orders (id, parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 'draft', 'draft', ?16, ?17, ?18, ?19, ?20, ?21, ?22, 0, 0, 0, 0, 0, ?22, 1, ?23, ?23)",
+                    params![child_order_id.to_string(), parent_order_id.to_string(), display_no, parent.0, parent.1, parent.2, parent.3, parent.4, parent.5, supplier_id.to_string(), supplier_snapshot, currency, parent.6, exchange_rate, parent.7, parent.8, parent.9, parent.10, parent.11, parent.12, parent.13, source_total, unix_seconds(now)],
+                )
+                .map_err(|_| AuthError::Database)?;
+            for (sort_order, (parent_item_id, item, line_total)) in
+                child_items.into_iter().enumerate()
+            {
+                let child_item_id = Uuid::new_v4();
+                transaction
+                    .execute(
+                        "INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', 0, ?10, ?11, ?12, ?12)",
+                        params![child_item_id.to_string(), child_order_id.to_string(), item.0, item.1, supplier_snapshot, currency, item.2, item.3, item.4, line_total, sort_order as i64, unix_seconds(now)],
+                    )
+                    .map_err(|_| AuthError::Database)?;
+                transaction
+                    .execute(
+                        "INSERT INTO local_supplier_order_allocations (id, parent_order_id, child_order_id, parent_item_id, child_item_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![Uuid::new_v4().to_string(), parent_order_id.to_string(), child_order_id.to_string(), parent_item_id.to_string(), child_item_id.to_string(), unix_seconds(now)],
+                    )
+                    .map_err(|_| AuthError::Database)?;
+            }
+            append_order_audit(
+                &transaction,
+                child_order_id,
+                actor_id,
+                "created_from_parent",
+                None,
+                None,
+                Some(&serde_json::json!({ "parentOrderId": parent_order_id }).to_string()),
+                now,
+            )?;
+            children.push(SupplierChildOrderView {
+                child_order_id,
+                supplier_id,
+                currency,
+                source_total_minor: source_total.to_string(),
+                primary_total_minor: primary_total.to_string(),
+                locked_exchange_rate_decimal: exchange_rate,
+            });
+        }
+        let parent_primary_total = as_i64(parent_primary_total)?;
+        transaction
+            .execute(
+                "UPDATE local_purchase_orders SET subtotal_minor = ?2, line_discount_minor = 0, order_discount_minor = 0, freight_minor = 0, tax_minor = 0, total_minor = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1",
+                params![parent_order_id.to_string(), parent_primary_total, unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        append_order_audit(
+            &transaction,
+            parent_order_id,
+            actor_id,
+            "supplier_children_created",
+            None,
+            None,
+            Some(
+                &serde_json::json!({
+                    "primaryCurrency": parent.6,
+                    "primaryTotalMinor": parent_primary_total.to_string(),
+                    "children": children,
+                })
+                .to_string(),
+            ),
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(children)
+    }
+
+    pub fn save_supplier_child_terms(
+        &self,
+        input: SupplierChildTermsInput,
+        now: SystemTime,
+    ) -> Result<RequisitionTotalsView, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        if input.lines.is_empty()
+            || input.lines.len() > 500
+            || !(0..=100_000).contains(&input.tax_rate_basis_points)
+            || validate_adjustment(&input.order_discount).is_err()
+            || validate_adjustment(&input.order_freight).is_err()
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut terms_by_item = HashMap::new();
+        for terms in &input.lines {
+            if validate_adjustment(&terms.line_discount).is_err()
+                || validate_adjustment(&terms.line_freight).is_err()
+                || terms_by_item
+                    .insert(terms.order_item_id.to_string(), terms.clone())
+                    .is_some()
+            {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let header: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+        ) = transaction
+            .query_row(
+                "SELECT display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, workflow_status FROM local_purchase_orders WHERE id = ?1 AND parent_order_id IS NOT NULL AND deleted_at IS NULL",
+                [input.order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?, row.get(13)?, row.get(14)?, row.get(15)?, row.get(16)?)),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if header.16 != "draft" {
+            return Err(AuthError::InvalidInput);
+        }
+        let mut statement = transaction
+            .prepare(
+                "SELECT id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, sort_order FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id",
+            )
+            .map_err(|_| AuthError::Database)?;
+        let saved_lines = statement
+            .query_map([input.order_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i32>(7)?,
+                ))
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        drop(statement);
+        if saved_lines.len() != terms_by_item.len() {
+            return Err(AuthError::InvalidInput);
+        }
+        let mut lines = Vec::with_capacity(saved_lines.len());
+        for (id, material_id, snapshot_json, currency, quantity, unit, unit_price, sort_order) in
+            saved_lines
+        {
+            let terms = terms_by_item.get(&id).ok_or(AuthError::InvalidInput)?;
+            lines.push(RequisitionLineInput {
+                id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
+                material_id: material_id
+                    .as_deref()
+                    .map(Uuid::parse_str)
+                    .transpose()
+                    .map_err(|_| AuthError::Database)?,
+                material_snapshot: serde_json::from_str(&snapshot_json)
+                    .map_err(|_| AuthError::Database)?,
+                supplier_id: None,
+                currency,
+                quantity,
+                unit,
+                unit_price_minor: unit_price.to_string(),
+                line_discount: terms.line_discount.clone(),
+                line_freight: terms.line_freight.clone(),
+                freight_included: terms.freight_included,
+                sort_order,
+            });
+        }
+        let draft = RequisitionDraftInput {
+            id: input.order_id,
+            display_no: header.0,
+            country_id: Uuid::parse_str(&header.1).map_err(|_| AuthError::Database)?,
+            project_id: Uuid::parse_str(&header.2).map_err(|_| AuthError::Database)?,
+            site: header.3,
+            department_id: Uuid::parse_str(&header.4).map_err(|_| AuthError::Database)?,
+            team_id: Uuid::parse_str(&header.5).map_err(|_| AuthError::Database)?,
+            applicant_id: Uuid::parse_str(&header.6).map_err(|_| AuthError::Database)?,
+            currency: header.7,
+            primary_currency: header.8,
+            language_pair: header.9,
+            urgency: header.10,
+            urgency_reason: header.11,
+            order_date: header.12,
+            delivery_address: header.13,
+            expected_delivery_date: header.14,
+            notes: header.15,
+            order_discount: input.order_discount,
+            order_freight: input.order_freight,
+            tax_rate_basis_points: input.tax_rate_basis_points,
+            lines,
+        };
+        let calculated = calculate_requisition(&draft)?;
+        let previous = order_audit_snapshot(&transaction, input.order_id)?;
+        for line in &calculated.lines {
+            transaction
+                .execute(
+                    "UPDATE local_purchase_order_items SET line_discount_json = ?2, line_freight_json = ?3, freight_included = ?4, line_total_minor = ?5, updated_at = ?6 WHERE id = ?1 AND order_id = ?7",
+                    params![line.input.id.to_string(), serde_json::to_string(&line.input.line_discount).map_err(|_| AuthError::Database)?, serde_json::to_string(&line.input.line_freight).map_err(|_| AuthError::Database)?, if line.input.freight_included { 1 } else { 0 }, line.total, unix_seconds(now), input.order_id.to_string()],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        transaction
+            .execute(
+                "UPDATE local_purchase_orders SET subtotal_minor = ?2, line_discount_minor = ?3, order_discount_minor = ?4, freight_minor = ?5, tax_rate_basis_points = ?6, tax_minor = ?7, total_minor = ?8, supplier_terms_completed_at = ?9, version = version + 1, updated_at = ?9 WHERE id = ?1",
+                params![input.order_id.to_string(), calculated.subtotal, calculated.line_discount, calculated.order_discount, calculated.freight, draft.tax_rate_basis_points, calculated.tax, calculated.total, unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        let next = order_audit_snapshot(&transaction, input.order_id)?;
+        append_order_audit(
+            &transaction,
+            input.order_id,
+            actor_id,
+            "supplier_terms_completed",
+            None,
+            Some(&previous),
+            Some(&next),
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(calculated.view())
+    }
+
+    pub fn send_supplier_order(&self, order_id: Uuid, now: SystemTime) -> Result<(), AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let ready: Option<String> = transaction
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1 AND parent_order_id IS NOT NULL AND supplier_terms_completed_at IS NOT NULL AND deleted_at IS NULL",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        if ready.as_deref() != Some("draft") {
+            return Err(AuthError::InvalidInput);
+        }
+        transaction
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'sent', version = version + 1, updated_at = ?2 WHERE id = ?1",
+                params![order_id.to_string(), unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            "sent_to_supplier",
+            None,
+            None,
+            None,
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn create_rfq(&self, input: CreateRfqInput, now: SystemTime) -> Result<RfqView, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        if !valid_required_text(&input.display_no, 128) || !valid_currency(&input.currency) {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let status: String = transaction
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1 AND parent_order_id IS NULL AND deleted_at IS NULL",
+                [input.source_order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if status != "confirmed" {
+            return Err(AuthError::InvalidInput);
+        }
+        let supplier_name = transaction
+            .query_row(
+                "SELECT name FROM local_suppliers WHERE id = ?1 AND is_active = 1 AND is_blacklisted = 0 AND deleted_at IS NULL",
+                [input.supplier_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .ok_or(AuthError::InvalidInput)?;
+        let source_items = transaction
+            .prepare("SELECT id, material_snapshot_json, quantity_decimal, unit FROM local_purchase_order_items WHERE order_id = ?1 AND currency = ?2 ORDER BY sort_order, id")
+            .map_err(|_| AuthError::Database)?
+            .query_map(params![input.source_order_id.to_string(), input.currency], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        if source_items.is_empty() {
+            return Err(AuthError::InvalidInput);
+        }
+        let snapshot =
+            serde_json::json!({ "id": input.supplier_id, "name": supplier_name }).to_string();
+        transaction.execute(
+            "INSERT INTO local_rfqs (id, source_order_id, supplier_id, supplier_snapshot_json, display_no, currency, status, created_by, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'draft', ?7, ?8, ?8)",
+            params![input.id.to_string(), input.source_order_id.to_string(), input.supplier_id.to_string(), snapshot, input.display_no, input.currency, actor_id.to_string(), unix_seconds(now)],
+        ).map_err(|_| AuthError::Database)?;
+        for (sort_order, (source_item_id, material_snapshot, quantity, unit)) in
+            source_items.iter().enumerate()
+        {
+            transaction.execute(
+                "INSERT INTO local_rfq_items (id, rfq_id, source_item_id, material_snapshot_json, quantity_decimal, unit, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![Uuid::new_v4().to_string(), input.id.to_string(), source_item_id, material_snapshot, quantity, unit, sort_order as i64],
+            ).map_err(|_| AuthError::Database)?;
+        }
+        append_order_audit(&transaction, input.source_order_id, actor_id, "rfq_created", None, None, Some(&serde_json::json!({ "rfqId": input.id, "supplierId": input.supplier_id, "currency": input.currency }).to_string()), now)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(RfqView {
+            id: input.id,
+            source_order_id: input.source_order_id,
+            supplier_id: input.supplier_id,
+            display_no: input.display_no,
+            currency: input.currency,
+            item_count: source_items.len() as i64,
+        })
+    }
+
+    pub fn record_receipt(
+        &self,
+        input: RecordReceiptInput,
+        now: SystemTime,
+    ) -> Result<ReceiptView, AuthError> {
+        let privileged = self.require_order_mutation(now)?;
+        if !valid_iso_date(&input.received_at)
+            || input.items.is_empty()
+            || input.items.len() > 500
+            || !valid_optional_text(&input.over_receipt_reason, 1000)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let (applicant_id, status, is_child): (String, String, i64) = transaction
+            .query_row(
+                "SELECT applicant_id, workflow_status, parent_order_id IS NOT NULL FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                [input.order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if status != "sent"
+            || is_child == 0
+            || (!privileged && applicant_id != actor_id.to_string())
+        {
+            return Err(AuthError::Forbidden);
+        }
+        let mut receipt_items = HashSet::new();
+        let mut receipt_attachments = HashSet::new();
+        let mut photo_count = 0usize;
+        for attachment_id in &input.attachment_ids {
+            if !receipt_attachments.insert(attachment_id) {
+                return Err(AuthError::InvalidInput);
+            }
+            let content_type: String = transaction
+                .query_row(
+                    "SELECT content_type FROM local_order_attachments WHERE id = ?1 AND order_id = ?2 AND deleted_at IS NULL",
+                    params![attachment_id.to_string(), input.order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::InvalidInput)?;
+            if content_type.starts_with("image/") {
+                photo_count += 1;
+            }
+        }
+        if photo_count > 10 {
+            return Err(AuthError::InvalidInput);
+        }
+        let mut is_over_receipt = false;
+        for item in &input.items {
+            if !receipt_items.insert(item.order_item_id) || !valid_required_text(&item.unit, 64) {
+                return Err(AuthError::InvalidInput);
+            }
+            let received = parse_quantity_hundredths(&item.quantity)?;
+            let (ordered_quantity, expected_unit): (String, String) = transaction
+                .query_row(
+                    "SELECT quantity_decimal, unit FROM local_purchase_order_items WHERE id = ?1 AND order_id = ?2",
+                    params![item.order_item_id.to_string(), input.order_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(|_| AuthError::InvalidInput)?;
+            if item.unit != expected_unit {
+                return Err(AuthError::InvalidInput);
+            }
+            let mut statement = transaction
+                .prepare("SELECT ri.quantity_decimal FROM local_receipt_items ri JOIN local_receipts r ON r.id = ri.receipt_id WHERE ri.order_item_id = ?1")
+                .map_err(|_| AuthError::Database)?;
+            let prior_exact = statement
+                .query_map([item.order_item_id.to_string()], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|_| AuthError::Database)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| AuthError::Database)?
+                .into_iter()
+                .try_fold(0i128, |sum, value| {
+                    parse_quantity_hundredths(&value)?
+                        .checked_add(sum)
+                        .ok_or(AuthError::InvalidInput)
+                })?;
+            if prior_exact
+                .checked_add(received)
+                .ok_or(AuthError::InvalidInput)?
+                > parse_quantity_hundredths(&ordered_quantity)?
+            {
+                is_over_receipt = true;
+            }
+        }
+        if is_over_receipt
+            && input
+                .over_receipt_reason
+                .as_ref()
+                .is_none_or(|value| !valid_required_text(value, 1000))
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        transaction.execute(
+            "INSERT INTO local_receipts (id, order_id, received_at, receiver_id, over_receipt_reason, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![input.id.to_string(), input.order_id.to_string(), input.received_at, input.receiver_id.to_string(), input.over_receipt_reason, actor_id.to_string(), unix_seconds(now)],
+        ).map_err(|_| AuthError::Database)?;
+        for item in &input.items {
+            transaction.execute(
+                "INSERT INTO local_receipt_items (id, receipt_id, order_item_id, quantity_decimal, unit) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![Uuid::new_v4().to_string(), input.id.to_string(), item.order_item_id.to_string(), item.quantity, item.unit],
+            ).map_err(|_| AuthError::Database)?;
+        }
+        for attachment_id in &input.attachment_ids {
+            transaction
+                .execute(
+                    "INSERT INTO local_receipt_attachment_links (receipt_id, attachment_id) VALUES (?1, ?2)",
+                    params![input.id.to_string(), attachment_id.to_string()],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        let mut items_statement = transaction
+            .prepare(
+                "SELECT id, quantity_decimal FROM local_purchase_order_items WHERE order_id = ?1",
+            )
+            .map_err(|_| AuthError::Database)?;
+        let order_items = items_statement
+            .query_map([input.order_id.to_string()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        drop(items_statement);
+        let mut complete = true;
+        for (item_id, ordered) in order_items {
+            let receipt_quantities = transaction
+                .prepare("SELECT ri.quantity_decimal FROM local_receipt_items ri JOIN local_receipts r ON r.id = ri.receipt_id WHERE ri.order_item_id = ?1")
+                .map_err(|_| AuthError::Database)?
+                .query_map([item_id], |row| row.get::<_, String>(0))
+                .map_err(|_| AuthError::Database)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| AuthError::Database)?;
+            let total = receipt_quantities
+                .into_iter()
+                .try_fold(0i128, |sum, value| {
+                    parse_quantity_hundredths(&value)?
+                        .checked_add(sum)
+                        .ok_or(AuthError::InvalidInput)
+                })?;
+            if total < parse_quantity_hundredths(&ordered)? {
+                complete = false;
+            }
+        }
+        let workflow_status = if complete { "completed" } else { "sent" };
+        transaction.execute(
+            "UPDATE local_purchase_orders SET workflow_status = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1",
+            params![input.order_id.to_string(), workflow_status, unix_seconds(now)],
+        ).map_err(|_| AuthError::Database)?;
+        append_order_audit(
+            &transaction,
+            input.order_id,
+            actor_id,
+            "receipt_recorded",
+            input.over_receipt_reason.as_deref(),
+            None,
+            Some(&serde_json::json!({ "receiptId": input.id, "completed": complete }).to_string()),
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(ReceiptView {
+            id: input.id,
+            order_id: input.order_id,
+            workflow_status: workflow_status.into(),
+            received_item_count: input.items.len() as i64,
+        })
+    }
+
+    pub fn close_supplier_order_with_conditions(
+        &self,
+        order_id: Uuid,
+        reason: String,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let privileged = self.require_order_mutation(now)?;
+        if !valid_required_text(&reason, 1000) {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let (applicant_id, status, is_child): (String, String, i64) = transaction
+            .query_row(
+                "SELECT applicant_id, workflow_status, parent_order_id IS NOT NULL FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                [order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if status != "sent"
+            || is_child == 0
+            || (!privileged && applicant_id != actor_id.to_string())
+        {
+            return Err(AuthError::Forbidden);
+        }
+        transaction
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'completed_with_conditions', version = version + 1, updated_at = ?2 WHERE id = ?1",
+                params![order_id.to_string(), unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            "closed_with_conditions",
+            Some(&reason),
+            None,
+            None,
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    fn save_requisition(
+        &self,
+        draft: RequisitionDraftInput,
+        revision_reason: Option<String>,
+        now: SystemTime,
+    ) -> Result<RequisitionTotalsView, AuthError> {
+        let privileged = self.require_order_mutation(now)?;
+        let actor_id = self.active_session_user_id()?;
+        if !privileged && actor_id != draft.applicant_id {
+            return Err(AuthError::Forbidden);
+        }
+        validate_requisition_draft(&draft)?;
+        let calculated = calculate_requisition(&draft)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let prior = transaction
+            .query_row(
+                "SELECT workflow_status, version, applicant_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                [draft.id.to_string()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        let is_revision = prior
+            .as_ref()
+            .is_some_and(|(status, _, _)| status == "confirmed");
+        if is_revision
+            && (!privileged
+                || !revision_reason
+                    .as_ref()
+                    .is_some_and(|value| valid_required_text(value, 1000))
+                || prior.as_ref().is_some_and(|(_, _, applicant_id)| {
+                    applicant_id != &draft.applicant_id.to_string()
+                }))
+        {
+            return Err(AuthError::Forbidden);
+        }
+        if is_revision {
+            let child_order_count: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL",
+                    [draft.id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Database)?;
+            let rfq_count: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM local_rfqs WHERE source_order_id = ?1",
+                    [draft.id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Database)?;
+            if child_order_count != 0 || rfq_count != 0 {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        if !is_revision
+            && (revision_reason.is_some()
+                || prior
+                    .as_ref()
+                    .is_some_and(|(status, _, _)| status != "draft" && status != "rejected"))
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let previous_snapshot = if is_revision {
+            Some(order_audit_snapshot(&transaction, draft.id)?)
+        } else {
+            None
+        };
+        let version = prior.as_ref().map_or(1, |(_, version, _)| version + 1);
+        let workflow_status = if is_revision { "confirmed" } else { "draft" };
+        transaction
+            .execute(
+                "INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'draft', ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?27)
+                 ON CONFLICT(id) DO UPDATE SET display_no = excluded.display_no, country_id = excluded.country_id, project_id = excluded.project_id, site = excluded.site, department_id = excluded.department_id, team_id = excluded.team_id, applicant_id = excluded.applicant_id, currency = excluded.currency, primary_currency = excluded.primary_currency, language_pair = excluded.language_pair, urgency = excluded.urgency, urgency_reason = excluded.urgency_reason, order_date = excluded.order_date, delivery_address = excluded.delivery_address, expected_delivery_date = excluded.expected_delivery_date, notes = excluded.notes, subtotal_minor = excluded.subtotal_minor, line_discount_minor = excluded.line_discount_minor, order_discount_minor = excluded.order_discount_minor, freight_minor = excluded.freight_minor, tax_rate_basis_points = excluded.tax_rate_basis_points, tax_minor = excluded.tax_minor, total_minor = excluded.total_minor, workflow_status = excluded.workflow_status, rejection_reason = NULL, version = excluded.version, updated_at = excluded.updated_at",
+                params![draft.id.to_string(), draft.display_no, draft.country_id.to_string(), draft.project_id.to_string(), draft.site, draft.department_id.to_string(), draft.team_id.to_string(), draft.applicant_id.to_string(), draft.currency, draft.primary_currency, draft.language_pair, workflow_status, draft.urgency, draft.urgency_reason, draft.order_date, draft.delivery_address, draft.expected_delivery_date, draft.notes, calculated.subtotal, calculated.line_discount, calculated.order_discount, calculated.freight, draft.tax_rate_basis_points, calculated.tax, calculated.total, version, unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "DELETE FROM local_purchase_order_items WHERE order_id = ?1",
+                [draft.id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        for line in &calculated.lines {
+            let material_snapshot = material_snapshot(&transaction, &line.input)?;
+            let supplier_snapshot = supplier_snapshot(&transaction, &line.input)?;
+            transaction
+                .execute(
+                    "INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
+                    params![line.input.id.to_string(), draft.id.to_string(), line.input.material_id.map(|value| value.to_string()), material_snapshot, supplier_snapshot, line.input.currency, line.input.quantity, line.input.unit, line.unit_price_minor, serde_json::to_string(&line.input.line_discount).map_err(|_| AuthError::InvalidInput)?, serde_json::to_string(&line.input.line_freight).map_err(|_| AuthError::InvalidInput)?, line.input.freight_included as i64, line.total, line.input.sort_order, unix_seconds(now)],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        if let (Some(previous), Some(reason)) = (previous_snapshot, revision_reason.as_deref()) {
+            append_order_audit(
+                &transaction,
+                draft.id,
+                actor_id,
+                "confirmed_revised",
+                Some(reason),
+                Some(&previous),
+                Some(&order_audit_snapshot(&transaction, draft.id)?),
+                now,
+            )?;
+        }
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(calculated.view())
+    }
+
+    pub fn submit_requisition_draft(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let privileged = self.require_order_mutation(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let (applicant_id, status, line_count): (String, String, i64) = connection
+            .query_row(
+                "SELECT o.applicant_id, o.workflow_status, COUNT(i.id) FROM local_purchase_orders o LEFT JOIN local_purchase_order_items i ON i.order_id = o.id WHERE o.id = ?1 AND o.deleted_at IS NULL GROUP BY o.id",
+                [order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if status != "draft"
+            || line_count == 0
+            || (!privileged
+                && Uuid::parse_str(&applicant_id).map_err(|_| AuthError::Database)?
+                    != self.active_session_user_id()?)
+        {
+            return Err(AuthError::Forbidden);
+        }
+        connection
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'pending_confirmation', version = version + 1, updated_at = ?2 WHERE id = ?1",
+                params![order_id.to_string(), unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn confirm_requisition(&self, order_id: Uuid, now: SystemTime) -> Result<(), AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let (applicant_id, status): (String, String) = transaction
+            .query_row(
+                "SELECT applicant_id, workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                [order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| AuthError::Database)?;
+        let is_self_approval =
+            Uuid::parse_str(&applicant_id).map_err(|_| AuthError::Database)? == actor_id;
+        let allow_self_approval: bool = transaction
+            .query_row(
+                "SELECT allow_self_approval FROM local_approval_policy WHERE singleton = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .unwrap_or(0)
+            != 0;
+        if status != "pending_confirmation" || (is_self_approval && !allow_self_approval) {
+            return Err(AuthError::Forbidden);
+        }
+        transaction
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'confirmed', confirmed_by = ?2, confirmed_at = ?3, self_approved = ?4, version = version + 1, updated_at = ?3 WHERE id = ?1",
+                params![order_id.to_string(), actor_id.to_string(), unix_seconds(now), is_self_approval as i64],
+            )
+            .map_err(|_| AuthError::Database)?;
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            if is_self_approval {
+                "self_confirmed"
+            } else {
+                "confirmed"
+            },
+            None,
+            Some("pending_confirmation"),
+            Some("confirmed"),
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
+    pub fn approval_policy(&self, now: SystemTime) -> Result<ApprovalPolicyView, AuthError> {
+        self.require_catalog_read(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let allow_self_approval = connection
+            .query_row(
+                "SELECT allow_self_approval FROM local_approval_policy WHERE singleton = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .unwrap_or(0)
+            != 0;
+        Ok(ApprovalPolicyView {
+            allow_self_approval,
+        })
+    }
+
+    pub fn set_approval_policy(
+        &self,
+        allow_self_approval: bool,
+        reason: String,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_role(Role::SuperAdministrator, now)?;
+        if !valid_required_text(&reason, 1000) {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "UPDATE local_approval_policy SET allow_self_approval = ?1, updated_by = ?2, updated_at = ?3 WHERE singleton = 1",
+                params![allow_self_approval as i64, actor_id.to_string(), unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "INSERT INTO local_approval_policy_audit_entries (id, actor_id, allow_self_approval, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![Uuid::new_v4().to_string(), actor_id.to_string(), allow_self_approval as i64, reason, unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
+    pub fn reject_requisition(
+        &self,
+        order_id: Uuid,
+        reason: String,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if !self.require_order_mutation(now)? || !valid_required_text(&reason, 1000) {
+            return Err(AuthError::Forbidden);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let status: String = transaction
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if status != "pending_confirmation" {
+            return Err(AuthError::Forbidden);
+        }
+        transaction
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'rejected', rejection_reason = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1",
+                params![order_id.to_string(), reason, unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            "rejected",
+            Some(&reason),
+            Some("pending_confirmation"),
+            Some("rejected"),
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
+    pub fn add_order_comment(
+        &self,
+        order_id: Uuid,
+        body: String,
+        now: SystemTime,
+    ) -> Result<OrderCommentView, AuthError> {
+        let privileged = self.require_order_mutation(now)?;
+        if !valid_required_text(&body, 4000) {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let applicant_id: String = transaction
+            .query_row(
+                "SELECT applicant_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if !privileged && applicant_id != actor_id.to_string() {
+            return Err(AuthError::Forbidden);
+        }
+        let mut comment = OrderCommentView {
+            id: Uuid::new_v4(),
+            order_id,
+            author_id: actor_id,
+            body,
+            created_at: unix_seconds(now),
+            notification_count: 0,
+        };
+        transaction
+            .execute(
+                "INSERT INTO local_order_comments (id, order_id, author_id, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![comment.id.to_string(), comment.order_id.to_string(), comment.author_id.to_string(), comment.body, comment.created_at],
+            )
+            .map_err(|_| AuthError::Database)?;
+        for username in mentioned_usernames(&comment.body) {
+            let recipient_id = transaction
+                .query_row(
+                    "SELECT id FROM local_accounts WHERE username = ?1 AND enabled = 1",
+                    [username],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?;
+            if recipient_id.as_deref() == Some(&comment.author_id.to_string()) {
+                continue;
+            }
+            if let Some(recipient_id) = recipient_id {
+                comment.notification_count += transaction
+                    .execute(
+                        "INSERT OR IGNORE INTO local_order_notifications (id, recipient_id, order_id, comment_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![Uuid::new_v4().to_string(), recipient_id, comment.order_id.to_string(), comment.id.to_string(), comment.created_at],
+                    )
+                    .map_err(|_| AuthError::Database)? as i64;
+            }
+        }
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(comment)
+    }
+
+    pub fn list_order_comments(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Vec<OrderCommentView>, AuthError> {
+        self.require_catalog_read(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, order_id, author_id, body, created_at FROM local_order_comments WHERE order_id = ?1 ORDER BY created_at, id",
+            )
+            .map_err(|_| AuthError::Database)?;
+        statement
+            .query_map([order_id.to_string()], |row| {
+                Ok(OrderCommentView {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    order_id: Uuid::parse_str(&row.get::<_, String>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    author_id: Uuid::parse_str(&row.get::<_, String>(2)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    body: row.get(3)?,
+                    created_at: row.get(4)?,
+                    notification_count: 0,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
+    pub fn list_order_audits(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Vec<OrderAuditView>, AuthError> {
+        self.require_catalog_read(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, order_id, actor_id, action, reason, previous_json, next_json, created_at FROM local_order_audit_entries WHERE order_id = ?1 ORDER BY created_at, id",
+            )
+            .map_err(|_| AuthError::Database)?;
+        statement
+            .query_map([order_id.to_string()], |row| {
+                Ok(OrderAuditView {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    order_id: Uuid::parse_str(&row.get::<_, String>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    actor_id: Uuid::parse_str(&row.get::<_, String>(2)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    action: row.get(3)?,
+                    reason: row.get(4)?,
+                    previous_json: row.get(5)?,
+                    next_json: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
+    pub fn search_catalog(
+        &self,
+        query: &str,
+        now: SystemTime,
+    ) -> Result<Vec<CatalogMaterialView>, AuthError> {
+        self.require_catalog_read(now)?;
+        if query.len() > 255 {
+            return Err(AuthError::InvalidInput);
+        }
+        let pattern = format!("%{}%", query.trim());
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut materials = connection
+            .prepare(
+                "SELECT id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, version
+                 FROM local_materials
+                 WHERE is_active = 1 AND deleted_at IS NULL
+                   AND (?1 = '%%' OR name_zh LIKE ?1 COLLATE NOCASE OR COALESCE(name_fr, '') LIKE ?1 COLLATE NOCASE
+                     OR aliases_json LIKE ?1 COLLATE NOCASE OR model LIKE ?1 COLLATE NOCASE
+                     OR specification LIKE ?1 COLLATE NOCASE OR COALESCE(sku, '') LIKE ?1 COLLATE NOCASE)
+                 ORDER BY name_zh, model
+                 LIMIT 100",
+            )
+            .map_err(|_| AuthError::Database)?;
+        let rows = materials
+            .query_map([pattern], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, i64>(10)?,
+                ))
+            })
+            .map_err(|_| AuthError::Database)?;
+        let material_rows = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        let mut prices = connection
+            .prepare(
+                "SELECT p.id, s.id, s.name, s.is_preferred, p.currency, p.unit_price_minor, p.unit, p.effective_at
+                 FROM local_material_prices p
+                 JOIN local_suppliers s ON s.id = p.supplier_id
+                 WHERE p.material_id = ?1 AND p.is_active = 1 AND p.deleted_at IS NULL
+                   AND s.is_active = 1 AND s.is_blacklisted = 0 AND s.deleted_at IS NULL
+                 ORDER BY s.is_preferred DESC, p.effective_at DESC, s.name
+                 LIMIT 4",
+            )
+            .map_err(|_| AuthError::Database)?;
+        material_rows
+            .into_iter()
+            .map(
+                |(
+                    id,
+                    sku,
+                    name_zh,
+                    name_fr,
+                    aliases_json,
+                    brand,
+                    model,
+                    specification,
+                    unit,
+                    notes,
+                    version,
+                )| {
+                    let material_id = Uuid::parse_str(&id).map_err(|_| AuthError::Database)?;
+                    let aliases =
+                        serde_json::from_str(&aliases_json).map_err(|_| AuthError::Database)?;
+                    let price_rows = prices
+                        .query_map([&id], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, i64>(3)?,
+                                row.get::<_, String>(4)?,
+                                row.get::<_, i64>(5)?,
+                                row.get::<_, String>(6)?,
+                                row.get::<_, String>(7)?,
+                            ))
+                        })
+                        .map_err(|_| AuthError::Database)?;
+                    let prices = price_rows
+                        .map(|row| {
+                            let (
+                                price_id,
+                                supplier_id,
+                                supplier_name,
+                                preferred,
+                                currency,
+                                minor,
+                                unit,
+                                effective_at,
+                            ) = row.map_err(|_| AuthError::Database)?;
+                            Ok(CatalogPriceView {
+                                price_id: Uuid::parse_str(&price_id)
+                                    .map_err(|_| AuthError::Database)?,
+                                supplier_id: Uuid::parse_str(&supplier_id)
+                                    .map_err(|_| AuthError::Database)?,
+                                supplier_name,
+                                is_preferred_supplier: preferred != 0,
+                                currency,
+                                unit_price_minor: minor.to_string(),
+                                unit,
+                                effective_at,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, AuthError>>()?;
+                    Ok(CatalogMaterialView {
+                        id: material_id,
+                        sku,
+                        name_zh,
+                        name_fr,
+                        aliases,
+                        brand,
+                        model,
+                        specification,
+                        unit,
+                        notes,
+                        version,
+                        prices,
+                    })
+                },
+            )
+            .collect()
+    }
+
+    pub fn list_suppliers(&self, now: SystemTime) -> Result<Vec<SupplierView>, AuthError> {
+        self.require_catalog_read(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, business_code, name, contact_name, address, city, country, phone, whatsapp, email,
+                        payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version
+                 FROM local_suppliers
+                 WHERE deleted_at IS NULL
+                 ORDER BY is_active DESC, name",
+            )
+            .map_err(|_| AuthError::Database)?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, i64>(13)?,
+                    row.get::<_, i64>(14)?,
+                    row.get::<_, i64>(15)?,
+                ))
+            })
+            .map_err(|_| AuthError::Database)?
+            .map(|row| {
+                let (
+                    id,
+                    business_code,
+                    name,
+                    contact_name,
+                    address,
+                    city,
+                    country,
+                    phone,
+                    whatsapp,
+                    email,
+                    payment_terms,
+                    delivery_lead_time,
+                    is_preferred,
+                    is_blacklisted,
+                    is_active,
+                    version,
+                ) = row.map_err(|_| AuthError::Database)?;
+                Ok(SupplierView {
+                    id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
+                    business_code,
+                    name,
+                    contact_name,
+                    address,
+                    city,
+                    country,
+                    phone,
+                    whatsapp,
+                    email,
+                    payment_terms,
+                    delivery_lead_time,
+                    is_preferred: is_preferred != 0,
+                    is_blacklisted: is_blacklisted != 0,
+                    is_active: is_active != 0,
+                    version,
+                })
+            })
+            .collect()
+    }
+
+    fn require_master_data_mutation(&self, now: SystemTime) -> Result<(), AuthError> {
+        for role in [
+            Role::SuperAdministrator,
+            Role::Administrator,
+            Role::Purchaser,
+        ] {
+            match self.require_role(role, now) {
+                Ok(()) => return Ok(()),
+                Err(AuthError::Forbidden) => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(AuthError::Forbidden)
+    }
+
+    fn require_catalog_read(&self, now: SystemTime) -> Result<(), AuthError> {
+        for role in [
+            Role::SuperAdministrator,
+            Role::Administrator,
+            Role::Purchaser,
+            Role::Engineer,
+            Role::Viewer,
+        ] {
+            match self.require_role(role, now) {
+                Ok(()) => return Ok(()),
+                Err(AuthError::Forbidden) => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(AuthError::Forbidden)
+    }
+
+    fn require_order_mutation(&self, now: SystemTime) -> Result<bool, AuthError> {
+        match self.require_role(Role::Purchaser, now) {
+            Ok(()) => Ok(true),
+            Err(AuthError::Forbidden) => match self.require_role(Role::Administrator, now) {
+                Ok(()) => Ok(true),
+                Err(AuthError::Forbidden) => {
+                    self.require_role(Role::Engineer, now)?;
+                    Ok(false)
+                }
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        }
+    }
+
+    fn active_session_user_id(&self) -> Result<Uuid, AuthError> {
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let user_id = connection
+            .query_row("SELECT user_id FROM local_session", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .ok_or(AuthError::NoActiveSession)?;
+        Uuid::parse_str(&user_id).map_err(|_| AuthError::Database)
+    }
+
+    pub fn lock(&self) -> Result<(), AuthError> {
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .execute("DELETE FROM local_session", [])
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+}
+
+pub mod commands {
+    use super::{AuthError, AuthenticatedSession, CaptchaChallenge, LocalAuthService};
+    use serde::{Deserialize, Serialize};
+    use std::time::SystemTime;
+    use tauri::State;
+    use uuid::Uuid;
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct OfflineLoginRequest {
+        pub username: String,
+        pub password: String,
+        pub captcha_id: Uuid,
+        pub captcha_answer: u8,
+    }
+
+    #[derive(Serialize)]
+    pub struct CommandError {
+        pub code: &'static str,
+    }
+
+    impl From<AuthError> for CommandError {
+        fn from(error: AuthError) -> Self {
+            let code = match error {
+                AuthError::InvalidCredentials => "invalid_credentials",
+                AuthError::OfflineWindowExpired => "offline_window_expired",
+                AuthError::AccountLocked => "account_locked",
+                AuthError::NoActiveSession => "reauthentication_required",
+                AuthError::Forbidden => "forbidden",
+                AuthError::Database => "local_storage_error",
+                AuthError::InvalidInput => "invalid_input",
+                AuthError::ImmutableBusinessCode => "immutable_business_code",
+                AuthError::PasswordHashing | AuthError::SecureStorage => "credential_storage_error",
+            };
+            Self { code }
+        }
+    }
+
+    #[tauri::command]
+    pub fn allocate_supplier_child_orders(
+        auth: State<'_, LocalAuthService>,
+        parent_order_id: Uuid,
+        allocations: Vec<super::SupplierChildAllocationInput>,
+    ) -> Result<Vec<super::SupplierChildOrderView>, CommandError> {
+        auth.allocate_supplier_child_orders(parent_order_id, allocations, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn close_supplier_order_with_conditions(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+        reason: String,
+    ) -> Result<(), CommandError> {
+        auth.close_supplier_order_with_conditions(order_id, reason, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn create_rfq(
+        auth: State<'_, LocalAuthService>,
+        input: super::CreateRfqInput,
+    ) -> Result<super::RfqView, CommandError> {
+        auth.create_rfq(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn record_receipt(
+        auth: State<'_, LocalAuthService>,
+        input: super::RecordReceiptInput,
+    ) -> Result<super::ReceiptView, CommandError> {
+        auth.record_receipt(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_supplier_child_terms(
+        auth: State<'_, LocalAuthService>,
+        input: super::SupplierChildTermsInput,
+    ) -> Result<super::RequisitionTotalsView, CommandError> {
+        auth.save_supplier_child_terms(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn send_supplier_order(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<(), CommandError> {
+        auth.send_supplier_order(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn issue_local_captcha(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<CaptchaChallenge, CommandError> {
+        auth.issue_captcha(SystemTime::now()).map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn offline_login(
+        auth: State<'_, LocalAuthService>,
+        request: OfflineLoginRequest,
+    ) -> Result<AuthenticatedSession, CommandError> {
+        auth.offline_login(
+            &request.username,
+            &request.password,
+            request.captcha_id,
+            request.captcha_answer,
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn authorize_material_mutation(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<(), CommandError> {
+        auth.require_material_mutation(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn confirm_requisition(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<(), CommandError> {
+        auth.confirm_requisition(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn get_approval_policy(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<super::ApprovalPolicyView, CommandError> {
+        auth.approval_policy(SystemTime::now()).map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn set_approval_policy(
+        auth: State<'_, LocalAuthService>,
+        allow_self_approval: bool,
+        reason: String,
+    ) -> Result<(), CommandError> {
+        auth.set_approval_policy(allow_self_approval, reason, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn reject_requisition(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+        reason: String,
+    ) -> Result<(), CommandError> {
+        auth.reject_requisition(order_id, reason, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn add_order_comment(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+        body: String,
+    ) -> Result<super::OrderCommentView, CommandError> {
+        auth.add_order_comment(order_id, body, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_order_comments(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<Vec<super::OrderCommentView>, CommandError> {
+        auth.list_order_comments(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_order_audits(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<Vec<super::OrderAuditView>, CommandError> {
+        auth.list_order_audits(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_requisition_draft(
+        auth: State<'_, LocalAuthService>,
+        draft: super::RequisitionDraftInput,
+    ) -> Result<super::RequisitionTotalsView, CommandError> {
+        auth.save_requisition_draft(draft, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn revise_confirmed_requisition(
+        auth: State<'_, LocalAuthService>,
+        draft: super::RequisitionDraftInput,
+        reason: String,
+    ) -> Result<super::RequisitionTotalsView, CommandError> {
+        auth.revise_confirmed_requisition(draft, reason, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn submit_requisition_draft(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<(), CommandError> {
+        auth.submit_requisition_draft(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_material(
+        auth: State<'_, LocalAuthService>,
+        material: super::MaterialInput,
+    ) -> Result<(), CommandError> {
+        auth.save_material(material, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_supplier(
+        auth: State<'_, LocalAuthService>,
+        supplier: super::SupplierInput,
+    ) -> Result<(), CommandError> {
+        auth.save_supplier(supplier, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn add_material_price(
+        auth: State<'_, LocalAuthService>,
+        price: super::MaterialPriceInput,
+    ) -> Result<(), CommandError> {
+        auth.add_material_price(price, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_material_image(
+        auth: State<'_, LocalAuthService>,
+        image: super::MaterialImageInput,
+    ) -> Result<(), CommandError> {
+        auth.save_material_image(image, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn get_material_square_image(
+        auth: State<'_, LocalAuthService>,
+        material_id: Uuid,
+    ) -> Result<Option<String>, CommandError> {
+        auth.get_material_square_image(material_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn search_catalog(
+        auth: State<'_, LocalAuthService>,
+        query: String,
+    ) -> Result<Vec<super::CatalogMaterialView>, CommandError> {
+        auth.search_catalog(&query, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_suppliers(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::SupplierView>, CommandError> {
+        auth.list_suppliers(SystemTime::now()).map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_project_defaults(
+        auth: State<'_, LocalAuthService>,
+        defaults: super::ProjectDefaultsInput,
+    ) -> Result<(), CommandError> {
+        auth.save_project_defaults(defaults, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_project_defaults(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::ProjectDefaultsView>, CommandError> {
+        auth.list_project_defaults(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_reference_master_data(
+        auth: State<'_, LocalAuthService>,
+        record: super::ReferenceMasterDataInput,
+    ) -> Result<(), CommandError> {
+        auth.save_reference_master_data(record, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_tax_template(
+        auth: State<'_, LocalAuthService>,
+        template: super::TaxTemplateInput,
+    ) -> Result<(), CommandError> {
+        auth.save_tax_template(template, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn save_exchange_rate(
+        auth: State<'_, LocalAuthService>,
+        rate: super::ExchangeRateInput,
+    ) -> Result<(), CommandError> {
+        auth.save_exchange_rate(rate, SystemTime::now())
+            .map_err(Into::into)
+    }
+}
+
+fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
+    connection
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS local_schema_migrations (
+                version TEXT PRIMARY KEY,
+                checksum TEXT NOT NULL,
+                applied_at INTEGER NOT NULL
+            );",
+        )
+        .map_err(|_| AuthError::Database)?;
+
+    for migration in [
+        (
+            "0001_local_auth",
+            include_str!("../migrations/0001_local_auth.sql"),
+        ),
+        (
+            "0002_master_data",
+            include_str!("../migrations/0002_master_data.sql"),
+        ),
+        (
+            "0003_reference_master_data",
+            include_str!("../migrations/0003_reference_master_data.sql"),
+        ),
+        (
+            "0004_local_catalog",
+            include_str!("../migrations/0004_local_catalog.sql"),
+        ),
+        (
+            "0005_local_material_images",
+            include_str!("../migrations/0005_local_material_images.sql"),
+        ),
+        (
+            "0006_local_requisitions",
+            include_str!("../migrations/0006_local_requisitions.sql"),
+        ),
+        (
+            "0007_order_workflow",
+            include_str!("../migrations/0007_order_workflow.sql"),
+        ),
+        (
+            "0008_approval_policy",
+            include_str!("../migrations/0008_approval_policy.sql"),
+        ),
+        (
+            "0009_order_notifications",
+            include_str!("../migrations/0009_order_notifications.sql"),
+        ),
+        (
+            "0010_supplier_child_orders",
+            include_str!("../migrations/0010_supplier_child_orders.sql"),
+        ),
+        (
+            "0011_order_item_currency",
+            include_str!("../migrations/0011_order_item_currency.sql"),
+        ),
+        ("0012_rfqs", include_str!("../migrations/0012_rfqs.sql")),
+        (
+            "0013_receipts",
+            include_str!("../migrations/0013_receipts.sql"),
+        ),
+        (
+            "0014_supplier_child_terms",
+            include_str!("../migrations/0014_supplier_child_terms.sql"),
+        ),
+        (
+            "0015_receipt_attachment_links",
+            include_str!("../migrations/0015_receipt_attachment_links.sql"),
+        ),
+    ] {
+        let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
+        let recorded_checksum = connection
+            .query_row(
+                "SELECT checksum FROM local_schema_migrations WHERE version = ?1",
+                [migration.0],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        match recorded_checksum {
+            Some(value) if value == checksum => continue,
+            Some(_) => return Err(AuthError::Database),
+            None => {
+                let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+                transaction
+                    .execute_batch(migration.1)
+                    .map_err(|_| AuthError::Database)?;
+                transaction
+                .execute(
+                    "INSERT INTO local_schema_migrations (version, checksum, applied_at) VALUES (?1, ?2, ?3)",
+                    params![migration.0, checksum, unix_seconds(SystemTime::now())],
+                )
+                .map_err(|_| AuthError::Database)?;
+                transaction.commit().map_err(|_| AuthError::Database)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_project_defaults(defaults: &ProjectDefaultsInput) -> Result<(), AuthError> {
+    if [
+        &defaults.department_title,
+        &defaults.company_address,
+        &defaults.company_contact,
+    ]
+    .iter()
+    .any(|value| value.trim().is_empty() || value.len() > 1000)
+        || !matches!(
+            defaults.default_currency.as_str(),
+            "XOF" | "CNY" | "USD" | "EUR"
+        )
+        || !matches!(defaults.default_language_pair.as_str(), "zh_fr" | "zh_en")
+    {
+        return Err(AuthError::Database);
+    }
+    Ok(())
+}
+
+fn validate_material(material: &MaterialInput) -> Result<(), AuthError> {
+    if material.version < 1
+        || !valid_required_text(&material.name_zh, 255)
+        || !valid_required_text(&material.model, 255)
+        || !valid_required_text(&material.specification, 2000)
+        || !valid_required_text(&material.unit, 64)
+        || material
+            .sku
+            .as_ref()
+            .is_some_and(|value| !valid_required_text(value, 128))
+        || material.aliases.len() > 50
+        || material
+            .aliases
+            .iter()
+            .any(|value| !valid_required_text(value, 255))
+        || !valid_optional_text(&material.name_fr, 255)
+        || !valid_optional_text(&material.brand, 1000)
+        || !valid_optional_text(&material.notes, 1000)
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok(())
+}
+
+fn validate_supplier(supplier: &SupplierInput) -> Result<(), AuthError> {
+    if supplier.version < 1
+        || !valid_business_code(&supplier.business_code)
+        || !valid_required_text(&supplier.name, 255)
+        || [
+            (&supplier.contact_name, 1000),
+            (&supplier.address, 1000),
+            (&supplier.city, 1000),
+            (&supplier.country, 1000),
+            (&supplier.phone, 1000),
+            (&supplier.whatsapp, 1000),
+            (&supplier.payment_terms, 1000),
+            (&supplier.delivery_lead_time, 1000),
+        ]
+        .iter()
+        .any(|(value, max)| !valid_optional_text(value, *max))
+        || supplier.email.as_ref().is_some_and(|value| {
+            !valid_required_text(value, 255)
+                || value.matches('@').count() != 1
+                || value.starts_with('@')
+                || value.ends_with('@')
+        })
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok(())
+}
+
+fn validate_material_price(price: &MaterialPriceInput) -> Result<i64, AuthError> {
+    if price.version < 1
+        || !valid_currency(&price.currency)
+        || !valid_required_text(&price.unit, 64)
+        || !valid_iso_date(&price.effective_at)
+        || !valid_optional_text(&price.source_note, 1000)
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    price
+        .unit_price_minor
+        .parse::<i64>()
+        .ok()
+        .filter(|value| {
+            *value >= 0
+                && !price.unit_price_minor.is_empty()
+                && price
+                    .unit_price_minor
+                    .bytes()
+                    .all(|character| character.is_ascii_digit())
+        })
+        .ok_or(AuthError::InvalidInput)
+}
+
+struct CalculatedRequisition {
+    subtotal: i64,
+    line_discount: i64,
+    order_discount: i64,
+    freight: i64,
+    tax: i64,
+    total: i64,
+    lines: Vec<CalculatedRequisitionLine>,
+}
+
+struct CalculatedRequisitionLine {
+    input: RequisitionLineInput,
+    unit_price_minor: i64,
+    total: i64,
+}
+
+impl CalculatedRequisition {
+    fn view(&self) -> RequisitionTotalsView {
+        RequisitionTotalsView {
+            subtotal_minor: self.subtotal.to_string(),
+            line_discount_minor: self.line_discount.to_string(),
+            order_discount_minor: self.order_discount.to_string(),
+            freight_minor: self.freight.to_string(),
+            tax_minor: self.tax.to_string(),
+            total_minor: self.total.to_string(),
+        }
+    }
+}
+
+fn validate_requisition_draft(draft: &RequisitionDraftInput) -> Result<(), AuthError> {
+    if !valid_required_text(&draft.display_no, 128)
+        || !valid_required_text(&draft.site, 255)
+        || !valid_required_text(&draft.delivery_address, 1000)
+        || !valid_iso_date(&draft.order_date)
+        || draft
+            .expected_delivery_date
+            .as_ref()
+            .is_some_and(|value| !valid_iso_date(value))
+        || draft.notes.as_ref().is_some_and(|value| value.len() > 4000)
+        || !valid_currency(&draft.currency)
+        || !valid_currency(&draft.primary_currency)
+        || !matches!(draft.language_pair.as_str(), "zh_fr" | "zh_en")
+        || !matches!(draft.urgency.as_str(), "low" | "normal" | "high")
+        || draft.tax_rate_basis_points < 0
+        || draft.tax_rate_basis_points > 100_000
+        || draft.lines.is_empty()
+        || draft.lines.len() > 500
+        || (draft.urgency == "high"
+            && draft
+                .urgency_reason
+                .as_ref()
+                .is_none_or(|value| !valid_required_text(value, 1000)))
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    let mut sort_orders = HashSet::new();
+    for line in &draft.lines {
+        if line.sort_order < 0
+            || !sort_orders.insert(line.sort_order)
+            || !valid_required_text(&line.unit, 64)
+            || !valid_currency(&line.currency)
+            || !valid_required_text(&line.material_snapshot.name_zh, 255)
+            || !valid_required_text(&line.material_snapshot.model, 255)
+            || !valid_required_text(&line.material_snapshot.specification, 2000)
+            || line
+                .material_snapshot
+                .name_fr
+                .as_ref()
+                .is_some_and(|value| !valid_required_text(value, 255))
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        parse_quantity_hundredths(&line.quantity)?;
+        parse_non_negative_minor(&line.unit_price_minor)?;
+        validate_adjustment(&line.line_discount)?;
+        validate_adjustment(&line.line_freight)?;
+    }
+    validate_adjustment(&draft.order_discount)?;
+    validate_adjustment(&draft.order_freight)
+}
+
+fn calculate_requisition(
+    draft: &RequisitionDraftInput,
+) -> Result<CalculatedRequisition, AuthError> {
+    let mixed_currencies = draft
+        .lines
+        .iter()
+        .map(|line| &line.currency)
+        .collect::<HashSet<_>>()
+        .len()
+        > 1;
+    if mixed_currencies
+        && (draft.tax_rate_basis_points != 0
+            || !is_zero_adjustment(&draft.order_discount)
+            || !is_zero_adjustment(&draft.order_freight))
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    let mut subtotal = 0i128;
+    let mut line_discount = 0i128;
+    let mut line_freight = 0i128;
+    let mut lines = Vec::with_capacity(draft.lines.len());
+    for input in &draft.lines {
+        let price = parse_non_negative_minor(&input.unit_price_minor)?;
+        let quantity = parse_quantity_hundredths(&input.quantity)?;
+        let line_subtotal = divide_half_up(price * quantity, 100)?;
+        let discount = adjustment_amount(line_subtotal, &input.line_discount, true)?;
+        let freight = if input.freight_included {
+            0
+        } else {
+            adjustment_amount(line_subtotal - discount, &input.line_freight, false)?
+        };
+        subtotal += line_subtotal;
+        line_discount += discount;
+        line_freight += freight;
+        lines.push(CalculatedRequisitionLine {
+            input: input.clone(),
+            unit_price_minor: as_i64(price)?,
+            total: as_i64(line_subtotal - discount + freight)?,
+        });
+    }
+    if mixed_currencies {
+        return Ok(CalculatedRequisition {
+            subtotal: 0,
+            line_discount: 0,
+            order_discount: 0,
+            freight: 0,
+            tax: 0,
+            total: 0,
+            lines,
+        });
+    }
+    let after_line_discount = subtotal - line_discount;
+    let order_discount = adjustment_amount(after_line_discount, &draft.order_discount, true)?;
+    let order_freight = adjustment_amount(
+        after_line_discount - order_discount,
+        &draft.order_freight,
+        false,
+    )?;
+    let freight = line_freight + order_freight;
+    let taxable = after_line_discount - order_discount + freight;
+    let tax = divide_half_up(taxable * i128::from(draft.tax_rate_basis_points), 10_000)?;
+    Ok(CalculatedRequisition {
+        subtotal: as_i64(subtotal)?,
+        line_discount: as_i64(line_discount)?,
+        order_discount: as_i64(order_discount)?,
+        freight: as_i64(freight)?,
+        tax: as_i64(tax)?,
+        total: as_i64(taxable + tax)?,
+        lines,
+    })
+}
+
+fn append_order_audit(
+    transaction: &Transaction<'_>,
+    order_id: Uuid,
+    actor_id: Uuid,
+    action: &str,
+    reason: Option<&str>,
+    previous: Option<&str>,
+    next: Option<&str>,
+    now: SystemTime,
+) -> Result<(), AuthError> {
+    transaction
+        .execute(
+            "INSERT INTO local_order_audit_entries (id, order_id, actor_id, action, reason, previous_json, next_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![Uuid::new_v4().to_string(), order_id.to_string(), actor_id.to_string(), action, reason, previous, next, unix_seconds(now)],
+        )
+        .map_err(|_| AuthError::Database)?;
+    Ok(())
+}
+
+fn order_audit_snapshot(
+    transaction: &Transaction<'_>,
+    order_id: Uuid,
+) -> Result<String, AuthError> {
+    let header: (String, String, String, Option<String>, Option<String>, i32, i64) = transaction
+        .query_row(
+            "SELECT display_no, currency, delivery_address, expected_delivery_date, notes, tax_rate_basis_points, total_minor FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            [order_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+        )
+        .map_err(|_| AuthError::Database)?;
+    let mut statement = transaction
+        .prepare(
+            "SELECT id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id",
+        )
+        .map_err(|_| AuthError::Database)?;
+    let lines = statement
+        .query_map([order_id.to_string()], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "material": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(1)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                "supplier": row.get::<_, Option<String>>(2)?.map(|value| serde_json::from_str::<serde_json::Value>(&value)).transpose().map_err(|_| rusqlite::Error::InvalidQuery)?,
+                "currency": row.get::<_, String>(3)?,
+                "quantity": row.get::<_, String>(4)?,
+                "unit": row.get::<_, String>(5)?,
+                "unitPriceMinor": row.get::<_, i64>(6)?.to_string(),
+                "lineTotalMinor": row.get::<_, i64>(7)?.to_string(),
+            }))
+        })
+        .map_err(|_| AuthError::Database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| AuthError::Database)?;
+    serde_json::to_string(&serde_json::json!({
+        "displayNo": header.0,
+        "currency": header.1,
+        "deliveryAddress": header.2,
+        "expectedDeliveryDate": header.3,
+        "notes": header.4,
+        "taxRateBasisPoints": header.5,
+        "totalMinor": header.6.to_string(),
+        "lines": lines,
+    }))
+    .map_err(|_| AuthError::Database)
+}
+
+fn mentioned_usernames(body: &str) -> HashSet<String> {
+    body.match_indices('@')
+        .filter_map(|(index, _)| {
+            let previous = body[..index].chars().next_back();
+            if previous.is_some_and(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+            }) {
+                return None;
+            }
+            let username: String = body[index + 1..]
+                .chars()
+                .take_while(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+                })
+                .collect();
+            (!username.is_empty()).then_some(username)
+        })
+        .collect()
+}
+
+fn parse_non_negative_minor(value: &str) -> Result<i128, AuthError> {
+    if value.is_empty() || !value.bytes().all(|character| character.is_ascii_digit()) {
+        return Err(AuthError::InvalidInput);
+    }
+    value
+        .parse::<i128>()
+        .ok()
+        .filter(|value| *value >= 0)
+        .ok_or(AuthError::InvalidInput)
+}
+
+fn parse_quantity_hundredths(value: &str) -> Result<i128, AuthError> {
+    let mut parts = value.split('.');
+    let whole = parts.next().ok_or(AuthError::InvalidInput)?;
+    let fraction = parts.next().unwrap_or("");
+    if parts.next().is_some()
+        || whole.is_empty()
+        || !whole.bytes().all(|character| character.is_ascii_digit())
+        || fraction.len() > 2
+        || !fraction.bytes().all(|character| character.is_ascii_digit())
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    let hundredths = whole
+        .parse::<i128>()
+        .ok()
+        .and_then(|whole| whole.checked_mul(100))
+        .and_then(|whole| {
+            whole.checked_add(
+                fraction.parse::<i128>().unwrap_or(0) * 10_i128.pow((2 - fraction.len()) as u32),
+            )
+        })
+        .ok_or(AuthError::InvalidInput)?;
+    if hundredths == 0 {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok(hundredths)
+}
+
+fn validate_adjustment(adjustment: &AdjustmentInput) -> Result<(), AuthError> {
+    match adjustment {
+        AdjustmentInput::FixedMinor { minor } => {
+            parse_non_negative_minor(minor)?;
+        }
+        AdjustmentInput::PercentBasisPoints { basis_points }
+            if (0..=10_000).contains(basis_points) => {}
+        AdjustmentInput::PercentBasisPoints { .. } => return Err(AuthError::InvalidInput),
+    }
+    Ok(())
+}
+
+fn is_zero_adjustment(adjustment: &AdjustmentInput) -> bool {
+    match adjustment {
+        AdjustmentInput::FixedMinor { minor } => minor == "0",
+        AdjustmentInput::PercentBasisPoints { basis_points } => *basis_points == 0,
+    }
+}
+
+fn adjustment_amount(
+    base: i128,
+    adjustment: &AdjustmentInput,
+    cap_to_base: bool,
+) -> Result<i128, AuthError> {
+    let amount = match adjustment {
+        AdjustmentInput::FixedMinor { minor } => parse_non_negative_minor(minor)?,
+        AdjustmentInput::PercentBasisPoints { basis_points } => {
+            divide_half_up(base * i128::from(*basis_points), 10_000)?
+        }
+    };
+    if cap_to_base && amount > base {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok(amount)
+}
+
+fn divide_half_up(numerator: i128, denominator: i128) -> Result<i128, AuthError> {
+    if numerator < 0 || denominator <= 0 {
+        return Err(AuthError::InvalidInput);
+    }
+    numerator
+        .checked_add(denominator / 2)
+        .and_then(|value| value.checked_div(denominator))
+        .ok_or(AuthError::InvalidInput)
+}
+
+fn as_i64(value: i128) -> Result<i64, AuthError> {
+    i64::try_from(value).map_err(|_| AuthError::InvalidInput)
+}
+
+fn material_snapshot(
+    transaction: &rusqlite::Transaction<'_>,
+    line: &RequisitionLineInput,
+) -> Result<String, AuthError> {
+    if let Some(material_id) = line.material_id {
+        let row = transaction
+            .query_row(
+                "SELECT name_zh, name_fr, model, specification FROM local_materials WHERE id = ?1 AND is_active = 1 AND deleted_at IS NULL",
+                [material_id.to_string()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .ok_or(AuthError::InvalidInput)?;
+        serde_json::to_string(&serde_json::json!({ "nameZh": row.0, "nameFr": row.1, "model": row.2, "specification": row.3 }))
+            .map_err(|_| AuthError::Database)
+    } else {
+        serde_json::to_string(&line.material_snapshot).map_err(|_| AuthError::Database)
+    }
+}
+
+fn supplier_snapshot(
+    transaction: &rusqlite::Transaction<'_>,
+    line: &RequisitionLineInput,
+) -> Result<Option<String>, AuthError> {
+    let Some(supplier_id) = line.supplier_id else {
+        return Ok(None);
+    };
+    let name = transaction
+        .query_row(
+            "SELECT name FROM local_suppliers WHERE id = ?1 AND is_active = 1 AND is_blacklisted = 0 AND deleted_at IS NULL",
+            [supplier_id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?
+        .ok_or(AuthError::InvalidInput)?;
+    serde_json::to_string(&serde_json::json!({ "id": supplier_id, "name": name }))
+        .map(Some)
+        .map_err(|_| AuthError::Database)
+}
+
+fn decode_material_image(value: &str) -> Result<Vec<u8>, AuthError> {
+    if value.is_empty() || value.len() > MAX_MATERIAL_IMAGE_BYTES * 2 {
+        return Err(AuthError::InvalidInput);
+    }
+    let decoded = BASE64.decode(value).map_err(|_| AuthError::InvalidInput)?;
+    if decoded.is_empty() || decoded.len() > MAX_MATERIAL_IMAGE_BYTES {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok(decoded)
+}
+
+fn valid_required_text(value: &str, max: usize) -> bool {
+    !value.trim().is_empty() && value.len() <= max
+}
+
+fn valid_optional_text(value: &Option<String>, max: usize) -> bool {
+    value
+        .as_ref()
+        .is_none_or(|value| value.len() <= max && !value.trim().is_empty())
+}
+
+fn validate_reference(business_code: &str, name: &str, version: i64) -> Result<(), AuthError> {
+    if business_code.is_empty()
+        || business_code.len() > 64
+        || !business_code
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || value == '_' || value == '-')
+        || name.trim().is_empty()
+        || name.len() > 255
+        || version < 1
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok(())
+}
+
+fn valid_business_code(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.bytes().all(|character| {
+            character.is_ascii_alphanumeric() || character == b'_' || character == b'-'
+        })
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+}
+
+fn valid_currency(currency: &str) -> bool {
+    matches!(currency, "XOF" | "CNY" | "USD" | "EUR")
+}
+
+fn valid_iso_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if value.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    let parts = value.split('-').collect::<Vec<_>>();
+    let [year, month, day] = parts.as_slice() else {
+        return false;
+    };
+    let Ok(year) = year.parse::<u16>() else {
+        return false;
+    };
+    let Ok(month) = month.parse::<u8>() else {
+        return false;
+    };
+    let Ok(day) = day.parse::<u8>() else {
+        return false;
+    };
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 400 == 0 || (year % 4 == 0 && year % 100 != 0) => 29,
+        2 => 28,
+        _ => 0,
+    };
+    year >= 2000 && day >= 1 && day <= max_day
+}
+
+fn valid_decimal_rate(value: &str) -> bool {
+    let mut parts = value.split('.');
+    let Some(integer) = parts.next() else {
+        return false;
+    };
+    let fraction = parts.next();
+    parts.next().is_none()
+        && !integer.is_empty()
+        && integer.bytes().all(|value| value.is_ascii_digit())
+        && fraction.is_none_or(|value| {
+            !value.is_empty()
+                && value.len() <= 8
+                && value.bytes().all(|value| value.is_ascii_digit())
+        })
+}
+
+fn valid_non_zero_decimal_rate(value: &str) -> bool {
+    valid_decimal_rate(value)
+        && value
+            .bytes()
+            .any(|value| value.is_ascii_digit() && value != b'0')
+}
+
+fn convert_minor_by_rate(
+    source_minor: i64,
+    source_currency: &str,
+    primary_currency: &str,
+    rate_decimal: &str,
+) -> Result<i64, AuthError> {
+    if source_minor < 0
+        || !valid_currency(source_currency)
+        || !valid_currency(primary_currency)
+        || !valid_non_zero_decimal_rate(rate_decimal)
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    let (rate_numerator, rate_denominator) = parse_decimal_ratio(rate_decimal)?;
+    if source_currency == primary_currency && rate_numerator != rate_denominator {
+        return Err(AuthError::InvalidInput);
+    }
+    let source_scale = 10_i128.pow(currency_minor_digits(source_currency)?);
+    let primary_scale = 10_i128.pow(currency_minor_digits(primary_currency)?);
+    let numerator = i128::from(source_minor)
+        .checked_mul(rate_numerator)
+        .and_then(|value| value.checked_mul(primary_scale))
+        .ok_or(AuthError::InvalidInput)?;
+    let denominator = source_scale
+        .checked_mul(rate_denominator)
+        .ok_or(AuthError::InvalidInput)?;
+    as_i64(divide_half_up(numerator, denominator)?)
+}
+
+fn parse_decimal_ratio(value: &str) -> Result<(i128, i128), AuthError> {
+    if !valid_non_zero_decimal_rate(value) {
+        return Err(AuthError::InvalidInput);
+    }
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    let scale = 10_i128.pow(fraction.len() as u32);
+    let numerator = whole
+        .parse::<i128>()
+        .ok()
+        .and_then(|whole| whole.checked_mul(scale))
+        .and_then(|whole| whole.checked_add(fraction.parse::<i128>().unwrap_or(0)))
+        .ok_or(AuthError::InvalidInput)?;
+    Ok((numerator, scale))
+}
+
+fn currency_minor_digits(currency: &str) -> Result<u32, AuthError> {
+    match currency {
+        "XOF" => Ok(0),
+        "CNY" | "USD" | "EUR" => Ok(2),
+        _ => Err(AuthError::InvalidInput),
+    }
+}
+
+fn assert_immutable_local_business_code(
+    connection: &Connection,
+    table: &str,
+    id: Uuid,
+    business_code: &str,
+) -> Result<(), AuthError> {
+    // `table` comes only from the closed match above; record values remain bound parameters.
+    let query = format!("SELECT business_code FROM {table} WHERE id = ?1");
+    let existing = connection
+        .query_row(&query, [id.to_string()], |row| row.get::<_, String>(0))
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    if existing.is_some_and(|value| value != business_code) {
+        return Err(AuthError::ImmutableBusinessCode);
+    }
+    Ok(())
+}
+
+fn hash_password(password: &str) -> Result<String, AuthError> {
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .map_err(|_| AuthError::PasswordHashing)
+}
+
+fn verify_password(hash: &str, password: &str) -> bool {
+    PasswordHash::new(hash).ok().is_some_and(|parsed| {
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok()
+    })
+}
+
+fn register_failure(
+    connection: &Connection,
+    id: &str,
+    failed_attempts: i64,
+    now: SystemTime,
+) -> Result<(), AuthError> {
+    let next_attempts = failed_attempts + 1;
+    let locked_until = (next_attempts >= MAX_FAILURES).then_some(unix_seconds(now + LOCK_WINDOW));
+    connection
+        .execute(
+            "UPDATE local_accounts SET failed_attempts = ?1, locked_until = ?2 WHERE id = ?3",
+            params![next_attempts, locked_until, id],
+        )
+        .map_err(|_| AuthError::Database)?;
+    Ok(())
+}
+
+fn unix_seconds(value: SystemTime) -> i64 {
+    value
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account() -> CachedAccount {
+        CachedAccount {
+            id: Uuid::new_v4(),
+            username: "engineer".into(),
+            roles: vec![Role::Engineer],
+            enabled: true,
+            requires_password_change: false,
+        }
+    }
+    fn answer(question: &str) -> u8 {
+        question
+            .split_whitespace()
+            .filter_map(|value| value.parse::<u8>().ok())
+            .sum()
+    }
+
+    #[test]
+    fn locked_exchange_rate_converts_minor_units_without_floating_point() {
+        assert_eq!(
+            convert_minor_by_rate(1_234, "CNY", "XOF", "76.5").unwrap(),
+            944
+        );
+        assert_eq!(
+            convert_minor_by_rate(1_000, "XOF", "CNY", "0.015").unwrap(),
+            1_500
+        );
+        assert_eq!(convert_minor_by_rate(1, "USD", "XOF", "2.5").unwrap(), 0);
+        assert_eq!(
+            convert_minor_by_rate(100, "XOF", "XOF", "1.01"),
+            Err(AuthError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn cached_account_can_login_offline_and_is_role_checked() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        let session = service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(session.roles, vec![Role::Engineer]);
+        assert!(service.require_role(Role::Engineer, now).is_ok());
+        assert_eq!(
+            service.require_role(Role::Administrator, now),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(
+            service.require_material_mutation(now),
+            Err(AuthError::Forbidden)
+        );
+
+        let connection = service.connection.lock().unwrap();
+        let password_hash_column_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_accounts') WHERE name = 'password_hash'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(password_hash_column_count, 0);
+        let migration_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_schema_migrations WHERE version = '0001_local_auth'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+        let master_data_migration_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_schema_migrations WHERE version = '0002_master_data'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(master_data_migration_count, 1);
+        let reference_master_data_migration_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_schema_migrations WHERE version = '0003_reference_master_data'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reference_master_data_migration_count, 1);
+        let catalog_migration_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_schema_migrations WHERE version = '0004_local_catalog'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(catalog_migration_count, 1);
+        let material_image_migration_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_schema_migrations WHERE version = '0005_local_material_images'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(material_image_migration_count, 1);
+        let requisition_migration_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_schema_migrations WHERE version = '0006_local_requisitions'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(requisition_migration_count, 1);
+        let supplier_table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_suppliers') WHERE name = 'business_code'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(supplier_table_count, 1);
+    }
+
+    #[test]
+    fn five_failed_passwords_lock_the_cached_account() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        for _ in 0..5 {
+            let captcha = service.issue_captcha(now).unwrap();
+            assert_eq!(
+                service.offline_login(
+                    "engineer",
+                    "wrong-password",
+                    captcha.id,
+                    answer(&captcha.question),
+                    now
+                ),
+                Err(AuthError::InvalidCredentials)
+            );
+        }
+        let captcha = service.issue_captcha(now).unwrap();
+        assert_eq!(
+            service.offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now
+            ),
+            Err(AuthError::AccountLocked)
+        );
+    }
+
+    #[test]
+    fn offline_window_and_idle_sessions_expire() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let late = now + OFFLINE_LOGIN_WINDOW + Duration::from_secs(1);
+        let captcha = service.issue_captcha(late).unwrap();
+        assert_eq!(
+            service.offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                late
+            ),
+            Err(AuthError::OfflineWindowExpired)
+        );
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.require_role(
+                Role::Engineer,
+                now + IDLE_LOCK_WINDOW + Duration::from_secs(1)
+            ),
+            Err(AuthError::NoActiveSession)
+        );
+    }
+
+    #[test]
+    fn only_master_data_roles_can_save_project_defaults() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let project_id = Uuid::new_v4();
+        let defaults = ProjectDefaultsInput {
+            project_id,
+            department_title: "fixture department".into(),
+            company_address: "fixture address".into(),
+            company_contact: "fixture contact".into(),
+            default_currency: "XOF".into(),
+            default_language_pair: "zh_fr".into(),
+            default_tax_template_id: None,
+        };
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_project_defaults(defaults.clone(), now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        let administrator_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: administrator_id,
+                    username: "administrator".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        service.save_project_defaults(defaults, now).unwrap();
+        let country_id = Uuid::new_v4();
+        service
+            .save_reference_master_data(
+                ReferenceMasterDataInput::Country {
+                    id: country_id,
+                    business_code: "CI".into(),
+                    name: "fixture country".into(),
+                    time_zone: "Africa/Abidjan".into(),
+                    is_active: true,
+                    version: 1,
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let saved_currency: String = connection
+            .query_row(
+                "SELECT default_currency FROM local_project_print_defaults WHERE project_id = ?1",
+                [project_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved_currency, "XOF");
+        let country_code: String = connection
+            .query_row(
+                "SELECT business_code FROM local_countries WHERE id = ?1",
+                [country_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(country_code, "CI");
+        drop(connection);
+        service
+            .save_reference_master_data(
+                ReferenceMasterDataInput::Project {
+                    id: project_id,
+                    country_id,
+                    business_code: "FIXTURE-PROJECT".into(),
+                    name: "fixture project".into(),
+                    site: "fixture site".into(),
+                    department_name: "fixture department".into(),
+                    default_currency: "XOF".into(),
+                    default_language_pair: "zh_fr".into(),
+                    is_active: true,
+                    version: 1,
+                },
+                now,
+            )
+            .unwrap();
+        let project_defaults = service.list_project_defaults(now).unwrap();
+        assert_eq!(project_defaults.len(), 1);
+        assert_eq!(project_defaults[0].project_name, "fixture project");
+        assert_eq!(
+            project_defaults[0].company_contact.as_deref(),
+            Some("fixture contact")
+        );
+        assert_eq!(
+            service.save_reference_master_data(
+                ReferenceMasterDataInput::Country {
+                    id: country_id,
+                    business_code: "CM".into(),
+                    name: "fixture country".into(),
+                    time_zone: "Africa/Douala".into(),
+                    is_active: true,
+                    version: 2,
+                },
+                now,
+            ),
+            Err(AuthError::ImmutableBusinessCode)
+        );
+        let tax_id = Uuid::new_v4();
+        service
+            .save_tax_template(
+                TaxTemplateInput {
+                    id: tax_id,
+                    business_code: "FIXTURE-TAX".into(),
+                    name: "fixture tax".into(),
+                    country_id: None,
+                    rate_basis_points: 1234,
+                    effective_at: "2026-10-10".into(),
+                    is_active: true,
+                    version: 1,
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_tax_template(
+                TaxTemplateInput {
+                    id: Uuid::new_v4(),
+                    business_code: "INVALID-DATE-TAX".into(),
+                    name: "invalid date fixture".into(),
+                    country_id: None,
+                    rate_basis_points: 1234,
+                    effective_at: "2026-02-30".into(),
+                    is_active: true,
+                    version: 1,
+                },
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service.save_exchange_rate(
+                ExchangeRateInput {
+                    id: Uuid::new_v4(),
+                    from_currency: "EUR".into(),
+                    to_currency: "XOF".into(),
+                    rate_decimal: "1.25".into(),
+                    effective_at: "2026-10-10".into(),
+                    source: "manual".into(),
+                    reason: None,
+                    version: 1,
+                },
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        service
+            .save_exchange_rate(
+                ExchangeRateInput {
+                    id: Uuid::new_v4(),
+                    from_currency: "EUR".into(),
+                    to_currency: "XOF".into(),
+                    rate_decimal: "1.25".into(),
+                    effective_at: "2026-10-10".into(),
+                    source: "manual".into(),
+                    reason: Some("fixture fallback".into()),
+                    version: 1,
+                },
+                now,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn catalog_writes_are_role_protected_and_price_changes_keep_history() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let material = MaterialInput {
+            id: Uuid::new_v4(),
+            sku: Some("FIXTURE-M16".into()),
+            name_zh: "测试材料".into(),
+            name_fr: None,
+            aliases: vec!["fixture alias".into()],
+            brand: None,
+            model: "M16".into(),
+            specification: "fixture specification".into(),
+            unit: "pcs".into(),
+            notes: None,
+            is_active: true,
+            version: 1,
+        };
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_material(material.clone(), now),
+            Err(AuthError::Forbidden)
+        );
+
+        service.lock().unwrap();
+        let purchaser_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: purchaser_id,
+                    username: "purchaser".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "purchaser",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        service.save_material(material.clone(), now).unwrap();
+        let image_id = Uuid::new_v4();
+        service
+            .save_material_image(
+                MaterialImageInput {
+                    id: image_id,
+                    material_id: material.id,
+                    source_file_name: "fixture.png".into(),
+                    source_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==".into(),
+                    square_crop_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==".into(),
+                    crop_json: "{\"x\":0,\"y\":0,\"size\":1}".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let supplier = SupplierInput {
+            id: Uuid::new_v4(),
+            business_code: "SUP-001".into(),
+            name: "fixture supplier".into(),
+            contact_name: None,
+            address: None,
+            city: None,
+            country: None,
+            phone: None,
+            whatsapp: None,
+            email: None,
+            payment_terms: None,
+            delivery_lead_time: None,
+            is_preferred: true,
+            is_blacklisted: false,
+            is_active: true,
+            version: 1,
+        };
+        service.save_supplier(supplier.clone(), now).unwrap();
+        let suppliers = service.list_suppliers(now).unwrap();
+        assert_eq!(suppliers.len(), 1);
+        assert_eq!(suppliers[0].business_code, "SUP-001");
+        for price_minor in ["500", "550"] {
+            service
+                .add_material_price(
+                    MaterialPriceInput {
+                        id: Uuid::new_v4(),
+                        material_id: material.id,
+                        supplier_id: supplier.id,
+                        currency: "XOF".into(),
+                        unit_price_minor: price_minor.into(),
+                        unit: "pcs".into(),
+                        effective_at: "2026-10-10".into(),
+                        source_note: None,
+                        version: 1,
+                    },
+                    now,
+                )
+                .unwrap();
+        }
+        let country_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let department_id = Uuid::new_v4();
+        let team_id = Uuid::new_v4();
+        {
+            let connection = service.connection.lock().unwrap();
+            connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, 'CI', 'fixture country', 'Africa/Abidjan', 1, 1)", [country_id.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, 'FIXTURE', 'fixture project', 'fixture site', 'fixture department', 'XOF', 'zh_fr', 1, 1)", params![project_id.to_string(), country_id.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, 'FIXTURE-DEPT', 'fixture department', 1, 1)", [department_id.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, 'FIXTURE-TEAM', 'fixture team', 1, 1)", params![team_id.to_string(), department_id.to_string()]).unwrap();
+        }
+        let requisition_id = Uuid::new_v4();
+        let draft = RequisitionDraftInput {
+            id: requisition_id,
+            display_no: "CI-FIXTURE-20261010-INT-0001".into(),
+            country_id,
+            project_id,
+            site: "fixture site".into(),
+            department_id,
+            team_id,
+            applicant_id: purchaser_id,
+            currency: "XOF".into(),
+            primary_currency: "XOF".into(),
+            language_pair: "zh_fr".into(),
+            urgency: "normal".into(),
+            urgency_reason: None,
+            order_date: "2026-10-10".into(),
+            delivery_address: "fixture address".into(),
+            expected_delivery_date: None,
+            notes: None,
+            order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+            order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+            tax_rate_basis_points: 1800,
+            lines: vec![RequisitionLineInput {
+                id: Uuid::new_v4(),
+                material_id: Some(material.id),
+                material_snapshot: MaterialSnapshotInput {
+                    name_zh: "forged".into(),
+                    name_fr: None,
+                    model: "forged".into(),
+                    specification: "forged".into(),
+                },
+                supplier_id: Some(supplier.id),
+                currency: "XOF".into(),
+                quantity: "2.5".into(),
+                unit: "pcs".into(),
+                unit_price_minor: "1250".into(),
+                line_discount: AdjustmentInput::FixedMinor {
+                    minor: "125".into(),
+                },
+                line_freight: AdjustmentInput::FixedMinor { minor: "20".into() },
+                freight_included: false,
+                sort_order: 0,
+            }],
+        };
+        let totals = service.save_requisition_draft(draft.clone(), now).unwrap();
+        assert_eq!(totals.total_minor, "3564");
+        service
+            .submit_requisition_draft(requisition_id, now)
+            .unwrap();
+        assert_eq!(
+            service.confirm_requisition(requisition_id, now),
+            Err(AuthError::Forbidden)
+        );
+        let comment = service
+            .add_order_comment(requisition_id, "fixture comment".into(), now)
+            .unwrap();
+        assert_eq!(comment.body, "fixture comment");
+        assert_eq!(
+            service
+                .list_order_comments(requisition_id, now)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            service.submit_requisition_draft(requisition_id, now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        let approver_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: approver_id,
+                    username: "approver".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "approver",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        service.confirm_requisition(requisition_id, now).unwrap();
+        let mention = service
+            .add_order_comment(
+                requisition_id,
+                "@purchaser 请核对。test@example.com".into(),
+                now,
+            )
+            .unwrap();
+        assert_eq!(mention.notification_count, 1);
+        {
+            let connection = service.connection.lock().unwrap();
+            let notification_count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_order_notifications WHERE recipient_id = ?1 AND comment_id = ?2",
+                    params![purchaser_id.to_string(), mention.id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(notification_count, 1);
+        }
+        let mut revised = draft;
+        revised.delivery_address = "revised fixture address".into();
+        revised.notes = Some("purchaser correction".into());
+        service
+            .revise_confirmed_requisition(revised.clone(), "fixture revision reason".into(), now)
+            .unwrap();
+        let revision_audits = service.list_order_audits(requisition_id, now).unwrap();
+        assert!(
+            revision_audits
+                .iter()
+                .any(|audit| audit.action == "confirmed_revised"
+                    && audit.reason.as_deref() == Some("fixture revision reason"))
+        );
+        let rfq = service
+            .create_rfq(
+                CreateRfqInput {
+                    id: Uuid::new_v4(),
+                    source_order_id: requisition_id,
+                    supplier_id: supplier.id,
+                    display_no: "CI-FIXTURE-20261010-RFQ-0001".into(),
+                    currency: "XOF".into(),
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(rfq.item_count, 1);
+        let connection = service.connection.lock().unwrap();
+        let rfq_item_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_rfq_items WHERE rfq_id = ?1",
+                [rfq.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rfq_item_count, 1);
+        drop(connection);
+        {
+            let connection = service.connection.lock().unwrap();
+            let (status, delivery_address, snapshot, freight, item_currency): (String, String, String, String, String) = connection.query_row(
+                "SELECT o.workflow_status, o.delivery_address, i.material_snapshot_json, i.line_freight_json, i.currency FROM local_purchase_orders o JOIN local_purchase_order_items i ON i.order_id = o.id WHERE o.id = ?1",
+                [requisition_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            ).unwrap();
+            assert_eq!(status, "confirmed");
+            assert_eq!(delivery_address, "revised fixture address");
+            assert!(snapshot.contains("测试材料"));
+            assert!(freight.contains("20"));
+            assert_eq!(item_currency, "XOF");
+            let audit_count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_order_audit_entries WHERE order_id = ?1 AND action = 'confirmed'",
+                    [requisition_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(audit_count, 1);
+            let revision: (String, String, String) = connection
+                .query_row(
+                    "SELECT reason, previous_json, next_json FROM local_order_audit_entries WHERE order_id = ?1 AND action = 'confirmed_revised'",
+                    [requisition_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(revision.0, "fixture revision reason");
+            assert!(revision.1.contains("fixture address"));
+            assert!(revision.2.contains("revised fixture address"));
+        }
+        let parent_item_id = {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .query_row(
+                    "SELECT id FROM local_purchase_order_items WHERE order_id = ?1",
+                    [requisition_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+        };
+        let children = service
+            .allocate_supplier_child_orders(
+                requisition_id,
+                vec![SupplierChildAllocationInput {
+                    parent_item_id: Uuid::parse_str(&parent_item_id).unwrap(),
+                    supplier_id: supplier.id,
+                    currency: "XOF".into(),
+                    child_display_no: "CI-FIXTURE-20261010-SUP-001-0001".into(),
+                    locked_exchange_rate_decimal: "1".into(),
+                }],
+                now,
+            )
+            .unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].supplier_id, supplier.id);
+        assert_eq!(children[0].currency, "XOF");
+        assert_eq!(children[0].source_total_minor, "3125");
+        assert_eq!(children[0].primary_total_minor, "3125");
+        let connection = service.connection.lock().unwrap();
+        let child: (String, String, String, String, i64) = connection
+            .query_row(
+                "SELECT parent_order_id, supplier_id, currency, locked_exchange_rate_decimal, total_minor FROM local_purchase_orders WHERE id = ?1",
+                [children[0].child_order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(child.0, requisition_id.to_string());
+        assert_eq!(child.1, supplier.id.to_string());
+        assert_eq!(child.2, "XOF");
+        assert_eq!(child.3, "1");
+        assert_eq!(child.4, 3125);
+        let parent_total: i64 = connection
+            .query_row(
+                "SELECT total_minor FROM local_purchase_orders WHERE id = ?1",
+                [requisition_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(parent_total, 3125);
+        drop(connection);
+        let child_item_id = {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .query_row(
+                    "SELECT id FROM local_purchase_order_items WHERE order_id = ?1",
+                    [children[0].child_order_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+        };
+        let child_terms = service
+            .save_supplier_child_terms(
+                SupplierChildTermsInput {
+                    order_id: children[0].child_order_id,
+                    lines: vec![SupplierChildLineTermsInput {
+                        order_item_id: Uuid::parse_str(&child_item_id).unwrap(),
+                        line_discount: AdjustmentInput::FixedMinor {
+                            minor: "125".into(),
+                        },
+                        line_freight: AdjustmentInput::FixedMinor { minor: "25".into() },
+                        freight_included: false,
+                    }],
+                    order_discount: AdjustmentInput::FixedMinor {
+                        minor: "100".into(),
+                    },
+                    order_freight: AdjustmentInput::FixedMinor { minor: "50".into() },
+                    tax_rate_basis_points: 1800,
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(child_terms.total_minor, "3511");
+        service
+            .send_supplier_order(children[0].child_order_id, now)
+            .unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            let child: (String, i64, i64) = connection
+                .query_row(
+                    "SELECT workflow_status, total_minor, supplier_terms_completed_at FROM local_purchase_orders WHERE id = ?1",
+                    [children[0].child_order_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(child.0, "sent");
+            assert_eq!(child.1, 3511);
+            assert!(child.2 > 0);
+        }
+        let receipt_attachment_id = Uuid::new_v4();
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute(
+                    "INSERT INTO local_order_attachments (id, order_id, original_name, content_type, byte_length, local_path, created_at) VALUES (?1, ?2, 'fixture-receipt.jpg', 'image/jpeg', 1, 'fixture-receipt.jpg', ?3)",
+                    params![receipt_attachment_id.to_string(), children[0].child_order_id.to_string(), unix_seconds(now)],
+                )
+                .unwrap();
+        }
+        {
+            let connection = service.connection.lock().unwrap();
+            let (quantity, unit): (String, String) = connection
+                .query_row(
+                    "SELECT quantity_decimal, unit FROM local_purchase_order_items WHERE id = ?1 AND order_id = ?2",
+                    params![child_item_id, children[0].child_order_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(quantity, "2.5");
+            assert_eq!(unit, "pcs");
+        }
+        assert_eq!(
+            service.record_receipt(
+                RecordReceiptInput {
+                    id: Uuid::new_v4(),
+                    order_id: children[0].child_order_id,
+                    received_at: "2026-10-11".into(),
+                    receiver_id: approver_id,
+                    over_receipt_reason: None,
+                    attachment_ids: vec![],
+                    items: vec![ReceiptItemInput {
+                        order_item_id: Uuid::parse_str(&child_item_id).unwrap(),
+                        quantity: "3".into(),
+                        unit: "pcs".into(),
+                    }],
+                },
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        let first_receipt = service
+            .record_receipt(
+                RecordReceiptInput {
+                    id: Uuid::new_v4(),
+                    order_id: children[0].child_order_id,
+                    received_at: "2026-10-11".into(),
+                    receiver_id: approver_id,
+                    over_receipt_reason: None,
+                    attachment_ids: vec![receipt_attachment_id],
+                    items: vec![ReceiptItemInput {
+                        order_item_id: Uuid::parse_str(&child_item_id).unwrap(),
+                        quantity: "1".into(),
+                        unit: "pcs".into(),
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(first_receipt.workflow_status, "sent");
+        {
+            let connection = service.connection.lock().unwrap();
+            let linked_count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_receipt_attachment_links WHERE receipt_id = ?1 AND attachment_id = ?2",
+                    params![first_receipt.id.to_string(), receipt_attachment_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(linked_count, 1);
+        }
+        let second_receipt = service
+            .record_receipt(
+                RecordReceiptInput {
+                    id: Uuid::new_v4(),
+                    order_id: children[0].child_order_id,
+                    received_at: "2026-10-11".into(),
+                    receiver_id: approver_id,
+                    over_receipt_reason: None,
+                    attachment_ids: vec![],
+                    items: vec![ReceiptItemInput {
+                        order_item_id: Uuid::parse_str(&child_item_id).unwrap(),
+                        quantity: "1.5".into(),
+                        unit: "pcs".into(),
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(second_receipt.workflow_status, "completed");
+        assert_eq!(
+            service.close_supplier_order_with_conditions(
+                children[0].child_order_id,
+                "".into(),
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE local_purchase_orders SET workflow_status = 'sent' WHERE id = ?1",
+                    [children[0].child_order_id.to_string()],
+                )
+                .unwrap();
+        }
+        service
+            .close_supplier_order_with_conditions(
+                children[0].child_order_id,
+                "fixture missing material".into(),
+                now,
+            )
+            .unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            let status: String = connection
+                .query_row(
+                    "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1",
+                    [children[0].child_order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(status, "completed_with_conditions");
+        }
+        assert_eq!(
+            service.revise_confirmed_requisition(revised, "after split".into(), now),
+            Err(AuthError::InvalidInput)
+        );
+        service.lock().unwrap();
+        let super_administrator_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: super_administrator_id,
+                    username: "super-administrator".into(),
+                    roles: vec![Role::SuperAdministrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "super-administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.approval_policy(now).unwrap().allow_self_approval,
+            false
+        );
+        service
+            .set_approval_policy(true, "fixture policy reason".into(), now)
+            .unwrap();
+        assert!(service.approval_policy(now).unwrap().allow_self_approval);
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "purchaser",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE local_purchase_orders SET workflow_status = 'pending_confirmation' WHERE id = ?1",
+                    [requisition_id.to_string()],
+                )
+                .unwrap();
+        }
+        service.confirm_requisition(requisition_id, now).unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            let (self_approved, policy_audits): (i64, i64) = connection
+                .query_row(
+                    "SELECT self_approved, (SELECT COUNT(*) FROM local_approval_policy_audit_entries WHERE reason = 'fixture policy reason') FROM local_purchase_orders WHERE id = ?1",
+                    [requisition_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(self_approved, 1);
+            assert_eq!(policy_audits, 1);
+        }
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE local_purchase_orders SET workflow_status = 'pending_confirmation' WHERE id = ?1",
+                    [requisition_id.to_string()],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            service.reject_requisition(requisition_id, "".into(), now),
+            Err(AuthError::Forbidden)
+        );
+        service
+            .reject_requisition(requisition_id, "fixture rejection reason".into(), now)
+            .unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            let (status, reason, audit_count): (String, String, i64) = connection
+                .query_row(
+                    "SELECT o.workflow_status, o.rejection_reason, (SELECT COUNT(*) FROM local_order_audit_entries a WHERE a.order_id = o.id AND a.action = 'rejected') FROM local_purchase_orders o WHERE o.id = ?1",
+                    [requisition_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(status, "rejected");
+            assert_eq!(reason, "fixture rejection reason");
+            assert_eq!(audit_count, 1);
+        }
+        let catalog = service.search_catalog("测试", now).unwrap();
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].prices.len(), 1);
+        assert_eq!(catalog[0].prices[0].unit_price_minor, "550");
+        assert_eq!(
+            service.save_supplier(
+                SupplierInput {
+                    business_code: "SUP-002".into(),
+                    ..supplier.clone()
+                },
+                now,
+            ),
+            Err(AuthError::ImmutableBusinessCode)
+        );
+        let connection = service.connection.lock().unwrap();
+        let (history_count, active_count, active_price): (i64, i64, i64) = connection
+            .query_row(
+                "SELECT COUNT(*), SUM(is_active), MAX(CASE WHEN is_active = 1 THEN unit_price_minor END)
+                 FROM local_material_prices WHERE material_id = ?1",
+                [material.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((history_count, active_count, active_price), (2, 1, 550));
+        let (source_path, square_path): (String, String) = connection
+            .query_row(
+                "SELECT source_path, square_crop_path FROM local_material_images WHERE id = ?1",
+                [image_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(Path::new(&source_path).is_file());
+        assert!(Path::new(&square_path).is_file());
+        drop(connection);
+        assert!(
+            service
+                .get_material_square_image(material.id, now)
+                .unwrap()
+                .is_some_and(|value| value.starts_with("data:image/png;base64,iVBOR"))
+        );
+    }
+
+    #[test]
+    fn requisition_migration_upgrades_the_previous_image_schema() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE local_schema_migrations (
+                    version TEXT PRIMARY KEY,
+                    checksum TEXT NOT NULL,
+                    applied_at INTEGER NOT NULL
+                );",
+            )
+            .unwrap();
+        for (version, sql) in [
+            (
+                "0001_local_auth",
+                include_str!("../migrations/0001_local_auth.sql"),
+            ),
+            (
+                "0002_master_data",
+                include_str!("../migrations/0002_master_data.sql"),
+            ),
+            (
+                "0003_reference_master_data",
+                include_str!("../migrations/0003_reference_master_data.sql"),
+            ),
+            (
+                "0004_local_catalog",
+                include_str!("../migrations/0004_local_catalog.sql"),
+            ),
+            (
+                "0005_local_material_images",
+                include_str!("../migrations/0005_local_material_images.sql"),
+            ),
+        ] {
+            connection.execute_batch(sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO local_schema_migrations (version, checksum, applied_at) VALUES (?1, ?2, 0)",
+                    params![version, format!("{:x}", Sha256::digest(sql.as_bytes()))],
+                )
+                .unwrap();
+        }
+        for (version, sql) in [
+            (
+                "0006_local_requisitions",
+                include_str!("../migrations/0006_local_requisitions.sql"),
+            ),
+            (
+                "0007_order_workflow",
+                include_str!("../migrations/0007_order_workflow.sql"),
+            ),
+            (
+                "0008_approval_policy",
+                include_str!("../migrations/0008_approval_policy.sql"),
+            ),
+            (
+                "0009_order_notifications",
+                include_str!("../migrations/0009_order_notifications.sql"),
+            ),
+            (
+                "0010_supplier_child_orders",
+                include_str!("../migrations/0010_supplier_child_orders.sql"),
+            ),
+        ] {
+            connection.execute_batch(sql).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO local_schema_migrations (version, checksum, applied_at) VALUES (?1, ?2, 0)",
+                    params![version, format!("{:x}", Sha256::digest(sql.as_bytes()))],
+                )
+                .unwrap();
+        }
+        let country_id = Uuid::new_v4().to_string();
+        let project_id = Uuid::new_v4().to_string();
+        let department_id = Uuid::new_v4().to_string();
+        let team_id = Uuid::new_v4().to_string();
+        let order_id = Uuid::new_v4().to_string();
+        let item_id = Uuid::new_v4().to_string();
+        connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, 'MIG-C', 'migration country', 'UTC', 1, 1)", [&country_id]).unwrap();
+        connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, 'MIG-P', 'migration project', 'migration site', 'migration department', 'CNY', 'zh_en', 1, 1)", params![project_id, country_id]).unwrap();
+        connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, 'MIG-D', 'migration department', 1, 1)", [&department_id]).unwrap();
+        connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, 'MIG-T', 'migration team', 1, 1)", params![team_id, department_id]).unwrap();
+        connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'MIG-ORDER', ?2, ?3, 'migration site', ?4, ?5, 'migration-applicant', 'CNY', 'CNY', 'zh_en', 'draft', 'draft', 'normal', '2026-10-11', 'migration address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![order_id, country_id, project_id, department_id, team_id]).unwrap();
+        connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_snapshot_json, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, '{\"nameZh\":\"migration material\"}', '1', 'pcs', 100, 100, 0, 0, 0)", params![item_id, order_id]).unwrap();
+
+        migrate(&mut connection).unwrap();
+
+        let image_column_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_material_images') WHERE name = 'source_file_name'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(image_column_exists, 1);
+        let freight_column_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_purchase_order_items') WHERE name = 'line_freight_json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(freight_column_exists, 1);
+        let item_currency_column_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_purchase_order_items') WHERE name = 'currency'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(item_currency_column_exists, 1);
+        let migrated_item_currency: String = connection
+            .query_row(
+                "SELECT currency FROM local_purchase_order_items WHERE id = ?1",
+                [item_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migrated_item_currency, "CNY");
+        let workflow_column_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_purchase_orders') WHERE name = 'workflow_status'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(workflow_column_exists, 1);
+        let audit_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_order_audit_entries'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(audit_table_exists, 1);
+        let self_approved_column_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_purchase_orders') WHERE name = 'self_approved'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(self_approved_column_exists, 1);
+        let approval_policy_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_approval_policy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(approval_policy_table_exists, 1);
+        let notification_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_order_notifications'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(notification_table_exists, 1);
+        let supplier_child_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_supplier_order_allocations'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(supplier_child_table_exists, 1);
+        let rfq_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_rfqs'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rfq_table_exists, 1);
+        let receipt_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_receipts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(receipt_table_exists, 1);
+        let supplier_terms_column_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_purchase_orders') WHERE name = 'supplier_terms_completed_at'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(supplier_terms_column_exists, 1);
+        let receipt_attachment_link_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_receipt_attachment_links'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(receipt_attachment_link_table_exists, 1);
+    }
+}

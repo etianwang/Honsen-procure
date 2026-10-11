@@ -1,0 +1,899 @@
+import { expect, test } from '@playwright/test'
+
+test('development sign-in placeholder opens the workbench and navigates accessibly', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+
+  await page.goto('/')
+  await expect(
+    page.getByRole('heading', { name: '登录 HONSEN Procure' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+
+  await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()
+  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: '材料库总览' }).last(),
+  ).toBeVisible()
+  await page.getByRole('button', { name: '首页', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('currency preview selects every supported currency without console errors', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+
+  await page.goto('/?test=money')
+  const currency = page.getByLabel('预览货币')
+  const formattedMoney = page.getByTestId('formatted-money')
+
+  for (const value of ['XOF', 'CNY', 'USD', 'EUR']) {
+    await currency.selectOption(value)
+    await expect(formattedMoney).toContainText(
+      value === 'XOF' ? '1,234' : '12.34',
+    )
+  }
+
+  await expect(browserErrors).toEqual([])
+})
+
+test('authentication fixture exposes invalid and first-login states', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+
+  await page.goto('/?test=auth')
+  await page.getByLabel('账号').fill('test-admin')
+  await page.getByLabel('密码').fill('wrong-password')
+  await page.getByLabel('验证码：3 + 4 = ?').fill('7')
+  await page.getByRole('button', { name: '验证登录' }).click()
+  await expect(page.getByText('账号、密码或验证码无效')).toBeVisible()
+
+  await page.getByLabel('密码').fill('fixture-password')
+  await page.getByRole('button', { name: '验证登录' }).click()
+  await expect(page.getByText('验证成功：首次登录需要修改密码')).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('offline login fixture locks idle engineers and denies a DOM-tampered material edit', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+
+  await page.goto('/?test=offline')
+  await page.getByRole('button', { name: '模拟工程师离线登录' }).click()
+  await expect(page.getByText('缓存账户已登录：工程师')).toBeVisible()
+
+  await page.getByRole('button', { name: '模拟 30 分钟空闲' }).click()
+  await expect(page.getByText('会话已锁定，需要重新输入密码')).toBeVisible()
+  await page.getByRole('button', { name: '重新验证' }).click()
+
+  const materialEdit = page.getByTestId('material-edit-control')
+  await expect(materialEdit).toBeDisabled()
+  await materialEdit.evaluate((button) => button.removeAttribute('disabled'))
+  await materialEdit.click()
+  await expect(page.getByText('可信边界拒绝：权限不足')).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('administrator changes project defaults and sees the selected project values', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+
+  await page.goto('/?test=master-data')
+  await expect(page.getByText('Bethel2工地')).toBeVisible()
+  await expect(page.getByText('科特迪瓦 TVA 18%')).toBeVisible()
+
+  await page.getByLabel('选择项目').click()
+  await page.getByText('Minrex数据中心', { exact: true }).last().click()
+  await expect(page.getByTestId('selected-project')).toHaveText(
+    'Minrex数据中心',
+  )
+  await expect(
+    page.getByLabel('项目默认值').getByText('中文 + 英文'),
+  ).toBeVisible()
+  await expect(page.getByText('未设置默认税率')).toBeVisible()
+
+  await page.getByLabel('页脚联系方式').fill('fixture updated contact')
+  await page.getByRole('button', { name: '保存项目默认值' }).click()
+  await expect(page.getByText('项目默认值已保存')).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('desktop project-default page uses the Tauri command adapter', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    const projects = [
+      {
+        projectId: '43e62f6f-8069-460d-8fa5-16e4d4800cd4',
+        projectName: 'Bethel2办公楼项目',
+        site: 'Bethel2工地',
+        departmentTitle: '科特迪瓦项目部',
+        companyAddress: 'fixture address',
+        companyContact: 'fixture contact',
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        defaultTaxTemplateId: null,
+        taxTemplateName: null,
+      },
+    ]
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(command: string) {
+            if (command === 'list_project_defaults')
+              return Promise.resolve(projects)
+            if (command === 'save_project_defaults') return Promise.resolve()
+            return Promise.reject(new Error('unexpected command'))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '项目默认设置' }).click()
+  await expect(
+    page.getByRole('heading', { name: '项目默认设置' }).last(),
+  ).toBeVisible()
+  await expect(page.getByText('Bethel2工地')).toBeVisible()
+  await page.getByLabel('页脚联系方式').fill('desktop fixture contact')
+  await page.getByRole('button', { name: '保存项目默认值' }).click()
+  await expect(page.getByText('项目默认值已保存')).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('engineer can search local catalog quotes but has no material mutation control', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+
+  await page.goto('/?test=catalog')
+  await expect(page.getByText('fixture supplier D')).toBeVisible()
+  await page.getByLabel('搜索材料').fill('FX-01')
+  await expect(page.getByText('测试电缆')).toBeVisible()
+  await page.getByLabel('搜索材料').fill('不存在的材料')
+  await expect(page.getByRole('status')).toHaveText('未找到匹配材料')
+  await expect(page.getByRole('button', { name: '新增材料' })).toHaveCount(0)
+  await expect(
+    page.getByText('工程师与查看者仅可搜索和查看材料及供应商价格。'),
+  ).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('purchaser saves a material through the Tauri catalog boundary', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              material?: { nameZh?: string }
+              image?: { squareCropBase64?: string }
+            },
+          ) {
+            if (command === 'search_catalog') return Promise.resolve([])
+            if (command === 'save_material') {
+              Object.assign(window, {
+                __catalogSaveName: args?.material?.nameZh,
+              })
+              return Promise.resolve()
+            }
+            if (command === 'save_material_image') {
+              Object.assign(window, {
+                __imageSaveSquare: args?.image?.squareCropBase64,
+              })
+              return Promise.resolve()
+            }
+            return Promise.reject(new Error('unexpected command'))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await page.getByRole('button', { name: '新增材料' }).click()
+  await page.getByLabel('材料名称').fill('边界测试材料')
+  await page.getByLabel('型号').fill('FX-02')
+  await page.getByLabel('规格').fill('fixture specification')
+  await page.getByLabel('单位').fill('件')
+  await page.getByLabel('选择材料图片').setInputFiles({
+    name: 'fixture.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+XQAAAABJRU5ErkJggg==',
+      'base64',
+    ),
+  })
+  await expect(page.getByLabel('方形裁剪预览')).toBeVisible()
+  await page.getByLabel('裁剪缩放').press('ArrowRight')
+  await page.getByRole('button', { name: '保存材料' }).click()
+  await expect(page.getByText('材料及图片已保存')).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __catalogSaveName?: string }).__catalogSaveName,
+    ),
+  ).resolves.toBe('边界测试材料')
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __imageSaveSquare?: string }).__imageSaveSquare,
+    ),
+  ).resolves.toMatch(/^iVBOR/)
+  await expect(browserErrors).toEqual([])
+})
+
+test('purchaser maintains a supplier and material quote through Tauri commands', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    const material = {
+      id: '00000000-0000-4000-8000-000000000001',
+      sku: null,
+      nameZh: '报价测试材料',
+      nameFr: null,
+      aliases: [],
+      brand: null,
+      model: 'QT-01',
+      specification: 'fixture',
+      unit: '件',
+      notes: null,
+      version: 1,
+      prices: [],
+    }
+    const supplier = {
+      id: '00000000-0000-4000-8000-000000000002',
+      businessCode: 'SUP-001',
+      name: 'fixture active supplier',
+      contactName: null,
+      address: null,
+      city: null,
+      country: null,
+      phone: null,
+      whatsapp: null,
+      email: null,
+      paymentTerms: null,
+      deliveryLeadTime: null,
+      isPreferred: true,
+      isBlacklisted: false,
+      isActive: true,
+      version: 1,
+    }
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              supplier?: { name?: string }
+              price?: { unitPriceMinor?: string }
+            },
+          ) {
+            if (command === 'search_catalog') return Promise.resolve([material])
+            if (command === 'list_suppliers') return Promise.resolve([supplier])
+            if (command === 'save_supplier') {
+              Object.assign(window, {
+                __supplierSaveName: args?.supplier?.name,
+              })
+              return Promise.resolve()
+            }
+            if (command === 'add_material_price') {
+              Object.assign(window, {
+                __priceSaveMinor: args?.price?.unitPriceMinor,
+              })
+              return Promise.resolve()
+            }
+            return Promise.resolve()
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await page.getByRole('button', { name: '供应商管理' }).click()
+  await page.getByRole('button', { name: '新增供应商' }).click()
+  await page.getByLabel('供应商编码').fill('SUP-NEW')
+  await page.getByLabel('供应商名称').fill('新建测试供应商')
+  await page.getByRole('button', { name: '保存供应商' }).click()
+  await expect(page.getByText('供应商已保存')).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __supplierSaveName?: string }).__supplierSaveName,
+    ),
+  ).resolves.toBe('新建测试供应商')
+  await page.getByRole('button', { name: '关闭供应商管理' }).click()
+
+  await page.getByRole('button', { name: '维护报价' }).click()
+  await page.getByRole('combobox', { name: /供应商/ }).click()
+  await page.getByText('SUP-001 · fixture active supplier').click()
+  await page.getByLabel('单价（最小货币单位）').fill('1250')
+  await page.getByRole('button', { name: '保存报价' }).click()
+  await expect(page.getByText('供应商报价已保存')).toBeVisible()
+  await expect(
+    page.evaluate(
+      () => (window as Window & { __priceSaveMinor?: string }).__priceSaveMinor,
+    ),
+  ).resolves.toBe('1250')
+  await expect(browserErrors).toEqual([])
+})
+
+test('purchaser creates, edits and submits a requisition through Tauri commands', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    const material = {
+      id: '00000000-0000-4000-8000-000000000201',
+      sku: 'FIXTURE-REQ',
+      nameZh: '请购测试电缆',
+      nameFr: 'Câble de demande',
+      aliases: [],
+      brand: null,
+      model: 'RQ-01',
+      specification: 'fixture specification',
+      unit: '米',
+      notes: null,
+      version: 1,
+      prices: [
+        {
+          priceId: '00000000-0000-4000-8000-000000000202',
+          supplierId: '00000000-0000-4000-8000-000000000203',
+          supplierName: 'fixture requisition supplier',
+          isPreferredSupplier: true,
+          currency: 'XOF',
+          unitPriceMinor: '1250',
+          unit: '米',
+          effectiveAt: '2026-10-10',
+        },
+      ],
+    }
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              draft?: { lines?: unknown[]; id?: string }
+              orderId?: string
+            },
+          ) {
+            if (command === 'search_catalog') return Promise.resolve([material])
+            if (command === 'save_requisition_draft') {
+              Object.assign(window, { __requisitionDraft: args?.draft })
+              return Promise.resolve({
+                subtotalMinor: '3125',
+                lineDiscountMinor: '125',
+                orderDiscountMinor: '0',
+                freightMinor: '0',
+                taxMinor: '540',
+                totalMinor: '3540',
+              })
+            }
+            if (command === 'submit_requisition_draft') {
+              Object.assign(window, { __submittedRequisitionId: args?.orderId })
+              return Promise.resolve()
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('请购测试电缆 · RQ-01').click()
+  await page.getByLabel('数量').fill('2.5')
+  await page.getByLabel('行折扣（最小货币单位）').fill('125')
+  await expect(page.getByLabel('订单总金额')).toHaveText('3540 XOF')
+  await page.getByRole('button', { name: '新增材料行' }).click()
+  await expect(page.getByText('第 2 行')).toBeVisible()
+  await page.getByLabel('材料').last().click()
+  await page
+    .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+    .last()
+    .getByText('请购测试电缆 · RQ-01')
+    .click()
+  await page.getByLabel('行币种').last().click()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(page.getByLabel('订单总金额')).toHaveText(
+    '待供应商拆单后汇总主币种',
+  )
+  await expect(page.getByText(/源币种小计：/)).toBeVisible()
+  await page.getByRole('button', { name: '删除第 2 行' }).click()
+  await expect(page.getByText('第 2 行')).not.toBeVisible()
+  await page.getByRole('button', { name: '提交确认' }).click()
+  await expect(page.getByText('采购申请已提交，状态：待确认')).toBeVisible()
+  await expect(page.getByText('待确认', { exact: true })).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __requisitionDraft?: { lines?: unknown[] } })
+          .__requisitionDraft?.lines?.length,
+    ),
+  ).resolves.toBe(1)
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __requisitionDraft?: {
+              lines?: Array<{ supplierId?: string | null }>
+            }
+          }
+        ).__requisitionDraft?.lines?.[0]?.supplierId,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000203')
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __submittedRequisitionId?: string })
+          .__submittedRequisitionId,
+    ),
+  ).resolves.toMatch(/^[0-9a-f-]{36}$/)
+  await expect(browserErrors).toEqual([])
+})
+
+test('purchaser allocates every parent line into supplier-specific child orders', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              parentOrderId?: string
+              allocations?: Array<{
+                supplierId?: string
+                currency?: string
+                childDisplayNo?: string
+                lockedExchangeRateDecimal?: string
+              }>
+            },
+          ) {
+            if (command !== 'allocate_supplier_child_orders') {
+              return Promise.reject(new Error(`unexpected command: ${command}`))
+            }
+            Object.assign(window, { __supplierAllocations: args })
+            return Promise.resolve(
+              args?.allocations?.map((allocation, index) => ({
+                childOrderId: `00000000-0000-4000-8000-00000000041${index}`,
+                supplierId: allocation.supplierId,
+                currency: allocation.currency,
+                sourceTotalMinor: index === 0 ? '3125' : '900',
+                primaryTotalMinor: index === 0 ? '3125' : '554000',
+                lockedExchangeRateDecimal: allocation.lockedExchangeRateDecimal,
+              })) ?? [],
+            )
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/?test=allocation')
+  await page.getByLabel('fixture cable 供应商').click()
+  await page
+    .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+    .last()
+    .getByText('fixture supplier A', { exact: true })
+    .click()
+  await page
+    .getByLabel('fixture cable 子单编号')
+    .fill('CI-FIXTURE-20261011-SUP-001-0001')
+  await page.getByLabel('fixture pipe 供应商').click()
+  await page
+    .locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+    .last()
+    .getByText('fixture supplier B', { exact: true })
+    .click()
+  await page
+    .getByLabel('fixture pipe 子单编号')
+    .fill('CI-FIXTURE-20261011-SUP-002-0001')
+  await page.getByLabel('fixture pipe 锁定汇率').fill('615.5')
+  await page.getByRole('button', { name: '创建供应商子单' }).click()
+  await expect(
+    page.getByText('已创建 2 张供应商子单，父单明细分配已锁定。'),
+  ).toBeVisible()
+  await expect(
+    page.getByText('USD · 900 · 锁定汇率 615.5 · 主币种合计 554000'),
+  ).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __supplierAllocations?: {
+              parentOrderId?: string
+              allocations?: Array<{
+                currency?: string
+                supplierId?: string
+              }>
+            }
+          }
+        ).__supplierAllocations,
+    ),
+  ).resolves.toMatchObject({
+    parentOrderId: '00000000-0000-4000-8000-000000000401',
+    allocations: [
+      {
+        supplierId: '00000000-0000-4000-8000-000000000402',
+        currency: 'XOF',
+      },
+      {
+        supplierId: '00000000-0000-4000-8000-000000000403',
+        currency: 'USD',
+      },
+    ],
+  })
+  await expect(browserErrors).toEqual([])
+})
+
+test('purchaser creates a price-free RFQ through the Tauri boundary', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command !== 'create_rfq')
+              return Promise.reject(new Error(`unexpected command: ${command}`))
+            Object.assign(window, { __rfqInput: args?.input })
+            return Promise.resolve({ ...args?.input, itemCount: 2 })
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/?test=rfq')
+  await page.getByLabel('RFQ 供应商').click()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await page.getByLabel('询价单编号').fill('CI-FIXTURE-20261011-RFQ-0001')
+  await page.getByRole('button', { name: '创建询价单' }).click()
+  await expect(page.getByText(/已创建，包含 2 条无价格明细/)).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __rfqInput?: Record<string, unknown> })
+          .__rfqInput,
+    ),
+  ).resolves.toMatchObject({
+    sourceOrderId: '00000000-0000-4000-8000-000000000501',
+    supplierId: '00000000-0000-4000-8000-000000000502',
+    currency: 'XOF',
+  })
+  await expect(browserErrors).toEqual([])
+})
+
+test('purchaser completes supplier-child terms before sending the order', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: { input?: Record<string, unknown>; orderId?: string },
+          ) {
+            if (command === 'save_supplier_child_terms') {
+              Object.assign(window, { __supplierTerms: args?.input })
+              return Promise.resolve({ totalMinor: '3511' })
+            }
+            if (command === 'send_supplier_order') {
+              Object.assign(window, { __sentSupplierOrder: args?.orderId })
+              return Promise.resolve()
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/?test=supplier-terms')
+  await page.getByRole('button', { name: '发送供应商' }).click()
+  await expect(page.getByText('请先保存税、折扣和运费条款。')).toBeVisible()
+  await page.getByLabel('fixture cable 行折扣').fill('125')
+  await page.getByLabel('fixture cable 行运费').fill('25')
+  await page.getByLabel('子单税率').fill('1800')
+  await page.getByLabel('子单单据折扣').fill('100')
+  await page.getByLabel('子单单据运费').fill('50')
+  await page.getByRole('button', { name: '保存子单条款' }).click()
+  await expect(page.getByText('子单条款已保存，含税总额 3511。')).toBeVisible()
+  await page.getByRole('button', { name: '发送供应商' }).click()
+  await expect(
+    page.getByText('供应商子单已发送，可开始登记收货。'),
+  ).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __supplierTerms?: {
+              taxRateBasisPoints?: number
+              lines?: Array<{ lineDiscount?: { minor?: string } }>
+            }
+          }
+        ).__supplierTerms,
+    ),
+  ).resolves.toMatchObject({
+    taxRateBasisPoints: 1800,
+    lines: [{ lineDiscount: { minor: '125' } }],
+  })
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __sentSupplierOrder?: string })
+          .__sentSupplierOrder,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000451')
+  await expect(browserErrors).toEqual([])
+})
+
+test('receiver records partial delivery and closes a supplier order with conditions', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: { input?: Record<string, unknown>; reason?: string },
+          ) {
+            if (command === 'record_receipt') {
+              Object.assign(window, { __receiptInput: args?.input })
+              return Promise.resolve({
+                id: args?.input?.id,
+                orderId: args?.input?.orderId,
+                workflowStatus: 'sent',
+                receivedItemCount: 1,
+              })
+            }
+            if (command === 'close_supplier_order_with_conditions') {
+              Object.assign(window, { __conditionalCloseReason: args?.reason })
+              return Promise.resolve()
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/?test=receipt')
+  await page.getByLabel('fixture pipe 实收数量').fill('1')
+  await page.getByRole('button', { name: '登记收货' }).click()
+  await expect(page.getByText('收货已登记，共 1 条明细。')).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __receiptInput?: { items?: Array<{ quantity?: string }> }
+          }
+        ).__receiptInput?.items?.[0]?.quantity,
+    ),
+  ).resolves.toBe('1')
+  await page.getByRole('button', { name: '按有条件完成关闭' }).click()
+  await expect(page.getByText('有条件完成原因必填。')).toBeVisible()
+  await page.getByLabel('有条件完成原因').fill('现场缺少余料，按条件关闭。')
+  await page.getByRole('button', { name: '按有条件完成关闭' }).click()
+  await expect(page.getByLabel('收货状态')).toHaveText('已完成（有条件）')
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __conditionalCloseReason?: string })
+          .__conditionalCloseReason,
+    ),
+  ).resolves.toBe('现场缺少余料，按条件关闭。')
+  await expect(browserErrors).toEqual([])
+})
+
+test('purchaser rejects with a reason and posts an immutable internal comment', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              orderId?: string
+              reason?: string
+              body?: string
+              allowSelfApproval?: boolean
+            },
+          ) {
+            if (command === 'list_order_comments') {
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000304',
+                  orderId: args?.orderId,
+                  authorId: '00000000-0000-4000-8000-000000000302',
+                  body: '既有不可变评论',
+                  createdAt: 0,
+                  notificationCount: 0,
+                },
+              ])
+            }
+            if (command === 'list_order_audits') {
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000305',
+                  orderId: args?.orderId,
+                  actorId: '00000000-0000-4000-8000-000000000302',
+                  action: 'confirmed_revised',
+                  reason: '采购员更正交付地址。',
+                  previousJson: JSON.stringify({
+                    deliveryAddress: '旧地址',
+                    notes: null,
+                  }),
+                  nextJson: JSON.stringify({
+                    deliveryAddress: '新地址',
+                    notes: '已核对',
+                  }),
+                  createdAt: 0,
+                },
+              ])
+            }
+            if (command === 'get_approval_policy') {
+              return Promise.resolve({ allowSelfApproval: false })
+            }
+            if (command === 'set_approval_policy') {
+              Object.assign(window, {
+                __approvalPolicyUpdate: {
+                  allowSelfApproval: args?.allowSelfApproval,
+                  reason: args?.reason,
+                },
+              })
+              return Promise.resolve()
+            }
+            if (command === 'reject_requisition') {
+              Object.assign(window, { __rejectionReason: args?.reason })
+              return Promise.resolve()
+            }
+            if (command === 'add_order_comment') {
+              return Promise.resolve({
+                id: '00000000-0000-4000-8000-000000000303',
+                orderId: args?.orderId,
+                authorId: '00000000-0000-4000-8000-000000000302',
+                body: args?.body,
+                createdAt: 0,
+                notificationCount: 1,
+              })
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/?test=workflow')
+  await expect(page.getByText('既有不可变评论')).toBeVisible()
+  await expect(page.getByText('修改原因：采购员更正交付地址。')).toBeVisible()
+  await expect(page.getByText(/交付地址：旧地址 → 新地址/)).toBeVisible()
+  await page.getByRole('button', { name: '保存策略' }).click()
+  await expect(page.getByText('策略修改原因必填。')).toBeVisible()
+  await page.getByLabel('允许自审').check()
+  await page.getByLabel('策略修改原因').fill('临时授权自审。')
+  await page.getByRole('button', { name: '保存策略' }).click()
+  await expect(
+    page.getByText('自审策略已更新，并已写入永久审计。'),
+  ).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __approvalPolicyUpdate?: {
+              allowSelfApproval?: boolean
+              reason?: string
+            }
+          }
+        ).__approvalPolicyUpdate,
+    ),
+  ).resolves.toEqual({
+    allowSelfApproval: true,
+    reason: '临时授权自审。',
+  })
+  await page.getByRole('button', { name: '驳回订单' }).click()
+  await expect(page.getByText('驳回原因必填。')).toBeVisible()
+  await page.getByLabel('驳回原因').fill('规格不完整，请补充。')
+  await page.getByRole('button', { name: '驳回订单' }).click()
+  await expect(page.getByLabel('审批状态')).toHaveText('已驳回')
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __rejectionReason?: string }).__rejectionReason,
+    ),
+  ).resolves.toBe('规格不完整，请补充。')
+  await page.getByLabel('留言（支持 @某人）').fill('@申请人 请补充规格。')
+  await page.getByRole('button', { name: '发送评论' }).click()
+  await expect(page.getByText('@申请人 请补充规格。')).toBeVisible()
+  await expect(
+    page.getByText('评论已发送，已通知 1 位被提及成员；发送后不可编辑或删除。'),
+  ).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
