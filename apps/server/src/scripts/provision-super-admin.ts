@@ -1,6 +1,7 @@
 import argon2 from 'argon2'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
+import { runMigrations } from '../db/migration-runner.js'
 import { createPostgresPool, waitForDatabase } from '../db/pool.js'
 
 const inputSchema = z.object({
@@ -17,6 +18,7 @@ if (!databaseUrl)
 
 const pool = createPostgresPool(databaseUrl)
 await waitForDatabase(pool)
+await runMigrations(pool)
 const client = await pool.connect()
 try {
   const id = randomUUID()

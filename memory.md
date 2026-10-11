@@ -3,6 +3,16 @@
 **Last updated:** 2026-10-11  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## T02-B PostgreSQL authentication-store acceptance — 2026-10-11
+
+- Selected child: **T02-B — COMPLETED**. Scope is limited to the PostgreSQL authentication store and initial-super-administrator provisioning path; callers are `AuthService` and the production server bootstrap, with no desktop/Rust/UI/shared-contract/Toolbox change and no schema migration.
+- The checkpoint changes make provisioning run the checksum-protected migrations before inserting the initial super administrator, and make a new login revoke (rather than delete) prior active sessions. The per-account `FOR UPDATE` lock serializes replacement so the final state has one active server session and retained revoked-session history.
+- Added the PostgreSQL integration test for repeat migration, role lookup, session replacement and initial provisioning. It uses only generated fixture identifiers and the disposable `TEST_DATABASE_URL` path.
+- Local evidence: `npx prettier --check` (after formatting), `npm run lint --workspace @honsen/server`, `npm run typecheck --workspace @honsen/server`, and `npm run build --workspace @honsen/server` passed. With explicit one-time authorization, the root WSL Docker Engine ran only `compose.test.yaml` under project name `honsen-procure-t02b`; the container became healthy, Windows Node.js successfully ran `SELECT 1` through `127.0.0.1:54329`, and `npm run test --workspace @honsen/server -- src/db/migration-runner.test.ts src/db/postgres-auth-store.test.ts` passed 3/3 without skips. `down --volumes` removed the project container/network and the Windows port was closed afterward.
+- **BLOCKER:** None for T02-B.
+- **DEFERRED:** T02-C's CAPTCHA/login/first-login/restricted-navigation DOM acceptance follows T02-B and was not started. T04-A requires an authorized deployment setup window. T15 remains blocked by permanent Toolbox identity approval.
+- **WARNING:** The root-WSL Docker exception was used only under this explicit request and does not change the default environment policy. Checkpoint reference: `HEAD` on `codex/t02-b-auth-store`; dirty files must be empty after the local commit.
+
 ## CI quality-workflow recovery — 2026-10-11
 
 - Selected scope: repair and verify the existing single GitHub Actions quality workflow only. No business, database, Docker Compose, dependency, native Tauri, Windows Runner, or macOS Runner change was made.
