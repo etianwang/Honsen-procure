@@ -48,7 +48,7 @@ When the user says **「开始任务」**, perform this startup protocol before 
 
 1. Read `AGENTS.md`, `memory.md`, and the relevant task/child entries and acceptance criteria in `docs/BUILD-TASKS.md`; use `docs/ROADMAP.md` to confirm milestone status and dependencies. Read the required product/architecture/security/test documents for the selected scope.
 2. Inspect `git status --short`, recent commits, and the diff for every existing uncommitted change. Preserve valid user or prior-session work; never reset, clean, overwrite, or silently fold unrelated changes into the new task.
-3. Identify the highest-priority unblocked **single minimal independently verifiable child task**. State its callers, schemas/migrations, tests, fixtures, UI/API/Rust boundaries, data-loss or exposure risks, and prerequisite status before editing.
+3. Identify the highest-priority unblocked **single minimal independently verifiable child task**. When multiple child tasks are available, prefer one whose prerequisites are satisfied, does not expand the modification scope, and can be accepted independently. State its callers, schemas/migrations, tests, fixtures, UI/API/Rust boundaries, data-loss or exposure risks, and prerequisite status before editing.
 4. If a required dependency, authority, environment, or acceptance-boundary decision is blocked, do not force work around it or mark it complete. Keep all existing code, record the exact blocker and safe next action in `memory.md`, then stop.
 5. For application, installer, update, release, or publishing changes, complete the Toolbox preflight above in its stated order. For contract conflicts, report the impact and proposed repair, then wait for approval.
 
