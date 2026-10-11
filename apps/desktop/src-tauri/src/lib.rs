@@ -340,6 +340,32 @@ pub struct SyncPushView {
     pub pending_count: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPullView {
+    pub applied_count: usize,
+    pub next_cursor: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPullChangeInput {
+    pub cursor: String,
+    pub entity_type: String,
+    pub entity_id: Uuid,
+    pub operation: String,
+    pub version: i64,
+    pub payload: serde_json::Value,
+    pub changed_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPullPageInput {
+    pub changes: Vec<SyncPullChangeInput>,
+    pub next_cursor: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SyncPushResponse {
@@ -2774,6 +2800,70 @@ impl LocalAuthService {
         transaction.commit().map_err(|_| AuthError::Database)
     }
 
+    pub fn apply_sync_pull_page(
+        &self,
+        page: SyncPullPageInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_catalog_read(now)?;
+        if page.changes.len() > 500 || !valid_sync_cursor(&page.next_cursor) {
+            return Err(AuthError::InvalidInput);
+        }
+        let mut prior_cursor = -1_i64;
+        for change in &page.changes {
+            let cursor = parse_sync_cursor(&change.cursor)?;
+            if cursor <= prior_cursor
+                || !matches!(change.operation.as_str(), "upsert" | "soft_delete")
+                || change.version < 1
+                || !change.payload.is_object()
+                || change.changed_at.len() > 64
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            prior_cursor = cursor;
+        }
+        if !page.changes.is_empty() && parse_sync_cursor(&page.next_cursor)? < prior_cursor {
+            return Err(AuthError::InvalidInput);
+        }
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        for change in &page.changes {
+            let remote_payload =
+                serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
+            let pending: Option<(String, i64, String)> = transaction.query_row(
+                "SELECT event_id, base_version, payload_json FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL ORDER BY created_at, event_id LIMIT 1",
+                params![change.entity_type, change.entity_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).optional().map_err(|_| AuthError::Database)?;
+            if let Some((event_id, base_version, local_payload)) = pending {
+                let conflict_exists: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM local_sync_conflicts WHERE event_id = ?1 AND server_version = ?2)",
+                    params![event_id, change.version], |row| row.get(0),
+                ).map_err(|_| AuthError::Database)?;
+                if !conflict_exists {
+                    transaction.execute(
+                        "INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![Uuid::new_v4().to_string(), event_id, change.entity_type, change.entity_id.to_string(), base_version, change.version, local_payload, remote_payload, unix_seconds(now)],
+                    ).map_err(|_| AuthError::Database)?;
+                }
+                continue;
+            }
+            transaction.execute(
+                "INSERT INTO local_sync_remote_entities (entity_type, entity_id, operation, server_version, payload_json, changed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(entity_type, entity_id) DO UPDATE SET operation = excluded.operation, server_version = excluded.server_version, payload_json = excluded.payload_json, changed_at = excluded.changed_at WHERE excluded.server_version >= local_sync_remote_entities.server_version",
+                params![change.entity_type, change.entity_id.to_string(), change.operation, change.version, remote_payload, change.changed_at],
+            ).map_err(|_| AuthError::Database)?;
+            transaction.execute(
+                "INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)",
+                params![change.entity_type, change.entity_id.to_string(), change.version],
+            ).map_err(|_| AuthError::Database)?;
+        }
+        transaction.execute(
+            "UPDATE local_sync_state SET last_pull_cursor = ?1, last_success_at = ?2 WHERE singleton = 1",
+            params![page.next_cursor, unix_seconds(now)],
+        ).map_err(|_| AuthError::Database)?;
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
     pub fn cache_sync_access_token(&self, account_id: Uuid, token: &str) -> Result<(), AuthError> {
         if token.len() < 32 {
             return Err(AuthError::InvalidInput);
@@ -2859,6 +2949,54 @@ impl LocalAuthService {
         Ok(SyncPushView {
             accepted_count,
             pending_count: self.pending_sync_events(100, now)?.len(),
+        })
+    }
+
+    pub async fn pull_sync_https(&self, now: SystemTime) -> Result<SyncPullView, AuthError> {
+        self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        let token = self
+            .credential_vault
+            .load_sync_token(account_id)?
+            .ok_or(AuthError::NoActiveSession)?;
+        let cursor: String = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        let endpoint = sync_pull_endpoint()?;
+        let response = reqwest::Client::builder()
+            .https_only(true)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?
+            .get(endpoint)
+            .bearer_auth(token)
+            .query(&[("cursor", cursor), ("limit", "500".to_owned())])
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AuthError::NoActiveSession);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        let page = response
+            .json::<SyncPullPageInput>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        let applied_count = page.changes.len();
+        let next_cursor = page.next_cursor.clone();
+        self.apply_sync_pull_page(page, now)?;
+        Ok(SyncPullView {
+            applied_count,
+            next_cursor,
         })
     }
 
@@ -2995,6 +3133,15 @@ pub mod commands {
         auth: State<'_, LocalAuthService>,
     ) -> Result<super::SyncPushView, CommandError> {
         auth.push_pending_https(SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn pull_sync(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<super::SyncPullView, CommandError> {
+        auth.pull_sync_https(SystemTime::now())
             .await
             .map_err(Into::into)
     }
@@ -3340,6 +3487,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0017_local_sync_state",
             include_str!("../migrations/0017_local_sync_state.sql"),
         ),
+        (
+            "0018_local_sync_remote_entities",
+            include_str!("../migrations/0018_local_sync_remote_entities.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -3619,12 +3770,28 @@ fn calculate_requisition(
     })
 }
 
-fn sync_push_endpoint() -> Result<reqwest::Url, AuthError> {
-    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
-    sync_push_endpoint_from(&value)
+fn valid_sync_cursor(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 20 && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn sync_push_endpoint_from(value: &str) -> Result<reqwest::Url, AuthError> {
+fn parse_sync_cursor(value: &str) -> Result<i64, AuthError> {
+    if !valid_sync_cursor(value) {
+        return Err(AuthError::InvalidInput);
+    }
+    value.parse().map_err(|_| AuthError::InvalidInput)
+}
+
+fn sync_push_endpoint() -> Result<reqwest::Url, AuthError> {
+    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    sync_endpoint_from(&value, "push")
+}
+
+fn sync_pull_endpoint() -> Result<reqwest::Url, AuthError> {
+    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    sync_endpoint_from(&value, "pull")
+}
+
+fn sync_endpoint_from(value: &str, operation: &str) -> Result<reqwest::Url, AuthError> {
     let mut endpoint = reqwest::Url::parse(&value).map_err(|_| AuthError::SyncTransport)?;
     if endpoint.scheme() != "https"
         || endpoint.host_str().is_none()
@@ -3636,7 +3803,7 @@ fn sync_push_endpoint_from(value: &str) -> Result<reqwest::Url, AuthError> {
         return Err(AuthError::SyncTransport);
     }
     endpoint.set_path(&format!(
-        "{}/api/sync/push",
+        "{}/api/sync/{operation}",
         endpoint.path().trim_end_matches('/')
     ));
     Ok(endpoint)
@@ -4149,19 +4316,133 @@ mod tests {
     #[test]
     fn sync_endpoint_requires_clean_https_base_url() {
         assert_eq!(
-            sync_push_endpoint_from("https://sync.example.test/root")
+            sync_endpoint_from("https://sync.example.test/root", "push")
                 .unwrap()
                 .as_str(),
             "https://sync.example.test/root/api/sync/push",
         );
         assert_eq!(
-            sync_push_endpoint_from("http://sync.example.test").unwrap_err(),
+            sync_endpoint_from("http://sync.example.test", "push").unwrap_err(),
             AuthError::SyncTransport,
         );
         assert_eq!(
-            sync_push_endpoint_from("https://user:secret@sync.example.test").unwrap_err(),
+            sync_endpoint_from("https://user:secret@sync.example.test", "push").unwrap_err(),
             AuthError::SyncTransport,
         );
+    }
+
+    #[test]
+    fn pull_page_advances_cursor_atomically_and_preserves_local_conflicts() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let purchaser_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: purchaser_id,
+                    username: "sync-purchaser".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "sync-purchaser",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let entity_id = Uuid::new_v4();
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "1".into(),
+                        entity_type: "material".into(),
+                        entity_id,
+                        operation: "upsert".into(),
+                        version: 1,
+                        payload: serde_json::json!({ "nameZh": "remote fixture" }),
+                        changed_at: "2026-10-11T00:00:00Z".into(),
+                    }],
+                    next_cursor: "1".into(),
+                },
+                now,
+            )
+            .unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            let cursor: String = connection
+                .query_row("SELECT last_pull_cursor FROM local_sync_state", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(cursor, "1");
+            let remote_count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_remote_entities",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(remote_count, 1);
+        }
+        service
+            .save_material(
+                MaterialInput {
+                    id: entity_id,
+                    sku: None,
+                    name_zh: "local fixture".into(),
+                    name_fr: None,
+                    aliases: vec![],
+                    brand: None,
+                    model: "fixture".into(),
+                    specification: "fixture".into(),
+                    unit: "pcs".into(),
+                    notes: None,
+                    is_active: true,
+                    version: 1,
+                },
+                now,
+            )
+            .unwrap();
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "2".into(),
+                        entity_type: "material".into(),
+                        entity_id,
+                        operation: "upsert".into(),
+                        version: 2,
+                        payload: serde_json::json!({ "nameZh": "remote newer" }),
+                        changed_at: "2026-10-11T00:01:00Z".into(),
+                    }],
+                    next_cursor: "2".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let conflicts: i64 = connection
+            .query_row("SELECT COUNT(*) FROM local_sync_conflicts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(conflicts, 1);
+        let cursor: String = connection
+            .query_row("SELECT last_pull_cursor FROM local_sync_state", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cursor, "2");
     }
 
     #[test]
@@ -5477,5 +5758,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(sync_state_table_exists, 1);
+        let remote_entities_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_sync_remote_entities'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remote_entities_table_exists, 1);
     }
 }
