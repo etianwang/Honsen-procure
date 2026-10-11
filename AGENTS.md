@@ -38,6 +38,15 @@ Then compare the project with `docs/HONSEN_TOOLBOX_INTEGRATION.md` and report an
 - For installer/update work: update `docs/HONSEN_TOOLBOX_INTEGRATION.md` with actual values and end-to-end evidence.
 - Never delete user data, overwrite production databases, or deploy without explicit approval.
 
+## Cross-platform development and test environment
+
+- Use Node.js `24.18.0` from `.nvmrc` and `npm ci` with the committed `package-lock.json`; do not regenerate the lock file without a dependency change.
+- On Windows, run Docker Engine and the Compose Plugin inside WSL2 Ubuntu, not Docker Desktop. On macOS, use Colima with its Docker context. Verify `docker`, `docker compose`, and `docker buildx` before local container tests.
+- Run disposable PostgreSQL tests with `docker compose --env-file .env.test -f compose.test.yaml`. Copy `.env.test.example` locally; `.env.test` stays untracked and contains test-only credentials. The container binds only to `127.0.0.1:54329`, has no persistent volume, and must be removed with `down --volumes` after testing.
+- Never use `.env`, deployment credentials, a business database, or hardcoded system paths for tests. Use repository-relative paths and environment variables so Windows/WSL2 and macOS/Colima use the same commands.
+- Before commits, run the affected-package checks and the focused test command. Keep the Git worktree clean except for the selected task, make one local checkpoint commit after acceptance, and never push without explicit approval.
+- WSL distributions that default to `root` are supported only for bootstrap. Create and use a normal development user deliberately; do not change the default WSL user or Docker group membership without explicit approval.
+
 ## Long-lived task lifecycle and cross-session handoff
 
 `docs/ROADMAP.md`, `docs/BUILD-TASKS.md` and `memory.md` are the joint source of truth for progress. Preserve the original requirements, dependency graph and complete acceptance gates in those documents; implementation, a passing focused test, or a historical result alone never completes a parent task or milestone.

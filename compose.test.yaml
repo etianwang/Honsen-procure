@@ -1,0 +1,14 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_TEST_DATABASE:?Set POSTGRES_TEST_DATABASE in .env.test}
+      POSTGRES_USER: ${POSTGRES_TEST_USER:?Set POSTGRES_TEST_USER in .env.test}
+      POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD:?Set POSTGRES_TEST_PASSWORD in .env.test}
+    ports:
+      - '127.0.0.1:${POSTGRES_TEST_PORT:-54329}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 5s
+      timeout: 5s
+      retries: 10

@@ -6,17 +6,17 @@ The authoritative execution order and mandatory per-task DOM testing gate are in
 
 Original milestone objectives below are retained. Their checkboxes concern the complete stated objective, not an implemented subset. The task acceptance register and child items in BUILD-TASKS provide evidence and remaining work; memory.md provides the current handoff. Cross-stage contributions do not redefine milestones or dependencies.
 
-| Milestone | Acceptance      | Contributing tasks (reverse mapping is in BUILD-TASKS) | Outstanding acceptance                                                                                                                                                                                                                              |
-| --------- | --------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0        | [ ] IN PROGRESS | T00, T01, T02, T03, T04, T05                           | Authorized initial master-data records are BLOCKED pending deployment account/setup authority. T02 PostgreSQL integration gate remains unproven; foundation CI configuration is not a successful CI run. M0 is not ready for full stage acceptance. |
-| M1        | [ ] IN PROGRESS | T02, T03, T04, T05, T13                                | Close PostgreSQL/account and actual master-data acceptance; retain administration hardening. Local catalog slice is accepted, not the whole milestone.                                                                                              |
-| M2        | [ ] IN PROGRESS | T01, T06, T07, T08, T09, T11, T12, T14                 | Production order/allocation/RFQ routing, numbering, full receiving/archival, bilingual PDF/printing/export and final snapshot/Windows acceptance.                                                                                                   |
-| M3        | [ ] IN PROGRESS | T02, T03, T08, T10, T11, T14                           | PostgreSQL integration evidence, complete safe entity projection (purchase-order Pull staging is a tested partial T10 slice), desktop startup/retry/WebSocket/revocation and multi-device offline/reconnect acceptance.                             |
-| M4        | [ ] BLOCKED     | T09, T11, T12, T13, T14, T15                           | Release identity approval blocks T15; remaining attachment, export, backup/localization/performance, print/accessibility and Windows acceptance have not passed.                                                                                    |
+| Milestone | Acceptance      | Contributing tasks (reverse mapping is in BUILD-TASKS) | Outstanding acceptance                                                                                                                                                                                                                                            |
+| --------- | --------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0        | [ ] IN PROGRESS | T00, T01, T02, T03, T04, T05                           | Authorized initial master-data records are BLOCKED pending deployment account/setup authority. T02-A PostgreSQL migration/sync-store integration passed locally, but T02-B/C and foundation CI acceptance remain open. M0 is not ready for full stage acceptance. |
+| M1        | [ ] IN PROGRESS | T02, T03, T04, T05, T13                                | Close PostgreSQL/account and actual master-data acceptance; retain administration hardening. Local catalog slice is accepted, not the whole milestone.                                                                                                            |
+| M2        | [ ] IN PROGRESS | T01, T06, T07, T08, T09, T11, T12, T14                 | Production order/allocation/RFQ routing, numbering, full receiving/archival, bilingual PDF/printing/export and final snapshot/Windows acceptance.                                                                                                                 |
+| M3        | [ ] IN PROGRESS | T02, T03, T08, T10, T11, T14                           | T02-A PostgreSQL migration/sync-store evidence is retained; complete account/session PostgreSQL acceptance, safe entity projection, desktop startup/retry/WebSocket/revocation and multi-device offline/reconnect acceptance remain open.                         |
+| M4        | [ ] BLOCKED     | T09, T11, T12, T13, T14, T15                           | Release identity approval blocks T15; remaining attachment, export, backup/localization/performance, print/accessibility and Windows acceptance have not passed.                                                                                                  |
 
 Accepted tasks: **T00, T01, T03, T05, T06, T07**. Partial tasks: **T02, T04, T08, T09, T10**. Not started: **T11–T14**. Blocked: **T15**. Partial tasks remain unchecked even where some historical gates passed.
 
-Evidence is committed code at `077b064`, committed tests and historical executed results recorded by the prior audit and memory.md. That recorded gate includes 31 JavaScript tests, 11 Rust tests and 16 Playwright tests; two PostgreSQL integration suites were skipped. Counts are not newly rerun or archived CI results. No new full tests/builds were run for this documentation change. The uncommitted Rust draft is not included in accepted evidence and prevents treating historical passing results as verification of the current worktree.
+Evidence is committed code at `077b064`, committed tests and historical executed results recorded by the prior audit and memory.md. That recorded gate includes 31 JavaScript tests, 11 Rust tests and 16 Playwright tests. On 2026-10-11, the two PostgreSQL integration suites formerly skipped locally passed against a disposable Docker PostgreSQL 16 container; this accepts T02-A only. Counts are not a new full or archived CI result. The uncommitted Rust draft is not included in accepted evidence and prevents treating historical passing results as verification of the current worktree.
 
 ## Milestone 0 — Foundation
 
@@ -38,7 +38,7 @@ M0 item tracking (all seven original objectives, in order):
 | 4 — SQLite authentication/trusted boundary          | COMPLETED     | T03 migrations, offline verifier and Rust/DOM evidence.                                                                        |
 | 5 — Local catalog/crop/trusted commands             | COMPLETED     | T05 SQLite repositories and material/supplier/price/crop tests.                                                                |
 | 6 — Authorized actual initial records               | BLOCKED       | T04-A; approved code mapping exists, authorized deployment records do not.                                                     |
-| 7 — CI and DOM execution gate                       | IN PROGRESS   | Historical local gates/DOM passed, but no verifiable successful CI PostgreSQL integration run; T02-A/B/C remain open.          |
+| 7 — CI and DOM execution gate                       | IN PROGRESS   | T02-A local PostgreSQL migration/sync-store evidence passed; T02-B/C and a verifiable successful CI run remain open.           |
 
 ## Milestone 1 — Local catalog and protected backend
 
@@ -83,7 +83,7 @@ M0 item tracking (all seven original objectives, in order):
 
 ## Current next-task recommendation
 
-Close T02 disposable PostgreSQL integration and original login/role gates first, then T04 authorized initial-record acceptance. Approve the cross-task acceptance-boundary plan and close remaining T08/T09 prerequisites before resuming T10. See independently tracked child tasks in BUILD-TASKS. No new feature implementation is authorized by this progress update.
+Close T02-B/C original login/role gates after accepted disposable PostgreSQL T02-A, then T04 authorized initial-record acceptance. Approve the cross-task acceptance-boundary plan and close remaining T08/T09 prerequisites before resuming T10. See independently tracked child tasks in BUILD-TASKS. No new feature implementation is authorized by this progress update.
 
 ## Original foundation instruction (retained; not current progress)
 
