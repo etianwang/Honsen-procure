@@ -3,6 +3,15 @@
 **Last updated:** 2026-10-11  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## CI quality-workflow recovery — 2026-10-11
+
+- Selected scope: repair and verify the existing single GitHub Actions quality workflow only. No business, database, Docker Compose, dependency, native Tauri, Windows Runner, or macOS Runner change was made.
+- Audit found the remote CI failing after the baseline because PostgreSQL migration and sync-store test files initialized the same disposable schema concurrently. The current branch already contains the T02-A repair: server Vitest uses `fileParallelism: false`; the CI update preserves one `npm run test` invocation because it executes the full workspace suite, including both PostgreSQL suites when the service-only `TEST_DATABASE_URL` is supplied. `test:postgres` is intentionally not appended, avoiding duplicate migration and sync-store execution.
+- The retained `ci.yml` now uses `.nvmrc`, `ubuntu-24.04`, read-only token permissions, a 25-minute job timeout, same-ref cancellation, npm lockfile caching, non-persistent checkout credentials, a PostgreSQL 16 Actions service with per-run CI-only credentials, and seven-day Playwright artifact retention. It does not use Compose, a production connection, Docker Desktop, Windows/macOS jobs, or a Tauri bundle.
+- Fresh local evidence: `npm run format:check`, `npm run lint`, `npm run typecheck`, and `npm run build` passed; `npm run test` passed (desktop 2, server 17 including migration and sync-store PostgreSQL tests, shared 14; no PostgreSQL suite skipped); `npm run e2e` passed (16 Chromium tests). The local PostgreSQL 16 container was healthy/reachable through 127.0.0.1:54329 and removed afterward; its network was removed and port 54329 was confirmed closed.
+- **WARNING:** GitHub has not run this unpushed repair, so remote CI is not yet accepted. The branch is ready for an explicitly authorized push; inspect the resulting `quality` run before treating the foundation CI gate as passed.
+- **DEFERRED:** Windows/macOS native Runner and Tauri bundle validation remain outside this CI repair because `src-tauri` intentionally has no Tauri bundle configuration until T15. No Runner matrix was added.
+
 ## T02-A PostgreSQL integration environment and acceptance — 2026-10-11
 
 - Selected the highest-priority unblocked child: **T02-A**, the committed server PostgreSQL migration and sync-store integration suites. Scope was limited to `apps/server` migrations and PostgreSQL test stores; no desktop, Rust, shared-contract, UI, production configuration, or business-data change was made.
