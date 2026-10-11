@@ -335,6 +335,19 @@ pub struct SyncAcknowledgementInput {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncPushView {
+    pub accepted_count: usize,
+    pub pending_count: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncPushResponse {
+    results: Vec<SyncAcknowledgementInput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RequisitionTotalsView {
     pub subtotal_minor: String,
     pub line_discount_minor: String,
@@ -517,6 +530,8 @@ pub enum AuthError {
     InvalidInput,
     #[error("business code cannot change")]
     ImmutableBusinessCode,
+    #[error("synchronization transport error")]
+    SyncTransport,
 }
 
 #[derive(Debug)]
@@ -529,9 +544,11 @@ struct LocalCaptcha {
 trait CredentialVault: Send + Sync {
     fn save_verifier(&self, account_id: Uuid, verifier: &str) -> Result<(), AuthError>;
     fn load_verifier(&self, account_id: Uuid) -> Result<Option<String>, AuthError>;
+    fn save_sync_token(&self, account_id: Uuid, token: &str) -> Result<(), AuthError>;
+    fn load_sync_token(&self, account_id: Uuid) -> Result<Option<String>, AuthError>;
 }
 
-struct MemoryCredentialVault(Mutex<HashMap<Uuid, String>>);
+struct MemoryCredentialVault(Mutex<HashMap<(Uuid, String), String>>);
 
 impl MemoryCredentialVault {
     fn new() -> Self {
@@ -544,7 +561,7 @@ impl CredentialVault for MemoryCredentialVault {
         self.0
             .lock()
             .map_err(|_| AuthError::SecureStorage)?
-            .insert(account_id, verifier.to_owned());
+            .insert((account_id, "verifier".into()), verifier.to_owned());
         Ok(())
     }
 
@@ -553,7 +570,24 @@ impl CredentialVault for MemoryCredentialVault {
             .0
             .lock()
             .map_err(|_| AuthError::SecureStorage)?
-            .get(&account_id)
+            .get(&(account_id, "verifier".into()))
+            .cloned())
+    }
+
+    fn save_sync_token(&self, account_id: Uuid, token: &str) -> Result<(), AuthError> {
+        self.0
+            .lock()
+            .map_err(|_| AuthError::SecureStorage)?
+            .insert((account_id, "sync-token".into()), token.to_owned());
+        Ok(())
+    }
+
+    fn load_sync_token(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|_| AuthError::SecureStorage)?
+            .get(&(account_id, "sync-token".into()))
             .cloned())
     }
 }
@@ -570,6 +604,23 @@ impl CredentialVault for OsCredentialVault {
 
     fn load_verifier(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
         let entry = Entry::new("HONSEN Materials offline verifier", &account_id.to_string())
+            .map_err(|_| AuthError::SecureStorage)?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(_) => Err(AuthError::SecureStorage),
+        }
+    }
+
+    fn save_sync_token(&self, account_id: Uuid, token: &str) -> Result<(), AuthError> {
+        Entry::new("HONSEN Procure sync session", &account_id.to_string())
+            .map_err(|_| AuthError::SecureStorage)?
+            .set_password(token)
+            .map_err(|_| AuthError::SecureStorage)
+    }
+
+    fn load_sync_token(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
+        let entry = Entry::new("HONSEN Procure sync session", &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -2723,6 +2774,94 @@ impl LocalAuthService {
         transaction.commit().map_err(|_| AuthError::Database)
     }
 
+    pub fn cache_sync_access_token(&self, account_id: Uuid, token: &str) -> Result<(), AuthError> {
+        if token.len() < 32 {
+            return Err(AuthError::InvalidInput);
+        }
+        self.credential_vault.save_sync_token(account_id, token)?;
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .execute(
+                "UPDATE local_sync_state SET last_authenticated_user_id = ?1 WHERE singleton = 1",
+                [account_id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
+        self.require_catalog_read(now)?;
+        let events = self.pending_sync_events(100, now)?;
+        if events.is_empty() {
+            return Ok(SyncPushView {
+                accepted_count: 0,
+                pending_count: 0,
+            });
+        }
+        let account_id = self.active_session_user_id()?;
+        let token = self
+            .credential_vault
+            .load_sync_token(account_id)?
+            .ok_or(AuthError::NoActiveSession)?;
+        let installation_id: String = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT installation_id FROM local_sync_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        let endpoint = sync_push_endpoint()?;
+        let request_events = events.iter().map(|event| serde_json::json!({
+            "eventId": event.event_id,
+            "entityType": event.entity_type,
+            "entityId": event.entity_id,
+            "operation": event.operation,
+            "baseVersion": event.base_version,
+            "payload": serde_json::from_str::<serde_json::Value>(&event.payload_json).unwrap_or(serde_json::Value::Null),
+        })).collect::<Vec<_>>();
+        if request_events
+            .iter()
+            .any(|event| event["payload"].is_null())
+        {
+            return Err(AuthError::Database);
+        }
+        let response = reqwest::Client::builder()
+            .https_only(true)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?
+            .post(endpoint)
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "deviceId": installation_id, "events": request_events }))
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AuthError::NoActiveSession);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        let acknowledgements = response
+            .json::<SyncPushResponse>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        let accepted_count = acknowledgements
+            .results
+            .iter()
+            .filter(|result| result.status == "accepted")
+            .count();
+        self.apply_sync_acknowledgements(acknowledgements.results, now)?;
+        Ok(SyncPushView {
+            accepted_count,
+            pending_count: self.pending_sync_events(100, now)?.len(),
+        })
+    }
+
     fn require_master_data_mutation(&self, now: SystemTime) -> Result<(), AuthError> {
         for role in [
             Role::SuperAdministrator,
@@ -2825,6 +2964,7 @@ pub mod commands {
                 AuthError::InvalidInput => "invalid_input",
                 AuthError::ImmutableBusinessCode => "immutable_business_code",
                 AuthError::PasswordHashing | AuthError::SecureStorage => "credential_storage_error",
+                AuthError::SyncTransport => "sync_transport_error",
             };
             Self { code }
         }
@@ -2847,6 +2987,15 @@ pub mod commands {
         reason: String,
     ) -> Result<(), CommandError> {
         auth.close_supplier_order_with_conditions(order_id, reason, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn push_pending_sync(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<super::SyncPushView, CommandError> {
+        auth.push_pending_https(SystemTime::now())
+            .await
             .map_err(Into::into)
     }
 
@@ -3187,6 +3336,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0016_local_sync_outbox",
             include_str!("../migrations/0016_local_sync_outbox.sql"),
         ),
+        (
+            "0017_local_sync_state",
+            include_str!("../migrations/0017_local_sync_state.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -3464,6 +3617,29 @@ fn calculate_requisition(
         total: as_i64(taxable + tax)?,
         lines,
     })
+}
+
+fn sync_push_endpoint() -> Result<reqwest::Url, AuthError> {
+    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    sync_push_endpoint_from(&value)
+}
+
+fn sync_push_endpoint_from(value: &str) -> Result<reqwest::Url, AuthError> {
+    let mut endpoint = reqwest::Url::parse(&value).map_err(|_| AuthError::SyncTransport)?;
+    if endpoint.scheme() != "https"
+        || endpoint.host_str().is_none()
+        || endpoint.username() != ""
+        || endpoint.password().is_some()
+        || endpoint.query().is_some()
+        || endpoint.fragment().is_some()
+    {
+        return Err(AuthError::SyncTransport);
+    }
+    endpoint.set_path(&format!(
+        "{}/api/sync/push",
+        endpoint.path().trim_end_matches('/')
+    ));
+    Ok(endpoint)
 }
 
 fn insert_local_sync_outbox(
@@ -3968,6 +4144,24 @@ mod tests {
             .split_whitespace()
             .filter_map(|value| value.parse::<u8>().ok())
             .sum()
+    }
+
+    #[test]
+    fn sync_endpoint_requires_clean_https_base_url() {
+        assert_eq!(
+            sync_push_endpoint_from("https://sync.example.test/root")
+                .unwrap()
+                .as_str(),
+            "https://sync.example.test/root/api/sync/push",
+        );
+        assert_eq!(
+            sync_push_endpoint_from("http://sync.example.test").unwrap_err(),
+            AuthError::SyncTransport,
+        );
+        assert_eq!(
+            sync_push_endpoint_from("https://user:secret@sync.example.test").unwrap_err(),
+            AuthError::SyncTransport,
+        );
     }
 
     #[test]
@@ -5275,5 +5469,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(receipt_attachment_link_table_exists, 1);
+        let sync_state_table_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_sync_state'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(sync_state_table_exists, 1);
     }
 }

@@ -16,6 +16,7 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 ## Push
 
 - `POST /api/sync/push` accepts a maximum of 100 versioned events and requires the authenticated account session. The request carries a non-secret installation UUID only for event/session tracking; it is not a credential.
+- The desktop obtains its API base URL from the deployment-time `HONSEN_SYNC_API_BASE_URL` runtime configuration. It accepts only a clean `https` origin/path (no embedded credentials, query or fragment); PostgreSQL/Neon credentials never appear in desktop configuration. The access token is kept in OS secure storage and is never returned to the renderer or written to SQLite.
 - Each result has the original `eventId`, `accepted`, `conflict` or `validation_error` status, plus the server version when one exists. A batch can therefore contain a safe retry beside a rejected event without losing either result.
 - Send pending events in stable creation order over HTTPS using the authenticated account session.
 - The server validates the account/project scope, request payload, event-id idempotency and expected entity version inside one PostgreSQL transaction.
