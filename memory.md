@@ -3,6 +3,14 @@
 **Last updated:** 2026-10-11  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## Git workflow policy handoff — 2026-10-11
+
+- The Git workflow policy was added through PR #1, `docs: require branch and PR workflow`, and Squash Merged to `main` as `2f41a5af41dbf85eea17224ace96ffe7b0e46fe3`. The merged change requires task branches, PRs, successful `quality`, explicit authorization for push/PR/merge, and approved Squash Merge on both Windows and macOS. The local and remote task branches were deleted after direct content verification.
+- GitHub Ruleset `Protect main` is active. It requires a PR, a strict successful `quality` status check, and Squash Merge; it prohibits deletion and non-fast-forward updates. Both the push and PR `quality` runs for PR #1 passed.
+- **BLOCKER:** the mandatory Windows local format gate cannot currently pass from a clean checkout: `core.autocrlf=true`, `.gitattributes` is absent, and `AGENTS.md` checks out as 103 CRLF lines. `npm run format:check` reports only `AGENTS.md`; GitHub's Linux CI passed because it checks out LF. No content differs from `main`, and no direct-main edit was made.
+- **Safe next action:** obtain approval for a separate, narrowly scoped cross-platform line-ending policy task (for example, a reviewed `.gitattributes` policy plus Windows/Linux validation). Do not normalize or rewrite repository files incidentally during unrelated work.
+- **DEFERRED:** optimizing duplicate `quality` runs caused by both `push` and `pull_request` triggers belongs to a separate CI-trigger policy task; it was not changed while enforcing the approved branch workflow.
+
 ## CI quality-workflow recovery — 2026-10-11
 
 - Selected scope: repair and verify the existing single GitHub Actions quality workflow only. No business, database, Docker Compose, dependency, native Tauri, Windows Runner, or macOS Runner change was made.
