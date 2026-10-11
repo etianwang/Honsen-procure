@@ -3,6 +3,14 @@
 **Last updated:** 2026-10-11  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## T10 order Pull subtask — 2026-10-11
+
+- Restored the uncommitted Rust synchronization draft's missing staged-projector definitions. Purchase-order remote entities now wait for country/project/department/team, retry in-page dependency order, and only then project to SQLite; staged comments are replayed after orders.
+- A pre-existing confirmed/sent/closed order is now left unchanged by a later Pull upsert or tombstone, preserving its historical snapshot. This deliberately does not implement T08 formal-number remapping, T09 receipt/attachment projection, RFQ projection, or T11 archival.
+- Added `pulled_purchase_order_waits_for_references_and_preserves_confirmed_snapshot` in `apps/desktop/src-tauri/src/lib.rs`. It proves an order received before reference master data projects during the same Pull transaction and that a subsequent remote update cannot overwrite a confirmed snapshot.
+- Fresh gate: `cargo fmt --check`, `cargo test` (12 passed), `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm run test` (desktop 2, server 15 + 2 skipped PostgreSQL suites, shared 14), `npm run build`, and `npm run e2e` (16 passed). Build retains the existing Vite >500 kB chunk warning; Rust retains a linker-message warning.
+- T10 remains IN PROGRESS. T02 PostgreSQL acceptance and T04/T08/T09 final gates remain open; T08 formal-number mapping and T09/T11 archival are cross-task integration checkpoints, not completed by this order Pull slice. No push was performed.
+
 ## CURRENT SESSION HANDOFF — 2026-10-11
 
 - **Project:** Honsen采购管理系统 / HONSEN Procure. Documentation checkpoint only; feature development is paused. M0–M3 IN PROGRESS; M4 BLOCKED for release. No milestone has full acceptance.
