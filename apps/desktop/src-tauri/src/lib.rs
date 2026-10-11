@@ -2025,6 +2025,8 @@ impl LocalAuthService {
             None,
             now,
         )?;
+        let payload = order_sync_payload(&transaction, order_id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
