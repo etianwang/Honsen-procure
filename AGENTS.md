@@ -38,6 +38,14 @@ Then compare the project with `docs/HONSEN_TOOLBOX_INTEGRATION.md` and report an
 - For installer/update work: update `docs/HONSEN_TOOLBOX_INTEGRATION.md` with actual values and end-to-end evidence.
 - Never delete user data, overwrite production databases, or deploy without explicit approval.
 
+## Git workflow
+
+- Before starting a task, inspect the worktree and branch state, fetch `origin/main`, and create or continue one independent task branch from the latest `main`. Windows and macOS use this same workflow.
+- Never commit or push development changes directly to `main`. Keep one task's changes, tests, and task-document updates on its task branch.
+- At task completion, run the required local checks, update the required task records, and create a local commit on the task branch. Do not push, create a pull request, or merge without explicit user authorization.
+- When authorized, push the task branch and create its pull request. Wait for the GitHub Actions `quality` check to pass; fix CI failures on that same task branch and never bypass required checks.
+- Only after all merge conditions and explicit user approval may the task branch be Squash Merged. Then synchronize local `main` from `origin/main` and delete only the confirmed merged task branch.
+
 ## Cross-platform development and test environment
 
 - Use Node.js `24.18.0` from `.nvmrc` and `npm ci` with the committed `package-lock.json`; do not regenerate the lock file without a dependency change.
