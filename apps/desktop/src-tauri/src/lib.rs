@@ -2067,6 +2067,8 @@ impl LocalAuthService {
                 now,
             )?;
         }
+        let payload = order_sync_payload(&transaction, draft.id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", draft.id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(calculated.view())
     }
@@ -2077,8 +2079,9 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         let privileged = self.require_order_mutation(now)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        let (applicant_id, status, line_count): (String, String, i64) = connection
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let (applicant_id, status, line_count): (String, String, i64) = transaction
             .query_row(
                 "SELECT o.applicant_id, o.workflow_status, COUNT(i.id) FROM local_purchase_orders o LEFT JOIN local_purchase_order_items i ON i.order_id = o.id WHERE o.id = ?1 AND o.deleted_at IS NULL GROUP BY o.id",
                 [order_id.to_string()],
@@ -2093,12 +2096,15 @@ impl LocalAuthService {
         {
             return Err(AuthError::Forbidden);
         }
-        connection
+        transaction
             .execute(
                 "UPDATE local_purchase_orders SET workflow_status = 'pending_confirmation', version = version + 1, updated_at = ?2 WHERE id = ?1",
                 params![order_id.to_string(), unix_seconds(now)],
             )
             .map_err(|_| AuthError::Database)?;
+        let payload = order_sync_payload(&transaction, order_id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
 
@@ -2151,6 +2157,8 @@ impl LocalAuthService {
             Some("confirmed"),
             now,
         )?;
+        let payload = order_sync_payload(&transaction, order_id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)
     }
 
@@ -2238,6 +2246,8 @@ impl LocalAuthService {
             Some("rejected"),
             now,
         )?;
+        let payload = order_sync_payload(&transaction, order_id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)
     }
 
@@ -3347,6 +3357,30 @@ fn insert_local_sync_outbox(
         )
         .map_err(|_| AuthError::Database)?;
     Ok(())
+}
+
+fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<String, AuthError> {
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&order_audit_snapshot(transaction, order_id)?)
+            .map_err(|_| AuthError::Database)?;
+    let (applicant_id, project_id, workflow_status): (String, String, String) = transaction
+        .query_row(
+            "SELECT applicant_id, project_id, workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            [order_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|_| AuthError::Database)?;
+    let object = payload.as_object_mut().ok_or(AuthError::Database)?;
+    object.insert(
+        "applicantId".into(),
+        serde_json::Value::String(applicant_id),
+    );
+    object.insert("projectId".into(), serde_json::Value::String(project_id));
+    object.insert(
+        "workflowStatus".into(),
+        serde_json::Value::String(workflow_status),
+    );
+    serde_json::to_string(&payload).map_err(|_| AuthError::Database)
 }
 
 fn append_order_audit(
