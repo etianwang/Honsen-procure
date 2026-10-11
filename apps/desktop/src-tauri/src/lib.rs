@@ -847,9 +847,10 @@ impl LocalAuthService {
     ) -> Result<(), AuthError> {
         validate_project_defaults(&defaults)?;
         self.require_master_data_mutation(now)?;
-        self.connection
-            .lock()
-            .map_err(|_| AuthError::Database)?
+        let payload = serde_json::to_string(&defaults).map_err(|_| AuthError::InvalidInput)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        transaction
             .execute(
                 "INSERT INTO local_project_print_defaults (project_id, department_title, company_address, company_contact, default_currency, default_language_pair, default_tax_template_id, version, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)
@@ -866,6 +867,14 @@ impl LocalAuthService {
                 ],
             )
             .map_err(|_| AuthError::Database)?;
+        insert_local_sync_outbox(
+            &transaction,
+            "project_defaults",
+            defaults.project_id,
+            &payload,
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
 
@@ -940,7 +949,17 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         self.require_master_data_mutation(now)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let (entity_type, entity_id) = match &record {
+            ReferenceMasterDataInput::Country { id, .. } => ("country", *id),
+            ReferenceMasterDataInput::Project { id, .. } => ("project", *id),
+            ReferenceMasterDataInput::Site { id, .. } => ("site", *id),
+            ReferenceMasterDataInput::Department { id, .. } => ("department", *id),
+            ReferenceMasterDataInput::Team { id, .. } => ("team", *id),
+            ReferenceMasterDataInput::Unit { id, .. } => ("unit", *id),
+        };
+        let payload = serde_json::to_string(&record).map_err(|_| AuthError::InvalidInput)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         match record {
             ReferenceMasterDataInput::Country {
                 id,
@@ -952,12 +971,12 @@ impl LocalAuthService {
             } => {
                 validate_reference(&business_code, &name, version)?;
                 assert_immutable_local_business_code(
-                    &connection,
+                    &transaction,
                     "local_countries",
                     id,
                     &business_code,
                 )?;
-                connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET name = excluded.name, time_zone = excluded.time_zone, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, time_zone, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+                transaction.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET name = excluded.name, time_zone = excluded.time_zone, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, time_zone, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
             ReferenceMasterDataInput::Project {
                 id,
@@ -973,7 +992,7 @@ impl LocalAuthService {
             } => {
                 validate_reference(&business_code, &name, version)?;
                 assert_immutable_local_business_code(
-                    &connection,
+                    &transaction,
                     "local_projects",
                     id,
                     &business_code,
@@ -985,7 +1004,7 @@ impl LocalAuthService {
                 {
                     return Err(AuthError::InvalidInput);
                 }
-                connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(id) DO UPDATE SET country_id = excluded.country_id, name = excluded.name, site = excluded.site, department_name = excluded.department_name, default_currency = excluded.default_currency, default_language_pair = excluded.default_language_pair, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), country_id.to_string(), business_code, name, site, department_name, default_currency, default_language_pair, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+                transaction.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(id) DO UPDATE SET country_id = excluded.country_id, name = excluded.name, site = excluded.site, department_name = excluded.department_name, default_currency = excluded.default_currency, default_language_pair = excluded.default_language_pair, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), country_id.to_string(), business_code, name, site, department_name, default_currency, default_language_pair, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
             ReferenceMasterDataInput::Site {
                 id,
@@ -997,12 +1016,12 @@ impl LocalAuthService {
             } => {
                 validate_reference(&business_code, &name, version)?;
                 assert_immutable_local_business_code(
-                    &connection,
+                    &transaction,
                     "local_sites",
                     id,
                     &business_code,
                 )?;
-                connection.execute("INSERT INTO local_sites (id, project_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), project_id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+                transaction.execute("INSERT INTO local_sites (id, project_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), project_id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
             ReferenceMasterDataInput::Department {
                 id,
@@ -1013,12 +1032,12 @@ impl LocalAuthService {
             } => {
                 validate_reference(&business_code, &name, version)?;
                 assert_immutable_local_business_code(
-                    &connection,
+                    &transaction,
                     "local_departments",
                     id,
                     &business_code,
                 )?;
-                connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+                transaction.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
             ReferenceMasterDataInput::Team {
                 id,
@@ -1030,12 +1049,12 @@ impl LocalAuthService {
             } => {
                 validate_reference(&business_code, &name, version)?;
                 assert_immutable_local_business_code(
-                    &connection,
+                    &transaction,
                     "local_teams",
                     id,
                     &business_code,
                 )?;
-                connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET department_id = excluded.department_id, name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), department_id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+                transaction.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET department_id = excluded.department_id, name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), department_id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
             ReferenceMasterDataInput::Unit {
                 id,
@@ -1046,14 +1065,16 @@ impl LocalAuthService {
             } => {
                 validate_reference(&business_code, &name, version)?;
                 assert_immutable_local_business_code(
-                    &connection,
+                    &transaction,
                     "local_units",
                     id,
                     &business_code,
                 )?;
-                connection.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+                transaction.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
         }
+        insert_local_sync_outbox(&transaction, entity_type, entity_id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
 
@@ -1070,14 +1091,16 @@ impl LocalAuthService {
         {
             return Err(AuthError::InvalidInput);
         }
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let payload = serde_json::to_string(&template).map_err(|_| AuthError::InvalidInput)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         assert_immutable_local_business_code(
-            &connection,
+            &transaction,
             "local_tax_templates",
             template.id,
             &template.business_code,
         )?;
-        connection
+        transaction
             .execute(
                 "INSERT INTO local_tax_templates (id, business_code, name, country_id, rate_basis_points, effective_at, is_active, version)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -1085,6 +1108,8 @@ impl LocalAuthService {
                 params![template.id.to_string(), template.business_code, template.name, template.country_id.map(|value| value.to_string()), template.rate_basis_points, template.effective_at, template.is_active as i64, template.version],
             )
             .map_err(|_| AuthError::Database)?;
+        insert_local_sync_outbox(&transaction, "tax_template", template.id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
 
@@ -1109,15 +1134,18 @@ impl LocalAuthService {
         {
             return Err(AuthError::InvalidInput);
         }
-        self.connection
-            .lock()
-            .map_err(|_| AuthError::Database)?
+        let payload = serde_json::to_string(&rate).map_err(|_| AuthError::InvalidInput)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        transaction
             .execute(
                 "INSERT INTO local_exchange_rates (id, from_currency, to_currency, rate_decimal, effective_at, source, reason, version)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![rate.id.to_string(), rate.from_currency, rate.to_currency, rate.rate_decimal, rate.effective_at, rate.source, rate.reason, rate.version],
             )
             .map_err(|_| AuthError::Database)?;
+        insert_local_sync_outbox(&transaction, "exchange_rate", rate.id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
 
@@ -5017,6 +5045,18 @@ mod tests {
                 now,
             )
             .unwrap();
+        let pending = service.pending_sync_events(100, now).unwrap();
+        let entity_types = pending
+            .iter()
+            .map(|event| event.entity_type.as_str())
+            .collect::<HashSet<_>>();
+        assert!(entity_types.is_superset(&HashSet::from([
+            "project_defaults",
+            "country",
+            "project",
+            "tax_template",
+            "exchange_rate",
+        ])));
     }
 
     #[test]
