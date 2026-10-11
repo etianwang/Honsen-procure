@@ -2460,11 +2460,11 @@ impl LocalAuthService {
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let applicant_id: String = transaction
+        let (applicant_id, project_id): (String, String) = transaction
             .query_row(
-                "SELECT applicant_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT applicant_id, project_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
                 [order_id.to_string()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|_| AuthError::Database)?;
         if !privileged && applicant_id != actor_id.to_string() {
@@ -2478,6 +2478,14 @@ impl LocalAuthService {
             created_at: unix_seconds(now),
             notification_count: 0,
         };
+        let sync_payload = serde_json::to_string(&serde_json::json!({
+            "orderId": comment.order_id,
+            "authorId": comment.author_id,
+            "projectId": project_id,
+            "body": comment.body,
+            "createdAt": comment.created_at,
+        }))
+        .map_err(|_| AuthError::InvalidInput)?;
         transaction
             .execute(
                 "INSERT INTO local_order_comments (id, order_id, author_id, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -2505,6 +2513,13 @@ impl LocalAuthService {
                     .map_err(|_| AuthError::Database)? as i64;
             }
         }
+        insert_local_sync_outbox(
+            &transaction,
+            "order_comment",
+            comment.id,
+            &sync_payload,
+            now,
+        )?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(comment)
     }
@@ -2882,6 +2897,7 @@ impl LocalAuthService {
             ).map_err(|_| AuthError::Database)?;
             project_remote_catalog_change(&transaction, change, now)?;
             project_remote_master_data_change(&transaction, change, now)?;
+            project_remote_order_comment(&transaction, change)?;
             transaction.execute(
                 "INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)",
                 params![change.entity_type, change.entity_id.to_string(), change.version],
@@ -3874,6 +3890,46 @@ fn project_remote_master_data_change(
         }
         _ => {}
     }
+    Ok(())
+}
+
+fn project_remote_order_comment(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+) -> Result<(), AuthError> {
+    if change.entity_type != "order_comment" {
+        return Ok(());
+    }
+    if change.operation != "upsert" {
+        return Err(AuthError::InvalidInput);
+    }
+    let payload = change.payload.as_object().ok_or(AuthError::InvalidInput)?;
+    let order_id = payload
+        .get("orderId")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .ok_or(AuthError::InvalidInput)?;
+    let author_id = payload
+        .get("authorId")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .ok_or(AuthError::InvalidInput)?;
+    let body = payload
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| valid_required_text(value, 4000))
+        .ok_or(AuthError::InvalidInput)?;
+    let created_at = payload
+        .get("createdAt")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|value| *value >= 0)
+        .ok_or(AuthError::InvalidInput)?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO local_order_comments (id, order_id, author_id, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![change.entity_id.to_string(), order_id.to_string(), author_id.to_string(), body, created_at],
+        )
+        .map_err(|_| AuthError::Database)?;
     Ok(())
 }
 
@@ -5127,6 +5183,15 @@ mod tests {
             )
             .unwrap();
         assert!(deleted.is_some());
+        let order_id = Uuid::new_v4();
+        connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'SYNC-ORDER', ?2, ?3, 'sync site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'pending_confirmation', 'pending_confirmation', 'normal', '2026-10-11', 'sync address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![order_id.to_string(), country_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), purchaser_id.to_string()]).unwrap();
+        drop(connection);
+        let comment_id = Uuid::new_v4();
+        service.apply_sync_pull_page(SyncPullPageInput { changes: vec![SyncPullChangeInput { cursor: "10".into(), entity_type: "order_comment".into(), entity_id: comment_id, operation: "upsert".into(), version: 1, payload: serde_json::json!({ "orderId": order_id, "authorId": purchaser_id, "projectId": project_id, "body": "remote immutable comment", "createdAt": 10 }), changed_at: "2026-10-11T00:02:00Z".into() }], next_cursor: "10".into() }, now).unwrap();
+        assert_eq!(
+            service.list_order_comments(order_id, now).unwrap()[0].body,
+            "remote immutable comment"
+        );
     }
 
     #[test]
@@ -5767,6 +5832,13 @@ mod tests {
                 .len(),
             1
         );
+        let comment_event = service
+            .pending_sync_events(100, now)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.entity_type == "order_comment" && event.entity_id == comment.id)
+            .unwrap();
+        assert!(comment_event.payload_json.contains("fixture comment"));
         assert_eq!(
             service.submit_requisition_draft(requisition_id, now),
             Err(AuthError::Forbidden)

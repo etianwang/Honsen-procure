@@ -207,6 +207,18 @@ export class PostgresSyncStore implements SyncStore {
     return result.rowCount === 1
   }
 
+  async getEntityPayload(
+    entityType: string,
+    entityId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const result = await this.pool.query<StoredEntity>(
+      `SELECT version, payload_json FROM sync_entities
+       WHERE entity_type = $1 AND entity_id = $2 AND is_deleted = FALSE`,
+      [entityType, entityId],
+    )
+    return result.rows[0]?.payload_json ?? null
+  }
+
   private async recordConflict(
     client: PoolClient,
     input: {

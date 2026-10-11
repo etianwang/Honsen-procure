@@ -47,9 +47,14 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'order_comment' && event.operation !== 'upsert')
+      return false
     if (actor.roles.some((role) => procurementRoles.includes(role))) return true
     if (!actor.roles.includes('engineer')) return false
-    if (!['purchase_order', 'receipt'].includes(event.entityType)) return false
+    if (
+      !['purchase_order', 'order_comment', 'receipt'].includes(event.entityType)
+    )
+      return false
 
     const projectId = stringField(event.payload, 'projectId')
     if (
@@ -60,6 +65,23 @@ export class SyncService {
     }
     if (event.entityType === 'purchase_order') {
       return stringField(event.payload, 'applicantId') === actor.id
+    }
+    if (event.entityType === 'order_comment') {
+      if (
+        event.operation !== 'upsert' ||
+        stringField(event.payload, 'authorId') !== actor.id
+      ) {
+        return false
+      }
+      const orderId = stringField(event.payload, 'orderId')
+      if (!orderId || stringField(event.payload, 'projectId') !== projectId)
+        return false
+      const order = await this.store.getEntityPayload('purchase_order', orderId)
+      return (
+        order !== null &&
+        stringField(order, 'applicantId') === actor.id &&
+        stringField(order, 'projectId') === projectId
+      )
     }
     return stringField(event.payload, 'receiverId') === actor.id
   }

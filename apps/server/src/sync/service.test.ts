@@ -11,6 +11,10 @@ const projectId = '00000000-0000-4000-8000-000000000002'
 class FixtureStore implements SyncStore {
   pushed = 0
   bound = true
+  order: Record<string, unknown> | null = {
+    applicantId: engineer.id,
+    projectId,
+  }
 
   async pushEvent(input: Parameters<SyncStore['pushEvent']>[0]) {
     this.pushed += 1
@@ -27,6 +31,10 @@ class FixtureStore implements SyncStore {
 
   async hasActiveProjectBinding() {
     return this.bound
+  }
+
+  async getEntityPayload() {
+    return this.order
   }
 }
 
@@ -64,6 +72,53 @@ describe('SyncService', () => {
       events: [purchaseOrderEvent('00000000-0000-4000-8000-000000000006')],
     })
 
+    expect(response.results[0]).toMatchObject({ status: 'validation_error' })
+    expect(store.pushed).toBe(0)
+  })
+
+  it('accepts an engineer comment only for their own bound-project order', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const response = await service.push(engineer, {
+      deviceId: '00000000-0000-4000-8000-000000000005',
+      events: [
+        {
+          eventId: '00000000-0000-4000-8000-000000000007',
+          entityType: 'order_comment',
+          entityId: '00000000-0000-4000-8000-000000000008',
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            orderId: '00000000-0000-4000-8000-000000000004',
+            authorId: engineer.id,
+            projectId,
+            body: 'fixture',
+          },
+        },
+      ],
+    })
+    expect(response.results[0]?.status).toBe('accepted')
+    expect(store.pushed).toBe(1)
+  })
+
+  it('rejects a comment tombstone without mutation', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const response = await service.push(engineer, {
+      deviceId: '00000000-0000-4000-8000-000000000005',
+      events: [
+        {
+          ...purchaseOrderEvent(),
+          entityType: 'order_comment',
+          operation: 'soft_delete',
+          payload: {
+            orderId: '00000000-0000-4000-8000-000000000004',
+            authorId: engineer.id,
+            projectId,
+          },
+        },
+      ],
+    })
     expect(response.results[0]).toMatchObject({ status: 'validation_error' })
     expect(store.pushed).toBe(0)
   })

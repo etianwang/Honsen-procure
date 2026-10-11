@@ -32,6 +32,7 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 - Pull ordered changes with an opaque, durable sequence cursor; timestamps are not cursors.
 - Apply one response page to SQLite in a transaction. Do not advance the local cursor until all page changes have applied.
 - A pulled change may update a clean local record. It may not overwrite a locally dirty record with pending events; create a conflict record instead.
+- Immutable order comments synchronize as separate append-only events. Engineer comments are accepted only when the server verifies the comment author is the applicant of the referenced, project-bound order; comment tombstones are rejected.
 - Tombstones are applied as soft deletion. Keep them long enough for the longest supported offline window.
 - On restart after an interrupted pull, retry the same cursor. The apply operation must be idempotent.
 

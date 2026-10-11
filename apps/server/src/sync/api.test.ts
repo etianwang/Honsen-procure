@@ -54,6 +54,10 @@ class SyncFixture implements SyncStore {
   async hasActiveProjectBinding() {
     return true
   }
+
+  async getEntityPayload() {
+    return null
+  }
 }
 
 function captchaAnswer(question: string): string {

@@ -15,6 +15,7 @@ export const syncEntityTypeSchema = z.enum([
   'supplier',
   'material_price',
   'purchase_order',
+  'order_comment',
   'receipt',
   'rfq',
   'attachment',
