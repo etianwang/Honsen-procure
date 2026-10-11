@@ -1030,9 +1030,10 @@ impl LocalAuthService {
         validate_material(&material)?;
         let aliases =
             serde_json::to_string(&material.aliases).map_err(|_| AuthError::InvalidInput)?;
-        self.connection
-            .lock()
-            .map_err(|_| AuthError::Database)?
+        let payload = serde_json::to_string(&material).map_err(|_| AuthError::InvalidInput)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        transaction
             .execute(
                 "INSERT INTO local_materials (id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, is_active, version)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
@@ -1043,20 +1044,24 @@ impl LocalAuthService {
                 params![material.id.to_string(), material.sku, material.name_zh, material.name_fr, aliases, material.brand, material.model, material.specification, material.unit, material.notes, material.is_active as i64, material.version],
             )
             .map_err(|_| AuthError::Database)?;
+        insert_local_sync_outbox(&transaction, "material", material.id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
 
     pub fn save_supplier(&self, supplier: SupplierInput, now: SystemTime) -> Result<(), AuthError> {
         self.require_material_mutation(now)?;
         validate_supplier(&supplier)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let payload = serde_json::to_string(&supplier).map_err(|_| AuthError::InvalidInput)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         assert_immutable_local_business_code(
-            &connection,
+            &transaction,
             "local_suppliers",
             supplier.id,
             &supplier.business_code,
         )?;
-        connection
+        transaction
             .execute(
                 "INSERT INTO local_suppliers (id, business_code, name, contact_name, address, city, country, phone, whatsapp, email, payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
@@ -1069,6 +1074,8 @@ impl LocalAuthService {
                 params![supplier.id.to_string(), supplier.business_code, supplier.name, supplier.contact_name, supplier.address, supplier.city, supplier.country, supplier.phone, supplier.whatsapp, supplier.email, supplier.payment_terms, supplier.delivery_lead_time, supplier.is_preferred as i64, supplier.is_blacklisted as i64, supplier.is_active as i64, supplier.version],
             )
             .map_err(|_| AuthError::Database)?;
+        insert_local_sync_outbox(&transaction, "supplier", supplier.id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
 
@@ -1079,6 +1086,7 @@ impl LocalAuthService {
     ) -> Result<(), AuthError> {
         self.require_material_mutation(now)?;
         let unit_price_minor = validate_material_price(&price)?;
+        let payload = serde_json::to_string(&price).map_err(|_| AuthError::InvalidInput)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         let material_is_active: bool = transaction
@@ -1112,6 +1120,7 @@ impl LocalAuthService {
                 params![price.id.to_string(), price.material_id.to_string(), price.supplier_id.to_string(), price.currency, unit_price_minor, price.unit, price.effective_at, price.source_note, price.version],
             )
             .map_err(|_| AuthError::Database)?;
+        insert_local_sync_outbox(&transaction, "material_price", price.id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
     }
@@ -3025,6 +3034,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0015_receipt_attachment_links",
             include_str!("../migrations/0015_receipt_attachment_links.sql"),
         ),
+        (
+            "0016_local_sync_outbox",
+            include_str!("../migrations/0016_local_sync_outbox.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -3302,6 +3315,38 @@ fn calculate_requisition(
         total: as_i64(taxable + tax)?,
         lines,
     })
+}
+
+fn insert_local_sync_outbox(
+    transaction: &Transaction<'_>,
+    entity_type: &str,
+    entity_id: Uuid,
+    payload: &str,
+    now: SystemTime,
+) -> Result<(), AuthError> {
+    let server_version: i64 = transaction
+        .query_row(
+            "SELECT server_version FROM local_sync_entity_versions WHERE entity_type = ?1 AND entity_id = ?2",
+            params![entity_type, entity_id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?
+        .unwrap_or(0);
+    let pending_count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL",
+            params![entity_type, entity_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| AuthError::Database)?;
+    transaction
+        .execute(
+            "INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, ?2, ?3, 'upsert', ?4, ?5, ?6)",
+            params![Uuid::new_v4().to_string(), entity_type, entity_id.to_string(), server_version + pending_count, payload, unix_seconds(now)],
+        )
+        .map_err(|_| AuthError::Database)?;
+    Ok(())
 }
 
 fn append_order_audit(
@@ -4242,6 +4287,25 @@ mod tests {
                     now,
                 )
                 .unwrap();
+        }
+        {
+            let connection = service.connection.lock().unwrap();
+            let pending_outbox_count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_outbox WHERE acknowledged_at IS NULL",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(pending_outbox_count, 4);
+            let material_payload: String = connection
+                .query_row(
+                    "SELECT payload_json FROM local_sync_outbox WHERE entity_type = 'material'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(material_payload.contains("测试材料"));
         }
         let country_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
