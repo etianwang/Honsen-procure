@@ -65,15 +65,15 @@ When the user says **「开始任务」**, perform this startup protocol before 
 When the user says **「收尾任务」**, perform the following only for the currently selected child task:
 
 1. Reinspect the diff and affected callers/tests. Run its focused test first, then every mandatory affected-package quality gate from `docs/BUILD-TASKS.md`: formatting, lint, strict typecheck, unit tests, production build, relevant Rust/API/integration checks, and the required reproducible Playwright DOM proof when the scope has UI acceptance.
-2. Do not claim success when a required check is skipped, fails, or is blocked. Preserve the work; record the command, result, failure/skip reason, migration/sync effect, remaining risk, and next action in `memory.md`.
+2. Do not claim success when a required check is skipped, fails, or is blocked. Preserve the work; record the command, result, failure/skip reason, migration/sync effect, remaining risk, and next action in `memory.md`. Every skipped test must name the affected acceptance item and the impact of not running it.
 3. If the selected child task is accepted, update the actual partial/full status and evidence consistently in `memory.md`, `docs/BUILD-TASKS.md`, and `docs/ROADMAP.md`. Keep incomplete parent tasks and milestones unchecked.
 4. Create one local Git checkpoint commit containing only the selected task's code, tests, and progress documentation. Never push, deploy, delete data, or start another task without explicit user instruction.
-5. Report changed files, commit hash, test evidence, remaining blockers/risks, and the recommended next task, then stop immediately.
+5. Classify every remaining issue as `BLOCKER` (prevents the current task's acceptance), `DEFERRED` (belongs to a later task), or `WARNING` (does not affect current acceptance). Never mark a `BLOCKER` complete or automatically fix a `DEFERRED` issue. Report changed files, commit hash, test evidence, this classified issue list, and the recommended next task, then stop immediately.
 
 ### Cross-session handoff
 
-- End every task attempt with `memory.md` recording the exact Git checkpoint, dirty files (if any), selected child task status, completed evidence, skipped/failed checks, data or migration effects, blockers, risks, and one safe next action.
-- At the next `开始任务`, treat that handoff and the current Git tree as evidence to verify, not assumptions to overwrite. Reconcile contradictions in favor of current code, current Git history, and fresh test output.
+- End every task attempt with `memory.md` recording the exact Git checkpoint, dirty files (if any), selected child task status, completed evidence, skipped/failed checks, data or migration effects, and every remaining issue classified as `BLOCKER`, `DEFERRED`, or `WARNING`. A skipped test must include its reason and affected acceptance item.
+- At the next `开始任务`, treat that handoff and the current Git tree as evidence to verify, not assumptions to overwrite. Reconcile contradictions in favor of current code, current Git history, and fresh test output. Prioritize an unblocked `BLOCKER` that affects the current task's acceptance before any `DEFERRED` work.
 - A blocked or partial child task stays unchecked. Its preserved code is a checkpoint for recovery, not proof of acceptance.
 
 ## Recommended repository layout
