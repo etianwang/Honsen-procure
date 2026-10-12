@@ -79,6 +79,14 @@ When the user says **「开始任务」**, perform this startup protocol before 
 - For a synchronization or schema change, include focused success, failure/retry and conflict/immutability coverage where applicable. Never silently drop a remote or local record to make projection succeed.
 - If the same defect remains after three consecutive repair attempts, stop. Retain the code, document the attempts, root cause, evidence, and recommended next action in `memory.md`.
 
+### Unattended fallback task pool
+
+When the main path is blocked by external approval, product decisions, or task dependencies, inspect for a separately verifiable fallback task before stopping. Eligible work is limited to a known defect fix, targeted test-coverage improvement, error-handling gap, documentation consistency repair, or reliability improvement for an already implemented feature.
+
+- Record the evidence, scope, affected callers/tests, acceptance criteria, and why it does not alter product behavior before editing.
+- Use the normal branch, validation, progress-record, and checkpoint workflow for each fallback task; re-evaluate the queue after it completes.
+- Do not invent requirements, bypass a blocked dependency, change product behavior, or conduct an unfocused refactor to create fallback work. If no eligible task exists, save the checkpoint and stop.
+
 ### Trigger: `收尾任务`
 
 When the user says **「收尾任务」**, perform the following only for the currently selected child task:

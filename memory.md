@@ -3,6 +3,19 @@
 **Last updated:** 2026-10-11  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## Current authoritative status — 2026-10-12
+
+- T02 is **COMPLETED**: T02-A/B/C are accepted in `docs/BUILD-TASKS.md`. Draft PR #4 (`codex/t02-b-auth-store`, `aeb0762`) targets `main`, is clean, and has passing remote `quality`; Draft PR #5 (`codex/t02-c-login-dom`, `69edc62`) targets `main`, is clean, has passing remote `quality`, and is stacked on #4. Neither is authorized for merge.
+- Current blockers are T04-A deployment authority, the approved T08↔T10 and T09↔T11 acceptance-boundary decisions, and T15 permanent Toolbox identity. No eligible independent fallback task is presently identified.
+- Earlier T02-open, failed-WSL-launch, unpushed-CI, dirty-worktree, and “next T02” statements below are historical and superseded by this section plus current Git/PR evidence; retain them only as investigation history.
+
+## T02-C CAPTCHA/login DOM acceptance — 2026-10-11
+
+- **T02-C COMPLETED.** Fastify CAPTCHA/login API coverage, the test-only invalid/first-login fixture, and the offline engineer DOM-tampering denial all passed.
+- Fresh full-gate evidence: formatting, lint, strict TypeScript, production build, workspace tests (desktop 2, server 19 including disposable PostgreSQL, shared 14), Playwright 16/16, Rust format and 12/12 tests. The first Rust command failed only because it was launched outside its crate; rerunning in `apps/desktop/src-tauri` passed.
+- The `honsen-procure-t02c` disposable Compose container/network is removed with `down --volumes`; no 5432 listener or other Docker resource is used.
+- **DEFERRED:** T04-A needs authorized deployment records. T08/T09 dependency-boundary work requires product approval. **WARNING:** LoginPage remains an explicitly labelled development preview; this acceptance covers the stated fixture/API gate, not a new online desktop-login flow.
+
 ## T02-B PostgreSQL authentication-store acceptance — 2026-10-11
 
 - Selected child: **T02-B — COMPLETED**. Scope is limited to the PostgreSQL authentication store and initial-super-administrator provisioning path; callers are `AuthService` and the production server bootstrap, with no desktop/Rust/UI/shared-contract/Toolbox change and no schema migration.
