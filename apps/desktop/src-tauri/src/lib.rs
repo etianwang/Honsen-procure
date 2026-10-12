@@ -2981,8 +2981,21 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<Vec<OrderAuditView>, AuthError> {
-        self.require_catalog_read(now)?;
+        let privileged = self.require_order_mutation(now)?;
+        let actor_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        if !privileged {
+            let applicant_id: String = connection
+                .query_row(
+                    "SELECT applicant_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                    [order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Forbidden)?;
+            if applicant_id != actor_id.to_string() {
+                return Err(AuthError::Forbidden);
+            }
+        }
         let mut statement = connection
             .prepare(
                 "SELECT id, order_id, actor_id, action, reason, previous_json, next_json, created_at FROM local_order_audit_entries WHERE order_id = ?1 ORDER BY created_at, id",
@@ -6624,6 +6637,39 @@ mod tests {
             .unwrap();
         assert_eq!(draft_status, "pending_confirmation");
         drop(connection);
+        let other_engineer_id = Uuid::new_v4();
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: other_engineer_id,
+                    username: "other-engineer".into(),
+                    roles: vec![Role::Engineer],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "other-engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.list_order_audits(draft_order_id, now),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(
+            service.submit_requisition_draft(draft_order_id, now),
+            Err(AuthError::Forbidden)
+        );
         drop(service);
         let _ = std::fs::remove_file(database_path);
     }
