@@ -35,6 +35,8 @@ The initial entity set is `materials`, `suppliers`, `material_prices`, `purchase
 - Enforce positive quantity, non-negative minor-unit price, non-empty material unit/supplier name, and order status transitions at the service layer and database where feasible.
 - Local outbox `event_id` is unique. Cloud processed event IDs are unique per tenant/device scope so retries cannot duplicate a mutation.
 - Persist a non-secret installation UUID and its local formal-number counter in the same SQLite transaction as formal issue. The cloud enforces unique formal number and `(installation UUID, sequence)` registrations. Restore/clone recovery must preserve issued rows and either retain the original namespace or create an audited new namespace before new issue.
+- Add `document_type` independently from any supplier business code. Numbering migrations are additive: preserve every existing `display_no` byte-for-byte, leave new formal fields null for legacy rows and require them only for newly formally issued documents.
+- Owner-price migrations preserve source price/currency, exact frozen source-to-primary rate, converted reference, markup and final primary-currency price separately. Never backfill a calculated value by guessing a historical rate.
 
 ## Migration review checklist
 

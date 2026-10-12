@@ -87,3 +87,7 @@ taxTemplates:
 ```
 
 After approval, a super administrator, administrator or purchaser creates records through the authenticated master-data API. The creation is audited; names, active state and defaults may later change, but `businessCode` remains fixed.
+
+## Separate reserved document-type namespace
+
+`OPA`, `HPA` and `SPO` are system document-type codes, not supplier or other master-data business codes. This reservation does not modify any approved code above or any historical number. The current approval list contains no supplier business codes and therefore no recorded `SPO` collision. Supplier-code creation must check the reserved set; if an externally approved supplier already uses `SPO`, preserve it and escalate a field-qualified compatibility alias for future documents rather than changing history.

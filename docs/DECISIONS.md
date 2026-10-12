@@ -29,11 +29,13 @@
 - Formal offline issue freezes the UUID, local formal document number, quote-source snapshot, markup rule and calculated owner price. Later catalog changes and synchronization must not silently rewrite a formally issued document or its number.
 - Formal numbers are locally issued and server-registered, never server-reassigned. Their normative format is `<country-code>-<project-code>-<YYYYMMDD>-<document-type>-<installation-short-code>-<sequence>`; the permanent installation UUID is carried in the authenticated business/outbox payload and is the server validation key behind the readable short code.
 - `procurement_expenditures` is the single lightweight, append-only Honsen-self-purchase payment record. It supports multiple payments and optional vouchers, but is not a ledger, reimbursement or advance-settlement subsystem. Owner-self-purchase cannot create it.
+- Owner-self-purchase may select catalog/manual reference prices in any supported currency. Each line first converts its source unit price to the application primary currency with the application’s frozen source-to-primary rate, then applies exactly one markup. Percentage markup applies to the converted reference price; fixed markup is entered in the application primary currency. Conversion and markup use integer/rational arithmetic with explicit half-up rounding, never floating point.
+- Formal issue freezes the original reference price/currency, rate direction/value/source/effective time, converted reference price, markup and final application price. A missing valid rate blocks formal issue; later exchange-rate updates cannot change an issued document. Owner prints expose only primary-currency final prices/totals.
+- `SPO` is the reserved supplier-child purchase-order document type. `document_type` and `supplier_code` are separate fields/namespaces; historical supplier codes and document numbers are never rewritten. The current approved master-data mapping contains no supplier codes, and the current implementation has no `document_type` field or `SPO` value, so no direct `SPO` data collision was found. Existing `INT`, `RFQ` and `SUP-001` fixture/display numbers remain opaque historical/test values until additive fields are implemented.
 
 ## Open implementation decisions
 
 1. **Toolbox identity:** `appId`, stable product-directory name, main EXE name, installer technology and internal update URL have not been registered. See `HONSEN_TOOLBOX_INTEGRATION.md`.
-2. **Supplier-child type code:** `SPO` is the reserved supplier-child purchase-order document type. It is an enumerated document type, never a supplier business code; master-data validation must reserve `OPA`, `HPA` and `SPO` from supplier-code reuse.
 
 ## Deferred
 

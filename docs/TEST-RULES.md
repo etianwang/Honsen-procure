@@ -56,6 +56,12 @@
 | T48 | Honsen market payment                       | Multiple offline payments can use a free-text payee; receipt remains independent; missing voucher is warned and outbox sync is idempotent           |
 | T49 | Owner payment prohibition                   | Trusted boundary rejects payment record for owner-self-purchase                                                                                     |
 | T50 | Payment correction                          | Submitted payment is not overwritten; reversal/replacement and audit reason remain visible                                                          |
+| T51 | Cross-currency owner percentage markup      | Rust converts source minor units to primary currency with frozen directed rate and half-up rounding, then applies percentage exactly                |
+| T52 | Cross-currency owner fixed markup           | Fixed markup is entered in primary-currency minor units and added only after conversion; percentage remains null                                    |
+| T53 | Missing owner exchange rate                 | Draft can save, but trusted boundary blocks formal issue and creates neither formal number nor outbox issue event                                   |
+| T54 | Issued owner rate changes                   | Pulling a changed/revoked rate leaves source/rate/converted/markup/final snapshots and reprint unchanged                                            |
+| T55 | Owner cross-currency print confidentiality  | Print uses primary currency and final values only; source currency/price, rate, converted reference and markup are absent                           |
+| T56 | Reserved SPO namespace                      | `document_type=SPO` and supplier business code are validated independently; historical display numbers remain byte-for-byte unchanged               |
 | T21 | Re-run installation for same appId          | Installer finds HKLM/HKCU and 32/64-bit registration and refuses a second instance                                                                  |
 | T22 | Toolbox opens the application               | Registered Runner receives `launch --app-id ... --source toolbox` and starts only the registered EXE                                                |
 | T23 | Toolbox update hash or target mismatch      | Runner fails, writes an operation-specific result JSON and does not restart the application                                                         |
@@ -68,7 +74,7 @@
 - Every bug fix must add a regression test.
 - Every migration must be tested against a copy of the previous schema.
 - Every sync change needs failure injection: timeouts, duplicate delivery, reordered responses, partial batch rejection.
-- Formal-number work additionally tests concurrent local issue, restored database, intentional clone/re-key, duplicate full number, reused installation sequence and server restart after commit. Payment work additionally tests multiple payments, owner-mode denial, missing voucher, append-only correction and independent receipt/payment synchronization.
+- Formal-number work additionally tests concurrent local issue, restored database, intentional clone/re-key, duplicate full number, reused installation sequence, separate `document_type`/supplier-code fields and server restart after commit. Owner-pricing work tests every supported source/primary minor-digit pairing, identity rate, rate direction, half-up boundary, percentage/fixed exclusivity, missing/revoked rates, snapshot immutability and print redaction. Payment work additionally tests multiple payments, owner-mode denial, missing voucher, append-only correction and independent receipt/payment synchronization.
 - Installer/update changes require the Windows and toolbox acceptance cases in `HONSEN_TOOLBOX_INTEGRATION.md`; record the actual OS, installer and result for each release candidate.
 - CI gates: formatting, lint, TypeScript strict typecheck, unit tests, API integration tests, production build.
 - Do not use real supplier contact data or real production credentials in test fixtures.

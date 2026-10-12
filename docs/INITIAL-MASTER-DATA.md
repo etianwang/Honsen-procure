@@ -27,6 +27,7 @@ The deployment administrator must create the two enabled super-administrator acc
 - XOF has zero minor decimal places; CNY, USD and EUR have two.
 - The system attempts a daily public exchange-rate refresh. If it fails, a purchaser or administrator may enter a rate manually with a reason and audit event.
 - Each issued order copies and locks its selected exchange rate; later rate changes cannot alter its totals.
+- Owner-self-purchase may use several source currencies in one application. Its primary currency is the only final/print currency. At formal issue, copy every source-to-primary rate actually used, including direction, canonical exact value, rate record/source/effective time and converted reference result. Missing a valid required rate blocks issue; same-currency lines use identity rate `1`.
 
 ## Human-readable formal document numbers
 
@@ -41,6 +42,12 @@ Example: `CI-Bethel2-20261012-OPA-A7K2M9QF-0001`.
 - Each installed database has a cryptographically generated persistent installation UUID. Its readable short code is at least eight Crockford-Base32 characters deterministically derived from that UUID; it aids people, but is not a global-uniqueness or security credential. The server stores the full UUID, enforces unique `(installation_uuid, sequence)` and formal-number keys, and validates that the short code matches the UUID.
 - A backup restored to the same logical installation keeps its UUID and counter. A database copied to another active installation, or restored after a reinstallation where it will issue new documents, must run an audited clone/recovery re-key before the next issue: generate a new installation UUID/short code and start a new sequence namespace while retaining historical documents unchanged. A fresh installation without a restored database generates a new UUID.
 - If a clone or short-code collision nevertheless produces the same formal number for different UUIDs/documents, the server preserves both originals, rejects automatic registration of the later collision and opens an auditable conflict. Neither the number nor the issued snapshot is silently changed. There is no provisional-to-final mapping and the server never assigns a replacement number.
+
+### Document-type and supplier-code compatibility check
+
+- `document_type` and `supplier_code` are separate fields and namespaces. `OPA`, `HPA` and `SPO` are reserved document types; no approved country/project/site/department/team/unit/tax code is changed by this reservation.
+- The current approved master-data file contains no supplier-code list, and repository search found no current `SPO` supplier code or stored `document_type`. Existing implementation/fixtures use free-form `display_no` values such as `INT`, `RFQ` and `SUP-001`; treat all existing values as opaque historical/test identifiers. A future migration adds new fields for new formal issues and must not parse, rewrite or renumber existing values.
+- Before deployment, validate newly created supplier business codes against the reserved document-type set. If a real supplier already uses `SPO`, preserve that immutable supplier code and historical numbers; use field-qualified validation and an explicitly approved compatibility alias for future document types rather than migrating history automatically.
 
 ## Account and synchronization provisioning
 

@@ -21,11 +21,13 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 - Send pending events in stable creation order over HTTPS using the authenticated account session.
 - The server validates the account/project scope, request payload, event-id idempotency and expected entity version inside one PostgreSQL transaction.
 - A formal-issue payload includes the UUID, immutable formal snapshot, complete installation UUID, installation short code and local sequence. The server validates the document-type/short-code derivation and uniqueness of the formal number and `(installation UUID, sequence)`; it registers, but never assigns or renumbers, a formal number.
+- An owner formal-issue payload also contains the primary currency and every line’s original quote/manual price and currency, frozen source-to-primary rate snapshot, converted reference price, exclusive markup and final price. The server validates the exact integer/rational calculation and required rate presence; acceptance never substitutes a newer exchange rate.
 - On acceptance it commits the mutation and a change-log entry atomically, assigns the next entity version, and returns the event acknowledgment.
 - Only after the client receives an accepted acknowledgment may it mark that local outbox event acknowledged.
 - Transport failure is retryable. The same event ID must be safe to resend indefinitely.
 - Validation rejection is retained with its structured reason. Version mismatch becomes a conflict; neither local nor remote value is silently discarded.
 - A duplicate formal number on another UUID, a reused `(installation UUID, sequence)`, or a divergent frozen snapshot for an issued UUID is an auditable conflict. The original issued records remain available; the client must not manufacture a replacement number during retry or resolution.
+- A remote rate change/revocation after local formal issue may create a verification warning, but cannot rewrite or reject an otherwise internally valid frozen issued snapshot solely because the current rate differs. A missing/invalid rate detected before issue is a local validation error and no formal issue/outbox event commits.
 
 ## Pull
 
