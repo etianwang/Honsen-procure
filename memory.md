@@ -1,10 +1,12 @@
 # Honsen采购管理系统（HONSEN Procure）— Development Memory
 
-**Last updated:** 2026-10-11  
+**Last updated:** 2026-10-12  
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
 ## Current authoritative status — 2026-10-12
 
+- Startup review selected **T04-A** as the highest-priority unblocked-by-code child, because T02 and T03 are accepted. It cannot start: its acceptance requires an authorized deployment account/setup window to create actual approved master-data records, and the repository intentionally prohibits automatic production seeding. `main` and `origin/main` both resolve to `dac45d6`; the entry worktree was clean with no user changes to preserve. A focused fallback scan found no independently verifiable known defect, coverage gap, error-handling gap, documentation inconsistency, or reliability improvement that does not change product behavior. No application, schema, migration, fixture, API, Rust, UI, installer, update, or Toolbox-contract file was changed.
+- **BLOCKER:** authorized deployment account/setup window for T04-A. **DEFERRED:** T04-B/C must follow the authorized records; T08↔T10 and T09↔T11 acceptance-boundary decisions; T15 permanent Toolbox identity. **WARNING:** no tests ran because no implementation was authorized or changed. **Safe next action:** provide the authorized T04 deployment workflow/window, then create the approved records through that workflow and retain non-secret evidence; otherwise leave this checkpoint unchanged.
 - T02 is **COMPLETED**: T02-A/B/C are accepted in `docs/BUILD-TASKS.md`. Draft PR #4 (`codex/t02-b-auth-store`, `aeb0762`) targets `main`, is clean, and has passing remote `quality`; Draft PR #5 (`codex/t02-c-login-dom`, `69edc62`) targets `main`, is clean, has passing remote `quality`, and is stacked on #4. Neither is authorized for merge.
 - Current blockers are T04-A deployment authority, the approved T08↔T10 and T09↔T11 acceptance-boundary decisions, and T15 permanent Toolbox identity. No eligible independent fallback task is presently identified.
 - Earlier T02-open, failed-WSL-launch, unpushed-CI, dirty-worktree, and “next T02” statements below are historical and superseded by this section plus current Git/PR evidence; retain them only as investigation history.
