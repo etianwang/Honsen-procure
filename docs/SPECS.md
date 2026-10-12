@@ -66,6 +66,7 @@
 - Never use JS float for financial arithmetic; use decimal arithmetic and explicit half-up rounding: XOF has zero decimal places; CNY/USD/EUR have two.
 - Required material name and unit; required supplier name; unique SKU if provided.
 - Disallow confirmation with zero lines. Supplier children have one currency; a parent may combine children by using its locked primary-currency exchange rate.
+- Parent order transitions are mode-constrained: both modes permit `draft → pending_confirmation → approved` and `pending_confirmation → rejected → draft`; only owner mode permits `approved → formally_issued → receiving`, while only Honsen mode permits `approved → executing → receiving`. Only receiving permits `completed` or `completed_with_conditions`; cancellation may not rewrite a formally issued snapshot. `confirmed` is a legacy local-storage alias for `approved` and is not a third approval state. Trusted commands must reject every other transition and cover rejection, cross-mode and skipped-state attempts.
 - Line/order discounts and freight accept fixed minor amounts or percentages. Calculation order is line discount, order discount, freight, then tax.
 - Draft/submitted temporary material requires name, model, specification and unit. Confirming the parent creates it as pending-completion; purchaser/administrator completes it before normal activation.
 - Reject invalid email/phone only where appropriate; permit international phone formats.

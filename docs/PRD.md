@@ -26,9 +26,12 @@
 
 ## 3. Main screens
 
-### 3.1 Home: purchase ordering (default after login)
+### 3.1 Home dashboard (default after login)
 
 - Homepage is a statistics/work queue dashboard. It shows role-appropriate counts for pending confirmation, purchasing in progress, receipt outstanding, urgent orders and current-period purchasing amount, with country/project/date filters and direct entry to the relevant order list.
+
+### 3.2 Quick order workspace
+
 - Country/project, site, requesting department/team, applicant, currency, language, delivery address, expected arrival date, notes and attachments.
 - Fast material search by Chinese/French name, alias, category, specification, model, SKU.
 - Select a material and quantity. For an owner-self-purchase line, explicitly choose one associated catalog quote from its dropdown, or explicitly switch to a red-marked manual-reference exception; never default to the first quote. The selected supplier is internal estimation evidence only and does not require the owner to purchase from that supplier.
@@ -37,7 +40,7 @@
 - Draft autosave, submit, withdraw, approval, rejection/resubmission, cancel/revision controls, history search, duplicate and reprint.
 - PDF export and system print dialog; no network required.
 
-### 3.2 Procurement workspace and controlled maintenance
+### 3.3 Procurement workspace and controlled maintenance
 
 - Material CRUD: names, category, brand, model, specifications, unit, image (future optional), notes, active status.
 - Material image upload is supported for purchasers/administrators. Before saving, the user must crop the selected image to a 1:1 square and review the resulting catalog thumbnail.
@@ -50,7 +53,7 @@
 
 - Every requisition has exactly one mode. `owner_self_purchase` is formally issued to the owner for offline purchase/payment; it records demand and partial receiving only, never a Honsen procurement payment or actual Honsen expenditure. `honsen_self_purchase` is internally approved then executed by Honsen; it records actual procurement expenditure and partial receiving.
 - Honsen execution supports a market/casual counterparty without a supplier profile, RFQ or formal supplier order. When a registered supplier and formal process are appropriate, it reuses the existing RFQ, allocation and supplier-specific child-order path; a child has one supplier/currency and retains supplier snapshots.
-- Owner mode flow: `draft → pending_confirmation → approved → formally_issued → receiving → completed | completed_with_conditions | cancelled`. Honsen mode flow: `draft → pending_confirmation → approved → executing → receiving → completed | completed_with_conditions | cancelled`; RFQ and supplier-order states are optional execution detail, not mandatory gates for market purchasing. Rejection returns to an editable state and starts a new approval cycle on resubmission.
+- Owner mode flow: `draft → pending_confirmation → approved → formally_issued → receiving → completed | completed_with_conditions | cancelled`. Honsen mode flow: `draft → pending_confirmation → approved → executing → receiving → completed | completed_with_conditions | cancelled`; RFQ and supplier-order states are optional execution detail, not mandatory gates for market purchasing. Rejection returns to an editable state and starts a new approval cycle on resubmission. The current local `workflow_status=confirmed` is a legacy persistence alias for `approved`, not an additional business state; a migration must preserve its audit history before it is replaced. No command may transition across modes or skip a listed state.
 - UUID is the permanent entity identity. Formal issue allocates and freezes `<country>-<project>-<YYYYMMDD>-<document-type>-<installation-short-code>-<sequence>` locally in the same transaction as its outbox event. `OPA` denotes owner-self-purchase, `HPA` Honsen-self-purchase and `SPO` supplier-child purchase order; these fixed document types are reserved from supplier business-code reuse. The persistent full installation UUID is the server uniqueness key behind the readable at-least-eight-character short code; it is not a credential. The server registers/validates it and reports collisions as conflicts; it never silently renumbers a formally issued document.
 - A formally issued document is immutable in its quote/price/number snapshot. A required correction is a cancelled/closed original plus a new revision with its own UUID and formal number.
 - Honsen-self-purchase may append one or more lightweight payment records (for example deposit and balance): actual amount/currency, payment date/method, handler, supplier or free-text payee, optional voucher and note. Payment and receiving are independent records. A submitted payment is corrected only by an auditable reversal/replacement, never silent overwrite; market counterparties do not need a supplier profile.
