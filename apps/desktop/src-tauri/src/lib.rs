@@ -1610,7 +1610,14 @@ impl LocalAuthService {
         let has_pricing: i64 = transaction
             .query_row("SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1 AND owner_quote_source IS NOT NULL", [input.order_id.to_string()], |row| row.get(0))
             .map_err(|_| AuthError::Database)?;
-        if has_pricing != 0
+        let has_pricing_audit: i64 = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_order_audit_entries WHERE order_id = ?1 AND action = 'owner_pricing_saved')",
+                [input.order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if (has_pricing != 0 || has_pricing_audit != 0)
             && !input
                 .revision_reason
                 .as_ref()
@@ -1634,34 +1641,40 @@ impl LocalAuthService {
             let (material_id, currency): (Option<String>, String) = transaction
                 .query_row("SELECT material_id, currency FROM local_purchase_order_items WHERE id = ?1 AND order_id = ?2", params![line.order_item_id.to_string(), input.order_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)))
                 .map_err(|_| AuthError::InvalidInput)?;
-            let (quote_source, catalog_price_id, source_unit_price, manual_reason) = match line
-                .quote_source
-            {
-                OwnerQuoteSourceInput::CatalogPrice { material_price_id } => {
-                    let material_id = material_id.ok_or(AuthError::InvalidInput)?;
-                    let price: (i64, String) = transaction
-                        .query_row("SELECT unit_price_minor, currency FROM local_material_prices WHERE id = ?1 AND material_id = ?2 AND is_active = 1 AND deleted_at IS NULL", params![material_price_id.to_string(), material_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            let (quote_source, catalog_price_id, source_unit_price, manual_reason, supplier) =
+                match line.quote_source {
+                    OwnerQuoteSourceInput::CatalogPrice { material_price_id } => {
+                        let material_id = material_id.ok_or(AuthError::InvalidInput)?;
+                        let price: (i64, String, String, String) = transaction
+                        .query_row("SELECT p.unit_price_minor, p.currency, s.id, s.name FROM local_material_prices p JOIN local_suppliers s ON s.id = p.supplier_id WHERE p.id = ?1 AND p.material_id = ?2 AND p.is_active = 1 AND p.deleted_at IS NULL AND s.is_active = 1 AND s.is_blacklisted = 0 AND s.deleted_at IS NULL", params![material_price_id.to_string(), material_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
                         .map_err(|_| AuthError::InvalidInput)?;
-                    if price.1 != currency {
-                        return Err(AuthError::InvalidInput);
+                        if price.1 != currency {
+                            return Err(AuthError::InvalidInput);
+                        }
+                        (
+                            "catalog_price",
+                            Some(material_price_id),
+                            price.0,
+                            None,
+                            Some((price.2, price.3)),
+                        )
                     }
-                    ("catalog_price", Some(material_price_id), price.0, None)
-                }
-                OwnerQuoteSourceInput::ManualReference {
-                    unit_price_minor,
-                    reason,
-                } => {
-                    if !valid_required_text(&reason, 1000) {
-                        return Err(AuthError::InvalidInput);
+                    OwnerQuoteSourceInput::ManualReference {
+                        unit_price_minor,
+                        reason,
+                    } => {
+                        if !valid_required_text(&reason, 1000) {
+                            return Err(AuthError::InvalidInput);
+                        }
+                        (
+                            "manual_reference",
+                            None,
+                            as_i64(parse_non_negative_minor(&unit_price_minor)?)?,
+                            Some(reason),
+                            None,
+                        )
                     }
-                    (
-                        "manual_reference",
-                        None,
-                        as_i64(parse_non_negative_minor(&unit_price_minor)?)?,
-                        Some(reason),
-                    )
-                }
-            };
+                };
             if !valid_non_zero_decimal_rate(&line.locked_exchange_rate_decimal)
                 || (currency == primary_currency && line.locked_exchange_rate_decimal != "1")
             {
@@ -1695,9 +1708,12 @@ impl LocalAuthService {
                 serde_json::to_string(&line.markup).map_err(|_| AuthError::InvalidInput)?;
             let manual_actor = manual_reason.as_ref().map(|_| actor_id.to_string());
             let manual_at = manual_reason.as_ref().map(|_| unix_seconds(now));
+            let supplier_snapshot = supplier
+                .as_ref()
+                .map(|(id, name)| serde_json::json!({ "id": id, "name": name }).to_string());
             transaction.execute(
-                "UPDATE local_purchase_order_items SET owner_quote_source = ?2, owner_catalog_price_id = ?3, owner_manual_reference_reason = ?4, owner_manual_reference_actor_id = ?5, owner_manual_reference_at = ?6, owner_source_unit_price_minor = ?7, owner_locked_exchange_rate_decimal = ?8, owner_converted_reference_unit_minor = ?9, owner_markup_json = ?10, owner_final_unit_price_minor = ?11, updated_at = ?12 WHERE id = ?1",
-                params![line.order_item_id.to_string(), quote_source, catalog_price_id.map(|id| id.to_string()), manual_reason, manual_actor, manual_at, source_unit_price, line.locked_exchange_rate_decimal, converted, markup_json, final_unit, unix_seconds(now)],
+                "UPDATE local_purchase_order_items SET supplier_snapshot_json = ?2, owner_quote_source = ?3, owner_catalog_price_id = ?4, owner_manual_reference_reason = ?5, owner_manual_reference_actor_id = ?6, owner_manual_reference_at = ?7, owner_source_unit_price_minor = ?8, owner_locked_exchange_rate_decimal = ?9, owner_converted_reference_unit_minor = ?10, owner_markup_json = ?11, owner_final_unit_price_minor = ?12, updated_at = ?13 WHERE id = ?1",
+                params![line.order_item_id.to_string(), supplier_snapshot, quote_source, catalog_price_id.map(|id| id.to_string()), manual_reason, manual_actor, manual_at, source_unit_price, line.locked_exchange_rate_decimal, converted, markup_json, final_unit, unix_seconds(now)],
             ).map_err(|_| AuthError::Database)?;
             views.push(OwnerLinePricingView {
                 order_item_id: line.order_item_id,
@@ -6574,10 +6590,6 @@ mod tests {
         let engineer_id = Uuid::new_v4();
         let draft_order_id = Uuid::new_v4();
         let draft_item_id = Uuid::new_v4();
-        let connection = service.connection.lock().unwrap();
-        connection.execute("INSERT INTO local_purchase_orders (id, display_no, procurement_mode, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'OPA-DRAFT', 'owner_self_purchase', ?2, ?3, 'site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'draft', 'draft', 'normal', '2026-10-12', 'address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![draft_order_id.to_string(), country_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), engineer_id.to_string()]).unwrap();
-        connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, '{\"nameZh\":\"owner material\"}', 'CNY', '1', 'pcs', 0, 0, 0, 0, 0)", params![draft_item_id.to_string(), draft_order_id.to_string(), material_id.to_string()]).unwrap();
-        drop(connection);
         service.lock().unwrap();
         service
             .cache_verified_account(
@@ -6602,10 +6614,98 @@ mod tests {
                 now,
             )
             .unwrap();
+        service
+            .save_requisition_draft(
+                RequisitionDraftInput {
+                    id: draft_order_id,
+                    display_no: "OPA-DRAFT".into(),
+                    country_id,
+                    project_id,
+                    site: "site".into(),
+                    department_id,
+                    team_id,
+                    applicant_id: engineer_id,
+                    currency: "XOF".into(),
+                    primary_currency: "XOF".into(),
+                    language_pair: "zh_fr".into(),
+                    urgency: "normal".into(),
+                    urgency_reason: None,
+                    order_date: "2026-10-12".into(),
+                    delivery_address: "address".into(),
+                    expected_delivery_date: None,
+                    notes: None,
+                    order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+                    order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+                    tax_rate_basis_points: 0,
+                    lines: vec![RequisitionLineInput {
+                        id: draft_item_id,
+                        material_id: Some(material_id),
+                        material_snapshot: MaterialSnapshotInput {
+                            name_zh: "owner material".into(),
+                            name_fr: None,
+                            model: "OP".into(),
+                            specification: "fixture".into(),
+                        },
+                        supplier_id: None,
+                        currency: "CNY".into(),
+                        quantity: "1".into(),
+                        unit: "pcs".into(),
+                        unit_price_minor: "0".into(),
+                        line_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+                        line_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+                        freight_included: false,
+                        sort_order: 0,
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        service
+            .set_procurement_mode(draft_order_id, "owner_self_purchase".into(), now)
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let before_failed_pricing: (i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM local_order_audit_entries WHERE order_id = ?1), (SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1)",
+                [draft_order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        drop(connection);
         assert_eq!(
             service.submit_requisition_draft(draft_order_id, now),
             Err(AuthError::Forbidden)
         );
+        assert_eq!(
+            service.save_owner_purchase_pricing(
+                OwnerPurchasePricingInput {
+                    order_id: draft_order_id,
+                    lines: vec![OwnerLinePricingInput {
+                        order_item_id: draft_item_id,
+                        quote_source: OwnerQuoteSourceInput::CatalogPrice {
+                            material_price_id: price_id,
+                        },
+                        locked_exchange_rate_decimal: "99".into(),
+                        markup: AdjustmentInput::FixedMinor { minor: "5".into() },
+                    }],
+                    revision_reason: None,
+                },
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        let connection = service.connection.lock().unwrap();
+        let after_failed_pricing: (i64, i64, Option<String>) = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM local_order_audit_entries WHERE order_id = ?1), (SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1), (SELECT owner_quote_source FROM local_purchase_order_items WHERE id = ?2)",
+                params![draft_order_id.to_string(), draft_item_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(after_failed_pricing.0, before_failed_pricing.0);
+        assert_eq!(after_failed_pricing.1, before_failed_pricing.1);
+        assert_eq!(after_failed_pricing.2, None);
+        drop(connection);
         let preview = service
             .save_owner_purchase_pricing(
                 OwnerPurchasePricingInput {
@@ -6637,6 +6737,173 @@ mod tests {
             .unwrap();
         assert_eq!(draft_status, "pending_confirmation");
         drop(connection);
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "owner-pricing",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let purchaser_audits = service.list_order_audits(draft_order_id, now).unwrap();
+        let initial_pricing_audit = purchaser_audits
+            .iter()
+            .find(|audit| audit.action == "owner_pricing_saved")
+            .unwrap();
+        assert_eq!(initial_pricing_audit.actor_id, engineer_id);
+        assert!(
+            initial_pricing_audit
+                .next_json
+                .as_deref()
+                .unwrap()
+                .contains("ownerConvertedReferenceUnitMinor")
+        );
+        assert!(
+            initial_pricing_audit
+                .next_json
+                .as_deref()
+                .unwrap()
+                .contains("\"name\":\"fixture\"")
+        );
+        service
+            .reject_requisition(draft_order_id, "rate needs revision".into(), now)
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let rejected: (String, String) = connection
+            .query_row(
+                "SELECT workflow_status, rejection_reason FROM local_purchase_orders WHERE id = ?1",
+                [draft_order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rejected, ("rejected".into(), "rate needs revision".into()));
+        drop(connection);
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "owner-engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        service
+            .save_requisition_draft(
+                RequisitionDraftInput {
+                    id: draft_order_id,
+                    display_no: "OPA-DRAFT".into(),
+                    country_id,
+                    project_id,
+                    site: "site".into(),
+                    department_id,
+                    team_id,
+                    applicant_id: engineer_id,
+                    currency: "XOF".into(),
+                    primary_currency: "XOF".into(),
+                    language_pair: "zh_fr".into(),
+                    urgency: "normal".into(),
+                    urgency_reason: None,
+                    order_date: "2026-10-12".into(),
+                    delivery_address: "address".into(),
+                    expected_delivery_date: None,
+                    notes: None,
+                    order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+                    order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+                    tax_rate_basis_points: 0,
+                    lines: vec![RequisitionLineInput {
+                        id: draft_item_id,
+                        material_id: Some(material_id),
+                        material_snapshot: MaterialSnapshotInput {
+                            name_zh: "owner material".into(),
+                            name_fr: None,
+                            model: "OP".into(),
+                            specification: "fixture".into(),
+                        },
+                        supplier_id: None,
+                        currency: "CNY".into(),
+                        quantity: "1".into(),
+                        unit: "pcs".into(),
+                        unit_price_minor: "0".into(),
+                        line_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+                        line_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+                        freight_included: false,
+                        sort_order: 0,
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_owner_purchase_pricing(
+                OwnerPurchasePricingInput {
+                    order_id: draft_order_id,
+                    lines: vec![OwnerLinePricingInput {
+                        order_item_id: draft_item_id,
+                        quote_source: OwnerQuoteSourceInput::CatalogPrice {
+                            material_price_id: price_id,
+                        },
+                        locked_exchange_rate_decimal: "76.5".into(),
+                        markup: AdjustmentInput::FixedMinor { minor: "10".into() },
+                    }],
+                    revision_reason: None,
+                },
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        let revised = service
+            .save_owner_purchase_pricing(
+                OwnerPurchasePricingInput {
+                    order_id: draft_order_id,
+                    lines: vec![OwnerLinePricingInput {
+                        order_item_id: draft_item_id,
+                        quote_source: OwnerQuoteSourceInput::CatalogPrice {
+                            material_price_id: price_id,
+                        },
+                        locked_exchange_rate_decimal: "76.5".into(),
+                        markup: AdjustmentInput::FixedMinor { minor: "10".into() },
+                    }],
+                    revision_reason: Some("updated markup after rejection".into()),
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(revised[0].final_unit_price_minor, "954");
+        service
+            .submit_requisition_draft(draft_order_id, now)
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let resubmitted: (String, i64, i64, i64) = connection
+            .query_row(
+                "SELECT workflow_status, (SELECT COUNT(*) FROM local_purchase_orders WHERE id = ?1), (SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1 AND owner_final_unit_price_minor = 954), (SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1) FROM local_purchase_orders WHERE id = ?1",
+                [draft_order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(resubmitted.0, "pending_confirmation");
+        assert_eq!(resubmitted.1, 1);
+        assert_eq!(resubmitted.2, 1);
+        assert_eq!(resubmitted.3, 8);
+        drop(connection);
+        let applicant_audits = service.list_order_audits(draft_order_id, now).unwrap();
+        assert!(applicant_audits.iter().any(|audit| {
+            audit.action == "rejected"
+                && audit.actor_id == purchaser_id
+                && audit.reason.as_deref() == Some("rate needs revision")
+                && audit.created_at > 0
+        }));
+        assert!(applicant_audits.iter().any(|audit| {
+            audit.action == "owner_pricing_saved"
+                && audit.actor_id == engineer_id
+                && audit.reason.as_deref() == Some("updated markup after rejection")
+                && audit.previous_json.is_some()
+                && audit.next_json.is_some()
+        }));
         let other_engineer_id = Uuid::new_v4();
         service.lock().unwrap();
         service
@@ -6662,6 +6929,15 @@ mod tests {
                 now,
             )
             .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let before_unauthorized: (String, i64, i64) = connection
+            .query_row(
+                "SELECT workflow_status, (SELECT COUNT(*) FROM local_order_audit_entries WHERE order_id = ?1), (SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1) FROM local_purchase_orders WHERE id = ?1",
+                [draft_order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        drop(connection);
         assert_eq!(
             service.list_order_audits(draft_order_id, now),
             Err(AuthError::Forbidden)
@@ -6670,6 +6946,16 @@ mod tests {
             service.submit_requisition_draft(draft_order_id, now),
             Err(AuthError::Forbidden)
         );
+        let connection = service.connection.lock().unwrap();
+        let after_unauthorized: (String, i64, i64) = connection
+            .query_row(
+                "SELECT workflow_status, (SELECT COUNT(*) FROM local_order_audit_entries WHERE order_id = ?1), (SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1) FROM local_purchase_orders WHERE id = ?1",
+                [draft_order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(after_unauthorized, before_unauthorized);
+        drop(connection);
         drop(service);
         let _ = std::fs::remove_file(database_path);
     }
