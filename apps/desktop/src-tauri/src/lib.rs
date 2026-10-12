@@ -828,6 +828,15 @@ impl LocalAuthService {
         )
     }
 
+    #[cfg(test)]
+    fn open_file_for_test(path: &str) -> Result<Self, AuthError> {
+        Self::open(
+            Connection::open(path).map_err(|_| AuthError::Database)?,
+            Box::new(MemoryCredentialVault::new()),
+            Path::new(path).with_extension("media"),
+        )
+    }
+
     fn open(
         mut connection: Connection,
         credential_vault: Box<dyn CredentialVault>,
@@ -6404,7 +6413,10 @@ mod tests {
 
     #[test]
     fn owner_pricing_requires_a_catalog_or_audited_manual_quote_and_freezes_the_result() {
-        let service = LocalAuthService::open_in_memory().unwrap();
+        let database_path =
+            std::env::temp_dir().join(format!("honsen-opa2-{}.sqlite", Uuid::new_v4()));
+        let service =
+            LocalAuthService::open_file_for_test(database_path.to_str().unwrap()).unwrap();
         let now = SystemTime::now();
         let purchaser_id = Uuid::new_v4();
         service
@@ -6611,6 +6623,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(draft_status, "pending_confirmation");
+        drop(connection);
+        drop(service);
+        let _ = std::fs::remove_file(database_path);
     }
 
     #[test]
