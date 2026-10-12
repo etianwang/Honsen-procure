@@ -322,10 +322,10 @@ export function RequisitionPage({
 
   useEffect(() => {
     catalogApi
-      .searchCatalog('')
+      .searchCatalog('', context.projectId)
       .then(setMaterials)
       .catch(() => setMaterials([]))
-  }, [catalogApi])
+  }, [catalogApi, context.projectId])
 
   const draft = useMemo(
     () => toOrder(orderId, lines, context),

@@ -60,7 +60,10 @@ export type MaterialImageInput = {
 }
 
 export type CatalogApi = {
-  searchCatalog(query: string): Promise<CatalogMaterialView[]>
+  searchCatalog(
+    query: string,
+    projectId?: string,
+  ): Promise<CatalogMaterialView[]>
   saveMaterial(material: Material): Promise<void>
   listSuppliers(): Promise<SupplierView[]>
   saveSupplier(supplier: Supplier): Promise<void>
@@ -82,8 +85,11 @@ function tauriInvoke(): TauriInvoke {
 }
 
 export const tauriCatalogApi: CatalogApi = {
-  searchCatalog: (query) =>
-    tauriInvoke()<CatalogMaterialView[]>('search_catalog', { query }),
+  searchCatalog: (query, projectId) =>
+    tauriInvoke()<CatalogMaterialView[]>('search_catalog', {
+      query,
+      projectId,
+    }),
   saveMaterial: (material) =>
     tauriInvoke()<void>('save_material', { material }),
   listSuppliers: () => tauriInvoke()<SupplierView[]>('list_suppliers'),

@@ -1,0 +1,456 @@
+{
+  "schemaVersion": 1,
+  "countries": [
+    {
+      "code": "CI",
+      "name": "科特迪瓦",
+      "timeZone": "Africa/Abidjan",
+      "isActive": true
+    },
+    {
+      "code": "CM",
+      "name": "喀麦隆",
+      "timeZone": "Africa/Douala",
+      "isActive": true
+    },
+    {
+      "code": "ET",
+      "name": "埃塞俄比亚",
+      "timeZone": "Africa/Addis_Ababa",
+      "isActive": true
+    }
+  ],
+  "projects": [
+    {
+      "code": "BETHEL",
+      "countryCode": "CI",
+      "name": "Bethel 办公楼",
+      "site": "阿比让",
+      "departmentName": "项目部",
+      "defaultCurrency": "XOF",
+      "defaultLanguagePair": "zh_fr",
+      "isActive": true
+    },
+    {
+      "code": "MINREX",
+      "countryCode": "CM",
+      "name": "Minrex 项目",
+      "site": "雅温得",
+      "departmentName": "项目部",
+      "defaultCurrency": "XAF",
+      "defaultLanguagePair": "zh_fr",
+      "isActive": true
+    },
+    {
+      "code": "MARRIOTT-ET",
+      "countryCode": "ET",
+      "name": "Marriott 万豪酒店",
+      "site": "亚的斯亚贝巴",
+      "departmentName": "项目部",
+      "defaultCurrency": "ETB",
+      "defaultLanguagePair": "zh_en",
+      "isActive": true
+    }
+  ],
+  "sites": [
+    {
+      "code": "BETHEL-SITE",
+      "projectCode": "BETHEL",
+      "name": "Bethel 项目现场",
+      "isActive": true
+    },
+    {
+      "code": "MINREX-SITE",
+      "projectCode": "MINREX",
+      "name": "Minrex 项目现场",
+      "isActive": true
+    },
+    {
+      "code": "MARRIOTT-SITE",
+      "projectCode": "MARRIOTT-ET",
+      "name": "Marriott 酒店项目现场",
+      "isActive": true
+    }
+  ],
+  "departments": [
+    {
+      "code": "PRJ",
+      "name": "项目部",
+      "isActive": true
+    },
+    {
+      "code": "PROC",
+      "name": "采购部",
+      "isActive": true
+    }
+  ],
+  "teams": [
+    {
+      "code": "PRJ-HVAC",
+      "name": "暖通施工组",
+      "departmentCode": "PRJ",
+      "isActive": true
+    },
+    {
+      "code": "PRJ-ELEC",
+      "name": "电气施工组",
+      "departmentCode": "PRJ",
+      "isActive": true
+    },
+    {
+      "code": "PROC-CFA",
+      "name": "弱电施工组",
+      "departmentCode": "PROC",
+      "isActive": true
+    },
+    {
+      "code": "PRJ-PLB",
+      "name": "给排水施工组",
+      "departmentCode": "PRJ",
+      "isActive": true
+    },
+    {
+      "code": "PRJ-FINITION",
+      "name": "精装施工组",
+      "departmentCode": "PRJ",
+      "isActive": true
+    },
+    {
+      "code": "PRJ-CIVIL",
+      "name": "土建施工组",
+      "departmentCode": "PRJ",
+      "isActive": true
+    }
+  ],
+  "units": [
+    {
+      "code": "PCS",
+      "name": "个",
+      "isActive": true
+    },
+    {
+      "code": "M",
+      "name": "米",
+      "isActive": true
+    },
+    {
+      "code": "M2",
+      "name": "平方米",
+      "isActive": true
+    },
+    {
+      "code": "M3",
+      "name": "立方米",
+      "isActive": true
+    },
+    {
+      "code": "KG",
+      "name": "千克",
+      "isActive": true
+    },
+    {
+      "code": "T",
+      "name": "吨",
+      "isActive": true
+    },
+    {
+      "code": "SET",
+      "name": "套",
+      "isActive": true
+    },
+    {
+      "code": "BOX",
+      "name": "箱",
+      "isActive": true
+    },
+    {
+      "code": "BAG",
+      "name": "袋",
+      "isActive": true
+    },
+    {
+      "code": "ROLL",
+      "name": "卷",
+      "isActive": true
+    },
+    {
+      "code": "BUCKET",
+      "name": "桶",
+      "isActive": true
+    },
+    {
+      "code": "PAIR",
+      "name": "对",
+      "isActive": true
+    },
+    {
+      "code": "BAR",
+      "name": "根",
+      "isActive": true
+    },
+    {
+      "code": "UNIT",
+      "name": "台",
+      "isActive": true
+    }
+  ],
+  "taxTemplates": [
+    {
+      "code": "CI-VAT",
+      "name": "科特迪瓦增值税",
+      "countryCode": "CI",
+      "rateBasisPoints": 1800,
+      "effectiveAt": "2026-10-12",
+      "isActive": true
+    },
+    {
+      "code": "CM-VAT",
+      "name": "喀麦隆增值税（含CAC）",
+      "countryCode": "CM",
+      "rateBasisPoints": 1925,
+      "effectiveAt": "2026-10-12",
+      "isActive": true
+    },
+    {
+      "code": "ET-VAT",
+      "name": "埃塞俄比亚增值税",
+      "countryCode": "ET",
+      "rateBasisPoints": 1500,
+      "effectiveAt": "2026-10-12",
+      "isActive": true
+    }
+  ],
+  "projectDefaults": [
+    {
+      "projectCode": "BETHEL",
+      "departmentTitle": "项目部",
+      "companyAddress": "Riviera Golf D30",
+      "companyContact": "+225 07 78 27 62 09",
+      "defaultCurrency": "XOF",
+      "defaultLanguagePair": "zh_fr",
+      "defaultTaxCode": "CI-VAT"
+    },
+    {
+      "projectCode": "MINREX",
+      "departmentTitle": "项目部",
+      "companyAddress": "CTDM Minrex",
+      "companyContact": null,
+      "defaultCurrency": "XAF",
+      "defaultLanguagePair": "zh_fr",
+      "defaultTaxCode": "CM-VAT"
+    },
+    {
+      "projectCode": "MARRIOTT-ET",
+      "departmentTitle": "项目部",
+      "companyAddress": "Marriott Hotel",
+      "companyContact": null,
+      "defaultCurrency": "ETB",
+      "defaultLanguagePair": "zh_en",
+      "defaultTaxCode": "ET-VAT"
+    }
+  ],
+  "materialCategories": [
+    {
+      "code": "CIVIL",
+      "name": "土建材料",
+      "isActive": true
+    },
+    {
+      "code": "FINISH",
+      "name": "装饰装修材料",
+      "isActive": true
+    },
+    {
+      "code": "ELEC",
+      "name": "强电材料",
+      "isActive": true
+    },
+    {
+      "code": "ELV",
+      "name": "弱电材料",
+      "isActive": true
+    },
+    {
+      "code": "HVAC",
+      "name": "暖通空调材料",
+      "isActive": true
+    },
+    {
+      "code": "PLUMB",
+      "name": "给排水材料",
+      "isActive": true
+    },
+    {
+      "code": "FIRE",
+      "name": "消防材料",
+      "isActive": true
+    },
+    {
+      "code": "TOOLS",
+      "name": "工具及设备",
+      "isActive": true
+    },
+    {
+      "code": "SAFETY",
+      "name": "安全防护用品",
+      "isActive": true
+    },
+    {
+      "code": "OTHER",
+      "name": "其他材料",
+      "isActive": true
+    }
+  ],
+  "materials": [
+    {
+      "sku": "CIVIL-CEM-0001",
+      "nameZh": "水泥",
+      "nameFr": "Ciment",
+      "categoryCode": "CIVIL",
+      "specification": "25 kg",
+      "model": "32.5",
+      "brand": "本地",
+      "unitCode": "BAG",
+      "aliases": [],
+      "notes": null,
+      "isActive": true
+    },
+    {
+      "sku": "FIRE-CR1-0001",
+      "nameZh": "CR1消防电缆 9/10",
+      "nameFr": "Câble résistant au feu CR1, 9/10ème",
+      "categoryCode": "FIRE",
+      "specification": "9/10ème",
+      "model": "9/10ème",
+      "brand": "本地",
+      "unitCode": "M",
+      "aliases": [],
+      "notes": null,
+      "isActive": true
+    },
+    {
+      "sku": "FIRE-CR1-0002",
+      "nameZh": "CR1消防电缆 2×1.5",
+      "nameFr": "Câble résistant au feu CR1, 2 × 1,5 mm²",
+      "categoryCode": "FIRE",
+      "specification": "2 × 1,5 mm²",
+      "model": "2 × 1,5 mm²",
+      "brand": "本地",
+      "unitCode": "M",
+      "aliases": [],
+      "notes": null,
+      "isActive": true
+    }
+  ],
+  "suppliers": [
+    {
+      "code": "SUP-001",
+      "name": "Sika Abidjan",
+      "countryCode": "CI",
+      "city": "Abidjan",
+      "contactName": null,
+      "phone": "+225 27 23 50 79 90",
+      "whatsApp": null,
+      "email": null,
+      "address": "Rue Thomas Edison - Zone 4 C Marcory",
+      "paymentTerms": null,
+      "deliveryLeadTime": null,
+      "isPreferred": true,
+      "isBlacklisted": false,
+      "isActive": true
+    },
+    {
+      "code": "SUP-002",
+      "name": "本地中间商",
+      "countryCode": "CI",
+      "city": null,
+      "contactName": null,
+      "phone": null,
+      "whatsApp": null,
+      "email": null,
+      "address": null,
+      "paymentTerms": null,
+      "deliveryLeadTime": null,
+      "isPreferred": false,
+      "isBlacklisted": false,
+      "isActive": true
+    }
+  ],
+  "materialPrices": [
+    {
+      "materialSku": "CIVIL-CEM-0001",
+      "supplierCode": "SUP-002",
+      "currency": "XOF",
+      "unitPriceMinor": "5600",
+      "unitCode": "BAG",
+      "effectiveAt": "2026-10-12",
+      "sourceNote": "本地"
+    }
+  ],
+  "exchangeRates": [
+    {
+      "fromCurrency": "CNY",
+      "toCurrency": "XOF",
+      "rateDecimal": "87.657286",
+      "effectiveAt": "2026-10-12",
+      "source": "manual",
+      "reason": "参考来源：reference；欧洲央行参考汇率交叉计算；生效日期：2026-10-12"
+    },
+    {
+      "fromCurrency": "EUR",
+      "toCurrency": "XOF",
+      "rateDecimal": "655.957",
+      "effectiveAt": "2026-10-12",
+      "source": "manual",
+      "reason": "参考来源：official；欧元与西非法郎固定兑换率；生效日期：2026-10-12"
+    },
+    {
+      "fromCurrency": "USD",
+      "toCurrency": "XOF",
+      "rateDecimal": "586.671139",
+      "effectiveAt": "2026-10-12",
+      "source": "manual",
+      "reason": "参考来源：reference；欧洲央行参考汇率交叉计算；生效日期：2026-10-12"
+    },
+    {
+      "fromCurrency": "CNY",
+      "toCurrency": "XAF",
+      "rateDecimal": "87.657286",
+      "effectiveAt": "2026-10-12",
+      "source": "manual",
+      "reason": "参考来源：reference；欧洲央行参考汇率交叉计算；生效日期：2026-10-12"
+    },
+    {
+      "fromCurrency": "EUR",
+      "toCurrency": "XAF",
+      "rateDecimal": "655.957",
+      "effectiveAt": "2026-10-12",
+      "source": "manual",
+      "reason": "参考来源：official；欧元与中非法郎固定兑换率；生效日期：2026-10-12"
+    },
+    {
+      "fromCurrency": "USD",
+      "toCurrency": "XAF",
+      "rateDecimal": "586.671139",
+      "effectiveAt": "2026-10-12",
+      "source": "manual",
+      "reason": "参考来源：reference；欧洲央行参考汇率交叉计算；生效日期：2026-10-12"
+    },
+    {
+      "fromCurrency": "CNY",
+      "toCurrency": "ETB",
+      "rateDecimal": "24.259701",
+      "effectiveAt": "2026-10-12",
+      "source": "manual",
+      "reason": "参考来源：reference；欧洲央行及USD/ETB市场报价交叉计算；生效日期：2026-10-12"
+    },
+    {
+      "fromCurrency": "USD",
+      "toCurrency": "ETB",
+      "rateDecimal": "162.3649",
+      "effectiveAt": "2026-10-12",
+      "source": "manual",
+      "reason": "参考来源：reference；USD/ETB当日市场报价快照；生效日期：2026-10-12"
+    }
+  ]
+}

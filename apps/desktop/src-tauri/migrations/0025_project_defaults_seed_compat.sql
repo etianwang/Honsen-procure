@@ -1,0 +1,1 @@
+-- Dedicated rebuild in migrate(): expand project-default currency and allow an absent contact.

@@ -773,9 +773,13 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
               draft?: { lines?: unknown[]; id?: string }
               orderId?: string
               mode?: string
+              projectId?: string
             },
           ) {
-            if (command === 'search_catalog') return Promise.resolve([material])
+            if (command === 'search_catalog') {
+              Object.assign(window, { __catalogProjectId: args?.projectId })
+              return Promise.resolve([material])
+            }
             if (command === 'save_requisition_draft') {
               Object.assign(window, { __requisitionDraft: args?.draft })
               return Promise.resolve({
@@ -805,6 +809,12 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
   await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __catalogProjectId?: string }).__catalogProjectId,
+    ),
+  ).resolves.toMatch(/^[0-9a-f-]{36}$/)
   await page.getByLabel('材料').click()
   await page.getByText('请购测试电缆 · RQ-01').click()
   await page.getByLabel('数量').fill('2.5')

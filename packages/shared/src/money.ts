@@ -1,14 +1,16 @@
 import { z } from 'zod'
 import { uiLocaleSchema, type UiLocale } from './contracts.js'
 
-export const currencySchema = z.enum(['XOF', 'CNY', 'USD', 'EUR'])
+export const currencySchema = z.enum(['XOF', 'XAF', 'CNY', 'USD', 'EUR', 'ETB'])
 export type Currency = z.infer<typeof currencySchema>
 
 export const currencyMinorDigits: Readonly<Record<Currency, number>> = {
   XOF: 0,
+  XAF: 0,
   CNY: 2,
   USD: 2,
   EUR: 2,
+  ETB: 2,
 }
 
 export const minorAmountSchema = z.string().regex(/^-?(0|[1-9]\d*)$/, {

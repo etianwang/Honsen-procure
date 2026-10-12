@@ -93,7 +93,8 @@ All child items inherit the original parent scope, dependencies and global gate.
 
 ### T04 — original dependencies: T02, T03
 
-- [ ] T04-A — BLOCKED: obtain the authorized deployment account/setup window and create the approved actual countries/projects/sites/departments/teams/units/taxes/defaults through the authorized workflow. Code approval does not mean records exist; no automatic production seeding.
+- [ ] T04-A — BLOCKED: obtain the authorized deployment account/setup window and initialize approved actual master data with the authenticated, non-destructive unified Seed workflow. Code/Seed approval does not mean records have been deployed; no production import was performed.
+- [x] T04 Seed engine — LOCAL IMPLEMENTATION VERIFIED 2026-10-12: `seed/master-data.json` is parsed strictly and imported through the existing master-data role boundary into one file-SQLite transaction. New records receive seed audit and sync outbox; equal records are skipped; conflicts, invalid references and malformed JSON roll back. The file-SQLite regression imports all 61 records, verifies supplier/price/currency links and outbox payload contracts, repeats with zero inserts, then proves conflict/invalid-reference rollback. This does not complete T04-A deployment acceptance or OPA-2 desktop smoke.
 - [ ] T04-B — NOT STARTED: verify deployed immutable codes, project bindings/default language/currency/tax/address/contact behavior and permitted exchange-rate maintenance without copying real records or secrets into evidence.
 - [ ] T04-C — NOT STARTED: retain API/Rust/DOM and affected-package acceptance evidence after prerequisites pass; distinguish synthetic fixture evidence from authorized deployment acceptance.
 

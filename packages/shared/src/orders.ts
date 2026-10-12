@@ -254,5 +254,5 @@ function decimalRatio(value: string) {
 }
 
 function currencyMinorDigits(currency: Currency) {
-  return currency === 'XOF' ? 0 : 2
+  return currency === 'XOF' || currency === 'XAF' ? 0 : 2
 }

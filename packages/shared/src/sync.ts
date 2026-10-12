@@ -11,6 +11,7 @@ export const syncEntityTypeSchema = z.enum([
   'tax_template',
   'exchange_rate',
   'project_defaults',
+  'material_category',
   'material',
   'supplier',
   'material_price',

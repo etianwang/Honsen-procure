@@ -25,7 +25,7 @@ Evidence is committed code and dated records in `memory.md`. On 2026-10-11, the 
 - [x] Tauri-ready host boundary and design tokens (release/bundle identity intentionally deferred)
 - [x] Versioned SQLite authentication migration, secure offline verifier cache and Rust/Tauri authorization boundary
 - [x] SQLite material/supplier/price repositories, square material-image crop and trusted local catalog commands
-- [ ] Authorized initial master-data deployment records (requires the deployment account; codes are intentionally never migration seeds)
+- [ ] Authorized initial master-data deployment records (requires a deployment account, verified backup and explicit non-destructive unified Seed execution; no production import has occurred)
 - [ ] CI formatting/lint/typecheck/test/build and Playwright DOM gate (local repair verified; successful remote run awaiting authorized push)
 
 M0 item tracking (all seven original objectives, in order):
@@ -84,6 +84,10 @@ M0 item tracking (all seven original objectives, in order):
 ## Current next-task recommendation
 
 Obtain authority for T04 authorized initial-record acceptance, then complete the remaining T08/T09 prerequisites before T10 final acceptance. See independently tracked child tasks in BUILD-TASKS. No new feature implementation is authorized by this progress update.
+
+## Approved / planned: Admin Master Data Management
+
+**Status: APPROVED / PLANNED — not implemented; not part of OPA-2 completion.** This independent phase will add the administrator UI and audited workflows for dynamic country, project, site, department, team, supplier, quotation, material/category/unit, tax and exchange-rate administration. It must allow a future country/project such as SN without Seed edits or direct SQL, preserve global materials, enforce country-scoped suppliers/quotations, and stop rather than delete referenced master data.
 
 ## Original foundation instruction (retained; not current progress)
 

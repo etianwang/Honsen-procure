@@ -49,6 +49,10 @@
 - Filter/search/sort, duplicate detection; CSV/Excel bulk import deferred unless explicitly prioritized.
 - RFQ creation, supplier allocation and supplier-specific sub-orders; account/master-data maintenance, cloud account-session status and manual sync trigger.
 
+### 3.4 Admin Master Data Management — APPROVED / PLANNED
+
+This is a separately scheduled post-OPA-2 phase, not an OPA-2 acceptance item and not implemented by the current Seed work. Authorized administrators will manage countries, projects, sites, departments, teams, country-scoped suppliers/quotations, global materials/categories/units, tax templates and exchange rates with auditable create/edit/enable/disable actions. Countries and projects are dynamic: a future country such as SN and its XOF project, sites and local suppliers must be created in the application without editing Seed JSON or executing SQL. Records used by business documents are stopped rather than physically deleted; a project's country cannot be changed after business use. Global materials remain reusable, but supplier and quotation selection is restricted to the order project's country.
+
 ## 4. Procurement modes, issue and execution
 
 - Every requisition has exactly one mode. `owner_self_purchase` is formally issued to the owner for offline purchase/payment; it records demand and partial receiving only, never a Honsen procurement payment or actual Honsen expenditure. `honsen_self_purchase` is internally approved then executed by Honsen; it records actual procurement expenditure and partial receiving.
