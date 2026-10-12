@@ -31,7 +31,8 @@
 - Homepage is a statistics/work queue dashboard. It shows role-appropriate counts for pending confirmation, purchasing in progress, receipt outstanding, urgent orders and current-period purchasing amount, with country/project/date filters and direct entry to the relevant order list.
 - Country/project, site, requesting department/team, applicant, currency, language, delivery address, expected arrival date, notes and attachments.
 - Fast material search by Chinese/French name, alias, category, specification, model, SKU.
-- Select material, supplier quotation and quantity; editable per-order unit price with clear override indication.
+- Select a material and quantity. For an owner-self-purchase line, explicitly choose one associated catalog quote from its dropdown, or explicitly switch to a red-marked manual-reference exception; never default to the first quote. The selected supplier is internal estimation evidence only and does not require the owner to purchase from that supplier.
+- A manual-reference exception requires a non-empty reason and records the actor, time, unit price and currency. Catalog base cost and the final owner application price are not directly editable; the trusted boundary calculates the latter from one per-line markup rule.
 - Add/remove lines, reorder, duplicate, update quantity; automatic line subtotal and document totals.
 - Draft autosave, submit, withdraw, approval, rejection/resubmission, cancel/revision controls, history search, duplicate and reprint.
 - PDF export and system print dialog; no network required.
@@ -45,21 +46,21 @@
 - Filter/search/sort, duplicate detection; CSV/Excel bulk import deferred unless explicitly prioritized.
 - RFQ creation, supplier allocation and supplier-specific sub-orders; account/master-data maintenance, cloud account-session status and manual sync trigger.
 
-## 4. Orders and supplier policy
+## 4. Procurement modes, issue and execution
 
-- One internal parent requisition may contain multiple currencies and supplier-specific child purchase orders. A child purchase order has exactly one supplier and one currency. The parent uses its chosen primary currency for a locked-exchange-rate aggregate total.
-- Confirmed supplier-specific orders should contain only that supplier's items; supplier contact/address snapshotted.
-- Unique offline-safe UUID and human-friendly display number; display numbers may be provisional offline until server assigns global sequence.
-- State flow: `draft → pending confirmation → confirmed → sent to supplier → completed | completed with conditions | cancelled`; rejection returns an order to editable status and resubmission creates a new approval cycle.
-- Confirmed-but-unsent orders can be changed only by purchaser/administrator with a reason, version and field-level audit diff. Sent orders are cancelled/closed and replaced by a revision; historical PDFs and snapshots never change.
-- Parent orders close only after all children are completed or cancelled. Supplier order-level taxes, discounts and freight are entered manually after splitting.
+- Every requisition has exactly one mode. `owner_self_purchase` is formally issued to the owner for offline purchase/payment; it records demand and partial receiving only, never a Honsen procurement payment or actual Honsen expenditure. `honsen_self_purchase` is internally approved then executed by Honsen; it records actual procurement expenditure and partial receiving.
+- Honsen execution supports a market/casual counterparty without a supplier profile, RFQ or formal supplier order. When a registered supplier and formal process are appropriate, it reuses the existing RFQ, allocation and supplier-specific child-order path; a child has one supplier/currency and retains supplier snapshots.
+- Owner mode flow: `draft → pending_confirmation → approved → formally_issued → receiving → completed | completed_with_conditions | cancelled`. Honsen mode flow: `draft → pending_confirmation → approved → executing → receiving → completed | completed_with_conditions | cancelled`; RFQ and supplier-order states are optional execution detail, not mandatory gates for market purchasing. Rejection returns to an editable state and starts a new approval cycle on resubmission.
+- UUID is the permanent entity identity. Formal issue allocates a unique local formal document number from an approved installation/sequence namespace, freezes it and sends it with the outbox event. The server registers/validates it and reports collisions as conflicts; it never silently renumbers a formally issued document.
+- A formally issued document is immutable in its quote/price/number snapshot. A required correction is a cancelled/closed original plus a new revision with its own UUID and formal number.
 
 ## 5. Pricing and tax
 
 - Manually entered supplier quotations; no automatic live supplier price feed.
 - The catalog overview must show at least four active supplier quotations for each material/model when available, with supplier name, currency and unit price visible directly in the list. The material detail shows all active quotations and their preferred/blacklist state, effective date, lead time, payment terms and quote source. Do not hide suppliers merely because their currencies differ.
-- Default quotation may be latest effective for selected supplier, visibly showing effective date.
-- User can override line price for this order only; catalog quotation remains unchanged.
+- Owner-facing pricing is line-local: `catalog` selects one existing material-price row, or an operator explicitly selects `manual` reference pricing with a mandatory reason. Catalog quotation base cost cannot be edited in the application. Manual reference prices do not masquerade as catalog quotes and are never automatically written back to the catalog.
+- A line uses exactly one markup: percentage or fixed per-unit amount. Its final owner application price and total are calculated at the Rust trusted boundary using integer minor units. Different lines may use different catalog suppliers, currencies and markup rules.
+- On formal issue, retain the material, selected supplier (when catalog), source price/currency/effective information, manual-reference metadata (when manual), markup and calculated final-price snapshots. Printed owner documents expose only the owner application prices and totals, never supplier, base cost, markup or manual-reference reason.
 - Multi-currency: the parent may aggregate child values into its selected primary currency using a user-entered, order-locked exchange rate. Display source-currency figures as well.
 - Tax is order-level and selected from versioned templates or entered at order time. Old orders retain their tax rate and amount.
 - Line/order discount and freight support both fixed amounts and percentages. Apply line discount, order discount, freight, then tax. Freight may be included in a line price or added separately.
@@ -73,7 +74,7 @@
 
 ## 7. Out of scope
 
-Accounting ledger, supplier accounts, payments, AI OCR, external live exchange-rate integration, mobile app and external supplier login. Receipts/partial receipts, attachments, RFQs, approval, comments and export are in scope.
+General accounting ledger, supplier account reconciliation, payment integration, AI OCR, external live exchange-rate integration, mobile app and external supplier login are out of scope. Honsen self-purchase still records its operational actual procurement expenditure; owner-self-purchase never does. Receipts/partial receipts, attachments, optional RFQs, approval, comments and export are in scope.
 
 ## 8. Acceptance outcomes
 

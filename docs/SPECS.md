@@ -16,11 +16,15 @@
 
 ### purchase_orders
 
-`id UUID PK`, `parent_order_id UUID nullable`, `display_no TEXT`, `country_id UUID`, `project_id UUID`, `site TEXT`, `department_id UUID`, `team_id UUID`, `applicant_id UUID`, `supplier_id UUID nullable`, `supplier_snapshot JSON`, `currency CHAR(3)`, `primary_currency CHAR(3)`, `locked_exchange_rate_decimal TEXT nullable`, `language_pair ENUM(zh_fr,zh_en)`, `status ENUM(draft,pending_confirmation,rejected,confirmed,sent,completed,completed_with_conditions,cancelled)`, `urgency ENUM(low,normal,high)`, `urgency_reason TEXT`, `order_date`, `delivery_address`, `expected_delivery_date`, `notes`, `subtotal_minor BIGINT`, `line_discount_minor BIGINT`, `order_discount_minor BIGINT`, `freight_minor BIGINT`, `tax_rate_snapshot JSON`, `tax_minor BIGINT`, `total_minor BIGINT`, `revision INT`, `version`, timestamps, `deleted_at`. Parent is internal requisition; child is supplier-specific and has one supplier/currency.
+`id UUID PK`, `parent_order_id UUID nullable`, `procurement_mode ENUM(owner_self_purchase,honsen_self_purchase)`, `display_no TEXT`, `formal_document_no TEXT nullable`, `formally_issued_at nullable`, `country_id UUID`, `project_id UUID`, `site TEXT`, `department_id UUID`, `team_id UUID`, `applicant_id UUID`, `supplier_id UUID nullable`, `supplier_snapshot JSON`, `currency CHAR(3)`, `primary_currency CHAR(3)`, `locked_exchange_rate_decimal TEXT nullable`, `language_pair ENUM(zh_fr,zh_en)`, `status ENUM(draft,pending_confirmation,rejected,approved,formally_issued,executing,receiving,completed,completed_with_conditions,cancelled)`, `urgency ENUM(low,normal,high)`, `urgency_reason TEXT`, `order_date`, `delivery_address`, `expected_delivery_date`, `notes`, `subtotal_minor BIGINT`, `line_discount_minor BIGINT`, `order_discount_minor BIGINT`, `freight_minor BIGINT`, `tax_rate_snapshot JSON`, `tax_minor BIGINT`, `total_minor BIGINT`, `revision INT`, `version`, timestamps, `deleted_at`. `formal_document_no` is required and immutable once formally issued. Supplier children remain a Honsen-self-purchase formal-execution option, not an owner-mode requirement.
 
 ### purchase_order_items
 
-`id UUID PK`, `order_id UUID FK`, `material_id UUID nullable`, `material_snapshot JSON`, `supplier_snapshot JSON`, `quantity_decimal TEXT`, `received_quantity_decimal TEXT`, `unit TEXT`, `unit_price_minor BIGINT`, `line_discount JSON`, `line_freight JSON`, `freight_included BOOLEAN`, `line_total_minor BIGINT`, `sort_order INT`, timestamps.`
+`id UUID PK`, `order_id UUID FK`, `material_id UUID nullable`, `material_snapshot JSON`, `supplier_snapshot JSON nullable`, `quote_source_type ENUM(catalog,manual) nullable`, `material_price_id UUID nullable`, `catalog_price_snapshot JSON nullable`, `manual_reference_price_minor BIGINT nullable`, `manual_reference_currency CHAR(3) nullable`, `manual_reference_reason TEXT nullable`, `manual_reference_actor_id UUID nullable`, `manual_reference_at nullable`, `markup_type ENUM(percentage,fixed) nullable`, `markup_percentage_bps BIGINT nullable`, `markup_fixed_minor BIGINT nullable`, `quantity_decimal TEXT`, `received_quantity_decimal TEXT`, `unit TEXT`, `unit_price_minor BIGINT`, `line_discount JSON`, `line_freight JSON`, `freight_included BOOLEAN`, `line_total_minor BIGINT`, `sort_order INT`, timestamps. Owner-mode `unit_price_minor` is the trusted calculated application price, not an editable source-cost field. The quoted-source and markup fields are frozen at formal issue.
+
+### procurement_expenditures
+
+`id UUID PK`, `order_id UUID FK`, `receipt_id UUID nullable`, `counterparty_type ENUM(registered_supplier,market_casual)`, `supplier_id UUID nullable`, `counterparty_snapshot JSON nullable`, `currency CHAR(3)`, `amount_minor BIGINT`, `occurred_at`, `evidence_attachment_id UUID nullable`, `actor_id UUID`, timestamps. This operational record exists only for `honsen_self_purchase`; it is not a general accounting ledger and must be absent for `owner_self_purchase`.
 
 ### users and master data
 
@@ -66,6 +70,10 @@
 - Draft/submitted temporary material requires name, model, specification and unit. Confirming the parent creates it as pending-completion; purchaser/administrator completes it before normal activation.
 - Reject invalid email/phone only where appropriate; permit international phone formats.
 - Deactivation does not delete referenced history.
+- For owner mode, every line must explicitly select `catalog` or `manual`; no dropdown may auto-select a first price. `catalog` requires an active `material_price_id` matching its material and a frozen supplier/price/currency snapshot; base cost is not editable. `manual` requires no `material_price_id`, a nonnegative unit price, currency, non-empty reason, actor and time; it is red-marked in internal UI/audit and never writes to `material_prices` automatically.
+- Owner mode requires exactly one markup rule per line: `percentage` has non-null basis points and null fixed amount; `fixed` has non-null fixed minor amount and null percentage. The Rust command validates integer-money/currency compatibility and calculates final unit/line totals. Renderer values cannot override either source cost or result.
+- A revoked/inactive catalog price cannot be newly selected. A draft referencing one must select another active catalog quote or explicit manual reference before formal issue. A locally valid quote may be formally issued offline: issue freezes the full source and calculation snapshot, formal number and UUID in one local business/outbox transaction.
+- Server Push/Pull is idempotent on UUID plus frozen formal snapshot. If an issued catalog price is now revoked/changed remotely, retain the issued snapshot and create an auditable verification discrepancy rather than changing price/number. A duplicate formal number on a different UUID, or a different frozen snapshot for the same issued UUID, is a conflict requiring resolution; neither is silently remapped. Manual source validation checks required exception metadata, not catalog-price existence.
 
 ## 3. Screen behavior
 
@@ -79,8 +87,9 @@
 
 ## 4. Printing
 
-- A4 portrait default, pagination with repeated table headers; company logo and bilingual title `BON DE COMMANDE / 采购订单`.
-- Header: order number, date, project, supplier name/address/contact, delivery location.
+- A4 portrait default, pagination with repeated table headers; company logo and bilingual title appropriate to the mode. An owner document is a formal material application, not a supplier purchase order.
+- Owner-print header: immutable formal number, date, project, applicant, delivery location and owner-facing notes. Its rows show material/specification/unit, quantity, final owner application unit price and total only. It must never contain supplier identity/contact, catalog base cost, markup type/value, `material_price_id` or manual-reference reason.
+- Internal approval/detail views retain the quote source, manual exception red warning, reason, actor/time and markup audit data; this is expressly not copied into the owner print template.
 - Rows: line number, French/Chinese description, model/spec, unit, quantity, unit price, line total.
 - Footer: subtotal, explicit tax, total, currency, notes, prepared/approved signature placeholders.
 - PDF output generated from persisted order snapshot; deterministic values across reprints.
