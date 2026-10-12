@@ -20,19 +20,20 @@
 - Offline ordering, local printing, PDF export.
 - Supported currencies are XOF, CNY, USD and EUR. XOF has zero minor places; the others have two.
 - Initial projects, teams, numbering, company print identity, cloud configuration boundary and internal update direction are recorded in `INITIAL-MASTER-DATA.md`.
-- There is no public account/device registration and no separate device-enrollment credential. Account sessions authorize synchronization; an opaque installation ID only supports session/cursor management.
+- There is no public account/device registration and no separate device-enrollment credential. Account sessions authorize synchronization; a non-secret installation UUID supports session/cursor management and the local formal-number namespace, but cannot independently authorize access.
 - Neon free-tier PostgreSQL cold starts use a bounded, read-only startup readiness probe (up to about 7.75 seconds of backoff). Purchases, approvals and other business writes are never automatically retried by this probe.
 - Purchasing has two modes. `owner_self_purchase` is an owner-facing material application: Honsen tracks the request and receiving, while the owner buys and pays. `honsen_self_purchase` is Honsen execution: it records receiving and actual procurement expenditure, and may use either market purchases or the existing formal RFQ/supplier-order path.
 - Owner-facing lines reuse existing catalog materials and `material_prices`; they never create a parallel quote or supplier-price library. A line explicitly chooses either a catalog quote or a manual-reference exception. It never auto-selects the first catalog quote.
 - An owner-facing catalog quote keeps its `material_price_id` and a complete supplier/price snapshot. A manual-reference exception has no `material_price_id`, must retain its unit price, currency, non-empty reason, actor and time, and is visibly/auditably exceptional. Manual values never write back to the catalog without a separate confirmed catalog action.
 - Each owner-facing line has exactly one markup rule: `percentage` (base × (1 + rate)) or `fixed` (base + per-unit amount). The unused parameter is null. Rust is the trusted calculation boundary for the final owner application price; neither base cost nor final price is a free-edit field.
 - Formal offline issue freezes the UUID, local formal document number, quote-source snapshot, markup rule and calculated owner price. Later catalog changes and synchronization must not silently rewrite a formally issued document or its number.
+- Formal numbers are locally issued and server-registered, never server-reassigned. Their normative format is `<country-code>-<project-code>-<YYYYMMDD>-<document-type>-<installation-short-code>-<sequence>`; the permanent installation UUID is carried in the authenticated business/outbox payload and is the server validation key behind the readable short code.
+- `procurement_expenditures` is the single lightweight, append-only Honsen-self-purchase payment record. It supports multiple payments and optional vouchers, but is not a ledger, reimbursement or advance-settlement subsystem. Owner-self-purchase cannot create it.
 
 ## Open implementation decisions
 
 1. **Toolbox identity:** `appId`, stable product-directory name, main EXE name, installer technology and internal update URL have not been registered. See `HONSEN_TOOLBOX_INTEGRATION.md`.
-2. **Formal-number namespace:** choose the approved human-readable local formal-number format and installation/sequence namespace. The server may register and validate it, but cannot silently replace a formally issued number.
-3. **Actual-expenditure boundary:** define the minimum payment/evidence fields required for Honsen self-purchase without expanding this release into a general accounting ledger.
+2. **Supplier-child type code:** `SPO` is the reserved supplier-child purchase-order document type. It is an enumerated document type, never a supplier business code; master-data validation must reserve `OPA`, `HPA` and `SPO` from supplier-code reuse.
 
 ## Deferred
 

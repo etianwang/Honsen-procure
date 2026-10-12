@@ -9,7 +9,7 @@
 
 ## Trust boundaries
 
-React UI is untrusted. Rust/Tauri commands and the server enforce user/role/project authorization for every mutation. Persist only Argon2id password hashes and local offline-account cache data; secrets use OS secure credential storage where practical. The local CAPTCHA is an anti-automation control, not an authorization control. There is no separate device-enrollment credential: the server authorizes the signed-in account session and tracks a non-secret installation ID for cursors and one-active-session enforcement. TLS is mandatory for sync and failed authentication is rate-limited.
+React UI is untrusted. Rust/Tauri commands and the server enforce user/role/project authorization for every mutation. Persist only Argon2id password hashes and local offline-account cache data; secrets use OS secure credential storage where practical. The local CAPTCHA is an anti-automation control, not an authorization control. There is no separate device-enrollment credential: the server authorizes the signed-in account session and tracks a non-secret installation UUID for cursors, one-active-session enforcement and formal-number namespaces. It is not an access credential. TLS is mandatory for sync and failed authentication is rate-limited.
 
 ## Local write and outbox
 
@@ -38,9 +38,11 @@ The server broadcasts a best-effort authenticated change hint only after committ
 - Orders: drafts can conflict; confirmed orders immutable; create revision for corrections.
 - Deletions use tombstones and retention long enough for offline devices.
 
-## Multi-device guarantees
+## Formal document numbering and multi-device guarantees
 
-Eventual consistency, not instant consistency. A device can be stale offline; show last successful sync. No claim of global uniqueness for human-readable offline provisional numbers. Server allocates final global sequence after confirmation/sync, or use UUID-based unique document reference offline.
+Eventual consistency, not instant consistency. A device can be stale offline; show last successful sync. A formal issue uses one SQLite transaction to allocate its local sequence, persist the immutable document snapshot and full installation UUID, and append the outbox event. The resulting number is `<country>-<project>-<YYYYMMDD>-<type>-<installation-short-code>-<sequence>`; UUID remains the permanent entity identity.
+
+The installation UUID is persistent, non-secret instance metadata. Its at-least-eight-character readable code is derived from it for the printed number, but only the full UUID plus sequence and the complete formal number are server uniqueness keys. The server registers/validates those values on Push and never allocates or replaces a formal number. Restore-to-same-instance retains the UUID/counter; an intentional clone/reinstall recovery must perform an audited re-key before issuing again. A duplicate full number or `(installation UUID, sequence)` with another document is retained as an auditable conflict, never silently remapped.
 
 ## Database lifecycle
 

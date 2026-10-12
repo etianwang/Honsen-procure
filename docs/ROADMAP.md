@@ -10,7 +10,7 @@ Original milestone objectives below are retained. Their checkboxes concern the c
 | --------- | --------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | M0        | [ ] IN PROGRESS | T00, T01, T02, T03, T04, T05                           | Authorized initial master-data records are BLOCKED pending deployment account/setup authority. T02-A/B/C and the repaired CI local/remote gate passed; M0 is not ready for full stage acceptance.                                                    |
 | M1        | [ ] IN PROGRESS | T02, T03, T04, T05, T13                                | Close PostgreSQL/account and actual master-data acceptance; retain administration hardening. Local catalog slice is accepted, not the whole milestone.                                                                                               |
-| M2        | [ ] IN PROGRESS | T01, T06, T07, T08, T09, T11, T12, T14                 | Owner-self-purchase formal issue/printing, Honsen market or supplier execution, full receiving/archival, bilingual PDF/printing/export and final snapshot/Windows acceptance.                                                                        |
+| M2        | [ ] IN PROGRESS | T01, T06, T07, T08, T09, T11, T12, T14                 | Owner-self-purchase formal issue/printing, Honsen market or supplier execution, lightweight payment/receipt evidence, full receiving/archival, bilingual PDF/printing/export and final snapshot/Windows acceptance.                                  |
 | M3        | [ ] IN PROGRESS | T02, T03, T08, T10, T11, T14                           | T02 account/session PostgreSQL and login/DOM acceptance is complete. Safe entity projection, immutable formally-issued number/quote snapshots, desktop startup/retry/WebSocket/revocation and multi-device offline/reconnect acceptance remain open. |
 | M4        | [ ] BLOCKED     | T09, T11, T12, T13, T14, T15                           | Release identity approval blocks T15; remaining attachment, export, backup/localization/performance, print/accessibility and Windows acceptance have not passed.                                                                                     |
 
@@ -83,7 +83,7 @@ M0 item tracking (all seven original objectives, in order):
 
 ## Current next-task recommendation
 
-Obtain authority for T04 authorized initial-record acceptance. For procurement work, first approve the formal-number namespace and actual-expenditure evidence boundary, then complete the remaining T08/T09 prerequisites before T10 final acceptance. See independently tracked child tasks in BUILD-TASKS. No new feature implementation is authorized by this progress update.
+Obtain authority for T04 authorized initial-record acceptance, then complete the remaining T08/T09 prerequisites before T10 final acceptance. See independently tracked child tasks in BUILD-TASKS. No new feature implementation is authorized by this progress update.
 
 ## Original foundation instruction (retained; not current progress)
 

@@ -15,15 +15,17 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 
 ## Push
 
-- `POST /api/sync/push` accepts a maximum of 100 versioned events and requires the authenticated account session. The request carries a non-secret installation UUID only for event/session tracking; it is not a credential.
+- `POST /api/sync/push` accepts a maximum of 100 versioned events and requires the authenticated account session. The request carries a non-secret installation UUID for event/session tracking and formal-number namespace validation; it is not a credential.
 - The desktop obtains its API base URL from the deployment-time `HONSEN_SYNC_API_BASE_URL` runtime configuration. It accepts only a clean `https` origin/path (no embedded credentials, query or fragment); PostgreSQL/Neon credentials never appear in desktop configuration. The access token is kept in OS secure storage and is never returned to the renderer or written to SQLite.
 - Each result has the original `eventId`, `accepted`, `conflict` or `validation_error` status, plus the server version when one exists. A batch can therefore contain a safe retry beside a rejected event without losing either result.
 - Send pending events in stable creation order over HTTPS using the authenticated account session.
 - The server validates the account/project scope, request payload, event-id idempotency and expected entity version inside one PostgreSQL transaction.
+- A formal-issue payload includes the UUID, immutable formal snapshot, complete installation UUID, installation short code and local sequence. The server validates the document-type/short-code derivation and uniqueness of the formal number and `(installation UUID, sequence)`; it registers, but never assigns or renumbers, a formal number.
 - On acceptance it commits the mutation and a change-log entry atomically, assigns the next entity version, and returns the event acknowledgment.
 - Only after the client receives an accepted acknowledgment may it mark that local outbox event acknowledged.
 - Transport failure is retryable. The same event ID must be safe to resend indefinitely.
 - Validation rejection is retained with its structured reason. Version mismatch becomes a conflict; neither local nor remote value is silently discarded.
+- A duplicate formal number on another UUID, a reused `(installation UUID, sequence)`, or a divergent frozen snapshot for an issued UUID is an auditable conflict. The original issued records remain available; the client must not manufacture a replacement number during retry or resolution.
 
 ## Pull
 
@@ -47,12 +49,13 @@ WebSocket is a latency optimization, not a data synchronization channel. After t
 
 ## Conflict handling
 
-| Entity                    | Conflict policy                                                                                                                   |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Material, supplier, price | Preserve local and remote payload/version in an audit record; a procurement administrator explicitly chooses or merges a result.  |
-| Draft order               | Preserve both drafts and require an explicit resolution before a replacement is synced.                                           |
-| Confirmed/cancelled order | Never mutate in place. Use a revision/new order for a correction.                                                                 |
-| Delete vs update          | Preserve the tombstone and competing value in the conflict record; an administrator decides whether to restore via a new version. |
+| Entity                          | Conflict policy                                                                                                                               |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Material, supplier, price       | Preserve local and remote payload/version in an audit record; a procurement administrator explicitly chooses or merges a result.              |
+| Draft order                     | Preserve both drafts and require an explicit resolution before a replacement is synced.                                                       |
+| Formally issued/cancelled order | Never mutate its number or frozen price/source snapshot in place. Use a cancelled/closed original plus a revision/new order for a correction. |
+| Payment record                  | Never overwrite a submitted payment. Preserve it and create an append-only correction/reversal record with audit reason.                      |
+| Delete vs update                | Preserve the tombstone and competing value in the conflict record; an administrator decides whether to restore via a new version.             |
 
 The resolver creates a normal new local mutation/outbox event against the version chosen as its base. It never changes historical conflict evidence.
 
@@ -67,4 +70,4 @@ Only an administrator or super administrator may resolve a conflict. For catalog
 
 ## Required tests
 
-Test duplicate delivery, timeout after server commit, restart during push, partial batch rejection, out-of-order responses, paged pull interruption, concurrent price editing, tombstone/update conflict and revoked-session handling. See `TEST-RULES.md` for acceptance IDs.
+Test duplicate delivery, timeout after server commit, restart during push, partial batch rejection, out-of-order responses, paged pull interruption, concurrent price editing, tombstone/update conflict, revoked-session handling, formal-number clone/re-key/collision and append-only payment retries. See `TEST-RULES.md` for acceptance IDs.

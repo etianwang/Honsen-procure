@@ -28,21 +28,23 @@ The deployment administrator must create the two enabled super-administrator acc
 - The system attempts a daily public exchange-rate refresh. If it fails, a purchaser or administrator may enter a rate manually with a reason and audit event.
 - Each issued order copies and locks its selected exchange rate; later rate changes cannot alter its totals.
 
-## Human-readable order numbers
+## Human-readable formal document numbers
 
-The final server-issued number has this structure:
+Formal issue is local and offline-capable. The permanent, readable number is:
 
-`<country-code>-<project-code>-<YYYYMMDD>-<INT|supplier-code>-<NNNN>`
+`<country-code>-<project-code>-<YYYYMMDD>-<document-type>-<installation-short-code>-<sequence>`
 
-Example: `CI-Bethel2-20261010-INT-0001`.
+Example: `CI-Bethel2-20261012-OPA-A7K2M9QF-0001`.
 
-- The date is calculated using the project’s local IANA time zone (for example `Africa/Abidjan` for Côte d’Ivoire and `Africa/Douala` for Cameroon), not the server time zone.
-- `INT` denotes the internal parent requisition. Supplier child orders use that supplier’s immutable sequential business code.
-- The sequence is four digits. Offline drafts use a provisional local reference. During Push, the server assigns the next free final sequence; on collision it advances sequentially until free and records the immutable provisional-to-final mapping in the audit trail.
+- The date is calculated using the project’s local IANA time zone (for example `Africa/Abidjan` for Côte d’Ivoire and `Africa/Douala` for Cameroon), not the server time zone. `OPA` is an owner-self-purchase application; `HPA` is a Honsen-self-purchase application; `SPO` is a supplier-child purchase order. These are fixed document-type enum values, not supplier business codes; master-data validation reserves them from supplier-code reuse.
+- A draft may show a local temporary reference only. At formal issue, SQLite transactionally allocates a monotonically increasing, zero-padded local sequence and persists the UUID, formal number, full installation UUID and outbox event together. It may not be regenerated after issue.
+- Each installed database has a cryptographically generated persistent installation UUID. Its readable short code is at least eight Crockford-Base32 characters deterministically derived from that UUID; it aids people, but is not a global-uniqueness or security credential. The server stores the full UUID, enforces unique `(installation_uuid, sequence)` and formal-number keys, and validates that the short code matches the UUID.
+- A backup restored to the same logical installation keeps its UUID and counter. A database copied to another active installation, or restored after a reinstallation where it will issue new documents, must run an audited clone/recovery re-key before the next issue: generate a new installation UUID/short code and start a new sequence namespace while retaining historical documents unchanged. A fresh installation without a restored database generates a new UUID.
+- If a clone or short-code collision nevertheless produces the same formal number for different UUIDs/documents, the server preserves both originals, rejects automatic registration of the later collision and opens an auditable conflict. Neither the number nor the issued snapshot is silently changed. There is no provisional-to-final mapping and the server never assigns a replacement number.
 
 ## Account and synchronization provisioning
 
-There is no public registration and no separate device-enrollment credential. A super administrator creates administrator, purchaser and viewer accounts with initial passwords; administrator-level user management creates the remaining authorized accounts. Sync is authenticated by the signed-in account session. The server still records an opaque local installation ID only to enforce the one-online-session rule, maintain cursors and deliver forced-lock notifications; it is not a credential and cannot independently access company data.
+There is no public registration and no separate device-enrollment credential. A super administrator creates administrator, purchaser and viewer accounts with initial passwords; administrator-level user management creates the remaining authorized accounts. Sync is authenticated by the signed-in account session. The server records the non-secret local installation UUID for the one-online-session rule, cursors, forced-lock notifications and formal-number namespace validation; it is not a credential and cannot independently access company data.
 
 ## Deployment-only configuration
 
