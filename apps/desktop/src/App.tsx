@@ -28,6 +28,7 @@ import { tauriProcurementExecutionApi } from './lib/procurement-execution-api'
 import { tauriRfqApi } from './lib/rfq-api'
 import { tauriSupplierOrderApi } from './lib/supplier-order-api'
 import { tauriWorkflowApi, type WorkflowApi } from './lib/workflow-api'
+import type { UserRole } from './lib/permissions'
 import './App.css'
 
 const previewRequisitionContext: RequisitionContext = {
@@ -154,6 +155,28 @@ function App() {
     new URLSearchParams(window.location.search).get('test') === 'sync-conflict'
   const [page, setPage] = useState<AppPage>('home')
   const [isPreviewOpen, setPreviewOpen] = useState(false)
+  const [session, setSession] = useState<{
+    user_id: string
+    username: string
+    roles: string[]
+    requires_password_change: boolean
+  } | null>(null)
+  const role: UserRole = session?.roles.includes('super_administrator')
+    ? 'super_administrator'
+    : session?.roles.includes('administrator')
+      ? 'administrator'
+      : session?.roles.includes('purchaser')
+        ? 'purchaser'
+        : session?.roles.includes('viewer')
+          ? 'viewer'
+          : 'engineer'
+  const requisitionContext = session
+    ? { ...previewRequisitionContext, applicantId: session.user_id }
+    : previewRequisitionContext
+  const canApprove =
+    role === 'purchaser' ||
+    role === 'administrator' ||
+    role === 'super_administrator'
 
   return (
     <ConfigProvider
@@ -188,7 +211,7 @@ function App() {
         <AuthFixturePage />
       ) : isMoneyPreview ? (
         <MoneyPreviewPage />
-      ) : isPreviewOpen ? (
+      ) : isPreviewOpen || session ? (
         <AppShell
           page={page}
           pageTitle={
@@ -202,8 +225,22 @@ function App() {
                     ? '采购执行'
                     : '项目默认设置'
           }
-          role="purchaser"
+          role={session ? role : 'purchaser'}
           onNavigate={setPage}
+          onLock={
+            session
+              ? () => {
+                  const invoke = (
+                    window as Window & {
+                      __TAURI__?: {
+                        core?: { invoke?: (command: string) => Promise<void> }
+                      }
+                    }
+                  ).__TAURI__?.core?.invoke
+                  void invoke?.('lock_session').finally(() => setSession(null))
+                }
+              : undefined
+          }
         >
           {page === 'home' ? (
             <HomePage
@@ -212,7 +249,7 @@ function App() {
             />
           ) : page === 'materials' ? (
             <MaterialsPage
-              role="purchaser"
+              role={session ? role : 'purchaser'}
               api={
                 (
                   window as Window & {
@@ -251,7 +288,7 @@ function App() {
                   ? tauriCatalogApi
                   : previewCatalogApi
               }
-              context={previewRequisitionContext}
+              context={requisitionContext}
               workflowApi={
                 (
                   window as Window & {
@@ -261,7 +298,7 @@ function App() {
                   ? tauriWorkflowApi
                   : previewWorkflowApi
               }
-              canApprove
+              canApprove={session ? canApprove : true}
             />
           ) : page === 'execution' ? (
             <ProcurementExecutionPage
@@ -271,11 +308,14 @@ function App() {
               rfqApi={tauriRfqApi}
             />
           ) : (
-            <MasterDataPage role="purchaser" />
+            <MasterDataPage role={session ? role : 'purchaser'} />
           )}
         </AppShell>
       ) : (
-        <LoginPage onPreview={() => setPreviewOpen(true)} />
+        <LoginPage
+          onLogin={setSession}
+          onPreview={() => setPreviewOpen(true)}
+        />
       )}
     </ConfigProvider>
   )

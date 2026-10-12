@@ -15,6 +15,7 @@ type AppShellProps = PropsWithChildren<{
   pageTitle: string
   role: UserRole
   onNavigate: (page: AppPage) => void
+  onLock?: () => void
 }>
 
 const roleLabel: Record<UserRole, string> = {
@@ -31,6 +32,7 @@ export function AppShell({
   pageTitle,
   role,
   onNavigate,
+  onLock,
 }: AppShellProps) {
   return (
     <div className="app-shell">
@@ -94,9 +96,14 @@ export function AppShell({
             <h1>{pageTitle}</h1>
           </div>
           <div className="identity">
-            <span>离线演示数据</span>
+            <span>离线本地数据</span>
             <span className="avatar">张</span>
             <span>{roleLabel[role]}</span>
+            {onLock && (
+              <button type="button" onClick={onLock}>
+                锁定
+              </button>
+            )}
           </div>
         </header>
         <div className="content">{children}</div>

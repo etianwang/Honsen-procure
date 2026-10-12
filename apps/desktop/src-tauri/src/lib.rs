@@ -766,18 +766,21 @@ impl CredentialVault for MemoryCredentialVault {
     }
 }
 
-struct OsCredentialVault;
+struct OsCredentialVault {
+    verifier_service: &'static str,
+    sync_service: &'static str,
+}
 
 impl CredentialVault for OsCredentialVault {
     fn save_verifier(&self, account_id: Uuid, verifier: &str) -> Result<(), AuthError> {
-        Entry::new("HONSEN Materials offline verifier", &account_id.to_string())
+        Entry::new(self.verifier_service, &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?
             .set_password(verifier)
             .map_err(|_| AuthError::SecureStorage)
     }
 
     fn load_verifier(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
-        let entry = Entry::new("HONSEN Materials offline verifier", &account_id.to_string())
+        let entry = Entry::new(self.verifier_service, &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -787,14 +790,14 @@ impl CredentialVault for OsCredentialVault {
     }
 
     fn save_sync_token(&self, account_id: Uuid, token: &str) -> Result<(), AuthError> {
-        Entry::new("HONSEN Procure sync session", &account_id.to_string())
+        Entry::new(self.sync_service, &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?
             .set_password(token)
             .map_err(|_| AuthError::SecureStorage)
     }
 
     fn load_sync_token(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
-        let entry = Entry::new("HONSEN Procure sync session", &account_id.to_string())
+        let entry = Entry::new(self.sync_service, &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -802,6 +805,29 @@ impl CredentialVault for OsCredentialVault {
             Err(_) => Err(AuthError::SecureStorage),
         }
     }
+}
+
+fn test_profile_accounts() -> [(Uuid, &'static str, Vec<Role>, &'static str); 3] {
+    [
+        (
+            Uuid::parse_str("10000000-0000-4000-8000-000000000011").expect("test UUID"),
+            "engineer-a",
+            vec![Role::Engineer],
+            "engineer A",
+        ),
+        (
+            Uuid::parse_str("10000000-0000-4000-8000-000000000012").expect("test UUID"),
+            "engineer-b",
+            vec![Role::Engineer],
+            "engineer B",
+        ),
+        (
+            Uuid::parse_str("10000000-0000-4000-8000-000000000013").expect("test UUID"),
+            "purchaser",
+            vec![Role::Purchaser],
+            "purchaser",
+        ),
+    ]
 }
 
 pub struct LocalAuthService {
@@ -823,9 +849,98 @@ impl LocalAuthService {
     pub fn open_path(path: &str) -> Result<Self, AuthError> {
         Self::open(
             Connection::open(path).map_err(|_| AuthError::Database)?,
-            Box::new(OsCredentialVault),
+            Box::new(OsCredentialVault {
+                verifier_service: "HONSEN Materials offline verifier",
+                sync_service: "HONSEN Procure sync session",
+            }),
             Path::new(path).with_extension("media"),
         )
+    }
+
+    pub fn open_test_path(path: &str) -> Result<Self, AuthError> {
+        if !Path::new(path).is_absolute() || !path.ends_with(".test.sqlite") {
+            return Err(AuthError::InvalidInput);
+        }
+        Self::open(
+            Connection::open(path).map_err(|_| AuthError::Database)?,
+            Box::new(OsCredentialVault {
+                verifier_service: "Honsen Procure test offline verifier",
+                sync_service: "Honsen Procure test sync session",
+            }),
+            Path::new(path).with_extension("media"),
+        )
+    }
+
+    pub fn bootstrap_test_profile(
+        &self,
+        engineer_a_password: &str,
+        engineer_b_password: &str,
+        purchaser_password: &str,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if [engineer_a_password, engineer_b_password, purchaser_password]
+            .iter()
+            .any(|password| password.len() < 12)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        for (id, username, roles, _) in test_profile_accounts() {
+            self.cache_verified_account(
+                CachedAccount {
+                    id,
+                    username: username.into(),
+                    roles,
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                match username {
+                    "engineer-a" => engineer_a_password,
+                    "engineer-b" => engineer_b_password,
+                    _ => purchaser_password,
+                },
+                now,
+            )?;
+        }
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.execute_batch(
+            "INSERT OR IGNORE INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES ('10000000-0000-4000-8000-000000000001', 'TEST-CI', 'Synthetic test country', 'Africa/Abidjan', 1, 1);
+             INSERT OR IGNORE INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES ('10000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', 'TEST-OPA', 'Synthetic OPA project', 'Test site', 'Test procurement', 'XOF', 'zh_fr', 1, 1);
+             INSERT OR IGNORE INTO local_departments (id, business_code, name, is_active, version) VALUES ('10000000-0000-4000-8000-000000000003', 'TEST-PROC', 'Synthetic procurement', 1, 1);
+             INSERT OR IGNORE INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES ('10000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-000000000003', 'TEST-TEAM', 'Synthetic team', 1, 1);
+             INSERT OR IGNORE INTO local_materials (id, sku, name_zh, name_fr, aliases_json, model, specification, unit, is_active, version) VALUES ('10000000-0000-4000-8000-000000000005', 'TEST-CABLE', '合成测试电缆', 'Câble synthétique', '[]', 'TEST-3X2.5', '3 × 2.5 mm²', '米', 1, 1);
+             INSERT OR IGNORE INTO local_suppliers (id, business_code, name, is_active, is_blacklisted, is_preferred, version) VALUES ('10000000-0000-4000-8000-000000000006', 'TEST-SUPPLIER', 'Synthetic catalog supplier', 1, 0, 1, 1);
+             INSERT OR IGNORE INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES ('10000000-0000-4000-8000-000000000007', '10000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000006', 'CNY', 1234, '米', '2026-10-12', 1, 1);
+             INSERT OR IGNORE INTO local_exchange_rates (id, from_currency, to_currency, rate_decimal, effective_at, source, version) VALUES ('10000000-0000-4000-8000-000000000008', 'CNY', 'XOF', '76.5', '2026-10-12', 'public_daily', 1);",
+        )
+        .map_err(|_| AuthError::Database)?;
+        Ok(())
+    }
+
+    pub fn clear_test_profile(path: &Path) -> Result<(), AuthError> {
+        if !path.is_absolute() || !path.to_string_lossy().ends_with(".test.sqlite") {
+            return Err(AuthError::InvalidInput);
+        }
+        for (id, _, _, _) in test_profile_accounts() {
+            for service in [
+                "Honsen Procure test offline verifier",
+                "Honsen Procure test sync session",
+            ] {
+                let entry =
+                    Entry::new(service, &id.to_string()).map_err(|_| AuthError::SecureStorage)?;
+                match entry.delete_credential() {
+                    Ok(()) | Err(keyring::Error::NoEntry) => {}
+                    Err(_) => return Err(AuthError::SecureStorage),
+                }
+            }
+        }
+        if path.exists() {
+            fs::remove_file(path).map_err(|_| AuthError::Database)?;
+        }
+        let media = path.with_extension("media");
+        if media.exists() {
+            fs::remove_dir_all(media).map_err(|_| AuthError::Database)?;
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -3803,6 +3918,11 @@ pub mod commands {
             SystemTime::now(),
         )
         .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn lock_session(auth: State<'_, LocalAuthService>) -> Result<(), CommandError> {
+        auth.lock().map_err(Into::into)
     }
 
     #[tauri::command]

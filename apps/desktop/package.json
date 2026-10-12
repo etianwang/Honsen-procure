@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build --bundles none",
     "typecheck": "tsc -b --pretty false",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
@@ -19,6 +21,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.2",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
