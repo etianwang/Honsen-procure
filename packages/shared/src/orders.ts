@@ -23,6 +23,59 @@ export const adjustmentSchema = z.discriminatedUnion('kind', [
   }),
 ])
 
+export const procurementModeSchema = z.enum([
+  'owner_self_purchase',
+  'honsen_self_purchase',
+])
+
+export const ownerQuoteSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('catalog_price'), materialPriceId: uuidSchema }),
+  z.object({
+    kind: z.literal('manual_reference'),
+    unitPriceMinor: nonNegativeMinorSchema,
+    reason: z.string().trim().min(1).max(1000),
+  }),
+])
+
+export const ownerLinePricingSchema = z.object({
+  lineId: uuidSchema,
+  sourceCurrency: currencySchema,
+  primaryCurrency: currencySchema,
+  lockedExchangeRateDecimal: z.string().regex(/^\d+(\.\d{1,8})?$/),
+  sourceUnitPriceMinor: nonNegativeMinorSchema,
+  markup: adjustmentSchema,
+})
+
+export type OwnerQuoteSource = z.infer<typeof ownerQuoteSourceSchema>
+export type OwnerLinePricing = z.infer<typeof ownerLinePricingSchema>
+
+export function calculateOwnerLinePrice(input: OwnerLinePricing) {
+  ownerLinePricingSchema.parse(input)
+  const rate = decimalRatio(input.lockedExchangeRateDecimal)
+  if (
+    input.sourceCurrency === input.primaryCurrency &&
+    rate.numerator !== rate.denominator
+  ) {
+    throw new RangeError('Identity conversion must use rate 1.')
+  }
+  const convertedReferenceUnitMinor = divideRoundHalfUp(
+    BigInt(input.sourceUnitPriceMinor) *
+      rate.numerator *
+      10n ** BigInt(currencyMinorDigits(input.primaryCurrency)),
+    10n ** BigInt(currencyMinorDigits(input.sourceCurrency)) * rate.denominator,
+  )
+  const markupMinor = adjustmentAmount(
+    convertedReferenceUnitMinor,
+    input.markup,
+    false,
+  )
+  return {
+    convertedReferenceUnitMinor: convertedReferenceUnitMinor.toString(),
+    markupMinor: markupMinor.toString(),
+    finalUnitPriceMinor: (convertedReferenceUnitMinor + markupMinor).toString(),
+  }
+}
+
 export const requisitionLineSchema = z.object({
   id: uuidSchema,
   materialId: uuidSchema.nullable(),
@@ -189,4 +242,17 @@ function adjustmentAmount(
     throw new RangeError('Adjustment cannot exceed its calculation base.')
   }
   return amount
+}
+
+function decimalRatio(value: string) {
+  const [whole, fraction = ''] = value.split('.')
+  const denominator = 10n ** BigInt(fraction.length)
+  return {
+    numerator: BigInt(whole) * denominator + BigInt(fraction || '0'),
+    denominator,
+  }
+}
+
+function currencyMinorDigits(currency: Currency) {
+  return currency === 'XOF' || currency === 'XAF' ? 0 : 2
 }

@@ -1,0 +1,4 @@
+-- Executed by the dedicated SQLite rebuild path in src/lib.rs.  The checksum
+-- remains versioned here while table SQL is read from sqlite_master so later
+-- additive columns, indexes and triggers are preserved during the copy.
+-- currency-check-expansion:XOF,XAF,CNY,USD,EUR,ETB

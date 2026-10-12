@@ -2,7 +2,7 @@
 
 ## Status
 
-**Not implemented; identity registration is required before installer, automatic update or toolbox-catalog work.** The product is internally distributed rather than publicly released, but automatic update still uses the fixed Toolbox/Runner contract. The display name is now **Honsen采购管理系统（HONSEN Procure）** and its source repository is `etianwang/Honsen-procure`; this document records the remaining gap rather than inventing values that would become a cross-project compatibility contract.
+**Identity approved; Toolbox integration is not implemented.** The product is internally distributed rather than publicly released, but automatic update still uses the fixed Toolbox/Runner contract. This document records the approved identity and the remaining implementation gaps; it does not authorize an installer, Runner, manifest, registry entry, catalog mutation or release.
 
 The authoritative upstream documents were reviewed on 2026-10-09:
 
@@ -18,15 +18,16 @@ The Gitee mirror is a mirror, not a replacement for resolving an ambiguity in th
 
 | Field                              | Actual value                                                 | Status                                                                                 |
 | ---------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| `appId`                            | Not assigned                                                 | Requires owner approval; must be permanent `honsen.<kebab-case>`                       |
-| Display name                       | Honsen采购管理系统（HONSEN Procure）                         | Working product name; not an identity                                                  |
-| Product installation directory     | Not assigned                                                 | Requires owner approval; must not change after release                                 |
-| Main EXE                           | Not assigned                                                 | Requires packaging decision/approval                                                   |
-| Installation scope                 | Not assigned                                                 | Choose machine or current-user installation                                            |
+| `appId`                            | `honsen.procure`                                             | Approved immutable Toolbox identity                                                    |
+| Tauri identifier                   | `africa.honsen.procure`                                      | Approved distinct Tauri bundle/data identifier; it is not the Toolbox appId            |
+| Display name                       | `Honsen Procure`                                             | Approved product-facing name                                                           |
+| Product installation directory     | `Honsen Procure`                                             | Approved stable product directory                                                      |
+| Main EXE                           | `HonsenProcure.exe`                                          | Approved executable name                                                               |
+| Installation scope                 | `machine`                                                    | Approved default release scope                                                         |
 | Installer                          | Not implemented                                              | Upstream permits Inno Setup or MSI with identical behavior                             |
 | Source repository                  | `https://github.com/etianwang/Honsen-procure.git`            | Confirmed source repository                                                            |
 | Internal update repository/API URL | Same GitHub repository is intended; API URL not yet approved | Required for `updateManifestUrl`; choose the internal update source before Runner work |
-| Release asset                      | Not assigned                                                 | Must be exactly one `<ProductId>-<version>-Setup.exe` plus `.sha256`                   |
+| Release asset                      | `Honsen-Procure-<version>-Setup.exe`                         | Approved naming; first release version and update source remain unapproved             |
 | `HonsenUpdateRunner.exe`           | Not implemented                                              | Must ship in installation root                                                         |
 | Manifest                           | Not implemented                                              | Must be root `honsen.app.json`, `schemaVersion: 1`                                     |
 
@@ -34,8 +35,8 @@ The Gitee mirror is a mirror, not a replacement for resolving an ambiguity in th
 
 | Required item                  | Current state | Required resolution before implementation                                                                         |
 | ------------------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------- |
-| appId                          | Missing       | Register and approve one unique immutable ID; do not infer it from display name.                                  |
-| Product directory and main EXE | Missing       | Approve stable names before installer/shortcut work.                                                              |
+| Approved identity              | Recorded      | Do not substitute the Tauri identifier for Toolbox `appId`; use the approved fields when T15 starts.              |
+| Product directory and main EXE | Recorded      | Implement only after the approved installer/release decision.                                                     |
 | Runner                         | Missing       | Implement `launch` and exact `apply` contract; only Runner may replace application files.                         |
 | Manifest                       | Missing       | Create schema-v1 manifest after actual identity, EXE and release URL are approved.                                |
 | Honsen registry entries        | Missing       | Installer must inspect HKLM/HKCU and 32/64-bit views, write required values, and prevent a second valid instance. |

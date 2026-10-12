@@ -358,6 +358,10 @@
   font-size: 28px;
   font-weight: 800;
 }
+
+.owner-manual-reference {
+  color: #b42318 !important;
+}
 .workflow-actions {
   margin: 14px 0;
 }

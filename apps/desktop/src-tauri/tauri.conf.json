@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Honsen Procure",
+  "version": "../package.json",
+  "identifier": "africa.honsen.procure",
+  "mainBinaryName": "HonsenProcure",
+  "build": {
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1 --port 1420",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": { "csp": null },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Honsen Procure",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 680
+      }
+    ]
+  },
+  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+}

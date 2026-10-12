@@ -1,9 +1,82 @@
+import { useState } from 'react'
 import { Alert, Button, Card, Input } from 'antd'
 import { LockKeyhole, UserRound } from 'lucide-react'
 
-type LoginPageProps = { onPreview: () => void }
+type Session = {
+  user_id: string
+  username: string
+  roles: string[]
+  requires_password_change: boolean
+}
 
-export function LoginPage({ onPreview }: LoginPageProps) {
+type LoginPageProps = {
+  onLogin: (session: Session) => void
+  onPreview: () => void
+}
+
+type TauriInvoke = <T>(command: string, args?: object) => Promise<T>
+
+function invoke(): TauriInvoke | undefined {
+  const tauriWindow = window as Window & {
+    __TAURI__?: { core?: { invoke?: TauriInvoke } }
+    __TAURI_INTERNALS__?: unknown
+  }
+  return tauriWindow.__TAURI_INTERNALS__
+    ? tauriWindow.__TAURI__?.core?.invoke
+    : undefined
+}
+
+export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
+  const desktopInvoke = invoke()
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [captcha, setCaptcha] = useState<{
+    id: string
+    question: string
+  } | null>(null)
+  const [answer, setAnswer] = useState('')
+  const [message, setMessage] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const refreshCaptcha = async () => {
+    if (!desktopInvoke) return
+    try {
+      setCaptcha(await desktopInvoke('issue_local_captcha'))
+      setAnswer('')
+      setMessage('')
+    } catch {
+      setMessage('无法生成本地验证码。')
+    }
+  }
+
+  if (!desktopInvoke) {
+    return (
+      <main className="login-page">
+        <Card className="login-card">
+          <div className="login-brand" aria-hidden="true">
+            H
+          </div>
+          <h1>登录 HONSEN Procure</h1>
+          <p>浏览器预览不连接本地凭据；桌面程序使用真实离线登录。</p>
+          <Alert
+            className="login-alert"
+            type="info"
+            showIcon
+            title="开发预览：不接受账号、密码或验证码"
+          />
+          <Button
+            className="preview-button"
+            type="primary"
+            block
+            onClick={onPreview}
+          >
+            打开界面预览
+          </Button>
+        </Card>
+      </main>
+    )
+  }
+
   return (
     <main className="login-page">
       <Card className="login-card">
@@ -11,34 +84,70 @@ export function LoginPage({ onPreview }: LoginPageProps) {
           H
         </div>
         <h1>登录 HONSEN Procure</h1>
-        <p>账号验证将在 T02/T03 接入。当前仅用于核验界面导航。</p>
-        <Alert
-          className="login-alert"
-          type="info"
-          showIcon
-          title="开发预览：不接受真实账号、密码或验证码"
-        />
-        <label htmlFor="preview-account">账号</label>
+        <p>离线登录仅接受已缓存、启用且仍在 24 小时窗口内的账户。</p>
+        {message && (
+          <Alert
+            className="login-alert"
+            type="error"
+            showIcon
+            title={message}
+          />
+        )}
+        <label htmlFor="account">账号</label>
         <Input
-          id="preview-account"
-          disabled
+          id="account"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
           prefix={<UserRound size={16} aria-hidden="true" />}
-          placeholder="T02 接入账号验证"
+          autoComplete="username"
         />
-        <label htmlFor="preview-password">密码</label>
+        <label htmlFor="password">密码</label>
         <Input.Password
-          id="preview-password"
-          disabled
+          id="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
           prefix={<LockKeyhole size={16} aria-hidden="true" />}
-          placeholder="T03 接入本地离线验证"
+          autoComplete="current-password"
         />
+        <label htmlFor="captcha">
+          本地验证码：{captcha?.question ?? '请先获取'}
+        </label>
+        <Input
+          id="captcha"
+          inputMode="numeric"
+          value={answer}
+          onChange={(event) => setAnswer(event.target.value)}
+        />
+        <Button type="link" onClick={() => void refreshCaptcha()}>
+          {captcha ? '换一个验证码' : '获取验证码'}
+        </Button>
         <Button
           className="preview-button"
           type="primary"
           block
-          onClick={onPreview}
+          loading={submitting}
+          disabled={!captcha}
+          onClick={() => {
+            if (!captcha) return
+            setSubmitting(true)
+            setMessage('')
+            void desktopInvoke<Session>('offline_login', {
+              request: {
+                username,
+                password,
+                captchaId: captcha.id,
+                captchaAnswer: Number(answer),
+              },
+            })
+              .then(onLogin)
+              .catch(() => {
+                setMessage('账号、密码或验证码无效。')
+                void refreshCaptcha()
+              })
+              .finally(() => setSubmitting(false))
+          }}
         >
-          打开界面预览
+          登录
         </Button>
       </Card>
     </main>

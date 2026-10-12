@@ -24,6 +24,373 @@ test('development sign-in placeholder opens the workbench and navigates accessib
   await expect(browserErrors).toEqual([])
 })
 
+test('owner purchase draft explicitly selects a quote source and saves trusted pricing', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command === 'search_catalog')
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000901',
+                  sku: 'OWNER-FIXTURE',
+                  nameZh: '业主报价材料',
+                  nameFr: null,
+                  aliases: [],
+                  brand: null,
+                  model: 'OP-01',
+                  specification: 'fixture',
+                  unit: '件',
+                  notes: null,
+                  version: 1,
+                  prices: [
+                    {
+                      priceId: '00000000-0000-4000-8000-000000000902',
+                      supplierId: '00000000-0000-4000-8000-000000000903',
+                      supplierName: 'owner fixture supplier',
+                      isPreferredSupplier: false,
+                      currency: 'XOF',
+                      unitPriceMinor: '1250',
+                      unit: '件',
+                      effectiveAt: '2026-10-12',
+                    },
+                  ],
+                },
+              ])
+            if (command === 'save_requisition_draft')
+              return Promise.resolve({ totalMinor: '0' })
+            if (command === 'set_procurement_mode') {
+              Object.assign(window, { __procurementMode: args?.mode })
+              return Promise.resolve()
+            }
+            if (command === 'save_owner_purchase_pricing') {
+              Object.assign(window, { __ownerPricingInput: args?.input })
+              return Promise.resolve([
+                {
+                  orderItemId: (
+                    args?.input?.lines as Array<{ orderItemId: string }>
+                  )[0].orderItemId,
+                  convertedReferenceUnitMinor: '1250',
+                  markupMinor: '125',
+                  finalUnitPriceMinor: '1375',
+                },
+              ])
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购申请单' }).click()
+  await page.getByLabel('采购模式').click()
+  await page.getByText('业主自行采购', { exact: true }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('业主报价材料 · OP-01', { exact: true }).click()
+  await expect(page.getByLabel('选择报价')).toHaveValue('')
+  await page.getByLabel('选择报价').click()
+  await page
+    .getByText('owner fixture supplier · 1250 XOF', { exact: true })
+    .click()
+  await page.getByRole('textbox', { name: '加价' }).fill('1000')
+  await page.getByRole('button', { name: '保存草稿' }).click()
+  await expect(page.getByLabel('换算参考单价（只读）')).toHaveValue('1250')
+  await expect(page.getByLabel('最终单价（只读）')).toHaveValue('1375')
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __ownerPricingInput?: {
+              lines?: Array<{ quoteSource?: { materialPriceId?: string } }>
+            }
+          }
+        ).__ownerPricingInput?.lines?.[0]?.quoteSource?.materialPriceId,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000902')
+  await expect(browserErrors).toEqual([])
+})
+
+test('regular requisition page completes owner pricing rejection and resubmission', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    let pricingAttempt = 0
+    let rejected = false
+    const orderId = '00000000-0000-4000-8000-000000000911'
+    const engineerId = '00000000-0000-4000-8000-000000000912'
+    const purchaserId = '00000000-0000-4000-8000-000000000913'
+    const pricingAudit = (
+      reason: string | null,
+      final: string,
+      markup: string,
+    ) => ({
+      id: crypto.randomUUID(),
+      orderId,
+      actorId: engineerId,
+      action: 'owner_pricing_saved',
+      reason,
+      previousJson: null,
+      nextJson: JSON.stringify({
+        lines: [
+          {
+            id: 'line-1',
+            material: { nameZh: '跨币种业主材料' },
+            supplier: { name: '审批报价供应商' },
+            currency: 'CNY',
+            ownerQuoteSource: 'catalog_price',
+            ownerSourceUnitPriceMinor: '1234',
+            ownerLockedExchangeRateDecimal: '76.5',
+            ownerConvertedReferenceUnitMinor: '944',
+            ownerMarkupJson: markup,
+            ownerFinalUnitPriceMinor: final,
+          },
+        ],
+      }),
+      createdAt: 1,
+    })
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              input?: Record<string, unknown>
+              orderId?: string
+              reason?: string
+            },
+          ) {
+            if (command === 'search_catalog') {
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000914',
+                  sku: 'OWNER-CNY',
+                  nameZh: '跨币种业主材料',
+                  nameFr: null,
+                  aliases: [],
+                  brand: null,
+                  model: 'OPA-CNY',
+                  specification: 'fixture',
+                  unit: '件',
+                  notes: null,
+                  version: 1,
+                  prices: [
+                    {
+                      priceId: '00000000-0000-4000-8000-000000000915',
+                      supplierId: '00000000-0000-4000-8000-000000000916',
+                      supplierName: '审批报价供应商',
+                      isPreferredSupplier: true,
+                      currency: 'CNY',
+                      unitPriceMinor: '1234',
+                      unit: '件',
+                      effectiveAt: '2026-10-12',
+                    },
+                  ],
+                },
+              ])
+            }
+            if (
+              command === 'save_requisition_draft' ||
+              command === 'set_procurement_mode'
+            )
+              return Promise.resolve({ totalMinor: '0' })
+            if (command === 'save_owner_purchase_pricing') {
+              pricingAttempt += 1
+              if (pricingAttempt <= 2)
+                return Promise.reject(new Error('rate unavailable'))
+              const reason = args?.input?.revisionReason as string | null
+              const revised = reason === '驳回后调整固定加价。'
+              Object.assign(window, { __ownerLifecyclePricing: args?.input })
+              return Promise.resolve([
+                {
+                  orderItemId: (
+                    args?.input?.lines as Array<{ orderItemId: string }>
+                  )[0].orderItemId,
+                  convertedReferenceUnitMinor: '944',
+                  markupMinor: revised ? '10' : '94',
+                  finalUnitPriceMinor: revised ? '954' : '1038',
+                },
+              ])
+            }
+            if (command === 'submit_requisition_draft') return Promise.resolve()
+            if (command === 'list_order_comments') return Promise.resolve([])
+            if (command === 'list_order_audits') {
+              if (rejected) {
+                return Promise.resolve([
+                  pricingAudit(
+                    '驳回后调整固定加价。',
+                    '954',
+                    '{"kind":"fixed_minor","minor":"10"}',
+                  ),
+                  {
+                    id: crypto.randomUUID(),
+                    orderId,
+                    actorId: purchaserId,
+                    action: 'rejected',
+                    reason: '请调整加价。',
+                    previousJson: 'pending_confirmation',
+                    nextJson: 'rejected',
+                    createdAt: 2,
+                  },
+                ])
+              }
+              return Promise.resolve([
+                pricingAudit(
+                  null,
+                  '1038',
+                  '{"kind":"percent_basis_points","basisPoints":1000}',
+                ),
+              ])
+            }
+            if (command === 'reject_requisition') {
+              rejected = true
+              return Promise.resolve()
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await page.getByLabel('采购模式').click()
+  await page.getByText('业主自行采购', { exact: true }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('跨币种业主材料 · OPA-CNY', { exact: true }).click()
+  await page.getByLabel('选择报价').click()
+  await page.getByText('审批报价供应商 · 1234 CNY', { exact: true }).click()
+  await page.getByLabel('CNY → XOF 锁定汇率').fill('76.5')
+  await page.getByRole('textbox', { name: '加价', exact: true }).fill('1000')
+  await page.getByRole('button', { name: '保存草稿' }).click()
+  await expect(page.getByText('基础草稿已保存，报价定价未完成')).toBeVisible()
+  await page.getByRole('button', { name: '提交确认' }).click()
+  await expect(page.getByText('提交失败，请检查订单内容。')).toBeVisible()
+  await page.getByRole('button', { name: '提交确认' }).click()
+  await expect(page.getByText('采购申请已提交，状态：待确认')).toBeVisible()
+  await expect(
+    page.getByText('供应商：审批报价供应商 · 原始价格：1234 CNY · 汇率：76.5'),
+  ).toBeVisible()
+  await expect(
+    page.getByText(/换算参考价：944 · 加价：.*1000.*最终价格：1038/),
+  ).toBeVisible()
+  await page.getByLabel('驳回原因').fill('请调整加价。')
+  await page.getByRole('button', { name: '驳回订单' }).click()
+  await expect(
+    page.getByText('申请已驳回，可修改报价并重新提交。'),
+  ).toBeVisible()
+  await page.getByLabel('加价方式').click()
+  await page.getByText('固定每单位金额', { exact: true }).click()
+  await page.getByRole('textbox', { name: '加价', exact: true }).fill('10')
+  await page.getByLabel('价格修订原因').fill('驳回后调整固定加价。')
+  await page.getByRole('button', { name: '提交确认' }).click()
+  await expect(
+    page.getByText('报价修订原因：驳回后调整固定加价。'),
+  ).toBeVisible()
+  await expect(page.getByText(/最终价格：954/)).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('regular owner draft marks manual reference pricing as an exception', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command === 'search_catalog')
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000921',
+                  sku: 'MANUAL',
+                  nameZh: '手工报价材料',
+                  nameFr: null,
+                  aliases: [],
+                  brand: null,
+                  model: 'OPA-MANUAL',
+                  specification: 'fixture',
+                  unit: '件',
+                  notes: null,
+                  version: 1,
+                  prices: [],
+                },
+              ])
+            if (
+              command === 'save_requisition_draft' ||
+              command === 'set_procurement_mode'
+            )
+              return Promise.resolve({ totalMinor: '0' })
+            if (command === 'save_owner_purchase_pricing') {
+              Object.assign(window, { __manualOwnerPricing: args?.input })
+              return Promise.resolve([
+                {
+                  orderItemId: (
+                    args?.input?.lines as Array<{ orderItemId: string }>
+                  )[0].orderItemId,
+                  convertedReferenceUnitMinor: '100',
+                  markupMinor: '0',
+                  finalUnitPriceMinor: '100',
+                },
+              ])
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await page.getByLabel('采购模式').click()
+  await page.getByText('业主自行采购', { exact: true }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('手工报价材料 · OPA-MANUAL', { exact: true }).click()
+  await page.getByLabel('报价来源').click()
+  await page.getByText('手工参考价（需原因）', { exact: true }).click()
+  await expect(
+    page.getByText('手工参考价会被审计，且不会写回材料目录。'),
+  ).toBeVisible()
+  await page.getByLabel('手工参考单价（最小货币单位）').fill('100')
+  await page.getByLabel('手工参考原因').fill('目录暂无可用报价。')
+  await page.getByRole('button', { name: '保存草稿' }).click()
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __manualOwnerPricing?: {
+              lines?: Array<{
+                quoteSource?: { kind?: string; reason?: string }
+              }>
+            }
+          }
+        ).__manualOwnerPricing?.lines?.[0]?.quoteSource,
+    ),
+  ).resolves.toEqual({
+    kind: 'manual_reference',
+    unitPriceMinor: '100',
+    reason: '目录暂无可用报价。',
+  })
+})
+
 test('currency preview selects every supported currency without console errors', async ({
   page,
 }) => {
@@ -405,9 +772,14 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
             args?: {
               draft?: { lines?: unknown[]; id?: string }
               orderId?: string
+              mode?: string
+              projectId?: string
             },
           ) {
-            if (command === 'search_catalog') return Promise.resolve([material])
+            if (command === 'search_catalog') {
+              Object.assign(window, { __catalogProjectId: args?.projectId })
+              return Promise.resolve([material])
+            }
             if (command === 'save_requisition_draft') {
               Object.assign(window, { __requisitionDraft: args?.draft })
               return Promise.resolve({
@@ -418,6 +790,10 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
                 taxMinor: '540',
                 totalMinor: '3540',
               })
+            }
+            if (command === 'set_procurement_mode') {
+              Object.assign(window, { __honsenProcurementMode: args?.mode })
+              return Promise.resolve()
             }
             if (command === 'submit_requisition_draft') {
               Object.assign(window, { __submittedRequisitionId: args?.orderId })
@@ -433,6 +809,12 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
   await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __catalogProjectId?: string }).__catalogProjectId,
+    ),
+  ).resolves.toMatch(/^[0-9a-f-]{36}$/)
   await page.getByLabel('材料').click()
   await page.getByText('请购测试电缆 · RQ-01').click()
   await page.getByLabel('数量').fill('2.5')
@@ -457,7 +839,7 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
   await expect(page.getByText('第 2 行')).not.toBeVisible()
   await page.getByRole('button', { name: '提交确认' }).click()
   await expect(page.getByText('采购申请已提交，状态：待确认')).toBeVisible()
-  await expect(page.getByText('待确认', { exact: true })).toBeVisible()
+  await expect(page.locator('.page-heading .status')).toHaveText('待确认')
   await expect(
     page.evaluate(
       () =>
@@ -484,6 +866,13 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
           .__submittedRequisitionId,
     ),
   ).resolves.toMatch(/^[0-9a-f-]{36}$/)
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __honsenProcurementMode?: string })
+          .__honsenProcurementMode,
+    ),
+  ).resolves.toBe('honsen_self_purchase')
   await expect(browserErrors).toEqual([])
 })
 
@@ -585,6 +974,138 @@ test('purchaser allocates every parent line into supplier-specific child orders'
       },
     ],
   })
+  await expect(browserErrors).toEqual([])
+})
+
+test('purchaser reaches execution from the regular application and completes RFQ, allocation and child terms', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    let allocated = false
+    const parent = {
+      id: '00000000-0000-4000-8000-000000000801',
+      displayNo: 'CI-FIXTURE-20261012-INT-0001',
+      primaryCurrency: 'XOF',
+      lines: [
+        {
+          id: '00000000-0000-4000-8000-000000000802',
+          materialName: 'regular flow cable',
+          quantity: '2',
+          unit: '米',
+          currency: 'XOF',
+        },
+      ],
+    }
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              input?: Record<string, unknown>
+              allocations?: Array<Record<string, unknown>>
+            },
+          ) {
+            if (command === 'list_confirmed_procurement_orders')
+              return Promise.resolve([
+                {
+                  ...parent,
+                  children: allocated
+                    ? [
+                        {
+                          id: '00000000-0000-4000-8000-000000000803',
+                          displayNo: 'CI-FIXTURE-20261012-SUP-0001',
+                          currency: 'XOF',
+                          lines: [
+                            {
+                              ...parent.lines[0],
+                              id: '00000000-0000-4000-8000-000000000804',
+                            },
+                          ],
+                        },
+                      ]
+                    : [],
+                },
+              ])
+            if (command === 'list_suppliers')
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000805',
+                  businessCode: 'SUP-FIXTURE',
+                  name: 'regular flow supplier',
+                  contactName: null,
+                  address: null,
+                  city: null,
+                  country: null,
+                  phone: null,
+                  whatsapp: null,
+                  email: null,
+                  paymentTerms: null,
+                  deliveryLeadTime: null,
+                  isPreferred: true,
+                  isBlacklisted: false,
+                  isActive: true,
+                  version: 1,
+                },
+              ])
+            if (command === 'create_rfq')
+              return Promise.resolve({ ...args?.input, itemCount: 1 })
+            if (command === 'allocate_supplier_child_orders') {
+              allocated = true
+              return Promise.resolve([
+                {
+                  childOrderId: '00000000-0000-4000-8000-000000000803',
+                  supplierId: '00000000-0000-4000-8000-000000000805',
+                  currency: 'XOF',
+                  sourceTotalMinor: '2500',
+                  primaryTotalMinor: '2500',
+                  lockedExchangeRateDecimal: '1',
+                },
+              ])
+            }
+            if (command === 'save_supplier_child_terms')
+              return Promise.resolve({
+                subtotalMinor: '2500',
+                lineDiscountMinor: '0',
+                orderDiscountMinor: '0',
+                freightMinor: '0',
+                taxMinor: '450',
+                totalMinor: '2950',
+              })
+            if (command === 'send_supplier_order') return Promise.resolve()
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await page
+    .getByRole('button', { name: 'CI-FIXTURE-20261012-INT-0001' })
+    .click()
+  await expect(page.getByText('regular flow cable · 2 米 · XOF')).toBeVisible()
+  await page.getByLabel('RFQ 供应商').click()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await page.getByLabel('询价单编号').fill('CI-FIXTURE-20261012-RFQ-0001')
+  await page.getByRole('button', { name: '创建询价单' }).click()
+  await expect(page.getByText(/已创建，包含 1 条无价格明细/)).toBeVisible()
+  await page.getByLabel('regular flow cable 供应商').click()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await page
+    .getByLabel('regular flow cable 子单编号')
+    .fill('CI-FIXTURE-20261012-SUP-0001')
+  await page.getByRole('button', { name: '创建供应商子单' }).click()
+  await expect(page.getByText('供应商子单条款')).toBeVisible()
+  await page.getByRole('button', { name: '保存子单条款' }).click()
+  await expect(page.getByText('子单条款已保存，含税总额 2950。')).toBeVisible()
   await expect(browserErrors).toEqual([])
 })
 

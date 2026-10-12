@@ -17,12 +17,18 @@ import { SupplierChildTermsFixturePage } from './pages/SupplierChildTermsFixture
 import { RfqFixturePage } from './pages/RfqFixturePage'
 import { ReceiptFixturePage } from './pages/ReceiptFixturePage'
 import { SyncConflictFixturePage } from './pages/SyncConflictFixturePage'
+import { ProcurementExecutionPage } from './pages/ProcurementExecutionPage'
 import {
   RequisitionPage,
   type RequisitionContext,
 } from './pages/RequisitionPage'
 import { tauriRequisitionApi, type RequisitionApi } from './lib/requisition-api'
 import { tauriCatalogApi } from './lib/catalog-api'
+import { tauriProcurementExecutionApi } from './lib/procurement-execution-api'
+import { tauriRfqApi } from './lib/rfq-api'
+import { tauriSupplierOrderApi } from './lib/supplier-order-api'
+import { tauriWorkflowApi, type WorkflowApi } from './lib/workflow-api'
+import type { UserRole } from './lib/permissions'
 import './App.css'
 
 const previewRequisitionContext: RequisitionContext = {
@@ -47,6 +53,21 @@ const previewRequisitionContext: RequisitionContext = {
 const previewRequisitionApi: RequisitionApi = {
   async saveRequisitionDraft(draft) {
     return calculateDraftTotals(draft)
+  },
+  async setProcurementMode() {},
+  async saveOwnerPurchasePricing(input) {
+    return input.lines.map((line) => ({
+      orderItemId: line.orderItemId,
+      convertedReferenceUnitMinor:
+        line.quoteSource.kind === 'manual_reference'
+          ? line.quoteSource.unitPriceMinor
+          : '1250',
+      markupMinor: '0',
+      finalUnitPriceMinor:
+        line.quoteSource.kind === 'manual_reference'
+          ? line.quoteSource.unitPriceMinor
+          : '1250',
+    }))
   },
   async submitRequisitionDraft() {},
 }
@@ -83,6 +104,31 @@ const previewCatalogApi = {
   },
 }
 
+const previewWorkflowApi: WorkflowApi = {
+  async confirmRequisition() {},
+  async rejectRequisition() {},
+  async addOrderComment(orderId, body) {
+    return {
+      id: crypto.randomUUID(),
+      orderId,
+      authorId: previewRequisitionContext.applicantId,
+      body,
+      createdAt: Date.now(),
+      notificationCount: 0,
+    }
+  },
+  async listOrderComments() {
+    return []
+  },
+  async listOrderAudits() {
+    return []
+  },
+  async getApprovalPolicy() {
+    return { allowSelfApproval: false }
+  },
+  async setApprovalPolicy() {},
+}
+
 function App() {
   // shortcut: test-only query route, remove when the app has an authenticated test fixture.
   const isMoneyPreview =
@@ -109,6 +155,28 @@ function App() {
     new URLSearchParams(window.location.search).get('test') === 'sync-conflict'
   const [page, setPage] = useState<AppPage>('home')
   const [isPreviewOpen, setPreviewOpen] = useState(false)
+  const [session, setSession] = useState<{
+    user_id: string
+    username: string
+    roles: string[]
+    requires_password_change: boolean
+  } | null>(null)
+  const role: UserRole = session?.roles.includes('super_administrator')
+    ? 'super_administrator'
+    : session?.roles.includes('administrator')
+      ? 'administrator'
+      : session?.roles.includes('purchaser')
+        ? 'purchaser'
+        : session?.roles.includes('viewer')
+          ? 'viewer'
+          : 'engineer'
+  const requisitionContext = session
+    ? { ...previewRequisitionContext, applicantId: session.user_id }
+    : previewRequisitionContext
+  const canApprove =
+    role === 'purchaser' ||
+    role === 'administrator' ||
+    role === 'super_administrator'
 
   return (
     <ConfigProvider
@@ -143,7 +211,7 @@ function App() {
         <AuthFixturePage />
       ) : isMoneyPreview ? (
         <MoneyPreviewPage />
-      ) : isPreviewOpen ? (
+      ) : isPreviewOpen || session ? (
         <AppShell
           page={page}
           pageTitle={
@@ -153,10 +221,26 @@ function App() {
                 ? '材料库总览'
                 : page === 'requisition'
                   ? '采购申请单'
-                  : '项目默认设置'
+                  : page === 'execution'
+                    ? '采购执行'
+                    : '项目默认设置'
           }
-          role="purchaser"
+          role={session ? role : 'purchaser'}
           onNavigate={setPage}
+          onLock={
+            session
+              ? () => {
+                  const invoke = (
+                    window as Window & {
+                      __TAURI__?: {
+                        core?: { invoke?: (command: string) => Promise<void> }
+                      }
+                    }
+                  ).__TAURI__?.core?.invoke
+                  void invoke?.('lock_session').finally(() => setSession(null))
+                }
+              : undefined
+          }
         >
           {page === 'home' ? (
             <HomePage
@@ -165,7 +249,7 @@ function App() {
             />
           ) : page === 'materials' ? (
             <MaterialsPage
-              role="purchaser"
+              role={session ? role : 'purchaser'}
               api={
                 (
                   window as Window & {
@@ -204,14 +288,34 @@ function App() {
                   ? tauriCatalogApi
                   : previewCatalogApi
               }
-              context={previewRequisitionContext}
+              context={requisitionContext}
+              workflowApi={
+                (
+                  window as Window & {
+                    __TAURI__?: { core?: { invoke?: unknown } }
+                  }
+                ).__TAURI__?.core?.invoke
+                  ? tauriWorkflowApi
+                  : previewWorkflowApi
+              }
+              canApprove={session ? canApprove : true}
+            />
+          ) : page === 'execution' ? (
+            <ProcurementExecutionPage
+              api={tauriProcurementExecutionApi}
+              supplierApi={tauriCatalogApi}
+              supplierOrderApi={tauriSupplierOrderApi}
+              rfqApi={tauriRfqApi}
             />
           ) : (
-            <MasterDataPage role="purchaser" />
+            <MasterDataPage role={session ? role : 'purchaser'} />
           )}
         </AppShell>
       ) : (
-        <LoginPage onPreview={() => setPreviewOpen(true)} />
+        <LoginPage
+          onLogin={setSession}
+          onPreview={() => setPreviewOpen(true)}
+        />
       )}
     </ConfigProvider>
   )

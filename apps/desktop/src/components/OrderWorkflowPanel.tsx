@@ -11,12 +11,14 @@ type OrderWorkflowPanelProps = {
   api: WorkflowApi
   orderId: string
   canApprove: boolean
+  onRejected?: () => void
 }
 
 export function OrderWorkflowPanel({
   api,
   orderId,
   canApprove,
+  onRejected,
 }: OrderWorkflowPanelProps) {
   const [status, setStatus] = useState('待确认')
   const [reason, setReason] = useState('')
@@ -55,6 +57,7 @@ export function OrderWorkflowPanel({
       await api.rejectRequisition(orderId, reason.trim())
       setStatus('已驳回')
       setMessage('订单已驳回，申请人可修改后重新提交。')
+      onRejected?.()
     } catch {
       setMessage('驳回失败，请稍后重试。')
     }
@@ -120,6 +123,31 @@ export function OrderWorkflowPanel({
             </article>
           ))}
       </section>
+      <section className="workflow-audits" aria-label="内部报价明细">
+        <h3>内部报价明细</h3>
+        {ownerPricingLines(audits).map((line) => (
+          <article className="workflow-audit" key={line.id}>
+            <p>
+              {line.material} ·{' '}
+              {line.source === 'manual_reference' ? '手工参考报价' : '目录报价'}
+            </p>
+            {line.source === 'manual_reference' ? (
+              <p className="owner-manual-reference">手工例外：{line.reason}</p>
+            ) : null}
+            {line.revisionReason !== '—' ? (
+              <p>报价修订原因：{line.revisionReason}</p>
+            ) : null}
+            <p>
+              供应商：{line.supplier} · 原始价格：{line.sourcePrice}{' '}
+              {line.currency} · 汇率：{line.rate}
+            </p>
+            <p>
+              换算参考价：{line.converted} · 加价：{line.markup} · 最终价格：
+              {line.final}
+            </p>
+          </article>
+        ))}
+      </section>
       <section className="workflow-comments" aria-label="内部评论">
         <h3>内部评论</h3>
         {comments.map((item) => (
@@ -141,6 +169,40 @@ export function OrderWorkflowPanel({
       </section>
     </Card>
   )
+}
+
+function ownerPricingLines(audits: OrderAuditView[]) {
+  const audit = [...audits]
+    .reverse()
+    .find((item) => item.action === 'owner_pricing_saved')
+  if (!audit?.nextJson) return [] as Array<Record<string, string>>
+  try {
+    const snapshot = JSON.parse(audit.nextJson) as {
+      lines?: Array<Record<string, unknown>>
+    }
+    return (snapshot.lines ?? [])
+      .filter((line) => line.ownerQuoteSource)
+      .map((line) => {
+        const material = line.material as { nameZh?: string } | undefined
+        const supplier = line.supplier as { name?: string } | undefined
+        return {
+          id: String(line.id),
+          material: material?.nameZh ?? '材料',
+          supplier: supplier?.name ?? '手工参考价（无供应商）',
+          source: String(line.ownerQuoteSource),
+          reason: String(line.ownerManualReferenceReason ?? '—'),
+          revisionReason: String(audit.reason ?? '—'),
+          sourcePrice: String(line.ownerSourceUnitPriceMinor ?? '—'),
+          currency: String(line.currency ?? '—'),
+          rate: String(line.ownerLockedExchangeRateDecimal ?? '—'),
+          converted: String(line.ownerConvertedReferenceUnitMinor ?? '—'),
+          markup: String(line.ownerMarkupJson ?? '—'),
+          final: String(line.ownerFinalUnitPriceMinor ?? '—'),
+        }
+      })
+  } catch {
+    return []
+  }
 }
 
 const labels: Record<string, string> = {

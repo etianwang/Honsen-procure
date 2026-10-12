@@ -7,13 +7,15 @@ import {
 } from 'lucide-react'
 import type { UserRole } from '../lib/permissions'
 
-export type AppPage = 'home' | 'materials' | 'requisition' | 'master-data'
+export type AppPage =
+  'home' | 'materials' | 'requisition' | 'execution' | 'master-data'
 
 type AppShellProps = PropsWithChildren<{
   page: AppPage
   pageTitle: string
   role: UserRole
   onNavigate: (page: AppPage) => void
+  onLock?: () => void
 }>
 
 const roleLabel: Record<UserRole, string> = {
@@ -30,6 +32,7 @@ export function AppShell({
   pageTitle,
   role,
   onNavigate,
+  onLock,
 }: AppShellProps) {
   return (
     <div className="app-shell">
@@ -65,6 +68,14 @@ export function AppShell({
             采购申请单
           </button>
           <button
+            className={`nav-button ${page === 'execution' ? 'active' : ''}`}
+            type="button"
+            onClick={() => onNavigate('execution')}
+          >
+            <ClipboardPlus size={17} aria-hidden="true" />
+            采购执行
+          </button>
+          <button
             className={`nav-button ${page === 'master-data' ? 'active' : ''}`}
             type="button"
             onClick={() => onNavigate('master-data')}
@@ -85,9 +96,14 @@ export function AppShell({
             <h1>{pageTitle}</h1>
           </div>
           <div className="identity">
-            <span>离线演示数据</span>
+            <span>离线本地数据</span>
             <span className="avatar">张</span>
             <span>{roleLabel[role]}</span>
+            {onLock && (
+              <button type="button" onClick={onLock}>
+                锁定
+              </button>
+            )}
           </div>
         </header>
         <div className="content">{children}</div>

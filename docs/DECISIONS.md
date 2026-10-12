@@ -2,7 +2,7 @@
 
 ## Confirmed
 
-- Product Chinese display name: `Honsen采购管理系统`; the English companion name is `HONSEN Procure`. This is a display-name decision only and does not approve or imply a Toolbox `appId`, EXE name or installation directory.
+- Formal Desktop/Toolbox identity is approved: Toolbox `appId` is `honsen.procure`; Tauri identifier is the distinct field `africa.honsen.procure`; display name and product directory are both `Honsen Procure`; main executable is `HonsenProcure.exe`; default release installation scope is machine. The normal mutable-data directory is `%LOCALAPPDATA%\\Honsen Program\\honsen.procure`. This approval does not authorize an installer, Runner, manifest, registry entry, catalog change or release.
 - Desktop: Tauri 2 + React + TypeScript + SQLite.
 - Remote: PostgreSQL behind HTTPS API; bidirectional incremental sync.
 - Every launch uses account/password plus local CAPTCHA; session locks at 30 minutes. A cached enabled user can sign in offline for 24 hours.
@@ -35,7 +35,7 @@
 
 ## Open implementation decisions
 
-1. **Toolbox identity:** `appId`, stable product-directory name, main EXE name, installer technology and internal update URL have not been registered. See `HONSEN_TOOLBOX_INTEGRATION.md`.
+1. **Toolbox release implementation:** identity is approved, but installer technology, GitHub Release URL/first version, signing certificate and update mechanism remain unapproved. See `HONSEN_TOOLBOX_INTEGRATION.md`.
 
 ## Deferred
 

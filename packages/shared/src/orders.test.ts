@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { calculateDraftTotals, requisitionDraftSchema } from './orders.js'
+import {
+  calculateDraftTotals,
+  calculateOwnerLinePrice,
+  requisitionDraftSchema,
+} from './orders.js'
 
 const ids = {
   order: '00000000-0000-4000-8000-000000000001',
@@ -59,6 +63,36 @@ function draft() {
 }
 
 describe('requisition calculations', () => {
+  it('calculates a frozen owner line conversion and exactly one markup', () => {
+    expect(
+      calculateOwnerLinePrice({
+        lineId: ids.line,
+        sourceCurrency: 'CNY',
+        primaryCurrency: 'XOF',
+        lockedExchangeRateDecimal: '76.5',
+        sourceUnitPriceMinor: '1234',
+        markup: { kind: 'percent_basis_points', basisPoints: 1000 },
+      }),
+    ).toEqual({
+      convertedReferenceUnitMinor: '944',
+      markupMinor: '94',
+      finalUnitPriceMinor: '1038',
+    })
+  })
+
+  it('rejects a non-identity rate for the same currency', () => {
+    expect(() =>
+      calculateOwnerLinePrice({
+        lineId: ids.line,
+        sourceCurrency: 'XOF',
+        primaryCurrency: 'XOF',
+        lockedExchangeRateDecimal: '2',
+        sourceUnitPriceMinor: '1',
+        markup: { kind: 'fixed_minor', minor: '0' },
+      }),
+    ).toThrow('Identity conversion')
+  })
+
   it('calculates discounts, freight and tax in the required order', () => {
     expect(calculateDraftTotals(draft())).toMatchObject({
       subtotalMinor: '3125',
