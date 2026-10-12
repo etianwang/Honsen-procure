@@ -1568,7 +1568,8 @@ impl LocalAuthService {
         input: OwnerPurchasePricingInput,
         now: SystemTime,
     ) -> Result<Vec<OwnerLinePricingView>, AuthError> {
-        if !self.require_order_mutation(now)? || input.lines.is_empty() || input.lines.len() > 500 {
+        let privileged = self.require_order_mutation(now)?;
+        if input.lines.is_empty() || input.lines.len() > 500 {
             return Err(AuthError::Forbidden);
         }
         let actor_id = self.active_session_user_id()?;
@@ -1582,14 +1583,17 @@ impl LocalAuthService {
         }
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let (primary_currency, workflow_status, child_count, order_date): (String, String, i64, String) = transaction
+        let (primary_currency, workflow_status, child_count, order_date, applicant_id): (String, String, i64, String, String) = transaction
             .query_row(
-                "SELECT primary_currency, workflow_status, (SELECT COUNT(*) FROM local_purchase_orders child WHERE child.parent_order_id = local_purchase_orders.id AND child.deleted_at IS NULL), order_date FROM local_purchase_orders WHERE id = ?1 AND parent_order_id IS NULL AND deleted_at IS NULL",
+                "SELECT primary_currency, workflow_status, (SELECT COUNT(*) FROM local_purchase_orders child WHERE child.parent_order_id = local_purchase_orders.id AND child.deleted_at IS NULL), order_date, applicant_id FROM local_purchase_orders WHERE id = ?1 AND parent_order_id IS NULL AND deleted_at IS NULL",
                 [input.order_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .map_err(|_| AuthError::Database)?;
-        if workflow_status != "confirmed" || child_count != 0 {
+        if child_count != 0
+            || !matches!(workflow_status.as_str(), "draft" | "confirmed")
+            || (!privileged && (workflow_status != "draft" || applicant_id != actor_id.to_string()))
+        {
             return Err(AuthError::Forbidden);
         }
         let item_count: i64 = transaction
@@ -2619,20 +2623,22 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         let privileged = self.require_order_mutation(now)?;
+        let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let (applicant_id, status, line_count): (String, String, i64) = transaction
+        let (applicant_id, status, line_count, procurement_mode, priced_line_count): (String, String, i64, Option<String>, i64) = transaction
             .query_row(
-                "SELECT o.applicant_id, o.workflow_status, COUNT(i.id) FROM local_purchase_orders o LEFT JOIN local_purchase_order_items i ON i.order_id = o.id WHERE o.id = ?1 AND o.deleted_at IS NULL GROUP BY o.id",
+                "SELECT o.applicant_id, o.workflow_status, COUNT(i.id), o.procurement_mode, SUM(CASE WHEN i.owner_quote_source IS NOT NULL AND i.owner_source_unit_price_minor IS NOT NULL AND i.owner_locked_exchange_rate_decimal IS NOT NULL AND i.owner_converted_reference_unit_minor IS NOT NULL AND i.owner_markup_json IS NOT NULL AND i.owner_final_unit_price_minor IS NOT NULL THEN 1 ELSE 0 END) FROM local_purchase_orders o LEFT JOIN local_purchase_order_items i ON i.order_id = o.id WHERE o.id = ?1 AND o.deleted_at IS NULL GROUP BY o.id",
                 [order_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, Option<i64>>(4)?.unwrap_or(0))),
             )
             .map_err(|_| AuthError::Database)?;
         if status != "draft"
             || line_count == 0
+            || (procurement_mode.as_deref() == Some("owner_self_purchase")
+                && priced_line_count != line_count)
             || (!privileged
-                && Uuid::parse_str(&applicant_id).map_err(|_| AuthError::Database)?
-                    != self.active_session_user_id()?)
+                && Uuid::parse_str(&applicant_id).map_err(|_| AuthError::Database)? != actor_id)
         {
             return Err(AuthError::Forbidden);
         }
@@ -5099,7 +5105,7 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
                 "rejectionReason": row.get::<_, Option<String>>(31)?,
                 "selfApproved": row.get::<_, i64>(32)? != 0,
                 "supplierTermsCompletedAt": row.get::<_, Option<i64>>(33)?,
-                "procurementMode": row.get::<_, String>(34)?,
+                "procurementMode": row.get::<_, Option<String>>(34)?,
             })),
         )
         .map_err(|_| AuthError::Database)?;
@@ -6388,6 +6394,14 @@ mod tests {
         for (item_id, currency) in [(catalog_item_id, "CNY"), (manual_item_id, "XOF")] {
             connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, '{\"nameZh\":\"owner material\"}', ?4, '1', 'pcs', 0, 0, ?5, 0, 0)", params![item_id.to_string(), order_id.to_string(), material_id.to_string(), currency, if item_id == catalog_item_id { 0 } else { 1 }]).unwrap();
         }
+        let legacy_mode: Option<String> = connection
+            .query_row(
+                "SELECT procurement_mode FROM local_purchase_orders WHERE id = ?1",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_mode, None);
         drop(connection);
         let result = service
             .save_owner_purchase_pricing(
@@ -6454,6 +6468,70 @@ mod tests {
             ),
             Err(AuthError::InvalidInput)
         );
+        let engineer_id = Uuid::new_v4();
+        let draft_order_id = Uuid::new_v4();
+        let draft_item_id = Uuid::new_v4();
+        let connection = service.connection.lock().unwrap();
+        connection.execute("INSERT INTO local_purchase_orders (id, display_no, procurement_mode, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'OPA-DRAFT', 'owner_self_purchase', ?2, ?3, 'site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'draft', 'draft', 'normal', '2026-10-12', 'address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![draft_order_id.to_string(), country_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), engineer_id.to_string()]).unwrap();
+        connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, '{\"nameZh\":\"owner material\"}', 'CNY', '1', 'pcs', 0, 0, 0, 0, 0)", params![draft_item_id.to_string(), draft_order_id.to_string(), material_id.to_string()]).unwrap();
+        drop(connection);
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: engineer_id,
+                    username: "owner-engineer".into(),
+                    roles: vec![Role::Engineer],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "owner-engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.submit_requisition_draft(draft_order_id, now),
+            Err(AuthError::Forbidden)
+        );
+        let preview = service
+            .save_owner_purchase_pricing(
+                OwnerPurchasePricingInput {
+                    order_id: draft_order_id,
+                    lines: vec![OwnerLinePricingInput {
+                        order_item_id: draft_item_id,
+                        quote_source: OwnerQuoteSourceInput::CatalogPrice {
+                            material_price_id: price_id,
+                        },
+                        locked_exchange_rate_decimal: "76.5".into(),
+                        markup: AdjustmentInput::FixedMinor { minor: "5".into() },
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(preview[0].final_unit_price_minor, "949");
+        service
+            .submit_requisition_draft(draft_order_id, now)
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let draft_status: String = connection
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1",
+                [draft_order_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(draft_status, "pending_confirmation");
     }
 
     #[test]
@@ -7819,5 +7897,24 @@ mod tests {
             )
             .unwrap();
         assert_eq!(exchange_rate_tombstone_column_exists, 1);
+        let procurement_mode_column_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_purchase_orders') WHERE name = 'procurement_mode'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(procurement_mode_column_exists, 1);
+        let migrated_order: (Option<String>, String, String, i64, String) = connection
+            .query_row(
+                "SELECT procurement_mode, status, workflow_status, total_minor, display_no FROM local_purchase_orders WHERE id = ?1",
+                [order_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            migrated_order,
+            (None, "draft".into(), "draft".into(), 0, "MIG-ORDER".into())
+        );
     }
 }

@@ -1,5 +1,5 @@
 ALTER TABLE local_purchase_orders
-  ADD COLUMN procurement_mode TEXT NOT NULL DEFAULT 'honsen_self_purchase'
+  ADD COLUMN procurement_mode TEXT
   CHECK (procurement_mode IN ('owner_self_purchase', 'honsen_self_purchase'));
 
 ALTER TABLE local_purchase_order_items
