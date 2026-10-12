@@ -121,6 +121,276 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
   await expect(browserErrors).toEqual([])
 })
 
+test('regular requisition page completes owner pricing rejection and resubmission', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    let pricingAttempt = 0
+    let rejected = false
+    const orderId = '00000000-0000-4000-8000-000000000911'
+    const engineerId = '00000000-0000-4000-8000-000000000912'
+    const purchaserId = '00000000-0000-4000-8000-000000000913'
+    const pricingAudit = (
+      reason: string | null,
+      final: string,
+      markup: string,
+    ) => ({
+      id: crypto.randomUUID(),
+      orderId,
+      actorId: engineerId,
+      action: 'owner_pricing_saved',
+      reason,
+      previousJson: null,
+      nextJson: JSON.stringify({
+        lines: [
+          {
+            id: 'line-1',
+            material: { nameZh: '跨币种业主材料' },
+            supplier: { name: '审批报价供应商' },
+            currency: 'CNY',
+            ownerQuoteSource: 'catalog_price',
+            ownerSourceUnitPriceMinor: '1234',
+            ownerLockedExchangeRateDecimal: '76.5',
+            ownerConvertedReferenceUnitMinor: '944',
+            ownerMarkupJson: markup,
+            ownerFinalUnitPriceMinor: final,
+          },
+        ],
+      }),
+      createdAt: 1,
+    })
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              input?: Record<string, unknown>
+              orderId?: string
+              reason?: string
+            },
+          ) {
+            if (command === 'search_catalog') {
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000914',
+                  sku: 'OWNER-CNY',
+                  nameZh: '跨币种业主材料',
+                  nameFr: null,
+                  aliases: [],
+                  brand: null,
+                  model: 'OPA-CNY',
+                  specification: 'fixture',
+                  unit: '件',
+                  notes: null,
+                  version: 1,
+                  prices: [
+                    {
+                      priceId: '00000000-0000-4000-8000-000000000915',
+                      supplierId: '00000000-0000-4000-8000-000000000916',
+                      supplierName: '审批报价供应商',
+                      isPreferredSupplier: true,
+                      currency: 'CNY',
+                      unitPriceMinor: '1234',
+                      unit: '件',
+                      effectiveAt: '2026-10-12',
+                    },
+                  ],
+                },
+              ])
+            }
+            if (
+              command === 'save_requisition_draft' ||
+              command === 'set_procurement_mode'
+            )
+              return Promise.resolve({ totalMinor: '0' })
+            if (command === 'save_owner_purchase_pricing') {
+              pricingAttempt += 1
+              if (pricingAttempt <= 2)
+                return Promise.reject(new Error('rate unavailable'))
+              const reason = args?.input?.revisionReason as string | null
+              const revised = reason === '驳回后调整固定加价。'
+              Object.assign(window, { __ownerLifecyclePricing: args?.input })
+              return Promise.resolve([
+                {
+                  orderItemId: (
+                    args?.input?.lines as Array<{ orderItemId: string }>
+                  )[0].orderItemId,
+                  convertedReferenceUnitMinor: '944',
+                  markupMinor: revised ? '10' : '94',
+                  finalUnitPriceMinor: revised ? '954' : '1038',
+                },
+              ])
+            }
+            if (command === 'submit_requisition_draft') return Promise.resolve()
+            if (command === 'list_order_comments') return Promise.resolve([])
+            if (command === 'list_order_audits') {
+              if (rejected) {
+                return Promise.resolve([
+                  pricingAudit(
+                    '驳回后调整固定加价。',
+                    '954',
+                    '{"kind":"fixed_minor","minor":"10"}',
+                  ),
+                  {
+                    id: crypto.randomUUID(),
+                    orderId,
+                    actorId: purchaserId,
+                    action: 'rejected',
+                    reason: '请调整加价。',
+                    previousJson: 'pending_confirmation',
+                    nextJson: 'rejected',
+                    createdAt: 2,
+                  },
+                ])
+              }
+              return Promise.resolve([
+                pricingAudit(
+                  null,
+                  '1038',
+                  '{"kind":"percent_basis_points","basisPoints":1000}',
+                ),
+              ])
+            }
+            if (command === 'reject_requisition') {
+              rejected = true
+              return Promise.resolve()
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await page.getByLabel('采购模式').click()
+  await page.getByText('业主自行采购', { exact: true }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('跨币种业主材料 · OPA-CNY', { exact: true }).click()
+  await page.getByLabel('选择报价').click()
+  await page.getByText('审批报价供应商 · 1234 CNY', { exact: true }).click()
+  await page.getByLabel('CNY → XOF 锁定汇率').fill('76.5')
+  await page.getByRole('textbox', { name: '加价', exact: true }).fill('1000')
+  await page.getByRole('button', { name: '保存草稿' }).click()
+  await expect(page.getByText('基础草稿已保存，报价定价未完成')).toBeVisible()
+  await page.getByRole('button', { name: '提交确认' }).click()
+  await expect(page.getByText('提交失败，请检查订单内容。')).toBeVisible()
+  await page.getByRole('button', { name: '提交确认' }).click()
+  await expect(page.getByText('采购申请已提交，状态：待确认')).toBeVisible()
+  await expect(
+    page.getByText('供应商：审批报价供应商 · 原始价格：1234 CNY · 汇率：76.5'),
+  ).toBeVisible()
+  await expect(
+    page.getByText(/换算参考价：944 · 加价：.*1000.*最终价格：1038/),
+  ).toBeVisible()
+  await page.getByLabel('驳回原因').fill('请调整加价。')
+  await page.getByRole('button', { name: '驳回订单' }).click()
+  await expect(
+    page.getByText('申请已驳回，可修改报价并重新提交。'),
+  ).toBeVisible()
+  await page.getByLabel('加价方式').click()
+  await page.getByText('固定每单位金额', { exact: true }).click()
+  await page.getByRole('textbox', { name: '加价', exact: true }).fill('10')
+  await page.getByLabel('价格修订原因').fill('驳回后调整固定加价。')
+  await page.getByRole('button', { name: '提交确认' }).click()
+  await expect(
+    page.getByText('报价修订原因：驳回后调整固定加价。'),
+  ).toBeVisible()
+  await expect(page.getByText(/最终价格：954/)).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('regular owner draft marks manual reference pricing as an exception', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command === 'search_catalog')
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000921',
+                  sku: 'MANUAL',
+                  nameZh: '手工报价材料',
+                  nameFr: null,
+                  aliases: [],
+                  brand: null,
+                  model: 'OPA-MANUAL',
+                  specification: 'fixture',
+                  unit: '件',
+                  notes: null,
+                  version: 1,
+                  prices: [],
+                },
+              ])
+            if (
+              command === 'save_requisition_draft' ||
+              command === 'set_procurement_mode'
+            )
+              return Promise.resolve({ totalMinor: '0' })
+            if (command === 'save_owner_purchase_pricing') {
+              Object.assign(window, { __manualOwnerPricing: args?.input })
+              return Promise.resolve([
+                {
+                  orderItemId: (
+                    args?.input?.lines as Array<{ orderItemId: string }>
+                  )[0].orderItemId,
+                  convertedReferenceUnitMinor: '100',
+                  markupMinor: '0',
+                  finalUnitPriceMinor: '100',
+                },
+              ])
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await page.getByLabel('采购模式').click()
+  await page.getByText('业主自行采购', { exact: true }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('手工报价材料 · OPA-MANUAL', { exact: true }).click()
+  await page.getByLabel('报价来源').click()
+  await page.getByText('手工参考价（需原因）', { exact: true }).click()
+  await expect(
+    page.getByText('手工参考价会被审计，且不会写回材料目录。'),
+  ).toBeVisible()
+  await page.getByLabel('手工参考单价（最小货币单位）').fill('100')
+  await page.getByLabel('手工参考原因').fill('目录暂无可用报价。')
+  await page.getByRole('button', { name: '保存草稿' }).click()
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __manualOwnerPricing?: {
+              lines?: Array<{
+                quoteSource?: { kind?: string; reason?: string }
+              }>
+            }
+          }
+        ).__manualOwnerPricing?.lines?.[0]?.quoteSource,
+    ),
+  ).resolves.toEqual({
+    kind: 'manual_reference',
+    unitPriceMinor: '100',
+    reason: '目录暂无可用报价。',
+  })
+})
+
 test('currency preview selects every supported currency without console errors', async ({
   page,
 }) => {
@@ -559,7 +829,7 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
   await expect(page.getByText('第 2 行')).not.toBeVisible()
   await page.getByRole('button', { name: '提交确认' }).click()
   await expect(page.getByText('采购申请已提交，状态：待确认')).toBeVisible()
-  await expect(page.getByText('待确认', { exact: true })).toBeVisible()
+  await expect(page.locator('.page-heading .status')).toHaveText('待确认')
   await expect(
     page.evaluate(
       () =>

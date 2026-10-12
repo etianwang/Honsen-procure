@@ -6,11 +6,13 @@ import {
 import { Alert, Button, Card, Input, Select, Space } from 'antd'
 import { Minus, Plus, Send } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { OrderWorkflowPanel } from '../components/OrderWorkflowPanel'
 import type { CatalogApi, CatalogMaterialView } from '../lib/catalog-api'
 import type {
   OwnerLinePricingInput,
   RequisitionApi,
 } from '../lib/requisition-api'
+import type { WorkflowApi } from '../lib/workflow-api'
 
 export type RequisitionContext = Omit<
   RequisitionDraft,
@@ -28,6 +30,8 @@ type RequisitionPageProps = {
   api: RequisitionApi
   catalogApi: Pick<CatalogApi, 'searchCatalog'>
   context: RequisitionContext
+  workflowApi?: WorkflowApi
+  canApprove?: boolean
 }
 
 type EditorLine = RequisitionLine
@@ -301,6 +305,8 @@ export function RequisitionPage({
   api,
   catalogApi,
   context,
+  workflowApi,
+  canApprove = false,
 }: RequisitionPageProps) {
   const [lines, setLines] = useState<EditorLine[]>([newLine(context.currency)])
   const [orderId] = useState(() => crypto.randomUUID())
@@ -677,6 +683,17 @@ export function RequisitionPage({
           </Button>
         </Space>
       </Card>
+      {status === 'pending' && workflowApi ? (
+        <OrderWorkflowPanel
+          api={workflowApi}
+          orderId={orderId}
+          canApprove={canApprove}
+          onRejected={() => {
+            setStatus('draft')
+            setMessage('申请已驳回，可修改报价并重新提交。')
+          }}
+        />
+      ) : null}
       <Card className="card" title="金额汇总">
         <output aria-label="订单总金额" className="requisition-total">
           {totals

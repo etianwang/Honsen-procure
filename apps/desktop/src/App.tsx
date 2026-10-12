@@ -27,6 +27,7 @@ import { tauriCatalogApi } from './lib/catalog-api'
 import { tauriProcurementExecutionApi } from './lib/procurement-execution-api'
 import { tauriRfqApi } from './lib/rfq-api'
 import { tauriSupplierOrderApi } from './lib/supplier-order-api'
+import { tauriWorkflowApi, type WorkflowApi } from './lib/workflow-api'
 import './App.css'
 
 const previewRequisitionContext: RequisitionContext = {
@@ -100,6 +101,31 @@ const previewCatalogApi = {
       },
     ]
   },
+}
+
+const previewWorkflowApi: WorkflowApi = {
+  async confirmRequisition() {},
+  async rejectRequisition() {},
+  async addOrderComment(orderId, body) {
+    return {
+      id: crypto.randomUUID(),
+      orderId,
+      authorId: previewRequisitionContext.applicantId,
+      body,
+      createdAt: Date.now(),
+      notificationCount: 0,
+    }
+  },
+  async listOrderComments() {
+    return []
+  },
+  async listOrderAudits() {
+    return []
+  },
+  async getApprovalPolicy() {
+    return { allowSelfApproval: false }
+  },
+  async setApprovalPolicy() {},
 }
 
 function App() {
@@ -226,6 +252,16 @@ function App() {
                   : previewCatalogApi
               }
               context={previewRequisitionContext}
+              workflowApi={
+                (
+                  window as Window & {
+                    __TAURI__?: { core?: { invoke?: unknown } }
+                  }
+                ).__TAURI__?.core?.invoke
+                  ? tauriWorkflowApi
+                  : previewWorkflowApi
+              }
+              canApprove
             />
           ) : page === 'execution' ? (
             <ProcurementExecutionPage

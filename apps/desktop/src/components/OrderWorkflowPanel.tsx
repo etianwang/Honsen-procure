@@ -11,12 +11,14 @@ type OrderWorkflowPanelProps = {
   api: WorkflowApi
   orderId: string
   canApprove: boolean
+  onRejected?: () => void
 }
 
 export function OrderWorkflowPanel({
   api,
   orderId,
   canApprove,
+  onRejected,
 }: OrderWorkflowPanelProps) {
   const [status, setStatus] = useState('待确认')
   const [reason, setReason] = useState('')
@@ -55,6 +57,7 @@ export function OrderWorkflowPanel({
       await api.rejectRequisition(orderId, reason.trim())
       setStatus('已驳回')
       setMessage('订单已驳回，申请人可修改后重新提交。')
+      onRejected?.()
     } catch {
       setMessage('驳回失败，请稍后重试。')
     }
@@ -131,6 +134,9 @@ export function OrderWorkflowPanel({
             {line.source === 'manual_reference' ? (
               <p className="owner-manual-reference">手工例外：{line.reason}</p>
             ) : null}
+            {line.revisionReason !== '—' ? (
+              <p>报价修订原因：{line.revisionReason}</p>
+            ) : null}
             <p>
               供应商：{line.supplier} · 原始价格：{line.sourcePrice}{' '}
               {line.currency} · 汇率：{line.rate}
@@ -185,6 +191,7 @@ function ownerPricingLines(audits: OrderAuditView[]) {
           supplier: supplier?.name ?? '手工参考价（无供应商）',
           source: String(line.ownerQuoteSource),
           reason: String(line.ownerManualReferenceReason ?? '—'),
+          revisionReason: String(audit.reason ?? '—'),
           sourcePrice: String(line.ownerSourceUnitPriceMinor ?? '—'),
           currency: String(line.currency ?? '—'),
           rate: String(line.ownerLockedExchangeRateDecimal ?? '—'),
