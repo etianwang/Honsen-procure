@@ -88,7 +88,7 @@ All child items inherit the original parent scope, dependencies and global gate.
 ### T02 — original dependencies: T00, T01
 
 - [x] T02-A — COMPLETED 2026-10-11: Docker PostgreSQL 16 bound to `127.0.0.1:54329` was healthy and reachable from Windows Node; `migration-runner.test.ts` and `sync/postgres-store.test.ts` each passed 1/1. The container, network and port were removed after the run; see `memory.md` for commands and environment limits.
-- [ ] T02-B — NOT STARTED: verify clean/repeated migration and initial-super-admin setup, role/session restrictions and one-online-session behavior with the real PostgreSQL store; retain executed commands and no skipped mandatory suites.
+- [x] T02-B — COMPLETED 2026-10-11: repeat migration, initial-super-admin provisioning, roles and retained one-active-session replacement passed 3/3 on the disposable PostgreSQL 16 Compose container. Windows Node.js also successfully queried the published port; the project container/network were removed with `down --volumes` and the port was closed afterward.
 - [ ] T02-C — NOT STARTED: close the original CAPTCHA/login/first-login/restricted-navigation DOM gate and affected-package gates against that accepted foundation; link durable results before checking T02.
 
 ### T04 — original dependencies: T02, T03

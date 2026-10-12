@@ -93,8 +93,13 @@ export class PostgresAuthStore implements AuthStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [
+        input.accountId,
+      ])
       await client.query(
-        'DELETE FROM account_sessions WHERE user_id = $1 AND revoked_at IS NULL',
+        `UPDATE account_sessions
+         SET revoked_at = NOW()
+         WHERE user_id = $1 AND revoked_at IS NULL`,
         [input.accountId],
       )
       await client.query(

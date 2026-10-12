@@ -15,6 +15,7 @@ describe.skipIf(!pool)('PostgreSQL migrations', () => {
   })
 
   it('creates the account, master-data and sync foundation', async () => {
+    await runMigrations(pool!)
     const result = await pool!.query<{ table_name: string }>(
       `SELECT table_name
        FROM information_schema.tables
