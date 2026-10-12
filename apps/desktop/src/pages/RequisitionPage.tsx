@@ -420,7 +420,10 @@ export function RequisitionPage({
   async function saveDraft() {
     try {
       if (mode === 'owner_self_purchase') await saveOwnerPricing()
-      else await api.saveRequisitionDraft(draft)
+      else {
+        await api.saveRequisitionDraft(draft)
+        await api.setProcurementMode(orderId, mode)
+      }
       setMessage('草稿已自动保存到本机')
     } catch {
       setMessage(
@@ -436,7 +439,10 @@ export function RequisitionPage({
     }
     try {
       if (mode === 'owner_self_purchase') await saveOwnerPricing()
-      else await api.saveRequisitionDraft(draft)
+      else {
+        await api.saveRequisitionDraft(draft)
+        await api.setProcurementMode(orderId, mode)
+      }
       await api.submitRequisitionDraft(draft.id)
       setStatus('pending')
       setMessage('采购申请已提交，状态：待确认')

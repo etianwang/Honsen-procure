@@ -66,7 +66,10 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
               ])
             if (command === 'save_requisition_draft')
               return Promise.resolve({ totalMinor: '0' })
-            if (command === 'set_procurement_mode') return Promise.resolve()
+            if (command === 'set_procurement_mode') {
+              Object.assign(window, { __procurementMode: args?.mode })
+              return Promise.resolve()
+            }
             if (command === 'save_owner_purchase_pricing') {
               Object.assign(window, { __ownerPricingInput: args?.input })
               return Promise.resolve([
@@ -499,6 +502,7 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
             args?: {
               draft?: { lines?: unknown[]; id?: string }
               orderId?: string
+              mode?: string
             },
           ) {
             if (command === 'search_catalog') return Promise.resolve([material])
@@ -512,6 +516,10 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
                 taxMinor: '540',
                 totalMinor: '3540',
               })
+            }
+            if (command === 'set_procurement_mode') {
+              Object.assign(window, { __honsenProcurementMode: args?.mode })
+              return Promise.resolve()
             }
             if (command === 'submit_requisition_draft') {
               Object.assign(window, { __submittedRequisitionId: args?.orderId })
@@ -578,6 +586,13 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
           .__submittedRequisitionId,
     ),
   ).resolves.toMatch(/^[0-9a-f-]{36}$/)
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __honsenProcurementMode?: string })
+          .__honsenProcurementMode,
+    ),
+  ).resolves.toBe('honsen_self_purchase')
   await expect(browserErrors).toEqual([])
 })
 
