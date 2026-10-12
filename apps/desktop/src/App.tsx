@@ -52,6 +52,20 @@ const previewRequisitionApi: RequisitionApi = {
   async saveRequisitionDraft(draft) {
     return calculateDraftTotals(draft)
   },
+  async saveOwnerPurchasePricing(input) {
+    return input.lines.map((line) => ({
+      orderItemId: line.orderItemId,
+      convertedReferenceUnitMinor:
+        line.quoteSource.kind === 'manual_reference'
+          ? line.quoteSource.unitPriceMinor
+          : '1250',
+      markupMinor: '0',
+      finalUnitPriceMinor:
+        line.quoteSource.kind === 'manual_reference'
+          ? line.quoteSource.unitPriceMinor
+          : '1250',
+    }))
+  },
   async submitRequisitionDraft() {},
 }
 

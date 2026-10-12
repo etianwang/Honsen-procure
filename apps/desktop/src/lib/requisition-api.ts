@@ -9,8 +9,32 @@ export type RequisitionTotalsView = {
   totalMinor: string
 }
 
+export type OwnerQuoteSource =
+  | { kind: 'catalog_price'; materialPriceId: string }
+  | { kind: 'manual_reference'; unitPriceMinor: string; reason: string }
+
+export type OwnerLinePricingInput = {
+  orderItemId: string
+  quoteSource: OwnerQuoteSource
+  lockedExchangeRateDecimal: string
+  markup:
+    | { kind: 'percent_basis_points'; basisPoints: number }
+    | { kind: 'fixed_minor'; minor: string }
+}
+
+export type OwnerLinePricingView = {
+  orderItemId: string
+  convertedReferenceUnitMinor: string
+  markupMinor: string
+  finalUnitPriceMinor: string
+}
+
 export type RequisitionApi = {
   saveRequisitionDraft(draft: RequisitionDraft): Promise<RequisitionTotalsView>
+  saveOwnerPurchasePricing(input: {
+    orderId: string
+    lines: OwnerLinePricingInput[]
+  }): Promise<OwnerLinePricingView[]>
   submitRequisitionDraft(orderId: string): Promise<void>
 }
 
@@ -29,6 +53,10 @@ function tauriInvoke(): TauriInvoke {
 export const tauriRequisitionApi: RequisitionApi = {
   saveRequisitionDraft: (draft) =>
     tauriInvoke()<RequisitionTotalsView>('save_requisition_draft', { draft }),
+  saveOwnerPurchasePricing: (input) =>
+    tauriInvoke()<OwnerLinePricingView[]>('save_owner_purchase_pricing', {
+      input,
+    }),
   submitRequisitionDraft: (orderId) =>
     tauriInvoke()<void>('submit_requisition_draft', { orderId }),
 }

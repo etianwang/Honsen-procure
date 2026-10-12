@@ -24,6 +24,99 @@ test('development sign-in placeholder opens the workbench and navigates accessib
   await expect(browserErrors).toEqual([])
 })
 
+test('owner purchase draft explicitly selects a quote source and saves trusted pricing', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command === 'search_catalog')
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000901',
+                  sku: 'OWNER-FIXTURE',
+                  nameZh: '业主报价材料',
+                  nameFr: null,
+                  aliases: [],
+                  brand: null,
+                  model: 'OP-01',
+                  specification: 'fixture',
+                  unit: '件',
+                  notes: null,
+                  version: 1,
+                  prices: [
+                    {
+                      priceId: '00000000-0000-4000-8000-000000000902',
+                      supplierId: '00000000-0000-4000-8000-000000000903',
+                      supplierName: 'owner fixture supplier',
+                      isPreferredSupplier: false,
+                      currency: 'XOF',
+                      unitPriceMinor: '1250',
+                      unit: '件',
+                      effectiveAt: '2026-10-12',
+                    },
+                  ],
+                },
+              ])
+            if (command === 'save_requisition_draft')
+              return Promise.resolve({ totalMinor: '0' })
+            if (command === 'save_owner_purchase_pricing') {
+              Object.assign(window, { __ownerPricingInput: args?.input })
+              return Promise.resolve([
+                {
+                  orderItemId: (
+                    args?.input?.lines as Array<{ orderItemId: string }>
+                  )[0].orderItemId,
+                  convertedReferenceUnitMinor: '1250',
+                  markupMinor: '125',
+                  finalUnitPriceMinor: '1375',
+                },
+              ])
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购申请单' }).click()
+  await page.getByLabel('采购模式').click()
+  await page.getByText('业主自行采购', { exact: true }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('业主报价材料 · OP-01', { exact: true }).click()
+  await expect(page.getByLabel('选择报价')).toHaveValue('')
+  await page.getByLabel('选择报价').click()
+  await page
+    .getByText('owner fixture supplier · 1250 XOF', { exact: true })
+    .click()
+  await page.getByRole('textbox', { name: '加价' }).fill('1000')
+  await page.getByRole('button', { name: '保存草稿' }).click()
+  await expect(page.getByLabel('换算参考单价（只读）')).toHaveValue('1250')
+  await expect(page.getByLabel('最终单价（只读）')).toHaveValue('1375')
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __ownerPricingInput?: {
+              lines?: Array<{ quoteSource?: { materialPriceId?: string } }>
+            }
+          }
+        ).__ownerPricingInput?.lines?.[0]?.quoteSource?.materialPriceId,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000902')
+  await expect(browserErrors).toEqual([])
+})
+
 test('currency preview selects every supported currency without console errors', async ({
   page,
 }) => {
