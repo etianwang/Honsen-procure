@@ -245,6 +245,35 @@ pub struct SupplierChildOrderView {
     pub locked_exchange_rate_decimal: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcurementExecutionLineView {
+    pub id: Uuid,
+    pub material_name: String,
+    pub quantity: String,
+    pub unit: String,
+    pub currency: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcurementExecutionChildView {
+    pub id: Uuid,
+    pub display_no: String,
+    pub currency: String,
+    pub lines: Vec<ProcurementExecutionLineView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcurementExecutionOrderView {
+    pub id: Uuid,
+    pub display_no: String,
+    pub primary_currency: String,
+    pub lines: Vec<ProcurementExecutionLineView>,
+    pub children: Vec<ProcurementExecutionChildView>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SupplierChildLineTermsInput {
@@ -1446,6 +1475,55 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<RequisitionTotalsView, AuthError> {
         self.save_requisition(draft, Some(reason), now)
+    }
+
+    pub fn list_confirmed_procurement_orders(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<ProcurementExecutionOrderView>, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let parents = connection
+            .prepare("SELECT id, display_no, primary_currency FROM local_purchase_orders WHERE parent_order_id IS NULL AND workflow_status = 'confirmed' AND deleted_at IS NULL ORDER BY updated_at DESC, id")
+            .map_err(|_| AuthError::Database)?
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        let read_lines = |order_id: &str| -> Result<Vec<ProcurementExecutionLineView>, AuthError> {
+            connection
+                .prepare("SELECT id, material_snapshot_json, quantity_decimal, unit, currency FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id")
+                .map_err(|_| AuthError::Database)?
+                .query_map([order_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?)))
+                .map_err(|_| AuthError::Database)?
+                .map(|row| {
+                    let (id, snapshot, quantity, unit, currency) = row.map_err(|_| AuthError::Database)?;
+                    let material_name = serde_json::from_str::<serde_json::Value>(&snapshot)
+                        .ok()
+                        .and_then(|value| value.get("nameZh").and_then(|name| name.as_str()).map(ToOwned::to_owned))
+                        .ok_or(AuthError::Database)?;
+                    Ok(ProcurementExecutionLineView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, material_name, quantity, unit, currency })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
+        parents
+            .into_iter()
+            .map(|(id, display_no, primary_currency)| {
+                let children = connection
+                    .prepare("SELECT id, display_no, currency FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
+                    .map_err(|_| AuthError::Database)?
+                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+                    .map_err(|_| AuthError::Database)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|_| AuthError::Database)?
+                    .into_iter()
+                    .map(|(child_id, child_display_no, currency)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, currency, lines: read_lines(&child_id)? }))
+                    .collect::<Result<Vec<_>, AuthError>>()?;
+                Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, display_no, primary_currency, lines: read_lines(&id)?, children })
+            })
+            .collect()
     }
 
     pub fn allocate_supplier_child_orders(
@@ -3302,6 +3380,14 @@ pub mod commands {
             };
             Self { code }
         }
+    }
+
+    #[tauri::command]
+    pub fn list_confirmed_procurement_orders(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::ProcurementExecutionOrderView>, CommandError> {
+        auth.list_confirmed_procurement_orders(SystemTime::now())
+            .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -6712,6 +6798,11 @@ mod tests {
             )
             .unwrap();
         service.confirm_requisition(requisition_id, now).unwrap();
+        let execution_orders = service.list_confirmed_procurement_orders(now).unwrap();
+        assert_eq!(execution_orders.len(), 1);
+        assert_eq!(execution_orders[0].id, requisition_id);
+        assert_eq!(execution_orders[0].lines.len(), 1);
+        assert_eq!(execution_orders[0].lines[0].material_name, "测试材料");
         let mention = service
             .add_order_comment(
                 requisition_id,

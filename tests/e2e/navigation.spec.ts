@@ -588,6 +588,138 @@ test('purchaser allocates every parent line into supplier-specific child orders'
   await expect(browserErrors).toEqual([])
 })
 
+test('purchaser reaches execution from the regular application and completes RFQ, allocation and child terms', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    let allocated = false
+    const parent = {
+      id: '00000000-0000-4000-8000-000000000801',
+      displayNo: 'CI-FIXTURE-20261012-INT-0001',
+      primaryCurrency: 'XOF',
+      lines: [
+        {
+          id: '00000000-0000-4000-8000-000000000802',
+          materialName: 'regular flow cable',
+          quantity: '2',
+          unit: '米',
+          currency: 'XOF',
+        },
+      ],
+    }
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              input?: Record<string, unknown>
+              allocations?: Array<Record<string, unknown>>
+            },
+          ) {
+            if (command === 'list_confirmed_procurement_orders')
+              return Promise.resolve([
+                {
+                  ...parent,
+                  children: allocated
+                    ? [
+                        {
+                          id: '00000000-0000-4000-8000-000000000803',
+                          displayNo: 'CI-FIXTURE-20261012-SUP-0001',
+                          currency: 'XOF',
+                          lines: [
+                            {
+                              ...parent.lines[0],
+                              id: '00000000-0000-4000-8000-000000000804',
+                            },
+                          ],
+                        },
+                      ]
+                    : [],
+                },
+              ])
+            if (command === 'list_suppliers')
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000805',
+                  businessCode: 'SUP-FIXTURE',
+                  name: 'regular flow supplier',
+                  contactName: null,
+                  address: null,
+                  city: null,
+                  country: null,
+                  phone: null,
+                  whatsapp: null,
+                  email: null,
+                  paymentTerms: null,
+                  deliveryLeadTime: null,
+                  isPreferred: true,
+                  isBlacklisted: false,
+                  isActive: true,
+                  version: 1,
+                },
+              ])
+            if (command === 'create_rfq')
+              return Promise.resolve({ ...args?.input, itemCount: 1 })
+            if (command === 'allocate_supplier_child_orders') {
+              allocated = true
+              return Promise.resolve([
+                {
+                  childOrderId: '00000000-0000-4000-8000-000000000803',
+                  supplierId: '00000000-0000-4000-8000-000000000805',
+                  currency: 'XOF',
+                  sourceTotalMinor: '2500',
+                  primaryTotalMinor: '2500',
+                  lockedExchangeRateDecimal: '1',
+                },
+              ])
+            }
+            if (command === 'save_supplier_child_terms')
+              return Promise.resolve({
+                subtotalMinor: '2500',
+                lineDiscountMinor: '0',
+                orderDiscountMinor: '0',
+                freightMinor: '0',
+                taxMinor: '450',
+                totalMinor: '2950',
+              })
+            if (command === 'send_supplier_order') return Promise.resolve()
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await page
+    .getByRole('button', { name: 'CI-FIXTURE-20261012-INT-0001' })
+    .click()
+  await expect(page.getByText('regular flow cable · 2 米 · XOF')).toBeVisible()
+  await page.getByLabel('RFQ 供应商').click()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await page.getByLabel('询价单编号').fill('CI-FIXTURE-20261012-RFQ-0001')
+  await page.getByRole('button', { name: '创建询价单' }).click()
+  await expect(page.getByText(/已创建，包含 1 条无价格明细/)).toBeVisible()
+  await page.getByLabel('regular flow cable 供应商').click()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await page
+    .getByLabel('regular flow cable 子单编号')
+    .fill('CI-FIXTURE-20261012-SUP-0001')
+  await page.getByRole('button', { name: '创建供应商子单' }).click()
+  await expect(page.getByText('供应商子单条款')).toBeVisible()
+  await page.getByRole('button', { name: '保存子单条款' }).click()
+  await expect(page.getByText('子单条款已保存，含税总额 2950。')).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
 test('purchaser creates a price-free RFQ through the Tauri boundary', async ({
   page,
 }) => {

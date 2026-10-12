@@ -17,12 +17,16 @@ import { SupplierChildTermsFixturePage } from './pages/SupplierChildTermsFixture
 import { RfqFixturePage } from './pages/RfqFixturePage'
 import { ReceiptFixturePage } from './pages/ReceiptFixturePage'
 import { SyncConflictFixturePage } from './pages/SyncConflictFixturePage'
+import { ProcurementExecutionPage } from './pages/ProcurementExecutionPage'
 import {
   RequisitionPage,
   type RequisitionContext,
 } from './pages/RequisitionPage'
 import { tauriRequisitionApi, type RequisitionApi } from './lib/requisition-api'
 import { tauriCatalogApi } from './lib/catalog-api'
+import { tauriProcurementExecutionApi } from './lib/procurement-execution-api'
+import { tauriRfqApi } from './lib/rfq-api'
+import { tauriSupplierOrderApi } from './lib/supplier-order-api'
 import './App.css'
 
 const previewRequisitionContext: RequisitionContext = {
@@ -153,7 +157,9 @@ function App() {
                 ? '材料库总览'
                 : page === 'requisition'
                   ? '采购申请单'
-                  : '项目默认设置'
+                  : page === 'execution'
+                    ? '采购执行'
+                    : '项目默认设置'
           }
           role="purchaser"
           onNavigate={setPage}
@@ -205,6 +211,13 @@ function App() {
                   : previewCatalogApi
               }
               context={previewRequisitionContext}
+            />
+          ) : page === 'execution' ? (
+            <ProcurementExecutionPage
+              api={tauriProcurementExecutionApi}
+              supplierApi={tauriCatalogApi}
+              supplierOrderApi={tauriSupplierOrderApi}
+              rfqApi={tauriRfqApi}
             />
           ) : (
             <MasterDataPage role="purchaser" />

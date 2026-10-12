@@ -7,7 +7,8 @@ import {
 } from 'lucide-react'
 import type { UserRole } from '../lib/permissions'
 
-export type AppPage = 'home' | 'materials' | 'requisition' | 'master-data'
+export type AppPage =
+  'home' | 'materials' | 'requisition' | 'execution' | 'master-data'
 
 type AppShellProps = PropsWithChildren<{
   page: AppPage
@@ -63,6 +64,14 @@ export function AppShell({
           >
             <ClipboardPlus size={17} aria-hidden="true" />
             采购申请单
+          </button>
+          <button
+            className={`nav-button ${page === 'execution' ? 'active' : ''}`}
+            type="button"
+            onClick={() => onNavigate('execution')}
+          >
+            <ClipboardPlus size={17} aria-hidden="true" />
+            采购执行
           </button>
           <button
             className={`nav-button ${page === 'master-data' ? 'active' : ''}`}

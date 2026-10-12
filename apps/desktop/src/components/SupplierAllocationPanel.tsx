@@ -24,6 +24,7 @@ type SupplierAllocationPanelProps = {
   parentOrderId: string
   lines: AllocationLine[]
   suppliers: AllocationSupplier[]
+  onCreated?: () => void
 }
 
 type AllocationDraft = Omit<SupplierChildAllocationInput, 'parentItemId'>
@@ -42,6 +43,7 @@ export function SupplierAllocationPanel({
   parentOrderId,
   lines,
   suppliers,
+  onCreated,
 }: SupplierAllocationPanelProps) {
   const [allocations, setAllocations] = useState<
     Record<string, AllocationDraft>
@@ -82,6 +84,7 @@ export function SupplierAllocationPanel({
         payload,
       )
       setChildren(saved)
+      onCreated?.()
       setMessage(`已创建 ${saved.length} 张供应商子单，父单明细分配已锁定。`)
     } catch {
       setMessage('拆单失败：请确认父单已确认、每行仅分配一次且供应商仍可用。')
