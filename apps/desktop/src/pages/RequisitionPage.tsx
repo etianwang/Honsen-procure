@@ -309,6 +309,8 @@ export function RequisitionPage({
   const [ownerPricing, setOwnerPricing] = useState<
     Record<string, OwnerPricing>
   >({})
+  const [pricingRevisionReason, setPricingRevisionReason] = useState('')
+  const [pricingIncomplete, setPricingIncomplete] = useState(false)
   const [status, setStatus] = useState<'draft' | 'pending'>('draft')
   const [message, setMessage] = useState<string | null>(null)
 
@@ -386,10 +388,18 @@ export function RequisitionPage({
 
   async function saveOwnerPricing() {
     await api.saveRequisitionDraft(draft)
-    const result = await api.saveOwnerPurchasePricing({
-      orderId,
-      lines: ownerPricingInputs(),
-    })
+    await api.setProcurementMode(orderId, mode)
+    let result
+    try {
+      result = await api.saveOwnerPurchasePricing({
+        orderId,
+        lines: ownerPricingInputs(),
+        revisionReason: pricingRevisionReason || null,
+      })
+    } catch (error) {
+      setPricingIncomplete(true)
+      throw error
+    }
     setOwnerPricing((current) => ({
       ...current,
       ...Object.fromEntries(
@@ -403,6 +413,8 @@ export function RequisitionPage({
         ]),
       ),
     }))
+    setPricingIncomplete(false)
+    setPricingRevisionReason('')
   }
 
   async function saveDraft() {
@@ -411,7 +423,9 @@ export function RequisitionPage({
       else await api.saveRequisitionDraft(draft)
       setMessage('草稿已自动保存到本机')
     } catch {
-      setMessage('草稿保存失败，请检查必填材料和金额。')
+      setMessage(
+        '基础草稿已保存，但可信定价未完成。请修正报价后再次保存；当前不能提交。',
+      )
     }
   }
 
@@ -467,6 +481,25 @@ export function RequisitionPage({
             onChange={(value: ProcurementMode) => setMode(value)}
           />
         </label>
+        {mode === 'owner_self_purchase' ? (
+          <label>
+            价格修订原因（已有定价时必填）
+            <Input
+              aria-label="价格修订原因"
+              disabled={status === 'pending'}
+              value={pricingRevisionReason}
+              onChange={(event) => setPricingRevisionReason(event.target.value)}
+            />
+          </label>
+        ) : null}
+        {pricingIncomplete ? (
+          <Alert
+            type="error"
+            showIcon
+            title="基础草稿已保存，报价定价未完成"
+            description="请检查报价、汇率和修订原因后再次保存；系统已阻止提交审批。"
+          />
+        ) : null}
         <div className="requisition-lines">
           {lines.map((line, index) => (
             <article className="requisition-line" key={line.id}>

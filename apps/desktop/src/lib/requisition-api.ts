@@ -31,9 +31,11 @@ export type OwnerLinePricingView = {
 
 export type RequisitionApi = {
   saveRequisitionDraft(draft: RequisitionDraft): Promise<RequisitionTotalsView>
+  setProcurementMode(orderId: string, mode: string): Promise<void>
   saveOwnerPurchasePricing(input: {
     orderId: string
     lines: OwnerLinePricingInput[]
+    revisionReason: string | null
   }): Promise<OwnerLinePricingView[]>
   submitRequisitionDraft(orderId: string): Promise<void>
 }
@@ -53,6 +55,8 @@ function tauriInvoke(): TauriInvoke {
 export const tauriRequisitionApi: RequisitionApi = {
   saveRequisitionDraft: (draft) =>
     tauriInvoke()<RequisitionTotalsView>('save_requisition_draft', { draft }),
+  setProcurementMode: (orderId, mode) =>
+    tauriInvoke()<void>('set_procurement_mode', { orderId, mode }),
   saveOwnerPurchasePricing: (input) =>
     tauriInvoke()<OwnerLinePricingView[]>('save_owner_purchase_pricing', {
       input,

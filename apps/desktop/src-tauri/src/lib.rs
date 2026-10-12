@@ -340,6 +340,7 @@ pub struct OwnerLinePricingInput {
 pub struct OwnerPurchasePricingInput {
     pub order_id: Uuid,
     pub lines: Vec<OwnerLinePricingInput>,
+    pub revision_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1596,6 +1597,18 @@ impl LocalAuthService {
         {
             return Err(AuthError::Forbidden);
         }
+        let previous = order_audit_snapshot(&transaction, input.order_id)?;
+        let has_pricing: i64 = transaction
+            .query_row("SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1 AND owner_quote_source IS NOT NULL", [input.order_id.to_string()], |row| row.get(0))
+            .map_err(|_| AuthError::Database)?;
+        if has_pricing != 0
+            && !input
+                .revision_reason
+                .as_ref()
+                .is_some_and(|reason| valid_required_text(reason, 1000))
+        {
+            return Err(AuthError::InvalidInput);
+        }
         let item_count: i64 = transaction
             .query_row(
                 "SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1",
@@ -1690,8 +1703,8 @@ impl LocalAuthService {
             input.order_id,
             actor_id,
             "owner_pricing_saved",
-            None,
-            None,
+            input.revision_reason.as_deref(),
+            Some(&previous),
             Some(&order_audit_snapshot(&transaction, input.order_id)?),
             now,
         )?;
@@ -1705,6 +1718,55 @@ impl LocalAuthService {
         )?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(views)
+    }
+
+    pub fn set_procurement_mode(
+        &self,
+        order_id: Uuid,
+        mode: String,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if !matches!(
+            mode.as_str(),
+            "owner_self_purchase" | "honsen_self_purchase"
+        ) {
+            return Err(AuthError::InvalidInput);
+        }
+        let privileged = self.require_order_mutation(now)?;
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let (applicant_id, workflow_status, existing, children, rfqs, priced): (String, String, Option<String>, i64, i64, i64) = transaction.query_row(
+            "SELECT o.applicant_id, o.workflow_status, o.procurement_mode, (SELECT COUNT(*) FROM local_purchase_orders c WHERE c.parent_order_id = o.id AND c.deleted_at IS NULL), (SELECT COUNT(*) FROM local_rfqs r WHERE r.source_order_id = o.id), (SELECT COUNT(*) FROM local_purchase_order_items i WHERE i.order_id = o.id AND i.owner_quote_source IS NOT NULL) FROM local_purchase_orders o WHERE o.id = ?1 AND o.deleted_at IS NULL",
+            [order_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        ).map_err(|_| AuthError::Database)?;
+        if workflow_status != "draft"
+            || (!privileged && applicant_id != actor_id.to_string())
+            || children != 0
+            || rfqs != 0
+            || (existing.as_deref().is_some_and(|value| value != mode) && priced != 0)
+        {
+            return Err(AuthError::Forbidden);
+        }
+        if existing.as_deref() == Some(mode.as_str()) {
+            return Ok(());
+        }
+        let previous = order_audit_snapshot(&transaction, order_id)?;
+        transaction.execute("UPDATE local_purchase_orders SET procurement_mode = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1", params![order_id.to_string(), mode, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            "procurement_mode_set",
+            None,
+            Some(&previous),
+            Some(&order_audit_snapshot(&transaction, order_id)?),
+            now,
+        )?;
+        let payload = order_sync_payload(&transaction, order_id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)
     }
 
     pub fn allocate_supplier_child_orders(
@@ -3643,6 +3705,16 @@ pub mod commands {
         input: super::OwnerPurchasePricingInput,
     ) -> Result<Vec<super::OwnerLinePricingView>, CommandError> {
         auth.save_owner_purchase_pricing(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn set_procurement_mode(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+        mode: String,
+    ) -> Result<(), CommandError> {
+        auth.set_procurement_mode(order_id, mode, SystemTime::now())
             .map_err(Into::into)
     }
 
@@ -6426,6 +6498,7 @@ mod tests {
                             markup: AdjustmentInput::FixedMinor { minor: "5".into() },
                         },
                     ],
+                    revision_reason: None,
                 },
                 now,
             )
@@ -6440,6 +6513,10 @@ mod tests {
         assert_eq!(stored.3.as_deref(), Some(purchaser_id.to_string().as_str()));
         assert_eq!(stored.4, 105);
         drop(connection);
+        assert_eq!(
+            service.set_procurement_mode(order_id, "honsen_self_purchase".into(), now),
+            Err(AuthError::Forbidden)
+        );
         assert_eq!(
             service.save_owner_purchase_pricing(
                 OwnerPurchasePricingInput {
@@ -6462,7 +6539,8 @@ mod tests {
                             locked_exchange_rate_decimal: "1".into(),
                             markup: AdjustmentInput::FixedMinor { minor: "0".into() }
                         }
-                    ]
+                    ],
+                    revision_reason: Some("correct rate".into()),
                 },
                 now
             ),
@@ -6515,6 +6593,7 @@ mod tests {
                         locked_exchange_rate_decimal: "76.5".into(),
                         markup: AdjustmentInput::FixedMinor { minor: "5".into() },
                     }],
+                    revision_reason: None,
                 },
                 now,
             )

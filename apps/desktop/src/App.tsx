@@ -52,6 +52,7 @@ const previewRequisitionApi: RequisitionApi = {
   async saveRequisitionDraft(draft) {
     return calculateDraftTotals(draft)
   },
+  async setProcurementMode() {},
   async saveOwnerPurchasePricing(input) {
     return input.lines.map((line) => ({
       orderItemId: line.orderItemId,

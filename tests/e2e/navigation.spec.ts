@@ -66,6 +66,7 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
               ])
             if (command === 'save_requisition_draft')
               return Promise.resolve({ totalMinor: '0' })
+            if (command === 'set_procurement_mode') return Promise.resolve()
             if (command === 'save_owner_purchase_pricing') {
               Object.assign(window, { __ownerPricingInput: args?.input })
               return Promise.resolve([
