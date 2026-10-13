@@ -54,6 +54,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::list_requisition_history,
             commands::list_confirmed_procurement_orders,
             commands::allocate_supplier_child_orders,
             commands::close_supplier_order_with_conditions,

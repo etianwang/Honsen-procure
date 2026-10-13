@@ -1547,6 +1547,23 @@ test('authenticated desktop switches between cached authorization scopes', async
                 ) ?? contexts[0]
               return Promise.resolve()
             }
+            if (command === 'list_requisition_history')
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000009',
+                    displayNo: 'REQ-HISTORY-1',
+                    projectName: '项目乙',
+                    site: '乙工地',
+                    workflowStatus: 'confirmed',
+                    procurementMode: 'honsen_self_purchase',
+                    primaryCurrency: 'XOF',
+                    totalMinor: '1200',
+                    updatedAt: 1,
+                  },
+                ],
+                nextCursor: null,
+              })
             return Promise.reject(new Error(`unexpected command: ${command}`))
           },
         },
@@ -1568,7 +1585,10 @@ test('authenticated desktop switches between cached authorization scopes', async
     '00000000-0000-4000-8000-000000000005:00000000-0000-4000-8000-000000000003:00000000-0000-4000-8000-000000000006',
   )
   await page.getByRole('button', { name: '采购申请单' }).click()
-  await expect(page.getByText(/REQ-.*乙工地/)).toBeVisible()
+  await expect(page.locator('.page-heading p')).toContainText('乙工地')
+  await expect(page.getByRole('list', { name: '请购历史' })).toContainText(
+    'REQ-HISTORY-1',
+  )
   await expect(browserErrors).toEqual([])
 })
 

@@ -366,6 +366,34 @@ pub struct ProcurementExecutionOrderView {
     pub children: Vec<ProcurementExecutionChildView>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequisitionHistoryView {
+    pub id: Uuid,
+    pub display_no: String,
+    pub project_name: String,
+    pub site: String,
+    pub workflow_status: String,
+    pub procurement_mode: Option<String>,
+    pub primary_currency: String,
+    pub total_minor: String,
+    pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequisitionHistoryCursor {
+    pub updated_at: i64,
+    pub id: Uuid,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequisitionHistoryPageView {
+    pub records: Vec<RequisitionHistoryView>,
+    pub next_cursor: Option<RequisitionHistoryCursor>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SupplierChildLineTermsInput {
@@ -2032,6 +2060,62 @@ impl LocalAuthService {
         self.save_requisition(draft, Some(reason), now)
     }
 
+    pub fn list_requisition_history(
+        &self,
+        cursor: Option<RequisitionHistoryCursor>,
+        now: SystemTime,
+    ) -> Result<RequisitionHistoryPageView, AuthError> {
+        self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let cursor_at = cursor.as_ref().map(|value| value.updated_at);
+        let cursor_id = cursor.as_ref().map(|value| value.id.to_string());
+        let mut statement = connection.prepare(
+            "SELECT o.id, o.display_no, p.name, o.site, o.workflow_status, o.procurement_mode, o.primary_currency, o.total_minor, o.updated_at
+             FROM local_purchase_orders o
+             JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id
+             JOIN local_projects p ON p.id = o.project_id
+             WHERE o.parent_order_id IS NULL AND o.deleted_at IS NULL
+               AND (?2 IS NULL OR o.updated_at < ?2 OR (o.updated_at = ?2 AND o.id < ?3))
+             ORDER BY o.updated_at DESC, o.id DESC LIMIT 51"
+        ).map_err(|_| AuthError::Database)?;
+        let mut records = statement
+            .query_map(
+                params![account_id.to_string(), cursor_at, cursor_id],
+                |row| {
+                    Ok(RequisitionHistoryView {
+                        id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        display_no: row.get(1)?,
+                        project_name: row.get(2)?,
+                        site: row.get(3)?,
+                        workflow_status: row.get(4)?,
+                        procurement_mode: row.get(5)?,
+                        primary_currency: row.get(6)?,
+                        total_minor: row.get::<_, i64>(7)?.to_string(),
+                        updated_at: row.get(8)?,
+                    })
+                },
+            )
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        let has_more = records.len() > 50;
+        records.truncate(50);
+        let next_cursor = if has_more {
+            records.last().map(|record| RequisitionHistoryCursor {
+                updated_at: record.updated_at,
+                id: record.id,
+            })
+        } else {
+            None
+        };
+        Ok(RequisitionHistoryPageView {
+            records,
+            next_cursor,
+        })
+    }
+
     pub fn list_confirmed_procurement_orders(
         &self,
         now: SystemTime,
@@ -2039,11 +2123,12 @@ impl LocalAuthService {
         if !self.require_order_mutation(now)? {
             return Err(AuthError::Forbidden);
         }
+        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let parents = connection
-            .prepare("SELECT id, display_no, primary_currency FROM local_purchase_orders WHERE parent_order_id IS NULL AND workflow_status = 'confirmed' AND deleted_at IS NULL ORDER BY updated_at DESC, id")
+            .prepare("SELECT o.id, o.display_no, o.primary_currency FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id WHERE o.parent_order_id IS NULL AND o.workflow_status = 'confirmed' AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
             .map_err(|_| AuthError::Database)?
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .query_map([account_id.to_string()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| AuthError::Database)?;
@@ -4545,6 +4630,15 @@ pub mod commands {
             };
             Self { code }
         }
+    }
+
+    #[tauri::command]
+    pub fn list_requisition_history(
+        auth: State<'_, LocalAuthService>,
+        cursor: Option<super::RequisitionHistoryCursor>,
+    ) -> Result<super::RequisitionHistoryPageView, CommandError> {
+        auth.list_requisition_history(cursor, SystemTime::now())
+            .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -9198,9 +9292,48 @@ mod tests {
             now,
         );
         service.confirm_requisition(requisition_id, now).unwrap();
+        let other_project_id = Uuid::new_v4();
+        service.connection.lock().unwrap().execute(
+            "INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, ?3, 'other project', 'other site', 'fixture department', 'XOF', 'zh_fr', 1, 1)",
+            params![other_project_id.to_string(), country_id.to_string(), format!("OTHER-{}", other_project_id.simple())],
+        ).unwrap();
+        grant_test_scope(
+            &service,
+            approver_id,
+            other_project_id,
+            department_id,
+            team_id,
+            now,
+        );
+        let other_order_id = Uuid::new_v4();
+        let mut other_draft = draft.clone();
+        other_draft.id = other_order_id;
+        other_draft.project_id = other_project_id;
+        other_draft.site = "other site".into();
+        other_draft.applicant_id = approver_id;
+        other_draft.display_no = "OTHER-TEST-DRAFT".into();
+        other_draft.lines[0].id = Uuid::new_v4();
+        service.save_requisition_draft(other_draft, now).unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'confirmed' WHERE id = ?1",
+                [other_order_id.to_string()],
+            )
+            .unwrap();
+        service.connection.lock().unwrap().execute(
+            "DELETE FROM local_authorization_snapshots WHERE account_id = ?1 AND project_id = ?2",
+            params![approver_id.to_string(), other_project_id.to_string()],
+        ).unwrap();
         let execution_orders = service.list_confirmed_procurement_orders(now).unwrap();
         assert_eq!(execution_orders.len(), 1);
         assert_eq!(execution_orders[0].id, requisition_id);
+        let history = service.list_requisition_history(None, now).unwrap();
+        assert_eq!(history.records.len(), 1);
+        assert_eq!(history.records[0].id, requisition_id);
+        assert!(history.next_cursor.is_none());
         assert_eq!(execution_orders[0].lines.len(), 1);
         assert_eq!(execution_orders[0].lines[0].material_name, "测试材料");
         let mention = service

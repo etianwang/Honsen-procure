@@ -56,6 +56,9 @@ const previewRequisitionContext: RequisitionContext = {
 }
 
 const previewRequisitionApi: RequisitionApi = {
+  async listRequisitionHistory() {
+    return { records: [], nextCursor: null }
+  },
   async saveRequisitionDraft(draft) {
     return calculateDraftTotals(draft)
   },
