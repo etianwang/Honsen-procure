@@ -26,6 +26,12 @@ export type AuthorizationStore = {
     scope: z.infer<typeof scopeSchema>
     actorId: string
   }): Promise<void>
+  replaceScope(input: {
+    accountId: string
+    oldScope: z.infer<typeof scopeSchema>
+    newScope: z.infer<typeof scopeSchema>
+    actorId: string
+  }): Promise<AuthorizationScope>
 }
 
 export class AuthorizationError extends Error {
@@ -39,6 +45,20 @@ export class AuthorizationService {
 
   async list(actor: { id: string }): Promise<AuthorizationScope[]> {
     return this.store.listScopes(actor.id)
+  }
+
+  async listForAccount(
+    actor: { id: string; roles: Role[] },
+    accountId: string,
+  ): Promise<AuthorizationScope[]> {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    ) {
+      throw new AuthorizationError('FORBIDDEN')
+    }
+    return this.store.listScopes(accountId)
   }
 
   async save(
@@ -79,6 +99,29 @@ export class AuthorizationService {
     await this.store.revokeScope({
       accountId,
       scope: parsed.data,
+      actorId: actor.id,
+    })
+  }
+
+  async replace(
+    actor: { id: string; roles: Role[] },
+    accountId: string,
+    input: unknown,
+  ): Promise<AuthorizationScope> {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    ) {
+      throw new AuthorizationError('FORBIDDEN')
+    }
+    const parsed = z
+      .object({ oldScope: scopeSchema, newScope: scopeSchema })
+      .safeParse(input)
+    if (!parsed.success) throw new AuthorizationError('INVALID_SCOPE')
+    return this.store.replaceScope({
+      accountId,
+      ...parsed.data,
       actorId: actor.id,
     })
   }

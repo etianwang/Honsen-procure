@@ -8,7 +8,22 @@ import {
 import type { UserRole } from '../lib/permissions'
 
 export type AppPage =
-  'home' | 'materials' | 'requisition' | 'execution' | 'master-data'
+  | 'home'
+  | 'materials'
+  | 'requisition'
+  | 'execution'
+  | 'master-data'
+  | 'authorization'
+
+export type AuthorizationContextOption = {
+  projectId: string
+  projectName: string
+  site: string
+  departmentId: string
+  departmentName: string
+  teamId: string
+  teamName: string
+}
 
 type AppShellProps = PropsWithChildren<{
   page: AppPage
@@ -16,6 +31,9 @@ type AppShellProps = PropsWithChildren<{
   role: UserRole
   onNavigate: (page: AppPage) => void
   onLock?: () => void
+  authorizationContexts?: AuthorizationContextOption[]
+  selectedAuthorizationContext?: string
+  onSelectAuthorizationContext?: (value: string) => void
 }>
 
 const roleLabel: Record<UserRole, string> = {
@@ -33,6 +51,9 @@ export function AppShell({
   role,
   onNavigate,
   onLock,
+  authorizationContexts,
+  selectedAuthorizationContext,
+  onSelectAuthorizationContext,
 }: AppShellProps) {
   return (
     <div className="app-shell">
@@ -83,6 +104,16 @@ export function AppShell({
             <Settings size={17} aria-hidden="true" />
             基础资料管理
           </button>
+          {(role === 'administrator' || role === 'super_administrator') && (
+            <button
+              className={`nav-button ${page === 'authorization' ? 'active' : ''}`}
+              type="button"
+              onClick={() => onNavigate('authorization')}
+            >
+              <Settings size={17} aria-hidden="true" />
+              在线授权管理
+            </button>
+          )}
           <p className="nav-label">即将接入</p>
           <button className="nav-button" type="button" disabled>
             供应商与价格
@@ -96,6 +127,32 @@ export function AppShell({
             <h1>{pageTitle}</h1>
           </div>
           <div className="identity">
+            {authorizationContexts && authorizationContexts.length > 0 && (
+              <label>
+                <span className="sr-only">当前授权范围</span>
+                <select
+                  aria-label="当前授权范围"
+                  value={selectedAuthorizationContext}
+                  onChange={(event) =>
+                    onSelectAuthorizationContext?.(event.target.value)
+                  }
+                >
+                  {authorizationContexts.map((context) => {
+                    const value = [
+                      context.projectId,
+                      context.departmentId,
+                      context.teamId,
+                    ].join(':')
+                    return (
+                      <option key={value} value={value}>
+                        {context.projectName} · {context.site} ·{' '}
+                        {context.departmentName} · {context.teamName}
+                      </option>
+                    )
+                  })}
+                </select>
+              </label>
+            )}
             <span>离线本地数据</span>
             <span className="avatar">张</span>
             <span>{roleLabel[role]}</span>

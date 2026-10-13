@@ -14,6 +14,7 @@ const scope = {
 class FixtureStore implements AuthorizationStore {
   saved = 0
   revoked = 0
+  replaced = 0
   async listScopes() {
     return [scope]
   }
@@ -24,9 +25,26 @@ class FixtureStore implements AuthorizationStore {
   async revokeScope(_input: Parameters<AuthorizationStore['revokeScope']>[0]) {
     this.revoked += 1
   }
+  async replaceScope(input: Parameters<AuthorizationStore['replaceScope']>[0]) {
+    this.replaced += 1
+    return { ...scope, ...input.newScope }
+  }
 }
 
 describe('authorization service', () => {
+  it("restricts another account's authorization query to administrators", async () => {
+    const service = new AuthorizationService(new FixtureStore())
+    const accountId = '00000000-0000-4000-8000-000000000006'
+    await expect(
+      service.listForAccount({ id: accountId, roles: ['engineer'] }, accountId),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(
+      service.listForAccount(
+        { id: accountId, roles: ['administrator'] },
+        accountId,
+      ),
+    ).resolves.toEqual([scope])
+  })
   it('allows only administrators to grant a validated scoped project binding', async () => {
     const store = new FixtureStore()
     const service = new AuthorizationService(store)
@@ -91,5 +109,36 @@ describe('authorization service', () => {
       ),
     ).resolves.toBeUndefined()
     expect(store.revoked).toBe(1)
+  })
+
+  it('requires admin and two valid scopes to modify a binding', async () => {
+    const store = new FixtureStore()
+    const service = new AuthorizationService(store)
+    const accountId = '00000000-0000-4000-8000-000000000006'
+    const change = {
+      oldScope: scope,
+      newScope: { ...scope, teamId: '00000000-0000-4000-8000-000000000007' },
+    }
+    await expect(
+      service.replace(
+        { id: accountId, roles: ['engineer'] },
+        accountId,
+        change,
+      ),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    await expect(
+      service.replace({ id: accountId, roles: ['administrator'] }, accountId, {
+        ...change,
+        newScope: { ...scope, teamId: 'bad' },
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_SCOPE' })
+    await expect(
+      service.replace(
+        { id: accountId, roles: ['administrator'] },
+        accountId,
+        change,
+      ),
+    ).resolves.toMatchObject(change.newScope)
+    expect(store.replaced).toBe(1)
   })
 })

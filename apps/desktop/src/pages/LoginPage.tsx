@@ -34,7 +34,12 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
     id: string
     question: string
   } | null>(null)
+  const [cloudCaptcha, setCloudCaptcha] = useState<{
+    id: string
+    question: string
+  } | null>(null)
   const [answer, setAnswer] = useState('')
+  const [cloudAnswer, setCloudAnswer] = useState('')
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -42,6 +47,13 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
     if (!desktopInvoke) return
     try {
       setCaptcha(await desktopInvoke('issue_local_captcha'))
+      setCloudCaptcha(null)
+      setCloudAnswer('')
+      void desktopInvoke<{ id: string; question: string }>(
+        'issue_cloud_captcha',
+      )
+        .then(setCloudCaptcha)
+        .catch(() => undefined)
       setAnswer('')
       setMessage('')
     } catch {
@@ -121,6 +133,19 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
         <Button type="link" onClick={() => void refreshCaptcha()}>
           {captcha ? '换一个验证码' : '获取验证码'}
         </Button>
+        {cloudCaptcha && (
+          <>
+            <label htmlFor="cloud-captcha">
+              云端验证码：{cloudCaptcha.question}
+            </label>
+            <Input
+              id="cloud-captcha"
+              inputMode="numeric"
+              value={cloudAnswer}
+              onChange={(event) => setCloudAnswer(event.target.value)}
+            />
+          </>
+        )}
         <Button
           className="preview-button"
           type="primary"
@@ -147,7 +172,41 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
               .finally(() => setSubmitting(false))
           }}
         >
-          登录
+          离线登录
+        </Button>
+        <Button
+          block
+          loading={submitting}
+          disabled={!captcha || !cloudCaptcha || !cloudAnswer}
+          onClick={() => {
+            if (!captcha || !cloudCaptcha) return
+            setSubmitting(true)
+            setMessage('')
+            void desktopInvoke<Session>('online_login', {
+              request: {
+                username,
+                password,
+                localCaptchaId: captcha.id,
+                localCaptchaAnswer: Number(answer),
+                cloudCaptchaId: cloudCaptcha.id,
+                cloudCaptchaAnswer: cloudAnswer,
+              },
+            })
+              .then(async (authenticated) => {
+                await desktopInvoke('refresh_authorization')
+                await desktopInvoke('pull_sync')
+                onLogin(authenticated)
+              })
+              .catch(() => {
+                setMessage(
+                  '在线登录或授权刷新失败，请检查连接并重新获取验证码。',
+                )
+                void refreshCaptcha()
+              })
+              .finally(() => setSubmitting(false))
+          }}
+        >
+          在线登录
         </Button>
       </Card>
     </main>

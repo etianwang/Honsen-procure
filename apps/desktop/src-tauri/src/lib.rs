@@ -24,6 +24,7 @@ const OFFLINE_LOGIN_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 const IDLE_LOCK_WINDOW: Duration = Duration::from_secs(30 * 60);
 const CAPTCHA_WINDOW: Duration = Duration::from_secs(5 * 60);
 const LOCK_WINDOW: Duration = Duration::from_secs(15 * 60);
+const AUTHORIZATION_CACHE_WINDOW: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const MAX_FAILURES: i64 = 5;
 const MAX_MATERIAL_IMAGE_BYTES: usize = 100 * 1024 * 1024;
 const SYNC_PULL_PAGE_LIMIT: usize = 500;
@@ -67,12 +68,73 @@ pub struct AuthenticatedSession {
 pub struct AuthorizationContextView {
     pub country_id: Uuid,
     pub project_id: Uuid,
+    pub project_name: String,
     pub site: String,
     pub department_id: Uuid,
+    pub department_name: String,
     pub team_id: Uuid,
+    pub team_name: String,
     pub currency: String,
     pub primary_currency: String,
     pub language_pair: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizationContextSelectionInput {
+    pub project_id: Uuid,
+    pub department_id: Uuid,
+    pub team_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudAuthorizationScope {
+    pub project_id: Uuid,
+    pub department_id: Uuid,
+    pub team_id: Uuid,
+    pub country_id: Uuid,
+    pub site: String,
+    pub currency: String,
+    pub language_pair: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudCaptchaChallenge {
+    pub id: Uuid,
+    pub question: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedAuthorizationBinding {
+    pub project_id: Uuid,
+    pub department_id: Uuid,
+    pub team_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedAuthorizationReplacement {
+    pub old_scope: ManagedAuthorizationBinding,
+    pub new_scope: ManagedAuthorizationBinding,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudLoginResponse {
+    access_token: String,
+    user: CloudLoginUser,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudLoginUser {
+    id: Uuid,
+    username: String,
+    roles: Vec<Role>,
+    requires_password_change: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -946,7 +1008,7 @@ impl LocalAuthService {
         connection.execute(
             "INSERT OR REPLACE INTO local_authorization_snapshots (account_id, project_id, department_id, team_id, verified_at, expires_at)
              SELECT id, '10000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000004', ?1, ?2 FROM local_accounts",
-            params![unix_seconds(now), unix_seconds(now + Duration::from_secs(30 * 24 * 60 * 60))],
+            params![unix_seconds(now), unix_seconds(now + AUTHORIZATION_CACHE_WINDOW)],
         ).map_err(|_| AuthError::Database)?;
         Ok(())
     }
@@ -1073,6 +1135,114 @@ impl LocalAuthService {
         })
     }
 
+    fn consume_captcha(
+        &self,
+        captcha_id: Uuid,
+        captcha_answer: u8,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let captcha = self.captcha.lock().map_err(|_| AuthError::Database)?.take();
+        if matches!(captcha, Some(challenge) if challenge.id == captcha_id && challenge.answer == captcha_answer && challenge.expires_at >= now)
+        {
+            Ok(())
+        } else {
+            Err(AuthError::InvalidCredentials)
+        }
+    }
+
+    pub async fn issue_cloud_captcha(&self) -> Result<CloudCaptchaChallenge, AuthError> {
+        let endpoint = cloud_auth_endpoint("captcha")?;
+        let response = reqwest::Client::builder()
+            .https_only(true)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?
+            .get(endpoint)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        response.json().await.map_err(|_| AuthError::SyncTransport)
+    }
+
+    pub async fn online_login(
+        &self,
+        username: &str,
+        password: &str,
+        local_captcha_id: Uuid,
+        local_captcha_answer: u8,
+        cloud_captcha_id: Uuid,
+        cloud_captcha_answer: &str,
+        now: SystemTime,
+    ) -> Result<AuthenticatedSession, AuthError> {
+        self.consume_captcha(local_captcha_id, local_captcha_answer, now)?;
+        if !valid_required_text(username, 128)
+            || password.is_empty()
+            || password.len() > 1024
+            || cloud_captcha_answer.len() > 4
+            || !cloud_captcha_answer
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let installation_id: String = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT installation_id FROM local_sync_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        let endpoint = cloud_auth_endpoint("login")?;
+        let response = reqwest::Client::builder().https_only(true).timeout(Duration::from_secs(20)).build().map_err(|_| AuthError::SyncTransport)?
+            .post(endpoint).header("x-installation-id", installation_id)
+            .json(&serde_json::json!({"username": username, "password": password, "captchaId": cloud_captcha_id, "captchaAnswer": cloud_captcha_answer}))
+            .send().await.map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED
+            || response.status() == reqwest::StatusCode::LOCKED
+        {
+            return Err(AuthError::InvalidCredentials);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        let login = response
+            .json::<CloudLoginResponse>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if login.user.username != username || login.access_token.len() < 32 {
+            return Err(AuthError::SyncTransport);
+        }
+        self.cache_verified_account(
+            CachedAccount {
+                id: login.user.id,
+                username: login.user.username.clone(),
+                roles: login.user.roles.clone(),
+                enabled: true,
+                requires_password_change: login.user.requires_password_change,
+            },
+            password,
+            now,
+        )?;
+        self.cache_sync_access_token(login.user.id, &login.access_token)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection
+            .execute("DELETE FROM local_session", [])
+            .map_err(|_| AuthError::Database)?;
+        connection.execute("INSERT INTO local_session (user_id, started_at, last_active_at) VALUES (?1, ?2, ?2)", params![login.user.id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        Ok(AuthenticatedSession {
+            user_id: login.user.id,
+            username: login.user.username,
+            roles: login.user.roles,
+            requires_password_change: login.user.requires_password_change,
+        })
+    }
+
     pub fn offline_login(
         &self,
         username: &str,
@@ -1081,11 +1251,7 @@ impl LocalAuthService {
         captcha_answer: u8,
         now: SystemTime,
     ) -> Result<AuthenticatedSession, AuthError> {
-        let captcha = self.captcha.lock().map_err(|_| AuthError::Database)?.take();
-        let valid_captcha = matches!(captcha, Some(challenge) if challenge.id == captcha_id && challenge.answer == captcha_answer && challenge.expires_at >= now);
-        if !valid_captcha {
-            return Err(AuthError::InvalidCredentials);
-        }
+        self.consume_captcha(captcha_id, captcha_answer, now)?;
 
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let account = connection.query_row(
@@ -1176,7 +1342,8 @@ impl LocalAuthService {
             Ok(()) => Ok(()),
             Err(AuthError::Forbidden) => self.require_role(Role::Administrator, now),
             Err(error) => Err(error),
-        }
+        }?;
+        self.require_active_scope_for_country(None, now)
     }
 
     fn require_conflict_resolution(&self, now: SystemTime) -> Result<(), AuthError> {
@@ -1642,6 +1809,7 @@ impl LocalAuthService {
         self.require_material_mutation(now)?;
         validate_supplier(&supplier)?;
         let country_id = supplier.country_id.ok_or(AuthError::InvalidInput)?;
+        self.require_active_scope_for_country(Some(country_id), now)?;
         let payload = serde_json::to_string(&supplier).map_err(|_| AuthError::InvalidInput)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
@@ -1698,6 +1866,22 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         self.require_material_mutation(now)?;
+        let supplier_country_id: Option<String> = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT country_id FROM local_suppliers WHERE id = ?1 AND deleted_at IS NULL",
+                [price.supplier_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .flatten();
+        let supplier_country_id = supplier_country_id
+            .ok_or(AuthError::InvalidInput)
+            .and_then(|value| Uuid::parse_str(&value).map_err(|_| AuthError::Database))?;
+        self.require_active_scope_for_country(Some(supplier_country_id), now)?;
         let unit_price_minor = validate_material_price(&price)?;
         let payload = serde_json::to_string(&price).map_err(|_| AuthError::InvalidInput)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
@@ -1903,6 +2087,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<Vec<OwnerLinePricingView>, AuthError> {
         let privileged = self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(input.order_id, now)?;
         if input.lines.is_empty() || input.lines.len() > 500 {
             return Err(AuthError::Forbidden);
         }
@@ -2082,6 +2267,7 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         let privileged = self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(order_id, now)?;
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
@@ -2127,6 +2313,7 @@ impl LocalAuthService {
         if !self.require_order_mutation(now)? || allocations.is_empty() {
             return Err(AuthError::Forbidden);
         }
+        self.require_active_scope_for_order(parent_order_id, now)?;
         let actor_id = self.active_session_user_id()?;
         let mut groups: Vec<(
             Uuid,
@@ -2384,6 +2571,7 @@ impl LocalAuthService {
         if !self.require_order_mutation(now)? {
             return Err(AuthError::Forbidden);
         }
+        self.require_active_scope_for_order(input.order_id, now)?;
         if input.lines.is_empty()
             || input.lines.len() > 500
             || !(0..=100_000).contains(&input.tax_rate_basis_points)
@@ -2550,6 +2738,7 @@ impl LocalAuthService {
         if !self.require_order_mutation(now)? {
             return Err(AuthError::Forbidden);
         }
+        self.require_active_scope_for_order(order_id, now)?;
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
@@ -2590,6 +2779,7 @@ impl LocalAuthService {
         if !self.require_order_mutation(now)? {
             return Err(AuthError::Forbidden);
         }
+        self.require_active_scope_for_order(input.source_order_id, now)?;
         if !valid_required_text(&input.display_no, 128) || !valid_currency(&input.currency) {
             return Err(AuthError::InvalidInput);
         }
@@ -2674,6 +2864,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<ReceiptView, AuthError> {
         let privileged = self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(input.order_id, now)?;
         if !valid_iso_date(&input.received_at)
             || input.items.is_empty()
             || input.items.len() > 500
@@ -2873,6 +3064,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         let privileged = self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(order_id, now)?;
         if !valid_required_text(&reason, 1000) {
             return Err(AuthError::InvalidInput);
         }
@@ -2929,6 +3121,14 @@ impl LocalAuthService {
         let calculated = calculate_requisition(&draft)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let authorized_scope: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.country_id = ?2 AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.project_id = ?3 AND a.department_id = ?4 AND a.team_id = ?5 AND a.expires_at >= ?6)",
+            params![actor_id.to_string(), draft.country_id.to_string(), draft.project_id.to_string(), draft.department_id.to_string(), draft.team_id.to_string(), unix_seconds(now)],
+            |row| row.get(0),
+        ).map_err(|_| AuthError::Database)?;
+        if !authorized_scope {
+            return Err(AuthError::Forbidden);
+        }
         let selected_site_is_disabled: bool = transaction
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM local_sites WHERE project_id = ?1 AND name = ?2 AND is_active = 0 AND deleted_at IS NULL)",
@@ -3044,6 +3244,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         let privileged = self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(order_id, now)?;
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
@@ -3079,6 +3280,7 @@ impl LocalAuthService {
         if !self.require_order_mutation(now)? {
             return Err(AuthError::Forbidden);
         }
+        self.require_active_scope_for_order(order_id, now)?;
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
@@ -3184,6 +3386,7 @@ impl LocalAuthService {
         if !self.require_order_mutation(now)? || !valid_required_text(&reason, 1000) {
             return Err(AuthError::Forbidden);
         }
+        self.require_active_scope_for_order(order_id, now)?;
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
@@ -3225,6 +3428,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<OrderCommentView, AuthError> {
         let privileged = self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(order_id, now)?;
         if !valid_required_text(&body, 4000) {
             return Err(AuthError::InvalidInput);
         }
@@ -3781,6 +3985,7 @@ impl LocalAuthService {
 
     pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
         self.require_catalog_read(now)?;
+        self.refresh_authorization_https(now).await?;
         let events = self.pending_sync_events(100, now)?;
         if events.is_empty() {
             return Ok(SyncPushView {
@@ -3853,6 +4058,7 @@ impl LocalAuthService {
 
     pub async fn pull_sync_https(&self, now: SystemTime) -> Result<SyncPullView, AuthError> {
         self.require_catalog_read(now)?;
+        self.refresh_authorization_https(now).await?;
         let account_id = self.active_session_user_id()?;
         let token = self
             .credential_vault
@@ -3967,6 +4173,238 @@ impl LocalAuthService {
         Uuid::parse_str(&user_id).map_err(|_| AuthError::Database)
     }
 
+    fn require_active_scope_for_order(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let authorized: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?2 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?3 JOIN local_projects p ON p.id = o.project_id AND p.country_id = o.country_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.id = ?1 AND o.deleted_at IS NULL)",
+                params![order_id.to_string(), account_id.to_string(), unix_seconds(now)],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if authorized {
+            Ok(())
+        } else {
+            Err(AuthError::Forbidden)
+        }
+    }
+
+    fn require_active_scope_for_country(
+        &self,
+        country_id: Option<Uuid>,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let authorized: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 AND (?3 IS NULL OR p.country_id = ?3))",
+            params![account_id.to_string(), unix_seconds(now), country_id.map(|value| value.to_string())],
+            |row| row.get(0),
+        ).map_err(|_| AuthError::Database)?;
+        if authorized {
+            Ok(())
+        } else {
+            Err(AuthError::Forbidden)
+        }
+    }
+
+    fn replace_authorization_snapshots(
+        &self,
+        scopes: &[CloudAuthorizationScope],
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if scopes.len() > 5_000 {
+            return Err(AuthError::InvalidInput);
+        }
+        let mut unique = HashSet::new();
+        for scope in scopes {
+            if !unique.insert((scope.project_id, scope.department_id, scope.team_id))
+                || !valid_required_text(&scope.site, 255)
+                || currency_minor_digits(&scope.currency).is_err()
+                || !matches!(scope.language_pair.as_str(), "zh_fr" | "zh_en")
+            {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        let account_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "DELETE FROM local_authorization_snapshots WHERE account_id = ?1",
+                [account_id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        for scope in scopes {
+            transaction
+                .execute(
+                    "INSERT INTO local_authorization_snapshots (account_id, project_id, department_id, team_id, verified_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![account_id.to_string(), scope.project_id.to_string(), scope.department_id.to_string(), scope.team_id.to_string(), unix_seconds(now), unix_seconds(now + AUTHORIZATION_CACHE_WINDOW)],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
+    pub async fn refresh_authorization_https(&self, now: SystemTime) -> Result<(), AuthError> {
+        self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        let token = self
+            .credential_vault
+            .load_sync_token(account_id)?
+            .ok_or(AuthError::NoActiveSession)?;
+        let endpoint = authorization_context_endpoint()?;
+        let response = reqwest::Client::builder()
+            .https_only(true)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?
+            .get(endpoint)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AuthError::NoActiveSession);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        let scopes = response
+            .json::<Vec<CloudAuthorizationScope>>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        self.replace_authorization_snapshots(&scopes, now)
+    }
+
+    fn authorization_management_token(&self, now: SystemTime) -> Result<String, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Ok(()) => {}
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            Err(error) => return Err(error),
+        }
+        let account_id = self.active_session_user_id()?;
+        self.credential_vault
+            .load_sync_token(account_id)?
+            .ok_or(AuthError::NoActiveSession)
+    }
+
+    pub async fn list_managed_authorizations(
+        &self,
+        account_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Vec<CloudAuthorizationScope>, AuthError> {
+        let token = self.authorization_management_token(now)?;
+        let endpoint = authorization_binding_endpoint(account_id)?;
+        let response = reqwest::Client::builder()
+            .https_only(true)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?
+            .get(endpoint)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AuthError::NoActiveSession);
+        }
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AuthError::Forbidden);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        response
+            .json::<Vec<CloudAuthorizationScope>>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)
+    }
+
+    pub async fn change_managed_authorization(
+        &self,
+        account_id: Uuid,
+        binding: ManagedAuthorizationBinding,
+        revoke: bool,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let token = self.authorization_management_token(now)?;
+        let endpoint = authorization_binding_endpoint(account_id)?;
+        let client = reqwest::Client::builder()
+            .https_only(true)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?;
+        let request = if revoke {
+            client.delete(endpoint)
+        } else {
+            client.put(endpoint)
+        };
+        let response = request
+            .bearer_auth(token)
+            .json(&binding)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AuthError::NoActiveSession);
+        }
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AuthError::Forbidden);
+        }
+        if response.status() == reqwest::StatusCode::BAD_REQUEST {
+            return Err(AuthError::InvalidInput);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        if account_id == self.active_session_user_id()? {
+            self.refresh_authorization_https(now).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn replace_managed_authorization(
+        &self,
+        account_id: Uuid,
+        replacement: ManagedAuthorizationReplacement,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let token = self.authorization_management_token(now)?;
+        let response = reqwest::Client::builder()
+            .https_only(true)
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?
+            .patch(authorization_binding_endpoint(account_id)?)
+            .bearer_auth(token)
+            .json(&replacement)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AuthError::NoActiveSession);
+        }
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AuthError::Forbidden);
+        }
+        if response.status() == reqwest::StatusCode::BAD_REQUEST {
+            return Err(AuthError::InvalidInput);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        if account_id == self.active_session_user_id()? {
+            self.refresh_authorization_https(now).await?;
+        }
+        Ok(())
+    }
+
     pub fn authorization_context(
         &self,
         now: SystemTime,
@@ -3975,25 +4413,78 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection.query_row(
-            "SELECT p.country_id, p.id, p.site, d.id, t.id, p.default_currency, p.default_currency, p.default_language_pair
+            "SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair
              FROM local_authorization_snapshots a
              JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL
              JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL
              JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL
+             LEFT JOIN local_selected_authorization_contexts s ON s.account_id = a.account_id AND s.project_id = a.project_id AND s.department_id = a.department_id AND s.team_id = a.team_id
              WHERE a.account_id = ?1 AND a.expires_at >= ?2
-             ORDER BY a.verified_at DESC, p.name, d.name, t.name LIMIT 1",
+             ORDER BY (s.account_id IS NOT NULL) DESC, a.verified_at DESC, p.name, d.name, t.name LIMIT 1",
             params![account_id.to_string(), unix_seconds(now)],
             |row| Ok(AuthorizationContextView {
                 country_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
                 project_id: Uuid::parse_str(&row.get::<_, String>(1)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                site: row.get(2)?,
-                department_id: Uuid::parse_str(&row.get::<_, String>(3)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                team_id: Uuid::parse_str(&row.get::<_, String>(4)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                currency: row.get(5)?,
-                primary_currency: row.get(6)?,
-                language_pair: row.get(7)?,
+                project_name: row.get(2)?,
+                site: row.get(3)?,
+                department_id: Uuid::parse_str(&row.get::<_, String>(4)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                department_name: row.get(5)?,
+                team_id: Uuid::parse_str(&row.get::<_, String>(6)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                team_name: row.get(7)?,
+                currency: row.get(8)?,
+                primary_currency: row.get(9)?,
+                language_pair: row.get(10)?,
             }),
         ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::Forbidden)
+    }
+
+    pub fn list_authorization_contexts(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<AuthorizationContextView>, AuthError> {
+        self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection.prepare("SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 ORDER BY p.name, d.name, t.name").map_err(|_| AuthError::Database)?;
+        statement
+            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| {
+                Ok(AuthorizationContextView {
+                    country_id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    project_id: Uuid::parse_str(&row.get::<_, String>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    project_name: row.get(2)?,
+                    site: row.get(3)?,
+                    department_id: Uuid::parse_str(&row.get::<_, String>(4)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    department_name: row.get(5)?,
+                    team_id: Uuid::parse_str(&row.get::<_, String>(6)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    team_name: row.get(7)?,
+                    currency: row.get(8)?,
+                    primary_currency: row.get(9)?,
+                    language_pair: row.get(10)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
+    pub fn select_authorization_context(
+        &self,
+        selection: AuthorizationContextSelectionInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let valid: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.project_id = ?2 AND a.department_id = ?3 AND a.team_id = ?4 AND a.expires_at >= ?5)", params![account_id.to_string(), selection.project_id.to_string(), selection.department_id.to_string(), selection.team_id.to_string(), unix_seconds(now)], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if !valid {
+            return Err(AuthError::Forbidden);
+        }
+        connection.execute("INSERT INTO local_selected_authorization_contexts (account_id, project_id, department_id, team_id, selected_at) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(account_id) DO UPDATE SET project_id = excluded.project_id, department_id = excluded.department_id, team_id = excluded.team_id, selected_at = excluded.selected_at", params![account_id.to_string(), selection.project_id.to_string(), selection.department_id.to_string(), selection.team_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        Ok(())
     }
 
     pub fn lock(&self) -> Result<(), AuthError> {
@@ -4020,6 +4511,17 @@ pub mod commands {
         pub password: String,
         pub captcha_id: Uuid,
         pub captcha_answer: u8,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct OnlineLoginRequest {
+        pub username: String,
+        pub password: String,
+        pub local_captcha_id: Uuid,
+        pub local_captcha_answer: u8,
+        pub cloud_captcha_id: Uuid,
+        pub cloud_captcha_answer: String,
     }
 
     #[derive(Serialize)]
@@ -4171,6 +4673,31 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn issue_cloud_captcha(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<super::CloudCaptchaChallenge, CommandError> {
+        auth.issue_cloud_captcha().await.map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn online_login(
+        auth: State<'_, LocalAuthService>,
+        request: OnlineLoginRequest,
+    ) -> Result<AuthenticatedSession, CommandError> {
+        auth.online_login(
+            &request.username,
+            &request.password,
+            request.local_captcha_id,
+            request.local_captcha_answer,
+            request.cloud_captcha_id,
+            &request.cloud_captcha_answer,
+            SystemTime::now(),
+        )
+        .await
+        .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn offline_login(
         auth: State<'_, LocalAuthService>,
         request: OfflineLoginRequest,
@@ -4195,6 +4722,65 @@ pub mod commands {
         auth: State<'_, LocalAuthService>,
     ) -> Result<super::AuthorizationContextView, CommandError> {
         auth.authorization_context(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn refresh_authorization(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<(), CommandError> {
+        auth.refresh_authorization_https(SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn list_managed_authorizations(
+        auth: State<'_, LocalAuthService>,
+        account_id: Uuid,
+    ) -> Result<Vec<super::CloudAuthorizationScope>, CommandError> {
+        auth.list_managed_authorizations(account_id, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn change_managed_authorization(
+        auth: State<'_, LocalAuthService>,
+        account_id: Uuid,
+        binding: super::ManagedAuthorizationBinding,
+        revoke: bool,
+    ) -> Result<(), CommandError> {
+        auth.change_managed_authorization(account_id, binding, revoke, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn replace_managed_authorization(
+        auth: State<'_, LocalAuthService>,
+        account_id: Uuid,
+        replacement: super::ManagedAuthorizationReplacement,
+    ) -> Result<(), CommandError> {
+        auth.replace_managed_authorization(account_id, replacement, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_authorization_contexts(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::AuthorizationContextView>, CommandError> {
+        auth.list_authorization_contexts(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn select_authorization_context(
+        auth: State<'_, LocalAuthService>,
+        selection: super::AuthorizationContextSelectionInput,
+    ) -> Result<(), CommandError> {
+        auth.select_authorization_context(selection, SystemTime::now())
             .map_err(Into::into)
     }
 
@@ -4533,6 +5119,14 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0028_authorization_snapshots",
             include_str!("../migrations/0028_authorization_snapshots.sql"),
+        ),
+        (
+            "0029_authorization_selection",
+            include_str!("../migrations/0029_authorization_selection.sql"),
+        ),
+        (
+            "0030_authorization_remote_cache",
+            include_str!("../migrations/0030_authorization_remote_cache.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -5726,7 +6320,26 @@ fn sync_pull_endpoint() -> Result<reqwest::Url, AuthError> {
     sync_endpoint_from(&value, "pull")
 }
 
+fn authorization_context_endpoint() -> Result<reqwest::Url, AuthError> {
+    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    api_endpoint_from(&value, "authorization/context")
+}
+
+fn authorization_binding_endpoint(account_id: Uuid) -> Result<reqwest::Url, AuthError> {
+    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    api_endpoint_from(&value, &format!("authorization/bindings/{account_id}"))
+}
+
+fn cloud_auth_endpoint(operation: &str) -> Result<reqwest::Url, AuthError> {
+    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    api_endpoint_from(&value, &format!("auth/{operation}"))
+}
+
 fn sync_endpoint_from(value: &str, operation: &str) -> Result<reqwest::Url, AuthError> {
+    api_endpoint_from(value, &format!("sync/{operation}"))
+}
+
+fn api_endpoint_from(value: &str, path: &str) -> Result<reqwest::Url, AuthError> {
     let mut endpoint = reqwest::Url::parse(&value).map_err(|_| AuthError::SyncTransport)?;
     if endpoint.scheme() != "https"
         || endpoint.host_str().is_none()
@@ -5738,7 +6351,7 @@ fn sync_endpoint_from(value: &str, operation: &str) -> Result<reqwest::Url, Auth
         return Err(AuthError::SyncTransport);
     }
     endpoint.set_path(&format!(
-        "{}/api/sync/{operation}",
+        "{}/api/{path}",
         endpoint.path().trim_end_matches('/')
     ));
     Ok(endpoint)
@@ -6317,6 +6930,38 @@ mod tests {
             .sum()
     }
 
+    fn grant_test_scope(
+        service: &LocalAuthService,
+        account_id: Uuid,
+        project_id: Uuid,
+        department_id: Uuid,
+        team_id: Uuid,
+        now: SystemTime,
+    ) {
+        service.connection.lock().unwrap().execute(
+            "INSERT INTO local_authorization_snapshots (account_id, project_id, department_id, team_id, verified_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![account_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), unix_seconds(now), unix_seconds(now + AUTHORIZATION_CACHE_WINDOW)],
+        ).unwrap();
+    }
+
+    fn grant_new_test_scope(
+        service: &LocalAuthService,
+        account_id: Uuid,
+        country_id: Uuid,
+        now: SystemTime,
+    ) {
+        let project_id = Uuid::new_v4();
+        let department_id = Uuid::new_v4();
+        let team_id = Uuid::new_v4();
+        let connection = service.connection.lock().unwrap();
+        connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, ?2, 'fixture country', 'UTC', 1, 1)", params![country_id.to_string(), format!("C-{}", country_id.simple())]).unwrap();
+        connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, ?3, 'fixture project', 'fixture site', 'fixture department', 'XOF', 'zh_fr', 1, 1)", params![project_id.to_string(), country_id.to_string(), format!("P-{}", project_id.simple())]).unwrap();
+        connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, ?2, 'fixture department', 1, 1)", params![department_id.to_string(), format!("D-{}", department_id.simple())]).unwrap();
+        connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, 'fixture team', 1, 1)", params![team_id.to_string(), department_id.to_string(), format!("T-{}", team_id.simple())]).unwrap();
+        drop(connection);
+        grant_test_scope(service, account_id, project_id, department_id, team_id, now);
+    }
+
     #[test]
     fn sync_endpoint_requires_clean_https_base_url() {
         assert_eq!(
@@ -6376,6 +7021,154 @@ mod tests {
         assert_eq!(context.site, "authorized site");
         assert_eq!(context.department_id, department_id);
         assert_eq!(context.team_id, team_id);
+        let second_project_id = Uuid::new_v4();
+        service.connection.lock().unwrap().execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, 'AUTH-SECOND', 'second project', 'second site', 'authorization department', 'XOF', 'zh_fr', 1, 1)", params![second_project_id.to_string(), country_id.to_string()]).unwrap();
+        grant_test_scope(
+            &service,
+            account.id,
+            second_project_id,
+            department_id,
+            team_id,
+            now,
+        );
+        assert_eq!(service.list_authorization_contexts(now).unwrap().len(), 2);
+        service
+            .select_authorization_context(
+                AuthorizationContextSelectionInput {
+                    project_id: second_project_id,
+                    department_id,
+                    team_id,
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.authorization_context(now).unwrap().project_id,
+            second_project_id
+        );
+        assert_eq!(
+            service.select_authorization_context(
+                AuthorizationContextSelectionInput {
+                    project_id: Uuid::new_v4(),
+                    department_id,
+                    team_id
+                },
+                now
+            ),
+            Err(AuthError::Forbidden)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_authorization_snapshots SET verified_at = ?1 - 1, expires_at = ?1 WHERE account_id = ?2",
+                params![unix_seconds(now) - 1, account.id.to_string()],
+            )
+            .unwrap();
+        assert!(service.list_authorization_contexts(now).unwrap().is_empty());
+        assert_eq!(
+            service.authorization_context(now),
+            Err(AuthError::Forbidden)
+        );
+    }
+
+    #[test]
+    fn cloud_authorization_refresh_replaces_only_validated_account_scopes() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account = account();
+        service
+            .cache_verified_account(account.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &account.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let scope = CloudAuthorizationScope {
+            project_id: Uuid::new_v4(),
+            department_id: Uuid::new_v4(),
+            team_id: Uuid::new_v4(),
+            country_id: Uuid::new_v4(),
+            site: "remote site".into(),
+            currency: "XOF".into(),
+            language_pair: "zh_fr".into(),
+        };
+        service
+            .replace_authorization_snapshots(std::slice::from_ref(&scope), now)
+            .unwrap();
+        let count = |service: &LocalAuthService| -> i64 {
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM local_authorization_snapshots WHERE account_id = ?1",
+                    [account.id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(count(&service), 1);
+        assert_eq!(
+            service.replace_authorization_snapshots(&[scope.clone(), scope.clone()], now),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(count(&service), 1);
+        service.replace_authorization_snapshots(&[], now).unwrap();
+        assert_eq!(count(&service), 0);
+    }
+
+    #[test]
+    fn authorization_cache_migration_preserves_previous_snapshots() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .unwrap();
+        for sql in [
+            include_str!("../migrations/0001_local_auth.sql"),
+            include_str!("../migrations/0002_master_data.sql"),
+            include_str!("../migrations/0003_reference_master_data.sql"),
+            include_str!("../migrations/0028_authorization_snapshots.sql"),
+        ] {
+            connection.execute_batch(sql).unwrap();
+        }
+        connection.execute_batch("INSERT INTO local_accounts (id, username, roles_json, enabled, requires_password_change, cached_verified_at) VALUES ('a', 'fixture', '[]', 1, 0, 0); INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES ('c', 'C', 'country', 'UTC', 1, 1); INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES ('p', 'c', 'P', 'project', 'site', 'department', 'XOF', 'zh_fr', 1, 1); INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES ('d', 'D', 'department', 1, 1); INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES ('t', 'd', 'T', 'team', 1, 1); INSERT INTO local_authorization_snapshots VALUES ('a', 'p', 'd', 't', 10, 20);").unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0029_authorization_selection.sql"
+            ))
+            .unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0030_authorization_remote_cache.sql"
+            ))
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT expires_at FROM local_authorization_snapshots WHERE account_id = 'a'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            20
+        );
+        connection.execute("INSERT INTO local_authorization_snapshots VALUES ('a', 'unprojected-cloud-project', 'unprojected-department', 'unprojected-team', 20, 30)", []).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -6450,6 +7243,7 @@ mod tests {
                 now,
             )
             .unwrap();
+        grant_new_test_scope(&service, purchaser_id, Uuid::new_v4(), now);
         let entity_id = Uuid::new_v4();
         let supplier_id = Uuid::new_v4();
         let price_id = Uuid::new_v4();
@@ -7147,6 +7941,7 @@ mod tests {
         connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, 'OP-P', 'owner pricing', 'site', 'department', 'XOF', 'zh_fr', 1, 1)", params![project_id.to_string(), country_id.to_string()]).unwrap();
         connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, 'OP-D', 'department', 1, 1)", [department_id.to_string()]).unwrap();
         connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, 'OP-T', 'team', 1, 1)", params![team_id.to_string(), department_id.to_string()]).unwrap();
+        connection.execute("INSERT INTO local_authorization_snapshots (account_id, project_id, department_id, team_id, verified_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![purchaser_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), unix_seconds(now), unix_seconds(now + AUTHORIZATION_CACHE_WINDOW)]).unwrap();
         connection.execute("INSERT INTO local_materials (id, name_zh, model, specification, unit, is_active, version) VALUES (?1, 'owner material', 'OP', 'fixture', 'pcs', 1, 1)", [material_id.to_string()]).unwrap();
         connection.execute("INSERT INTO local_suppliers (id, business_code, name, country_id, is_active, is_blacklisted, is_preferred, version) VALUES (?1, 'OP-S', 'fixture', ?2, 1, 0, 0, 1)", params![supplier_id.to_string(), country_id.to_string()]).unwrap();
         connection.execute("INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'CNY', 1234, 'pcs', '2026-10-12', 1, 1)", params![price_id.to_string(), material_id.to_string(), supplier_id.to_string()]).unwrap();
@@ -7202,6 +7997,45 @@ mod tests {
         assert_eq!(stored.3.as_deref(), Some(purchaser_id.to_string().as_str()));
         assert_eq!(stored.4, 105);
         drop(connection);
+        let outbox_before_revocation: i64 = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        service.connection.lock().unwrap().execute(
+            "DELETE FROM local_authorization_snapshots WHERE account_id = ?1 AND project_id = ?2",
+            params![purchaser_id.to_string(), project_id.to_string()],
+        ).unwrap();
+        assert_eq!(
+            service.add_order_comment(order_id, "unauthorized".into(), now),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1",
+                    [order_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            outbox_before_revocation
+        );
+        grant_test_scope(
+            &service,
+            purchaser_id,
+            project_id,
+            department_id,
+            team_id,
+            now,
+        );
         assert_eq!(
             service.set_procurement_mode(order_id, "honsen_self_purchase".into(), now),
             Err(AuthError::Forbidden)
@@ -7262,6 +8096,14 @@ mod tests {
                 now,
             )
             .unwrap();
+        grant_test_scope(
+            &service,
+            engineer_id,
+            project_id,
+            department_id,
+            team_id,
+            now,
+        );
         service
             .save_requisition_draft(
                 RequisitionDraftInput {
@@ -7629,6 +8471,10 @@ mod tests {
         assert!(service.require_role(Role::Engineer, now).is_ok());
         assert_eq!(
             service.require_role(Role::Administrator, now),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(
+            service.authorization_management_token(now),
             Err(AuthError::Forbidden)
         );
         assert_eq!(
@@ -8056,15 +8902,24 @@ mod tests {
                 now,
             )
             .unwrap();
-        service.save_material(material.clone(), now).unwrap();
         let country_id = Uuid::new_v4();
+        grant_new_test_scope(&service, purchaser_id, country_id, now);
+        service.save_material(material.clone(), now).unwrap();
+        service.connection.lock().unwrap().execute("UPDATE local_authorization_snapshots SET verified_at = ?1, expires_at = ?2 WHERE account_id = ?3", params![unix_seconds(now) - 2, unix_seconds(now) - 1, purchaser_id.to_string()]).unwrap();
+        assert_eq!(
+            service.save_material(material.clone(), now),
+            Err(AuthError::Forbidden)
+        );
         service
             .connection
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, 'FIXTURE-COUNTRY', 'fixture country', 'UTC', 1, 1)",
-                [country_id.to_string()],
+                "UPDATE local_authorization_snapshots SET expires_at = ?1 WHERE account_id = ?2",
+                params![
+                    unix_seconds(now + AUTHORIZATION_CACHE_WINDOW),
+                    purchaser_id.to_string()
+                ],
             )
             .unwrap();
         let image_id = Uuid::new_v4();
@@ -8199,6 +9054,14 @@ mod tests {
             connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, 'FIXTURE-DEPT', 'fixture department', 1, 1)", [department_id.to_string()]).unwrap();
             connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, 'FIXTURE-TEAM', 'fixture team', 1, 1)", params![team_id.to_string(), department_id.to_string()]).unwrap();
         }
+        grant_test_scope(
+            &service,
+            purchaser_id,
+            project_id,
+            department_id,
+            team_id,
+            now,
+        );
         let requisition_id = Uuid::new_v4();
         let draft = RequisitionDraftInput {
             id: requisition_id,
@@ -8326,6 +9189,14 @@ mod tests {
                 now,
             )
             .unwrap();
+        grant_test_scope(
+            &service,
+            approver_id,
+            project_id,
+            department_id,
+            team_id,
+            now,
+        );
         service.confirm_requisition(requisition_id, now).unwrap();
         let execution_orders = service.list_confirmed_procurement_orders(now).unwrap();
         assert_eq!(execution_orders.len(), 1);
@@ -9290,6 +10161,11 @@ mod tests {
                 sort_order: 0,
             }],
         };
+        assert_eq!(
+            service.save_requisition_draft(cross_country.clone(), now),
+            Err(AuthError::Forbidden)
+        );
+        grant_test_scope(&service, engineer.id, cm_project, department, team, now);
         assert_eq!(
             service.save_requisition_draft(cross_country, now),
             Err(AuthError::InvalidInput)

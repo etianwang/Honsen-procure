@@ -62,6 +62,24 @@ export function createApp(
         throw error
       }
     })
+    app.get(
+      '/api/authorization/bindings/:accountId',
+      async (request, reply) => {
+        try {
+          const account = await authenticateRequest(request)
+          const params = z.object({ accountId: z.uuid() }).parse(request.params)
+          return await authorization.listForAccount(account, params.accountId)
+        } catch (error) {
+          if (error instanceof AuthenticationError)
+            return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+          if (error instanceof AuthorizationError)
+            return reply.status(403).send({ code: error.code })
+          if (error instanceof z.ZodError)
+            return reply.status(400).send({ code: 'INVALID_REQUEST' })
+          throw error
+        }
+      },
+    )
     app.put(
       '/api/authorization/bindings/:accountId',
       async (request, reply) => {
@@ -69,6 +87,30 @@ export function createApp(
           const account = await authenticateRequest(request)
           const params = z.object({ accountId: z.uuid() }).parse(request.params)
           return await authorization.save(
+            account,
+            params.accountId,
+            request.body,
+          )
+        } catch (error) {
+          if (error instanceof AuthenticationError)
+            return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+          if (error instanceof AuthorizationError)
+            return reply
+              .status(error.code === 'FORBIDDEN' ? 403 : 400)
+              .send({ code: error.code })
+          if (error instanceof z.ZodError)
+            return reply.status(400).send({ code: 'INVALID_REQUEST' })
+          throw error
+        }
+      },
+    )
+    app.patch(
+      '/api/authorization/bindings/:accountId',
+      async (request, reply) => {
+        try {
+          const account = await authenticateRequest(request)
+          const params = z.object({ accountId: z.uuid() }).parse(request.params)
+          return await authorization.replace(
             account,
             params.accountId,
             request.body,
