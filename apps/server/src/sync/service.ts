@@ -80,9 +80,17 @@ export class SyncService {
       return false
 
     const projectId = stringField(event.payload, 'projectId')
+    const departmentId = stringField(event.payload, 'departmentId')
+    const teamId = stringField(event.payload, 'teamId')
     if (
       !projectId ||
-      !(await this.store.hasActiveProjectBinding(actor.id, projectId))
+      (event.entityType === 'purchase_order' && (!departmentId || !teamId)) ||
+      !(await this.store.hasActiveProjectBinding(
+        actor.id,
+        projectId,
+        departmentId ?? undefined,
+        teamId ?? undefined,
+      ))
     ) {
       return false
     }

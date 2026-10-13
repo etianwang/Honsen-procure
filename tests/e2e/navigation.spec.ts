@@ -1476,3 +1476,185 @@ test('purchaser rejects with a reason and posts an immutable internal comment', 
   ).toBeVisible()
   await expect(browserErrors).toEqual([])
 })
+
+test('authenticated desktop switches between cached authorization scopes', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    const contexts = [
+      {
+        countryId: '00000000-0000-4000-8000-000000000001',
+        projectId: '00000000-0000-4000-8000-000000000002',
+        projectName: '项目甲',
+        site: '甲工地',
+        departmentId: '00000000-0000-4000-8000-000000000003',
+        departmentName: '采购部',
+        teamId: '00000000-0000-4000-8000-000000000004',
+        teamName: '一班',
+        currency: 'XOF',
+        primaryCurrency: 'XOF',
+        languagePair: 'zh_fr',
+      },
+      {
+        countryId: '00000000-0000-4000-8000-000000000001',
+        projectId: '00000000-0000-4000-8000-000000000005',
+        projectName: '项目乙',
+        site: '乙工地',
+        departmentId: '00000000-0000-4000-8000-000000000003',
+        departmentName: '采购部',
+        teamId: '00000000-0000-4000-8000-000000000006',
+        teamName: '二班',
+        currency: 'XOF',
+        primaryCurrency: 'XOF',
+        languagePair: 'zh_fr',
+      },
+    ]
+    let selected = contexts[0]
+    Object.assign(window, {
+      __TAURI_INTERNALS__: {},
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: { selection?: { projectId: string } },
+          ) {
+            if (command === 'issue_local_captcha')
+              return Promise.resolve({
+                id: crypto.randomUUID(),
+                question: '1 + 1 = ?',
+              })
+            if (command === 'issue_cloud_captcha')
+              return Promise.reject(new Error('offline'))
+            if (command === 'offline_login')
+              return Promise.resolve({
+                user_id: '00000000-0000-4000-8000-000000000007',
+                username: 'fixture',
+                roles: ['engineer'],
+                requires_password_change: false,
+              })
+            if (command === 'list_authorization_contexts')
+              return Promise.resolve(contexts)
+            if (command === 'get_authorization_context')
+              return Promise.resolve(selected)
+            if (command === 'select_authorization_context') {
+              selected =
+                contexts.find(
+                  (context) => context.projectId === args?.selection?.projectId,
+                ) ?? contexts[0]
+              return Promise.resolve()
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByLabel('账号').fill('fixture')
+  await page.getByLabel('密码').fill('fixture-password')
+  await page.getByLabel(/本地验证码/).fill('2')
+  await page.getByRole('button', { name: '离线登录' }).click()
+  await page
+    .getByLabel('当前授权范围')
+    .selectOption(
+      '00000000-0000-4000-8000-000000000005:00000000-0000-4000-8000-000000000003:00000000-0000-4000-8000-000000000006',
+    )
+  await expect(page.getByLabel('当前授权范围')).toHaveValue(
+    '00000000-0000-4000-8000-000000000005:00000000-0000-4000-8000-000000000003:00000000-0000-4000-8000-000000000006',
+  )
+  await page.getByRole('button', { name: '采购申请单' }).click()
+  await expect(page.getByText(/REQ-.*乙工地/)).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('administrator queries and changes cloud-scoped bindings from desktop UI', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const accountId = '00000000-0000-4000-8000-000000000010'
+    let bindings = [
+      {
+        projectId: '00000000-0000-4000-8000-000000000002',
+        departmentId: '00000000-0000-4000-8000-000000000003',
+        teamId: '00000000-0000-4000-8000-000000000004',
+        site: '甲工地',
+      },
+    ]
+    Object.assign(window, {
+      __TAURI_INTERNALS__: {},
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              accountId?: string
+              binding?: (typeof bindings)[number]
+              replacement?: { newScope: (typeof bindings)[number] }
+              revoke?: boolean
+            },
+          ) {
+            if (command === 'issue_local_captcha')
+              return Promise.resolve({
+                id: crypto.randomUUID(),
+                question: '1 + 1 = ?',
+              })
+            if (command === 'issue_cloud_captcha')
+              return Promise.reject(new Error('offline'))
+            if (command === 'offline_login')
+              return Promise.resolve({
+                user_id: accountId,
+                username: 'admin',
+                roles: ['administrator'],
+                requires_password_change: false,
+              })
+            if (command === 'list_authorization_contexts')
+              return Promise.resolve([])
+            if (command === 'get_authorization_context')
+              return Promise.reject(new Error('no local scope'))
+            if (command === 'list_managed_authorizations')
+              return Promise.resolve(bindings)
+            if (
+              command === 'replace_managed_authorization' &&
+              args?.replacement
+            ) {
+              bindings = [{ ...args.replacement.newScope, site: '乙工地' }]
+              return Promise.resolve()
+            }
+            if (command === 'change_managed_authorization' && args?.binding) {
+              bindings = args.revoke
+                ? []
+                : [{ ...args.binding, site: '甲工地' }]
+              return Promise.resolve()
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByLabel('账号').fill('admin')
+  await page.getByLabel('密码').fill('fixture-password')
+  await page.getByLabel(/本地验证码/).fill('2')
+  await page.getByRole('button', { name: '离线登录' }).click()
+  await page.getByRole('button', { name: '在线授权管理' }).click()
+  await page
+    .getByLabel('账户 UUID')
+    .fill('00000000-0000-4000-8000-000000000010')
+  await page.getByRole('button', { name: '查询云端授权' }).click()
+  await expect(page.getByText('已读取 1 个云端授权范围。')).toBeVisible()
+  await page.getByRole('button', { name: '修改' }).click()
+  await page
+    .getByLabel('班组 UUID')
+    .fill('00000000-0000-4000-8000-000000000005')
+  await page.getByRole('button', { name: '保存修改' }).click()
+  await expect(page.getByText('授权范围已原子修改。')).toBeVisible()
+  await page.getByRole('button', { name: '撤销' }).click()
+  await expect(page.getByText('授权已撤销。')).toBeVisible()
+})

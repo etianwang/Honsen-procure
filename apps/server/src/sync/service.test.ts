@@ -7,6 +7,8 @@ const engineer = {
   roles: ['engineer'] as const,
 }
 const projectId = '00000000-0000-4000-8000-000000000002'
+const departmentId = '00000000-0000-4000-8000-000000000011'
+const teamId = '00000000-0000-4000-8000-000000000012'
 
 class FixtureStore implements SyncStore {
   pushed = 0
@@ -31,7 +33,13 @@ class FixtureStore implements SyncStore {
     return { changes: [], nextCursor: '0' }
   }
 
-  async hasActiveProjectBinding() {
+  async hasActiveProjectBinding(
+    _accountId: string,
+    _projectId: string,
+    departmentId?: string,
+    teamId?: string,
+  ) {
+    if ((departmentId === undefined) !== (teamId === undefined)) return false
     return this.bound
   }
 
@@ -51,7 +59,7 @@ function purchaseOrderEvent(applicantId = engineer.id) {
     entityId: '00000000-0000-4000-8000-000000000004',
     operation: 'upsert' as const,
     baseVersion: 0,
-    payload: { applicantId, projectId },
+    payload: { applicantId, projectId, departmentId, teamId },
   }
 }
 
@@ -78,6 +86,21 @@ describe('SyncService', () => {
       events: [purchaseOrderEvent('00000000-0000-4000-8000-000000000006')],
     })
 
+    expect(response.results[0]).toMatchObject({ status: 'validation_error' })
+    expect(store.pushed).toBe(0)
+  })
+
+  it('rejects an engineer order that omits the scoped department and team', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const event = {
+      ...purchaseOrderEvent(),
+      payload: { applicantId: engineer.id, projectId },
+    }
+    const response = await service.push(engineer, {
+      deviceId: '00000000-0000-4000-8000-000000000005',
+      events: [event],
+    })
     expect(response.results[0]).toMatchObject({ status: 'validation_error' })
     expect(store.pushed).toBe(0)
   })

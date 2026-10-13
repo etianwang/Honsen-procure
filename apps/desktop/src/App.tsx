@@ -1,7 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ConfigProvider } from 'antd'
 import { calculateDraftTotals } from '@honsen/shared'
-import { AppShell, type AppPage } from './components/AppShell'
+import {
+  AppShell,
+  type AppPage,
+  type AuthorizationContextOption,
+} from './components/AppShell'
 import { AuthFixturePage } from './pages/AuthFixturePage'
 import { CatalogFixturePage } from './pages/CatalogFixturePage'
 import { HomePage } from './pages/HomePage'
@@ -18,6 +22,7 @@ import { RfqFixturePage } from './pages/RfqFixturePage'
 import { ReceiptFixturePage } from './pages/ReceiptFixturePage'
 import { SyncConflictFixturePage } from './pages/SyncConflictFixturePage'
 import { ProcurementExecutionPage } from './pages/ProcurementExecutionPage'
+import { AuthorizationManagementPage } from './pages/AuthorizationManagementPage'
 import {
   RequisitionPage,
   type RequisitionContext,
@@ -161,6 +166,104 @@ function App() {
     roles: string[]
     requires_password_change: boolean
   } | null>(null)
+  const [authorizationContext, setAuthorizationContext] =
+    useState<RequisitionContext | null>(null)
+  const [authorizationContexts, setAuthorizationContexts] = useState<
+    AuthorizationContextOption[]
+  >([])
+  const [contextError, setContextError] = useState('')
+  useEffect(() => {
+    if (!session) {
+      setAuthorizationContext(null)
+      return
+    }
+    const invoke = (
+      window as Window & {
+        __TAURI__?: { core?: { invoke?: <T>(command: string) => Promise<T> } }
+      }
+    ).__TAURI__?.core?.invoke
+    if (!invoke) return
+    void Promise.all([
+      invoke<AuthorizationContextOption[]>('list_authorization_contexts'),
+      invoke<
+        Omit<
+          RequisitionContext,
+          | 'displayNo'
+          | 'applicantId'
+          | 'urgency'
+          | 'urgencyReason'
+          | 'orderDate'
+          | 'deliveryAddress'
+          | 'expectedDeliveryDate'
+          | 'notes'
+        >
+      >('get_authorization_context'),
+    ])
+      .then(([contexts, context]) => {
+        setAuthorizationContexts(contexts)
+        setAuthorizationContext({
+          ...context,
+          displayNo: `REQ-${crypto.randomUUID()}`,
+          applicantId: session.user_id,
+          urgency: 'normal',
+          urgencyReason: null,
+          orderDate: new Date().toISOString().slice(0, 10),
+          deliveryAddress: context.site,
+          expectedDeliveryDate: null,
+          notes: null,
+        })
+        setContextError('')
+      })
+      .catch(() => {
+        setAuthorizationContexts([])
+        setAuthorizationContext(null)
+        setContextError('当前账户没有有效的离线授权范围，无法新建采购申请。')
+      })
+  }, [session])
+  const selectAuthorizationContext = (value: string) => {
+    const [projectId, departmentId, teamId] = value.split(':')
+    const invoke = (
+      window as Window & {
+        __TAURI__?: {
+          core?: { invoke?: <T>(command: string, args?: object) => Promise<T> }
+        }
+      }
+    ).__TAURI__?.core?.invoke
+    if (!invoke || !projectId || !departmentId || !teamId || !session) return
+    void invoke<void>('select_authorization_context', {
+      selection: { projectId, departmentId, teamId },
+    })
+      .then(() =>
+        invoke<
+          Omit<
+            RequisitionContext,
+            | 'displayNo'
+            | 'applicantId'
+            | 'urgency'
+            | 'urgencyReason'
+            | 'orderDate'
+            | 'deliveryAddress'
+            | 'expectedDeliveryDate'
+            | 'notes'
+          >
+        >('get_authorization_context'),
+      )
+      .then((context) => {
+        setAuthorizationContext({
+          ...context,
+          displayNo: `REQ-${crypto.randomUUID()}`,
+          applicantId: session.user_id,
+          urgency: 'normal',
+          urgencyReason: null,
+          orderDate: new Date().toISOString().slice(0, 10),
+          deliveryAddress: context.site,
+          expectedDeliveryDate: null,
+          notes: null,
+        })
+        setContextError('')
+      })
+      .catch(() => setContextError('无法切换到所选授权范围。'))
+  }
   const role: UserRole = session?.roles.includes('super_administrator')
     ? 'super_administrator'
     : session?.roles.includes('administrator')
@@ -171,7 +274,7 @@ function App() {
           ? 'viewer'
           : 'engineer'
   const requisitionContext = session
-    ? { ...previewRequisitionContext, applicantId: session.user_id }
+    ? authorizationContext
     : previewRequisitionContext
   const canApprove =
     role === 'purchaser' ||
@@ -223,10 +326,23 @@ function App() {
                   ? '采购申请单'
                   : page === 'execution'
                     ? '采购执行'
-                    : '基础资料管理'
+                    : page === 'authorization'
+                      ? '在线授权管理'
+                      : '基础资料管理'
           }
           role={session ? role : 'purchaser'}
           onNavigate={setPage}
+          authorizationContexts={session ? authorizationContexts : undefined}
+          selectedAuthorizationContext={
+            authorizationContext
+              ? [
+                  authorizationContext.projectId,
+                  authorizationContext.departmentId,
+                  authorizationContext.teamId,
+                ].join(':')
+              : undefined
+          }
+          onSelectAuthorizationContext={selectAuthorizationContext}
           onLock={
             session
               ? () => {
@@ -268,7 +384,7 @@ function App() {
                     }
               }
             />
-          ) : page === 'requisition' ? (
+          ) : page === 'requisition' && requisitionContext ? (
             <RequisitionPage
               api={
                 (
@@ -300,6 +416,10 @@ function App() {
               }
               canApprove={session ? canApprove : true}
             />
+          ) : page === 'requisition' ? (
+            <main className="empty-state" role="alert">
+              {contextError || '正在加载授权范围…'}
+            </main>
           ) : page === 'execution' ? (
             <ProcurementExecutionPage
               api={tauriProcurementExecutionApi}
@@ -307,6 +427,10 @@ function App() {
               supplierOrderApi={tauriSupplierOrderApi}
               rfqApi={tauriRfqApi}
             />
+          ) : page === 'authorization' &&
+            session &&
+            (role === 'administrator' || role === 'super_administrator') ? (
+            <AuthorizationManagementPage />
           ) : (
             <MasterDataPage role={session ? role : 'purchaser'} />
           )}

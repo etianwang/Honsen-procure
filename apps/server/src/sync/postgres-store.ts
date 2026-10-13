@@ -199,11 +199,18 @@ export class PostgresSyncStore implements SyncStore {
   async hasActiveProjectBinding(
     accountId: string,
     projectId: string,
+    departmentId?: string,
+    teamId?: string,
   ): Promise<boolean> {
     const result = await this.pool.query(
-      `SELECT 1 FROM user_project_bindings
-       WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL`,
-      [accountId, projectId],
+      `SELECT 1 FROM user_project_bindings b
+       WHERE b.user_id = $1 AND b.project_id = $2 AND b.deleted_at IS NULL
+         AND ($3::uuid IS NULL OR EXISTS (
+           SELECT 1 FROM user_project_scope_bindings s
+           WHERE s.user_id = b.user_id AND s.project_id = b.project_id
+             AND s.department_id = $3 AND s.team_id = $4 AND s.deleted_at IS NULL
+         ))`,
+      [accountId, projectId, departmentId ?? null, teamId ?? null],
     )
     return result.rowCount === 1
   }

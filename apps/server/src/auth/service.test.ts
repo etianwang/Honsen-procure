@@ -6,6 +6,10 @@ import {
   MasterDataService,
   type MasterDataStore,
 } from '../master-data/service.js'
+import {
+  AuthorizationService,
+  type AuthorizationStore,
+} from '../authorization/service.js'
 
 const account: LoginAccount = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -165,6 +169,103 @@ class FixtureMasterDataStore implements MasterDataStore {
     return rate
   }
 }
+
+class FixtureAuthorizationStore implements AuthorizationStore {
+  revoked = 0
+
+  async listScopes() {
+    return []
+  }
+
+  async saveScope(input: Parameters<AuthorizationStore['saveScope']>[0]) {
+    return {
+      ...input.scope,
+      countryId: '00000000-0000-4000-8000-000000000007',
+      site: 'fixture site',
+      currency: 'XOF',
+      languagePair: 'zh_fr',
+    }
+  }
+
+  async revokeScope(_input: Parameters<AuthorizationStore['revokeScope']>[0]) {
+    this.revoked += 1
+  }
+  async replaceScope(input: Parameters<AuthorizationStore['replaceScope']>[0]) {
+    return {
+      ...input.newScope,
+      countryId: '00000000-0000-4000-8000-000000000007',
+      site: 'fixture site',
+      currency: 'XOF',
+      languagePair: 'zh_fr',
+    }
+  }
+}
+
+describe('authorization API', () => {
+  it('lets an authenticated administrator revoke a scoped binding', async () => {
+    const authStore = new FixtureStore()
+    const authorizationStore = new FixtureAuthorizationStore()
+    const app = createApp(
+      new AuthService(authStore, { verify: async () => true }),
+      undefined,
+      undefined,
+      new AuthorizationService(authorizationStore),
+    )
+    const captcha = (
+      await app.inject({ method: 'GET', url: '/api/auth/captcha' })
+    ).json<{ id: string; question: string }>()
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { 'x-installation-id': '00000000-0000-4000-8000-000000000099' },
+      payload: {
+        username: account.username,
+        password: 'fixture-password',
+        captchaId: captcha.id,
+        captchaAnswer: captchaAnswer(captcha.question),
+      },
+    })
+    const token = login.json<{ accessToken: string }>().accessToken
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/authorization/bindings/00000000-0000-4000-8000-000000000006',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(listed.statusCode).toBe(200)
+    const replaced = await app.inject({
+      method: 'PATCH',
+      url: '/api/authorization/bindings/00000000-0000-4000-8000-000000000006',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        oldScope: {
+          projectId: '00000000-0000-4000-8000-000000000002',
+          departmentId: '00000000-0000-4000-8000-000000000003',
+          teamId: '00000000-0000-4000-8000-000000000004',
+        },
+        newScope: {
+          projectId: '00000000-0000-4000-8000-000000000002',
+          departmentId: '00000000-0000-4000-8000-000000000003',
+          teamId: '00000000-0000-4000-8000-000000000004',
+        },
+      },
+    })
+    expect(replaced.statusCode).toBe(200)
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/authorization/bindings/00000000-0000-4000-8000-000000000006',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        projectId: '00000000-0000-4000-8000-000000000002',
+        departmentId: '00000000-0000-4000-8000-000000000003',
+        teamId: '00000000-0000-4000-8000-000000000004',
+      },
+    })
+
+    expect(response.statusCode).toBe(204)
+    expect(authorizationStore.revoked).toBe(1)
+    await app.close()
+  })
+})
 
 describe('master-data API', () => {
   it('requires an authenticated authorized user to save project defaults', async () => {

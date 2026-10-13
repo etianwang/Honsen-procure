@@ -6,5 +6,6 @@ coverage
 playwright-report
 test-results
 apps/desktop/package-lock.json
+apps/desktop/src-tauri/gen/
 package-lock.json
 **/*.ico
