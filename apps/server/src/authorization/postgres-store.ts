@@ -1,5 +1,9 @@
 import type { Pool } from 'pg'
-import type { AuthorizationScope, AuthorizationStore } from './service.js'
+import {
+  AuthorizationError,
+  type AuthorizationScope,
+  type AuthorizationStore,
+} from './service.js'
 
 export class PostgresAuthorizationStore implements AuthorizationStore {
   constructor(private readonly pool: Pool) {}
@@ -54,7 +58,7 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
         WHERE p.id = $1 AND p.is_active = TRUE AND p.deleted_at IS NULL`,
         [input.scope.projectId, input.scope.departmentId, input.scope.teamId],
       )
-      if (valid.rowCount !== 1) throw new Error('invalid authorization scope')
+      if (valid.rowCount !== 1) throw new AuthorizationError('INVALID_SCOPE')
       await client.query(
         `INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id)
         VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, project_id, department_id, team_id) DO UPDATE SET deleted_at = NULL, updated_at = NOW()`,
