@@ -11,9 +11,13 @@ import type { WorkflowApi } from '../lib/workflow-api'
 import { OrderWorkflowPanel } from './OrderWorkflowPanel'
 
 type Props = {
-  api: Pick<RequisitionApi, 'listRequisitionHistory' | 'getRequisitionDetail'>
+  api: Pick<
+    RequisitionApi,
+    'listRequisitionHistory' | 'getRequisitionDetail' | 'withdrawRequisition'
+  >
   refreshKey: string
   projectId: string
+  applicantId: string
   onCopy: (detail: RequisitionDetail) => void
   workflowApi?: WorkflowApi
   canApprove: boolean
@@ -23,6 +27,7 @@ export function RequisitionHistoryPanel({
   api,
   refreshKey,
   projectId,
+  applicantId,
   onCopy,
   workflowApi,
   canApprove,
@@ -39,6 +44,7 @@ export function RequisitionHistoryPanel({
   const [detail, setDetail] = useState<RequisitionDetail | null>(null)
   const [detailError, setDetailError] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [withdrawError, setWithdrawError] = useState(false)
   const detailRequest = useRef(0)
 
   useEffect(() => {
@@ -89,6 +95,17 @@ export function RequisitionHistoryPanel({
       if (request === detailRequest.current) setDetailError(true)
     } finally {
       if (request === detailRequest.current) setDetailLoading(false)
+    }
+  }
+
+  async function withdrawHistoricalOrder(orderId: string) {
+    setWithdrawError(false)
+    try {
+      await api.withdrawRequisition(orderId)
+      await openDetail(orderId)
+      setRetry((value) => value + 1)
+    } catch {
+      setWithdrawError(true)
     }
   }
 
@@ -192,10 +209,19 @@ export function RequisitionHistoryPanel({
       {detailError ? (
         <Alert type="error" title="详情读取失败或无权查看。" />
       ) : null}
+      {withdrawError ? (
+        <Alert type="error" title="撤回失败：当前状态或授权不允许撤回。" />
+      ) : null}
       {detailLoading ? <p role="status">正在读取详情…</p> : null}
       {detail ? (
         <section aria-label="请购详情">
           <h3>{detail.displayNo}</h3>
+          {detail.workflowStatus === 'pending_confirmation' &&
+          detail.applicantId === applicantId ? (
+            <Button onClick={() => void withdrawHistoricalOrder(detail.id)}>
+              撤回历史申请
+            </Button>
+          ) : null}
           {detail.projectId === projectId &&
           detail.procurementMode &&
           detail.lines.length > 0 ? (
