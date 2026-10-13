@@ -4,6 +4,10 @@ import { z } from 'zod'
 import { AuthenticationError, AuthService } from './auth/service.js'
 import { MasterDataError, MasterDataService } from './master-data/service.js'
 import { SyncService } from './sync/service.js'
+import {
+  AuthorizationError,
+  AuthorizationService,
+} from './authorization/service.js'
 
 const installationHeaderSchema = z.string().uuid()
 const bearerTokenSchema = z.string().regex(/^Bearer (.+)$/)
@@ -12,6 +16,7 @@ export function createApp(
   auth: AuthService,
   masterData?: MasterDataService,
   sync?: SyncService,
+  authorization?: AuthorizationService,
 ) {
   const app = Fastify({ logger: false })
   const sockets = new Set<{
@@ -46,6 +51,42 @@ export function createApp(
       throw error
     }
   })
+
+  if (authorization) {
+    app.get('/api/authorization/context', async (request, reply) => {
+      try {
+        return await authorization.list(await authenticateRequest(request))
+      } catch (error) {
+        if (error instanceof AuthenticationError)
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        throw error
+      }
+    })
+    app.put(
+      '/api/authorization/bindings/:accountId',
+      async (request, reply) => {
+        try {
+          const account = await authenticateRequest(request)
+          const params = z.object({ accountId: z.uuid() }).parse(request.params)
+          return await authorization.save(
+            account,
+            params.accountId,
+            request.body,
+          )
+        } catch (error) {
+          if (error instanceof AuthenticationError)
+            return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+          if (error instanceof AuthorizationError)
+            return reply
+              .status(error.code === 'FORBIDDEN' ? 403 : 400)
+              .send({ code: error.code })
+          if (error instanceof z.ZodError)
+            return reply.status(400).send({ code: 'INVALID_REQUEST' })
+          throw error
+        }
+      },
+    )
+  }
 
   if (masterData) {
     app.put('/api/master-data/project-defaults', async (request, reply) => {
