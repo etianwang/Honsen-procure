@@ -14,8 +14,6 @@ const globallyVisibleEntityTypes = [
   'project_defaults',
   'material_category',
   'material',
-  'supplier',
-  'material_price',
 ]
 
 type StoredEvent = {
@@ -164,6 +162,26 @@ export class PostgresSyncStore implements SyncStore {
          AND (
            $2
            OR entity_type = ANY($3::text[])
+           OR (
+             c.entity_type = 'supplier'
+             AND EXISTS (
+               SELECT 1 FROM user_project_bindings b
+               JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+               WHERE b.user_id = $4 AND b.deleted_at IS NULL
+                 AND p.country_id::text = c.payload_json->>'countryId'
+             )
+           )
+           OR (
+             c.entity_type = 'material_price'
+             AND EXISTS (
+               SELECT 1 FROM sync_entities supplier
+               JOIN user_project_bindings b ON b.user_id = $4 AND b.deleted_at IS NULL
+               JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+               WHERE supplier.entity_type = 'supplier'
+                 AND supplier.entity_id::text = c.payload_json->>'supplierId'
+                 AND p.country_id::text = supplier.payload_json->>'countryId'
+             )
+           )
            OR EXISTS (
              SELECT 1 FROM user_project_bindings b
              WHERE b.user_id = $4
