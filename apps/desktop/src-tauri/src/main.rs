@@ -70,6 +70,7 @@ fn main() {
             commands::issue_local_captcha,
             commands::offline_login,
             commands::lock_session,
+            commands::get_authorization_context,
             commands::authorize_material_mutation,
             commands::confirm_requisition,
             commands::get_approval_policy,

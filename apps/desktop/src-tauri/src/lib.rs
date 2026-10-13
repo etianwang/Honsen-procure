@@ -62,6 +62,19 @@ pub struct AuthenticatedSession {
     pub requires_password_change: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizationContextView {
+    pub country_id: Uuid,
+    pub project_id: Uuid,
+    pub site: String,
+    pub department_id: Uuid,
+    pub team_id: Uuid,
+    pub currency: String,
+    pub primary_currency: String,
+    pub language_pair: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDefaultsInput {
@@ -930,6 +943,11 @@ impl LocalAuthService {
              INSERT OR IGNORE INTO local_exchange_rates (id, from_currency, to_currency, rate_decimal, effective_at, source, version) VALUES ('10000000-0000-4000-8000-000000000008', 'CNY', 'XOF', '76.5', '2026-10-12', 'public_daily', 1);",
         )
         .map_err(|_| AuthError::Database)?;
+        connection.execute(
+            "INSERT OR REPLACE INTO local_authorization_snapshots (account_id, project_id, department_id, team_id, verified_at, expires_at)
+             SELECT id, '10000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000004', ?1, ?2 FROM local_accounts",
+            params![unix_seconds(now), unix_seconds(now + Duration::from_secs(30 * 24 * 60 * 60))],
+        ).map_err(|_| AuthError::Database)?;
         Ok(())
     }
 
@@ -3949,6 +3967,35 @@ impl LocalAuthService {
         Uuid::parse_str(&user_id).map_err(|_| AuthError::Database)
     }
 
+    pub fn authorization_context(
+        &self,
+        now: SystemTime,
+    ) -> Result<AuthorizationContextView, AuthError> {
+        self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.query_row(
+            "SELECT p.country_id, p.id, p.site, d.id, t.id, p.default_currency, p.default_currency, p.default_language_pair
+             FROM local_authorization_snapshots a
+             JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL
+             JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL
+             JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL
+             WHERE a.account_id = ?1 AND a.expires_at >= ?2
+             ORDER BY a.verified_at DESC, p.name, d.name, t.name LIMIT 1",
+            params![account_id.to_string(), unix_seconds(now)],
+            |row| Ok(AuthorizationContextView {
+                country_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                project_id: Uuid::parse_str(&row.get::<_, String>(1)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                site: row.get(2)?,
+                department_id: Uuid::parse_str(&row.get::<_, String>(3)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                team_id: Uuid::parse_str(&row.get::<_, String>(4)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                currency: row.get(5)?,
+                primary_currency: row.get(6)?,
+                language_pair: row.get(7)?,
+            }),
+        ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::Forbidden)
+    }
+
     pub fn lock(&self) -> Result<(), AuthError> {
         self.connection
             .lock()
@@ -4141,6 +4188,14 @@ pub mod commands {
     #[tauri::command]
     pub fn lock_session(auth: State<'_, LocalAuthService>) -> Result<(), CommandError> {
         auth.lock().map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn get_authorization_context(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<super::AuthorizationContextView, CommandError> {
+        auth.authorization_context(SystemTime::now())
+            .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -6278,6 +6333,49 @@ mod tests {
             sync_endpoint_from("https://user:secret@sync.example.test", "push").unwrap_err(),
             AuthError::SyncTransport,
         );
+    }
+
+    #[test]
+    fn authorization_context_requires_a_current_scoped_snapshot() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account = account();
+        service
+            .cache_verified_account(account.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &account.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.authorization_context(now),
+            Err(AuthError::Forbidden)
+        );
+
+        let country_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let department_id = Uuid::new_v4();
+        let team_id = Uuid::new_v4();
+        let connection = service.connection.lock().unwrap();
+        connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, 'AUTH-CI', 'authorization country', 'Africa/Abidjan', 1, 1)", [country_id.to_string()]).unwrap();
+        connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, 'AUTH-PROJECT', 'authorization project', 'authorized site', 'authorization department', 'XOF', 'zh_fr', 1, 1)", params![project_id.to_string(), country_id.to_string()]).unwrap();
+        connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, 'AUTH-DEPT', 'authorization department', 1, 1)", [department_id.to_string()]).unwrap();
+        connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, 'AUTH-TEAM', 'authorization team', 1, 1)", params![team_id.to_string(), department_id.to_string()]).unwrap();
+        connection.execute("INSERT INTO local_authorization_snapshots (account_id, project_id, department_id, team_id, verified_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![account.id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), unix_seconds(now), unix_seconds(now + Duration::from_secs(30 * 24 * 60 * 60))]).unwrap();
+        drop(connection);
+
+        let context = service.authorization_context(now).unwrap();
+        assert_eq!(context.project_id, project_id);
+        assert_eq!(context.country_id, country_id);
+        assert_eq!(context.site, "authorized site");
+        assert_eq!(context.department_id, department_id);
+        assert_eq!(context.team_id, team_id);
     }
 
     #[test]
