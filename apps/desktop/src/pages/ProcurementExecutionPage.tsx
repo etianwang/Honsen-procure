@@ -4,6 +4,7 @@ import { RfqPanel } from '../components/RfqPanel'
 import { SupplierAllocationPanel } from '../components/SupplierAllocationPanel'
 import { SupplierChildTermsPanel } from '../components/SupplierChildTermsPanel'
 import { ReceiptPanel } from '../components/ReceiptPanel'
+import { ProcurementExpenditurePanel } from '../components/ProcurementExpenditurePanel'
 import type { SupplierView } from '../lib/catalog-api'
 import type {
   ProcurementExecutionApi,
@@ -12,6 +13,7 @@ import type {
 import type { RfqApi } from '../lib/rfq-api'
 import type { SupplierOrderApi } from '../lib/supplier-order-api'
 import { tauriReceiptApi } from '../lib/receipt-api'
+import { tauriProcurementExpenditureApi } from '../lib/procurement-expenditure-api'
 
 type Props = {
   api: ProcurementExecutionApi
@@ -144,6 +146,23 @@ export function ProcurementExecutionPage({
               }))}
             />
           ) : null}
+          {selected.procurementMode === 'honsen_self_purchase' &&
+          selected.children.length === 0 &&
+          [
+            'executing',
+            'receiving',
+            'completed',
+            'completed_with_conditions',
+          ].includes(selected.workflowStatus) ? (
+            <ProcurementExpenditurePanel
+              key={`expenditure-${selected.id}`}
+              api={tauriProcurementExpenditureApi}
+              orderId={selected.id}
+              handlerId={receiverId}
+              primaryCurrency={selected.primaryCurrency}
+              suppliers={suppliers}
+            />
+          ) : null}
           {selected.children.length ? (
             selected.children.map((child) => (
               <section
@@ -170,6 +189,21 @@ export function ProcurementExecutionPage({
                     orderedQuantity: line.quantity,
                   }))}
                 />
+                {[
+                  'sent',
+                  'receiving',
+                  'completed',
+                  'completed_with_conditions',
+                ].includes(child.workflowStatus) ? (
+                  <ProcurementExpenditurePanel
+                    key={`expenditure-${child.id}`}
+                    api={tauriProcurementExpenditureApi}
+                    orderId={child.id}
+                    handlerId={receiverId}
+                    primaryCurrency={child.currency}
+                    suppliers={suppliers}
+                  />
+                ) : null}
               </section>
             ))
           ) : ['confirmed', 'approved'].includes(selected.workflowStatus) ? (

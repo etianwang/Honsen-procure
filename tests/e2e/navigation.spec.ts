@@ -1184,39 +1184,72 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   await page.addInitScript(() => {
     let status = 'confirmed'
     let receiptCount = 0
+    const expenditures: Record<string, unknown>[] = []
     const orderId = '00000000-0000-4000-8000-000000000811'
     Object.assign(window, {
       __TAURI__: {
         core: {
           invoke(
             command: string,
-            args?: { orderId?: string; input?: { orderId: string } },
+            args?: {
+              orderId?: string
+              input?: Record<string, unknown>
+              expenditureId?: string
+              reversalId?: string
+              reason?: string
+            },
           ) {
             if (command === 'list_confirmed_procurement_orders')
-              return Promise.resolve(
-                status === 'completed'
-                  ? []
-                  : [
-                      {
-                        id: orderId,
-                        displayNo: 'HONSEN-MARKET-1',
-                        primaryCurrency: 'XOF',
-                        procurementMode: 'honsen_self_purchase',
-                        workflowStatus: status,
-                        children: [],
-                        lines: [
-                          {
-                            id: '00000000-0000-4000-8000-000000000812',
-                            materialName: 'market cement',
-                            quantity: '2',
-                            unit: '袋',
-                            currency: 'XOF',
-                          },
-                        ],
-                      },
-                    ],
-              )
+              return Promise.resolve([
+                {
+                  id: orderId,
+                  displayNo: 'HONSEN-MARKET-1',
+                  primaryCurrency: 'XOF',
+                  procurementMode: 'honsen_self_purchase',
+                  workflowStatus: status,
+                  children: [],
+                  lines: [
+                    {
+                      id: '00000000-0000-4000-8000-000000000812',
+                      materialName: 'market cement',
+                      quantity: '2',
+                      unit: '袋',
+                      currency: 'XOF',
+                    },
+                  ],
+                },
+              ])
             if (command === 'list_suppliers') return Promise.resolve([])
+            if (command === 'list_procurement_expenditures')
+              return Promise.resolve([...expenditures])
+            if (command === 'record_procurement_expenditure') {
+              if (args?.input?.orderId !== orderId)
+                return Promise.reject(new Error('wrong order'))
+              const value = {
+                ...args.input,
+                status: 'recorded',
+                createdBy: '00000000-0000-4000-8000-000000000899',
+                createdAt: 1,
+              }
+              expenditures.push(value)
+              return Promise.resolve(value)
+            }
+            if (command === 'reverse_procurement_expenditure') {
+              const prior = expenditures.find(
+                (item) => item.id === args?.expenditureId,
+              )
+              if (!prior || !args?.reason)
+                return Promise.reject(new Error('invalid reversal'))
+              const value = {
+                ...prior,
+                id: args.reversalId,
+                status: 'reversed',
+                correctsExpenditureId: args.expenditureId,
+                correctionReason: args.reason,
+              }
+              expenditures.push(value)
+              return Promise.resolve(value)
+            }
             if (command === 'start_honsen_market_execution') {
               if (args?.orderId !== orderId)
                 return Promise.reject(new Error('wrong order'))
@@ -1247,12 +1280,35 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   await expect(page.getByRole('button', { name: '开始市场直采' })).toBeVisible()
   await page.getByRole('button', { name: '开始市场直采' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('采购执行中')
+  await page.getByLabel('支出收款方').fill('fixture market payee')
+  await page.getByLabel('支出金额（最小货币单位）').fill('1200')
+  await page.getByRole('button', { name: '登记实际支出' }).click()
+  await expect(
+    page.getByText('实际采购支出已登记', { exact: false }),
+  ).toBeVisible()
+  await page.getByLabel('支出金额（最小货币单位）').fill('300')
+  await page.getByRole('button', { name: '登记实际支出' }).click()
+  await expect(
+    page.getByText('fixture market payee', { exact: false }),
+  ).toHaveCount(2)
+  const firstExpense = page
+    .getByRole('listitem')
+    .filter({ hasText: '1200 XOF' })
+  await firstExpense
+    .getByLabel('冲销原因 fixture market payee')
+    .fill('fixture correction')
+  await firstExpense.getByRole('button', { name: '冲销该支出' }).click()
+  await expect(page.getByText('冲销记录已追加', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: '以新记录替换' })).toBeVisible()
   await page.getByLabel('market cement 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('收货中')
   await page.getByLabel('market cement 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
-  await expect(page.getByText('没有可执行的已确认采购申请')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'HONSEN-MARKET-1' }),
+  ).toBeVisible()
+  await expect(page.getByText('Honsen 实际采购支出')).toBeVisible()
   await expect(browserErrors).toEqual([])
 })
 

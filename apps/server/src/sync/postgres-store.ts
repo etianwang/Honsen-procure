@@ -63,6 +63,41 @@ export class PostgresSyncStore implements SyncStore {
       )
       const current = entity.rows[0]
       const currentVersion = current ? Number(current.version) : 0
+      if (input.event.entityType === 'procurement_expenditure') {
+        const correctsId = input.event.payload.correctsExpenditureId
+        if (typeof correctsId === 'string') {
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+            `procurement_expenditure_correction:${correctsId}`,
+          ])
+        }
+        const competing =
+          typeof correctsId === 'string'
+            ? await client.query<StoredEntity>(
+                `SELECT version, payload_json FROM sync_entities
+                 WHERE entity_type = 'procurement_expenditure'
+                   AND is_deleted = FALSE
+                   AND payload_json->>'correctsExpenditureId' = $1
+                   AND payload_json->>'status' = $2
+                 LIMIT 1`,
+                [correctsId, input.event.payload.status],
+              )
+            : null
+        if (current || competing?.rows[0]) {
+          const result = {
+            eventId: input.event.eventId,
+            status: 'conflict' as const,
+            serverVersion: currentVersion,
+          }
+          await this.recordConflict(
+            client,
+            input,
+            current ?? competing?.rows[0],
+            result,
+          )
+          await client.query('COMMIT')
+          return result
+        }
+      }
       if (currentVersion !== input.event.baseVersion) {
         const result = {
           eventId: input.event.eventId,

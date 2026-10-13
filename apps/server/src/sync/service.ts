@@ -8,10 +8,37 @@ import {
   type SyncPushResponse,
 } from '@honsen/shared'
 import type { Role } from '@honsen/shared'
+import { z } from 'zod'
 import type { SyncActor, SyncStore } from './types.js'
 
 const procurementRoles: Role[] = ['purchaser', 'administrator']
 const referenceMasterDataTypes = ['country', 'project', 'site'] as const
+const expenditurePayloadSchema = z.object({
+  id: z.uuid(),
+  orderId: z.uuid(),
+  projectId: z.uuid(),
+  receiptId: z.uuid().nullable(),
+  counterpartyType: z.enum(['registered_supplier', 'market_casual']),
+  supplierId: z.uuid().nullable(),
+  payeeName: z.string().trim().min(1).max(255),
+  counterpartySnapshot: z
+    .object({ id: z.uuid(), name: z.string().min(1), countryId: z.uuid() })
+    .nullable(),
+  currency: z.enum(['XOF', 'XAF', 'CNY', 'USD', 'EUR', 'ETB']),
+  amountMinor: z
+    .string()
+    .regex(/^[1-9][0-9]*$/)
+    .refine((amount) => BigInt(amount) <= 9223372036854775807n),
+  paymentDate: z.iso.date(),
+  paymentMethod: z.enum(['cash', 'bank_transfer', 'mobile_payment', 'other']),
+  paymentHandlerId: z.uuid(),
+  notes: z.string().max(2000).nullable(),
+  status: z.enum(['recorded', 'reversed']),
+  correctsExpenditureId: z.uuid().nullable(),
+  correctionReason: z.string().trim().min(1).max(1000).nullable(),
+  createdBy: z.uuid(),
+  createdAt: z.number().int().nonnegative(),
+})
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
@@ -49,6 +76,9 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'procurement_expenditure') {
+      return this.canWriteExpenditure(actor, event)
+    }
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
     if (
@@ -115,6 +145,154 @@ export class SyncService {
       )
     }
     return stringField(event.payload, 'receiverId') === actor.id
+  }
+
+  private async canWriteExpenditure(
+    actor: SyncActor,
+    event: SyncEvent,
+  ): Promise<boolean> {
+    if (
+      event.operation !== 'upsert' ||
+      !actor.roles.some((role) => procurementRoles.includes(role))
+    )
+      return false
+    const parsed = expenditurePayloadSchema.safeParse(event.payload)
+    if (
+      !parsed.success ||
+      parsed.data.id !== event.entityId ||
+      parsed.data.createdBy !== actor.id
+    )
+      return false
+    const value = parsed.data
+    if (
+      (value.counterpartyType === 'market_casual') !==
+      (value.supplierId === null)
+    )
+      return false
+    if (value.supplierId === null && value.counterpartySnapshot !== null)
+      return false
+    if (
+      (value.correctsExpenditureId === null) !==
+      (value.correctionReason === null)
+    )
+      return false
+    if (value.status === 'reversed' && value.correctsExpenditureId === null)
+      return false
+    const order = await this.store.getEntityPayload(
+      'purchase_order',
+      value.orderId,
+    )
+    if (!order || stringField(order, 'projectId') !== value.projectId)
+      return false
+    const parentId = stringField(order, 'parentOrderId')
+    const parent = parentId
+      ? await this.store.getEntityPayload('purchase_order', parentId)
+      : null
+    if (
+      parentId &&
+      (!parent || stringField(parent, 'projectId') !== value.projectId)
+    )
+      return false
+    const mode =
+      stringField(order, 'procurementMode') ??
+      (parent ? stringField(parent, 'procurementMode') : null)
+    if (mode !== 'honsen_self_purchase') return false
+    const workflowStatus = stringField(order, 'workflowStatus')
+    if (
+      !(parentId === null
+        ? [
+            'executing',
+            'receiving',
+            'completed',
+            'completed_with_conditions',
+          ].includes(workflowStatus ?? '')
+        : [
+            'sent',
+            'receiving',
+            'completed',
+            'completed_with_conditions',
+          ].includes(workflowStatus ?? ''))
+    )
+      return false
+    const departmentId = stringField(order, 'departmentId')
+    const teamId = stringField(order, 'teamId')
+    if (
+      !departmentId ||
+      !teamId ||
+      !(await this.store.hasActiveProjectBinding(
+        actor.id,
+        value.projectId,
+        departmentId,
+        teamId,
+      ))
+    )
+      return false
+    if (value.receiptId !== null) {
+      const receipt = await this.store.getEntityPayload(
+        'receipt',
+        value.receiptId,
+      )
+      if (!receipt || stringField(receipt, 'orderId') !== value.orderId)
+        return false
+    }
+    let prior: Record<string, unknown> | null = null
+    if (value.correctsExpenditureId !== null) {
+      prior = await this.store.getEntityPayload(
+        'procurement_expenditure',
+        value.correctsExpenditureId,
+      )
+      if (
+        !prior ||
+        stringField(prior, 'orderId') !== value.orderId ||
+        stringField(prior, 'status') === value.status
+      )
+        return false
+    }
+    if (value.status === 'reversed') {
+      const copiedFields = [
+        'receiptId',
+        'counterpartyType',
+        'supplierId',
+        'payeeName',
+        'currency',
+        'amountMinor',
+        'paymentDate',
+        'paymentMethod',
+        'paymentHandlerId',
+        'notes',
+      ] as const
+      if (
+        !prior ||
+        copiedFields.some((field) => prior?.[field] !== value[field])
+      )
+        return false
+      const priorSnapshot =
+        expenditurePayloadSchema.shape.counterpartySnapshot.safeParse(
+          prior.counterpartySnapshot,
+        )
+      if (
+        !priorSnapshot.success ||
+        priorSnapshot.data?.id !== value.counterpartySnapshot?.id ||
+        priorSnapshot.data?.name !== value.counterpartySnapshot?.name ||
+        priorSnapshot.data?.countryId !== value.counterpartySnapshot?.countryId
+      )
+        return false
+    } else if (value.supplierId !== null) {
+      const supplier = await this.store.getEntityPayload(
+        'supplier',
+        value.supplierId,
+      )
+      if (
+        !supplier ||
+        stringField(supplier, 'countryId') !==
+          stringField(order, 'countryId') ||
+        value.counterpartySnapshot?.id !== value.supplierId ||
+        value.counterpartySnapshot.name !== value.payeeName ||
+        value.counterpartySnapshot.countryId !== stringField(order, 'countryId')
+      )
+        return false
+    }
+    return true
   }
 
   private async canChangeProjectCountry(event: SyncEvent): Promise<boolean> {
