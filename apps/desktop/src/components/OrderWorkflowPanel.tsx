@@ -11,6 +11,8 @@ type OrderWorkflowPanelProps = {
   api: WorkflowApi
   orderId: string
   canApprove: boolean
+  workflowStatus?: string
+  onChanged?: () => void
   onRejected?: () => void
 }
 
@@ -18,9 +20,11 @@ export function OrderWorkflowPanel({
   api,
   orderId,
   canApprove,
+  workflowStatus = 'pending_confirmation',
+  onChanged,
   onRejected,
 }: OrderWorkflowPanelProps) {
-  const [status, setStatus] = useState('待确认')
+  const [status, setStatus] = useState(workflowStatus)
   const [reason, setReason] = useState('')
   const [comment, setComment] = useState('')
   const [comments, setComments] = useState<OrderCommentView[]>([])
@@ -41,8 +45,9 @@ export function OrderWorkflowPanel({
   async function confirm() {
     try {
       await api.confirmRequisition(orderId)
-      setStatus('已确认')
+      setStatus('confirmed')
       setMessage('订单已确认，审批记录已写入审计。')
+      onChanged?.()
     } catch {
       setMessage('确认失败：不能确认自己的订单或当前状态不允许确认。')
     }
@@ -55,9 +60,10 @@ export function OrderWorkflowPanel({
     }
     try {
       await api.rejectRequisition(orderId, reason.trim())
-      setStatus('已驳回')
+      setStatus('rejected')
       setMessage('订单已驳回，申请人可修改后重新提交。')
       onRejected?.()
+      onChanged?.()
     } catch {
       setMessage('驳回失败，请稍后重试。')
     }
@@ -80,10 +86,19 @@ export function OrderWorkflowPanel({
   return (
     <Card className="card" title="审批与内部留言">
       <p>
-        当前状态： <strong aria-label="审批状态">{status}</strong>
+        当前状态：{' '}
+        <strong aria-label="审批状态">
+          {status === 'pending_confirmation'
+            ? '待确认'
+            : status === 'confirmed'
+              ? '已确认'
+              : status === 'rejected'
+                ? '已驳回'
+                : status}
+        </strong>
       </p>
       {message ? <Alert title={message} type="info" showIcon /> : null}
-      {canApprove && status === '待确认' ? (
+      {canApprove && status === 'pending_confirmation' ? (
         <Space className="workflow-actions" wrap>
           <Button
             type="primary"

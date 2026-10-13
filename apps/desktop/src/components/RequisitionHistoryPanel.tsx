@@ -7,12 +7,16 @@ import type {
   RequisitionHistoryFilter,
   RequisitionHistoryPage,
 } from '../lib/requisition-api'
+import type { WorkflowApi } from '../lib/workflow-api'
+import { OrderWorkflowPanel } from './OrderWorkflowPanel'
 
 type Props = {
   api: Pick<RequisitionApi, 'listRequisitionHistory' | 'getRequisitionDetail'>
   refreshKey: string
   projectId: string
   onCopy: (detail: RequisitionDetail) => void
+  workflowApi?: WorkflowApi
+  canApprove: boolean
 }
 
 export function RequisitionHistoryPanel({
@@ -20,6 +24,8 @@ export function RequisitionHistoryPanel({
   refreshKey,
   projectId,
   onCopy,
+  workflowApi,
+  canApprove,
 }: Props) {
   const [records, setRecords] = useState<RequisitionHistoryPage['records']>([])
   const [cursor, setCursor] = useState<RequisitionHistoryCursor | null>(null)
@@ -246,6 +252,19 @@ export function RequisitionHistoryPanel({
           ) : (
             <p>无审计记录</p>
           )}
+          {workflowApi ? (
+            <OrderWorkflowPanel
+              key={`${detail.id}:${detail.workflowStatus}`}
+              api={workflowApi}
+              orderId={detail.id}
+              workflowStatus={detail.workflowStatus}
+              canApprove={canApprove}
+              onChanged={() => {
+                setRetry((value) => value + 1)
+                void openDetail(detail.id)
+              }}
+            />
+          ) : null}
         </section>
       ) : null}
     </Card>

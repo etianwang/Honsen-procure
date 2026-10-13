@@ -3497,6 +3497,16 @@ impl LocalAuthService {
                 params![order_id.to_string(), unix_seconds(now)],
             )
             .map_err(|_| AuthError::Database)?;
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            "submitted",
+            None,
+            Some("draft"),
+            Some("pending_confirmation"),
+            now,
+        )?;
         let payload = order_sync_payload(&transaction, order_id)?;
         insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
@@ -8523,6 +8533,13 @@ mod tests {
             .unwrap();
         assert_eq!(draft_status, "pending_confirmation");
         drop(connection);
+        assert!(
+            service
+                .list_order_audits(draft_order_id, now)
+                .unwrap()
+                .iter()
+                .any(|audit| audit.action == "submitted")
+        );
         service.withdraw_requisition(draft_order_id, now).unwrap();
         assert!(
             service

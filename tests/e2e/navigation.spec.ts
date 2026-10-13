@@ -1532,6 +1532,7 @@ test('authenticated desktop switches between cached authorization scopes', async
       },
     ]
     let selected = contexts[0]
+    let historicalStatus = 'pending_confirmation'
     Object.assign(window, {
       __TAURI_INTERNALS__: {},
       __TAURI__: {
@@ -1554,7 +1555,7 @@ test('authenticated desktop switches between cached authorization scopes', async
               return Promise.resolve({
                 user_id: '00000000-0000-4000-8000-000000000007',
                 username: 'fixture',
-                roles: ['engineer'],
+                roles: ['purchaser'],
                 requires_password_change: false,
               })
             if (command === 'list_authorization_contexts')
@@ -1579,7 +1580,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                           displayNo: 'REQ-HISTORY-1',
                           projectName: '项目乙',
                           site: '乙工地',
-                          workflowStatus: 'confirmed',
+                          workflowStatus: historicalStatus,
                           procurementMode: 'honsen_self_purchase',
                           primaryCurrency: 'XOF',
                           totalMinor: '1200',
@@ -1595,7 +1596,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                 projectName: '项目乙',
                 projectId: '00000000-0000-4000-8000-000000000005',
                 site: '乙工地',
-                workflowStatus: 'confirmed',
+                workflowStatus: historicalStatus,
                 procurementMode: 'honsen_self_purchase',
                 orderDate: '2026-10-13',
                 deliveryAddress: '乙工地',
@@ -1631,6 +1632,15 @@ test('authenticated desktop switches between cached authorization scopes', async
               })
             if (command === 'save_requisition_draft')
               return Promise.resolve({ totalMinor: '0' })
+            if (
+              command === 'list_order_comments' ||
+              command === 'list_order_audits'
+            )
+              return Promise.resolve([])
+            if (command === 'confirm_requisition') {
+              historicalStatus = 'confirmed'
+              return Promise.resolve()
+            }
             return Promise.reject(new Error(`unexpected command: ${command}`))
           },
         },
@@ -1660,6 +1670,10 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     '测试电缆',
   )
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    'pending_confirmation',
+  )
+  await page.getByRole('button', { name: '确认订单' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     'confirmed',
   )

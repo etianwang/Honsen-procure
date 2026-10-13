@@ -818,6 +818,8 @@ export function RequisitionPage({
         refreshKey={status}
         projectId={context.projectId}
         onCopy={copyFromHistory}
+        workflowApi={workflowApi}
+        canApprove={canApprove}
       />
     </>
   )
