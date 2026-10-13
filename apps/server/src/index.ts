@@ -7,6 +7,8 @@ import { PostgresMasterDataStore } from './master-data/postgres-store.js'
 import { MasterDataService } from './master-data/service.js'
 import { PostgresSyncStore } from './sync/postgres-store.js'
 import { SyncService } from './sync/service.js'
+import { PostgresAuthorizationStore } from './authorization/postgres-store.js'
+import { AuthorizationService } from './authorization/service.js'
 
 const databaseUrl = process.env.POSTGRES_URL
 if (!databaseUrl)
@@ -20,6 +22,7 @@ const app = createApp(
   }),
   new MasterDataService(new PostgresMasterDataStore(pool)),
   new SyncService(new PostgresSyncStore(pool)),
+  new AuthorizationService(new PostgresAuthorizationStore(pool)),
 )
 
 app.addHook('onClose', async () => pool.end())
