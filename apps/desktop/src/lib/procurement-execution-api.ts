@@ -17,12 +17,15 @@ export type ProcurementExecutionOrder = {
   id: string
   displayNo: string
   primaryCurrency: string
+  procurementMode: 'honsen_self_purchase' | 'owner_self_purchase' | null
+  workflowStatus: string
   lines: ProcurementExecutionLine[]
   children: ProcurementExecutionChild[]
 }
 
 export type ProcurementExecutionApi = {
   listConfirmedProcurementOrders(): Promise<ProcurementExecutionOrder[]>
+  startHonsenMarketExecution(orderId: string): Promise<void>
 }
 
 type TauriInvoke = <T>(command: string, args?: object) => Promise<T>
@@ -40,4 +43,6 @@ export const tauriProcurementExecutionApi: ProcurementExecutionApi = {
     tauriInvoke()<ProcurementExecutionOrder[]>(
       'list_confirmed_procurement_orders',
     ),
+  startHonsenMarketExecution: (orderId) =>
+    tauriInvoke()<void>('start_honsen_market_execution', { orderId }),
 }
