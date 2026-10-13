@@ -11,10 +11,12 @@ const projectId = '00000000-0000-4000-8000-000000000002'
 class FixtureStore implements SyncStore {
   pushed = 0
   bound = true
+  projectInUse = false
   order: Record<string, unknown> | null = {
     applicantId: engineer.id,
     projectId,
   }
+  project: Record<string, unknown> | null = null
 
   async pushEvent(input: Parameters<SyncStore['pushEvent']>[0]) {
     this.pushed += 1
@@ -33,8 +35,12 @@ class FixtureStore implements SyncStore {
     return this.bound
   }
 
-  async getEntityPayload() {
-    return this.order
+  async hasProjectBusinessUse() {
+    return this.projectInUse
+  }
+
+  async getEntityPayload(entityType: string) {
+    return entityType === 'project' ? this.project : this.order
   }
 }
 
@@ -119,6 +125,93 @@ describe('SyncService', () => {
         },
       ],
     })
+    expect(response.results[0]).toMatchObject({ status: 'validation_error' })
+    expect(store.pushed).toBe(0)
+  })
+
+  it('rejects an invalid country sync payload without mutation', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const response = await service.push(
+      { id: engineer.id, roles: ['administrator'] },
+      {
+        deviceId: '00000000-0000-4000-8000-000000000005',
+        events: [
+          {
+            eventId: '00000000-0000-4000-8000-000000000009',
+            entityType: 'country',
+            entityId: '00000000-0000-4000-8000-000000000010',
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: { name: 'missing required fields' },
+          },
+        ],
+      },
+    )
+    expect(response.results[0]).toMatchObject({ status: 'validation_error' })
+    expect(store.pushed).toBe(0)
+  })
+
+  it('accepts the snake_case country payload emitted by the desktop outbox', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const response = await service.push(
+      { id: engineer.id, roles: ['administrator'] },
+      {
+        deviceId: '00000000-0000-4000-8000-000000000005',
+        events: [
+          {
+            eventId: '00000000-0000-4000-8000-000000000009',
+            entityType: 'country',
+            entityId: '00000000-0000-4000-8000-000000000010',
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: {
+              kind: 'country',
+              business_code: 'SN',
+              name: 'fixture country',
+              time_zone: 'Africa/Dakar',
+              is_active: true,
+              version: 1,
+            },
+          },
+        ],
+      },
+    )
+    expect(response.results[0]).toMatchObject({ status: 'accepted' })
+    expect(store.pushed).toBe(1)
+  })
+
+  it('rejects changing a used project country without mutation', async () => {
+    const store = new FixtureStore()
+    store.projectInUse = true
+    store.project = { country_id: '00000000-0000-4000-8000-000000000011' }
+    const service = new SyncService(store)
+    const response = await service.push(
+      { id: engineer.id, roles: ['administrator'] },
+      {
+        deviceId: '00000000-0000-4000-8000-000000000005',
+        events: [
+          {
+            eventId: '00000000-0000-4000-8000-000000000009',
+            entityType: 'project',
+            entityId: '00000000-0000-4000-8000-000000000010',
+            operation: 'upsert',
+            baseVersion: 1,
+            payload: {
+              business_code: 'P',
+              name: 'project',
+              country_id: '00000000-0000-4000-8000-000000000012',
+              site: 'site',
+              department_name: 'department',
+              default_currency: 'XOF',
+              default_language_pair: 'zh_fr',
+              is_active: true,
+            },
+          },
+        ],
+      },
+    )
     expect(response.results[0]).toMatchObject({ status: 'validation_error' })
     expect(store.pushed).toBe(0)
   })

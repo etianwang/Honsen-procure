@@ -57,6 +57,10 @@ class SyncFixture implements SyncStore {
     return true
   }
 
+  async hasProjectBusinessUse() {
+    return false
+  }
+
   async getEntityPayload() {
     return null
   }

@@ -1,4 +1,5 @@
 import {
+  referenceMasterDataSchema,
   syncPullQuerySchema,
   syncPushRequestSchema,
   type SyncEvent,
@@ -10,6 +11,7 @@ import type { Role } from '@honsen/shared'
 import type { SyncActor, SyncStore } from './types.js'
 
 const procurementRoles: Role[] = ['purchaser', 'administrator']
+const referenceMasterDataTypes = ['country', 'project', 'site'] as const
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
@@ -49,6 +51,27 @@ export class SyncService {
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
+    if (
+      referenceMasterDataTypes.includes(
+        event.entityType as (typeof referenceMasterDataTypes)[number],
+      )
+    ) {
+      if (
+        event.entityType === 'project' &&
+        !(await this.canChangeProjectCountry(event))
+      ) {
+        return false
+      }
+      return (
+        event.operation === 'upsert' &&
+        actor.roles.some((role) => procurementRoles.includes(role)) &&
+        referenceMasterDataSchema.safeParse({
+          ...referencePayload(event.payload),
+          kind: event.entityType,
+          id: event.entityId,
+        }).success
+      )
+    }
     if (actor.roles.some((role) => procurementRoles.includes(role))) return true
     if (!actor.roles.includes('engineer')) return false
     if (
@@ -84,6 +107,42 @@ export class SyncService {
       )
     }
     return stringField(event.payload, 'receiverId') === actor.id
+  }
+
+  private async canChangeProjectCountry(event: SyncEvent): Promise<boolean> {
+    const previous = await this.store.getEntityPayload(
+      'project',
+      event.entityId,
+    )
+    const nextCountryId = stringField(
+      referencePayload(event.payload),
+      'countryId',
+    )
+    const previousCountryId = previous
+      ? stringField(referencePayload(previous), 'countryId')
+      : null
+    return (
+      previousCountryId === null ||
+      previousCountryId === nextCountryId ||
+      !(await this.store.hasProjectBusinessUse(event.entityId))
+    )
+  }
+}
+
+function referencePayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...payload,
+    businessCode: payload.businessCode ?? payload.business_code,
+    timeZone: payload.timeZone ?? payload.time_zone,
+    countryId: payload.countryId ?? payload.country_id,
+    departmentName: payload.departmentName ?? payload.department_name,
+    defaultCurrency: payload.defaultCurrency ?? payload.default_currency,
+    defaultLanguagePair:
+      payload.defaultLanguagePair ?? payload.default_language_pair,
+    projectId: payload.projectId ?? payload.project_id,
+    isActive: payload.isActive ?? payload.is_active,
   }
 }
 

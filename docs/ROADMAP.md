@@ -87,7 +87,7 @@ Obtain authority for T04 authorized initial-record acceptance, then complete the
 
 ## Approved / planned: Admin Master Data Management
 
-**Status: APPROVED / PLANNED — not implemented; not part of OPA-2 completion.** This independent phase will add the administrator UI and audited workflows for dynamic country, project, site, department, team, supplier, quotation, material/category/unit, tax and exchange-rate administration. It must allow a future country/project such as SN without Seed edits or direct SQL, preserve global materials, enforce country-scoped suppliers/quotations, and stop rather than delete referenced master data.
+**Status: COMPLETED — not part of OPA-2 completion.** The approved administrator UI and audited offline workflows for dynamic country, project and site records are complete. Departments, teams, suppliers, quotations, materials/categories/units, tax templates and exchange rates remain out of scope. The slice supports creating a future country/project without Seed edits or direct SQL, preserves global materials, retains country-scoped supplier/quotation enforcement, and stops rather than deletes referenced master data.
 
 ## Original foundation instruction (retained; not current progress)
 

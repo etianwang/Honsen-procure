@@ -13,9 +13,44 @@ export type ProjectDefaultsView = {
   taxTemplateName: string | null
 }
 
+export type ReferenceMasterDataView =
+  | {
+      kind: 'country'
+      id: string
+      business_code: string
+      name: string
+      time_zone: string
+      is_active: boolean
+      version: number
+    }
+  | {
+      kind: 'project'
+      id: string
+      country_id: string
+      business_code: string
+      name: string
+      site: string
+      department_name: string
+      default_currency: 'XOF' | 'CNY' | 'USD' | 'EUR'
+      default_language_pair: 'zh_fr' | 'zh_en'
+      is_active: boolean
+      version: number
+    }
+  | {
+      kind: 'site'
+      id: string
+      project_id: string
+      business_code: string
+      name: string
+      is_active: boolean
+      version: number
+    }
+
 export type MasterDataApi = {
   listProjectDefaults(): Promise<ProjectDefaultsView[]>
   saveProjectDefaults(defaults: ProjectDefaults): Promise<void>
+  listReferenceMasterData(): Promise<ReferenceMasterDataView[]>
+  saveReferenceMasterData(record: ReferenceMasterDataView): Promise<void>
 }
 
 type TauriInvoke = <T>(command: string, args?: object) => Promise<T>
@@ -35,4 +70,8 @@ export const tauriMasterDataApi: MasterDataApi = {
     tauriInvoke()<ProjectDefaultsView[]>('list_project_defaults'),
   saveProjectDefaults: (defaults) =>
     tauriInvoke()<void>('save_project_defaults', { defaults }),
+  listReferenceMasterData: () =>
+    tauriInvoke()<ReferenceMasterDataView[]>('list_reference_master_data'),
+  saveReferenceMasterData: (record) =>
+    tauriInvoke()<void>('save_reference_master_data', { record }),
 }

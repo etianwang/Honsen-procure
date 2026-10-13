@@ -91,6 +91,7 @@ fn main() {
             commands::save_project_defaults,
             commands::list_project_defaults,
             commands::save_reference_master_data,
+            commands::list_reference_master_data,
             commands::save_tax_template,
             commands::save_exchange_rate
         ])

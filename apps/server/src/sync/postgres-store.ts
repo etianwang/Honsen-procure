@@ -208,6 +208,17 @@ export class PostgresSyncStore implements SyncStore {
     return result.rowCount === 1
   }
 
+  async hasProjectBusinessUse(projectId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM sync_entities
+       WHERE entity_type = 'purchase_order' AND is_deleted = FALSE
+         AND (payload_json->>'projectId' = $1 OR payload_json->>'project_id' = $1)
+       LIMIT 1`,
+      [projectId],
+    )
+    return result.rowCount === 1
+  }
+
   async getEntityPayload(
     entityType: string,
     entityId: string,

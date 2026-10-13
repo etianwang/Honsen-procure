@@ -223,7 +223,7 @@ function App() {
                   ? '采购申请单'
                   : page === 'execution'
                     ? '采购执行'
-                    : '项目默认设置'
+                    : '基础资料管理'
           }
           role={session ? role : 'purchaser'}
           onNavigate={setPage}

@@ -25,6 +25,7 @@ export type SyncStore = {
     accountId: string,
     projectId: string,
   ): Promise<boolean>
+  hasProjectBusinessUse(projectId: string): Promise<boolean>
   getEntityPayload(
     entityType: string,
     entityId: string,

@@ -486,6 +486,49 @@ test('administrator changes project defaults and sees the selected project value
   await expect(browserErrors).toEqual([])
 })
 
+test('administrator master-data fixture adds a country', async ({ page }) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByRole('tab', { name: '国家' }).click()
+  await page.getByLabel('国家代码').fill('SN')
+  await page.getByLabel('国家名称', { exact: true }).fill('塞内加尔')
+  await page.getByLabel('国家时区', { exact: true }).fill('Africa/Dakar')
+  await page.getByRole('button', { name: '新增国家' }).click()
+  await expect(page.getByText('基础资料已保存；等待同步确认')).toBeVisible()
+  await expect(page.getByLabel('编辑国家名称-SN')).toHaveValue('塞内加尔')
+  await expect(browserErrors).toEqual([])
+})
+
+test('administrator master-data fixture creates a project and a site', async ({
+  page,
+}) => {
+  await page.goto('/?test=master-data')
+  await page.getByRole('tab', { name: '项目', exact: true }).click()
+  await page.getByLabel('项目代码').fill('SN-P1')
+  await page.getByLabel('项目名称', { exact: true }).fill('塞内加尔项目')
+  await page.getByLabel('项目国家').click()
+  await page.getByText('科特迪瓦', { exact: true }).last().click()
+  await page.getByLabel('项目默认站点').fill('达喀尔')
+  await page.getByLabel('项目部门').fill('项目部')
+  await page.getByRole('button', { name: '新增项目' }).click()
+  await expect(page.getByLabel('编辑项目名称-SN-P1')).toHaveValue(
+    '塞内加尔项目',
+  )
+
+  await page.getByRole('tab', { name: '项目站点' }).click()
+  await page.getByLabel('站点代码').fill('SN-P1-DAK')
+  await page.getByLabel('站点名称').fill('达喀尔现场')
+  await page.getByLabel('站点项目').click()
+  await page.getByText('塞内加尔项目', { exact: true }).last().click()
+  await page.getByRole('button', { name: '新增站点' }).click()
+  await expect(page.getByLabel('编辑站点名称-SN-P1-DAK')).toHaveValue(
+    '达喀尔现场',
+  )
+})
+
 test('desktop project-default page uses the Tauri command adapter', async ({
   page,
 }) => {
@@ -514,6 +557,8 @@ test('desktop project-default page uses the Tauri command adapter', async ({
           invoke(command: string) {
             if (command === 'list_project_defaults')
               return Promise.resolve(projects)
+            if (command === 'list_reference_master_data')
+              return Promise.resolve([])
             if (command === 'save_project_defaults') return Promise.resolve()
             return Promise.reject(new Error('unexpected command'))
           },
@@ -524,9 +569,9 @@ test('desktop project-default page uses the Tauri command adapter', async ({
 
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '项目默认设置' }).click()
+  await page.getByRole('button', { name: '基础资料管理' }).click()
   await expect(
-    page.getByRole('heading', { name: '项目默认设置' }).last(),
+    page.getByRole('heading', { name: '基础资料管理' }).last(),
   ).toBeVisible()
   await expect(page.getByText('Bethel2工地')).toBeVisible()
   await page.getByLabel('页脚联系方式').fill('desktop fixture contact')

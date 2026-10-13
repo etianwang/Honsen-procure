@@ -81,7 +81,7 @@ export function AppShell({
             onClick={() => onNavigate('master-data')}
           >
             <Settings size={17} aria-hidden="true" />
-            项目默认设置
+            基础资料管理
           </button>
           <p className="nav-label">即将接入</p>
           <button className="nav-button" type="button" disabled>
