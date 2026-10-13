@@ -84,6 +84,60 @@
   color: #476359;
   font-size: 13px;
 }
+.identity select {
+  max-width: min(36vw, 26rem);
+  min-height: 2.25rem;
+  border: 1px solid #a9c2b4;
+  border-radius: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  background: white;
+  color: #183d2c;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.auth-management {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+  background: #fff;
+  border-radius: 0.75rem;
+}
+
+.auth-management-form {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 1.25rem;
+  min-width: 0;
+}
+
+.auth-management-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.55rem;
+}
+
+.auth-management button {
+  min-height: 2.75rem;
+}
+
+.auth-management li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.5rem;
+  overflow-wrap: anywhere;
+}
 .avatar {
   display: grid;
   place-items: center;

@@ -190,6 +190,15 @@ class FixtureAuthorizationStore implements AuthorizationStore {
   async revokeScope(_input: Parameters<AuthorizationStore['revokeScope']>[0]) {
     this.revoked += 1
   }
+  async replaceScope(input: Parameters<AuthorizationStore['replaceScope']>[0]) {
+    return {
+      ...input.newScope,
+      countryId: '00000000-0000-4000-8000-000000000007',
+      site: 'fixture site',
+      currency: 'XOF',
+      languagePair: 'zh_fr',
+    }
+  }
 }
 
 describe('authorization API', () => {
@@ -217,6 +226,30 @@ describe('authorization API', () => {
       },
     })
     const token = login.json<{ accessToken: string }>().accessToken
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/authorization/bindings/00000000-0000-4000-8000-000000000006',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(listed.statusCode).toBe(200)
+    const replaced = await app.inject({
+      method: 'PATCH',
+      url: '/api/authorization/bindings/00000000-0000-4000-8000-000000000006',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        oldScope: {
+          projectId: '00000000-0000-4000-8000-000000000002',
+          departmentId: '00000000-0000-4000-8000-000000000003',
+          teamId: '00000000-0000-4000-8000-000000000004',
+        },
+        newScope: {
+          projectId: '00000000-0000-4000-8000-000000000002',
+          departmentId: '00000000-0000-4000-8000-000000000003',
+          teamId: '00000000-0000-4000-8000-000000000004',
+        },
+      },
+    })
+    expect(replaced.statusCode).toBe(200)
     const response = await app.inject({
       method: 'DELETE',
       url: '/api/authorization/bindings/00000000-0000-4000-8000-000000000006',
