@@ -3370,23 +3370,32 @@ impl LocalAuthService {
         }
         let prior = transaction
             .query_row(
-                "SELECT workflow_status, version, applicant_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT workflow_status, version, applicant_id, country_id, project_id, department_id, team_id, display_no FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
                 [draft.id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, String>(6)?, row.get::<_, String>(7)?)),
             )
             .optional()
             .map_err(|_| AuthError::Database)?;
+        if prior.as_ref().is_some_and(
+            |(_, _, applicant_id, country_id, project_id, department_id, team_id, display_no)| {
+                applicant_id != &draft.applicant_id.to_string()
+                    || country_id != &draft.country_id.to_string()
+                    || project_id != &draft.project_id.to_string()
+                    || department_id != &draft.department_id.to_string()
+                    || team_id != &draft.team_id.to_string()
+                    || display_no != &draft.display_no
+            },
+        ) {
+            return Err(AuthError::Forbidden);
+        }
         let is_revision = prior
             .as_ref()
-            .is_some_and(|(status, _, _)| status == "confirmed");
+            .is_some_and(|(status, ..)| status == "confirmed");
         if is_revision
             && (!privileged
                 || !revision_reason
                     .as_ref()
-                    .is_some_and(|value| valid_required_text(value, 1000))
-                || prior.as_ref().is_some_and(|(_, _, applicant_id)| {
-                    applicant_id != &draft.applicant_id.to_string()
-                }))
+                    .is_some_and(|value| valid_required_text(value, 1000)))
         {
             return Err(AuthError::Forbidden);
         }
@@ -3413,7 +3422,7 @@ impl LocalAuthService {
             && (revision_reason.is_some()
                 || prior
                     .as_ref()
-                    .is_some_and(|(status, _, _)| status != "draft" && status != "rejected"))
+                    .is_some_and(|(status, ..)| status != "draft" && status != "rejected"))
         {
             return Err(AuthError::InvalidInput);
         }
@@ -3422,7 +3431,7 @@ impl LocalAuthService {
         } else {
             None
         };
-        let version = prior.as_ref().map_or(1, |(_, version, _)| version + 1);
+        let version = prior.as_ref().map_or(1, |(_, version, ..)| version + 1);
         let workflow_status = if is_revision { "confirmed" } else { "draft" };
         transaction
             .execute(
@@ -9442,6 +9451,36 @@ mod tests {
         };
         let totals = service.save_requisition_draft(draft.clone(), now).unwrap();
         assert_eq!(totals.total_minor, "3564");
+        let outbox_before_identity_change: i64 = service.connection.lock().unwrap().query_row(
+            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1",
+            [requisition_id.to_string()],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            service.save_requisition_draft(
+                RequisitionDraftInput {
+                    applicant_id: Uuid::new_v4(),
+                    ..draft.clone()
+                },
+                now
+            ),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(
+            service.save_requisition_draft(
+                RequisitionDraftInput {
+                    display_no: "moved-order-number".into(),
+                    ..draft.clone()
+                },
+                now
+            ),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(service.connection.lock().unwrap().query_row(
+            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1",
+            [requisition_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        ).unwrap(), outbox_before_identity_change);
         let order_event = service
             .pending_sync_events(100, now)
             .unwrap()
@@ -9544,6 +9583,17 @@ mod tests {
             department_id,
             team_id,
             now,
+        );
+        assert_eq!(
+            service.revise_confirmed_requisition(
+                RequisitionDraftInput {
+                    project_id: other_project_id,
+                    ..draft.clone()
+                },
+                "move to another authorized project".into(),
+                now,
+            ),
+            Err(AuthError::Forbidden)
         );
         let other_order_id = Uuid::new_v4();
         let mut other_draft = draft.clone();
