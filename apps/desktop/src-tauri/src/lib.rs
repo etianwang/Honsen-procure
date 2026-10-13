@@ -4475,6 +4475,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0027_master_data_audit",
             include_str!("../migrations/0027_master_data_audit.sql"),
         ),
+        (
+            "0028_authorization_snapshots",
+            include_str!("../migrations/0028_authorization_snapshots.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
