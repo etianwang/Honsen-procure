@@ -1207,6 +1207,68 @@ impl LocalAuthService {
         Ok(())
     }
 
+    pub fn list_reference_master_data(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<ReferenceMasterDataInput>, AuthError> {
+        self.require_master_data_mutation(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut records = Vec::new();
+        let mut countries = connection.prepare("SELECT id, business_code, name, time_zone, is_active, version FROM local_countries WHERE deleted_at IS NULL ORDER BY name").map_err(|_| AuthError::Database)?;
+        for row in countries
+            .query_map([], |row| {
+                Ok(ReferenceMasterDataInput::Country {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+                    business_code: row.get(1)?,
+                    name: row.get(2)?,
+                    time_zone: row.get(3)?,
+                    is_active: row.get::<_, i64>(4)? != 0,
+                    version: row.get(5)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+        {
+            records.push(row.map_err(|_| AuthError::Database)?);
+        }
+        let mut projects = connection.prepare("SELECT id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version FROM local_projects WHERE deleted_at IS NULL ORDER BY name").map_err(|_| AuthError::Database)?;
+        for row in projects
+            .query_map([], |row| {
+                Ok(ReferenceMasterDataInput::Project {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+                    country_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap(),
+                    business_code: row.get(2)?,
+                    name: row.get(3)?,
+                    site: row.get(4)?,
+                    department_name: row.get(5)?,
+                    default_currency: row.get(6)?,
+                    default_language_pair: row.get(7)?,
+                    is_active: row.get::<_, i64>(8)? != 0,
+                    version: row.get(9)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+        {
+            records.push(row.map_err(|_| AuthError::Database)?);
+        }
+        let mut sites = connection.prepare("SELECT id, project_id, business_code, name, is_active, version FROM local_sites WHERE deleted_at IS NULL ORDER BY name").map_err(|_| AuthError::Database)?;
+        for row in sites
+            .query_map([], |row| {
+                Ok(ReferenceMasterDataInput::Site {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+                    project_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap(),
+                    business_code: row.get(2)?,
+                    name: row.get(3)?,
+                    is_active: row.get::<_, i64>(4)? != 0,
+                    version: row.get(5)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+        {
+            records.push(row.map_err(|_| AuthError::Database)?);
+        }
+        Ok(records)
+    }
+
     pub fn list_project_defaults(
         &self,
         now: SystemTime,
@@ -1278,6 +1340,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         self.require_master_data_mutation(now)?;
+        let actor_id = self.active_session_user_id()?;
         let (entity_type, entity_id) = match &record {
             ReferenceMasterDataInput::Country { id, .. } => ("country", *id),
             ReferenceMasterDataInput::Project { id, .. } => ("project", *id),
@@ -1289,6 +1352,39 @@ impl LocalAuthService {
         let payload = serde_json::to_string(&record).map_err(|_| AuthError::InvalidInput)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let audit_prior_active = match entity_type {
+            "country" => transaction
+                .query_row(
+                    "SELECT is_active FROM local_countries WHERE id = ?1",
+                    [entity_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?,
+            "project" => transaction
+                .query_row(
+                    "SELECT is_active FROM local_projects WHERE id = ?1",
+                    [entity_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?,
+            "site" => transaction
+                .query_row(
+                    "SELECT is_active FROM local_sites WHERE id = ?1",
+                    [entity_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?,
+            _ => None,
+        };
+        let audit_next_active = match &record {
+            ReferenceMasterDataInput::Country { is_active, .. }
+            | ReferenceMasterDataInput::Project { is_active, .. }
+            | ReferenceMasterDataInput::Site { is_active, .. } => Some(*is_active),
+            _ => None,
+        };
         match record {
             ReferenceMasterDataInput::Country {
                 id,
@@ -1331,6 +1427,16 @@ impl LocalAuthService {
                     || !matches!(default_currency.as_str(), "XOF" | "CNY" | "USD" | "EUR")
                     || !matches!(default_language_pair.as_str(), "zh_fr" | "zh_en")
                 {
+                    return Err(AuthError::InvalidInput);
+                }
+                let country_changed_after_business_use: bool = transaction
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM local_projects p WHERE p.id = ?1 AND p.country_id <> ?2 AND EXISTS (SELECT 1 FROM local_purchase_orders o WHERE o.project_id = p.id AND o.deleted_at IS NULL))",
+                        params![id.to_string(), country_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| AuthError::Database)?;
+                if country_changed_after_business_use {
                     return Err(AuthError::InvalidInput);
                 }
                 transaction.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(id) DO UPDATE SET country_id = excluded.country_id, name = excluded.name, site = excluded.site, department_name = excluded.department_name, default_currency = excluded.default_currency, default_language_pair = excluded.default_language_pair, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), country_id.to_string(), business_code, name, site, department_name, default_currency, default_language_pair, is_active as i64, version]).map_err(|_| AuthError::Database)?;
@@ -1401,6 +1507,18 @@ impl LocalAuthService {
                 )?;
                 transaction.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
+        }
+        if matches!(entity_type, "country" | "project" | "site") {
+            let action = match (audit_prior_active, audit_next_active) {
+                (None, _) => "create",
+                (Some(0), Some(true)) => "enable",
+                (Some(1), Some(false)) => "disable",
+                _ => "edit",
+            };
+            transaction.execute(
+                "INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![Uuid::new_v4().to_string(), actor_id.to_string(), entity_type, entity_id.to_string(), action, payload, unix_seconds(now)],
+            ).map_err(|_| AuthError::Database)?;
         }
         insert_local_sync_outbox(&transaction, entity_type, entity_id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
@@ -2793,6 +2911,16 @@ impl LocalAuthService {
         let calculated = calculate_requisition(&draft)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let selected_site_is_disabled: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_sites WHERE project_id = ?1 AND name = ?2 AND is_active = 0 AND deleted_at IS NULL)",
+                params![draft.project_id.to_string(), draft.site],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if selected_site_is_disabled {
+            return Err(AuthError::InvalidInput);
+        }
         let prior = transaction
             .query_row(
                 "SELECT workflow_status, version, applicant_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
@@ -4204,6 +4332,14 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn list_reference_master_data(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::ReferenceMasterDataInput>, CommandError> {
+        auth.list_reference_master_data(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn save_tax_template(
         auth: State<'_, LocalAuthService>,
         template: super::TaxTemplateInput,
@@ -4334,6 +4470,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0026_master_data_seed_audit",
             include_str!("../migrations/0026_master_data_seed_audit.sql"),
+        ),
+        (
+            "0027_master_data_audit",
+            include_str!("../migrations/0027_master_data_audit.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -7620,6 +7760,22 @@ mod tests {
             )
             .unwrap();
         assert_eq!(country_code, "CI");
+        let country_audit_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_master_data_audit_entries WHERE entity_type = 'country'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(country_audit_count, 1);
+        let country_audit_action: String = connection
+            .query_row(
+                "SELECT action FROM local_master_data_audit_entries WHERE entity_type = 'country'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(country_audit_action, "create");
         drop(connection);
         service
             .save_reference_master_data(

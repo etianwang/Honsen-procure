@@ -250,6 +250,11 @@
 - Full T01 gate passed on 2026-10-10: format check, lint, typecheck, five unit tests, build and two Playwright browser flows. Success screenshots are in ignored `test-results/`; CI uploads the Playwright report artifact.
 - The local npm client rejected `workspace:*`; the desktop uses the explicit local `file:../../packages/shared` dependency. Do not treat `npm ls` as proof: all four runtime/type/test/build gates must pass.
 
+## Admin Master Data Management — in progress
+
+- Branch: `codex/admin-master-data` from merged OPA-2 (`224bc29`). The selected scope is country, project and project-site management only; no production database, Seed data, supplier/material/rate management, remote push or PR activity.
+- Completed locally on 2026-10-13: additive SQLite audit migration, local reference-data listing/saving through the trusted Tauri boundary, editable management UI, server-side sync payload validation, project-country change rejection after local business use, and an inactive-site guard for new requisitions. Focused Rust/server/DOM tests and the full quality gates passed; no production database, Seed data, remote push or PR activity occurred.
+
 ## T02 historical partial-gate evidence — full acceptance still open
 
 - `apps/server` now has Fastify login/CAPTCHA routes, Argon2id password verification, account-session creation, PostgreSQL migration runner, account/master-data migration and initial-super-administrator provisioning command.

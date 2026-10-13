@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import { ProjectDefaultsEditor } from '../components/ProjectDefaultsEditor'
-import type { MasterDataApi, ProjectDefaultsView } from '../lib/master-data-api'
+import { MasterDataManager } from '../components/MasterDataManager'
+import type {
+  MasterDataApi,
+  ProjectDefaultsView,
+  ReferenceMasterDataView,
+} from '../lib/master-data-api'
 import type { ProjectDefaults } from '@honsen/shared'
 
 const projects: ProjectDefaultsView[] = [
@@ -30,6 +35,18 @@ const projects: ProjectDefaultsView[] = [
   },
 ]
 
+const referenceData: ReferenceMasterDataView[] = [
+  {
+    kind: 'country',
+    id: '10000000-0000-4000-8000-000000000001',
+    business_code: 'CI',
+    name: '科特迪瓦',
+    time_zone: 'Africa/Abidjan',
+    is_active: true,
+    version: 1,
+  },
+]
+
 export function MasterDataFixturePage() {
   const [, setLastSaved] = useState<ProjectDefaults | null>(null)
   const api: MasterDataApi = {
@@ -39,10 +56,15 @@ export function MasterDataFixturePage() {
     async saveProjectDefaults(defaults) {
       setLastSaved(defaults)
     },
+    async listReferenceMasterData() {
+      return []
+    },
+    async saveReferenceMasterData() {},
   }
 
   return (
     <main className="fixture-page">
+      <MasterDataManager api={api} records={referenceData} canEdit />
       <ProjectDefaultsEditor api={api} projects={projects} canEdit />
     </main>
   )
