@@ -1053,6 +1053,8 @@ test('purchaser reaches execution from the regular application and completes RFQ
       id: '00000000-0000-4000-8000-000000000801',
       displayNo: 'CI-FIXTURE-20261012-INT-0001',
       primaryCurrency: 'XOF',
+      procurementMode: 'honsen_self_purchase',
+      workflowStatus: 'confirmed',
       lines: [
         {
           id: '00000000-0000-4000-8000-000000000802',
@@ -1169,6 +1171,88 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await expect(page.getByText('供应商子单条款')).toBeVisible()
   await page.getByRole('button', { name: '保存子单条款' }).click()
   await expect(page.getByText('子单条款已保存，含税总额 2950。')).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('Honsen market purchase records partial and final receipt without RFQ or supplier child', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    let status = 'confirmed'
+    let receiptCount = 0
+    const orderId = '00000000-0000-4000-8000-000000000811'
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: { orderId?: string; input?: { orderId: string } },
+          ) {
+            if (command === 'list_confirmed_procurement_orders')
+              return Promise.resolve(
+                status === 'completed'
+                  ? []
+                  : [
+                      {
+                        id: orderId,
+                        displayNo: 'HONSEN-MARKET-1',
+                        primaryCurrency: 'XOF',
+                        procurementMode: 'honsen_self_purchase',
+                        workflowStatus: status,
+                        children: [],
+                        lines: [
+                          {
+                            id: '00000000-0000-4000-8000-000000000812',
+                            materialName: 'market cement',
+                            quantity: '2',
+                            unit: '袋',
+                            currency: 'XOF',
+                          },
+                        ],
+                      },
+                    ],
+              )
+            if (command === 'list_suppliers') return Promise.resolve([])
+            if (command === 'start_honsen_market_execution') {
+              if (args?.orderId !== orderId)
+                return Promise.reject(new Error('wrong order'))
+              status = 'executing'
+              return Promise.resolve()
+            }
+            if (command === 'record_receipt') {
+              if (args?.input?.orderId !== orderId)
+                return Promise.reject(new Error('wrong order'))
+              receiptCount += 1
+              status = receiptCount === 1 ? 'receiving' : 'completed'
+              return Promise.resolve({
+                id: crypto.randomUUID(),
+                orderId,
+                workflowStatus: status,
+                receivedItemCount: 1,
+              })
+            }
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await expect(page.getByRole('button', { name: '开始市场直采' })).toBeVisible()
+  await page.getByRole('button', { name: '开始市场直采' }).click()
+  await expect(page.getByLabel('收货状态')).toHaveText('采购执行中')
+  await page.getByLabel('market cement 实收数量').fill('1')
+  await page.getByRole('button', { name: '登记收货' }).click()
+  await expect(page.getByLabel('收货状态')).toHaveText('收货中')
+  await page.getByLabel('market cement 实收数量').fill('1')
+  await page.getByRole('button', { name: '登记收货' }).click()
+  await expect(page.getByText('没有可执行的已确认采购申请')).toBeVisible()
   await expect(browserErrors).toEqual([])
 })
 

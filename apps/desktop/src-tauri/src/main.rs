@@ -58,6 +58,7 @@ fn main() {
             commands::withdraw_requisition,
             commands::list_requisition_history,
             commands::list_confirmed_procurement_orders,
+            commands::start_honsen_market_execution,
             commands::allocate_supplier_child_orders,
             commands::close_supplier_order_with_conditions,
             commands::push_pending_sync,

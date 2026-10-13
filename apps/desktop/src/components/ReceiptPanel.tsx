@@ -14,6 +14,8 @@ type ReceiptPanelProps = {
   orderId: string
   receiverId: string
   lines: ReceiptLine[]
+  initialStatus?: string
+  onChanged?: () => void
 }
 
 export function ReceiptPanel({
@@ -21,13 +23,21 @@ export function ReceiptPanel({
   orderId,
   receiverId,
   lines,
+  initialStatus,
+  onChanged,
 }: ReceiptPanelProps) {
   const [quantities, setQuantities] = useState(() =>
     Object.fromEntries(lines.map((line) => [line.id, ''])),
   )
   const [overReason, setOverReason] = useState('')
   const [closeReason, setCloseReason] = useState('')
-  const [status, setStatus] = useState('已发送供应商')
+  const [status, setStatus] = useState(
+    initialStatus === 'executing'
+      ? '采购执行中'
+      : initialStatus === 'receiving'
+        ? '收货中'
+        : '已发送供应商',
+  )
   const [message, setMessage] = useState<string | null>(null)
 
   async function record() {
@@ -47,17 +57,22 @@ export function ReceiptPanel({
         id: crypto.randomUUID(),
         orderId,
         receiverId,
-        receivedAt: '2026-10-11',
+        receivedAt: new Date().toISOString().slice(0, 10),
         overReceiptReason: overReason.trim() || null,
         attachmentIds: [],
         items,
       })
       setStatus(
-        receipt.workflowStatus === 'completed' ? '已完成' : '已发送供应商',
+        receipt.workflowStatus === 'completed'
+          ? '已完成'
+          : receipt.workflowStatus === 'receiving'
+            ? '收货中'
+            : '已发送供应商',
       )
       setMessage(`收货已登记，共 ${receipt.receivedItemCount} 条明细。`)
+      onChanged?.()
     } catch {
-      setMessage('收货失败：超收必须填写原因，且订单必须处于已发送状态。')
+      setMessage('收货失败：超收必须填写原因，且订单必须处于可收货状态。')
     }
   }
 
@@ -70,8 +85,9 @@ export function ReceiptPanel({
       await api.closeSupplierOrderWithConditions(orderId, closeReason.trim())
       setStatus('已完成（有条件）')
       setMessage('订单已按有条件完成关闭，原因已写入审计。')
+      onChanged?.()
     } catch {
-      setMessage('关闭失败：只有已发送供应商的子订单可以这样关闭。')
+      setMessage('关闭失败：订单必须处于可有条件关闭的状态。')
     }
   }
 
