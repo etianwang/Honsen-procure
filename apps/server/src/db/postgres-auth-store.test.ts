@@ -33,18 +33,20 @@ describe.skipIf(!pool)('PostgreSQL authentication store', () => {
     )
     const store = new PostgresAuthStore(pool!)
     const expiresAt = new Date(Date.now() + 60_000)
+    const firstToken = `first-token-${accountId}`
+    const secondToken = `second-token-${accountId}`
 
     await store.createSession({
       id: randomUUID(),
       accountId,
-      tokenHash: 'first-token',
+      tokenHash: firstToken,
       installationId: randomUUID(),
       expiresAt,
     })
     await store.createSession({
       id: randomUUID(),
       accountId,
-      tokenHash: 'second-token',
+      tokenHash: secondToken,
       installationId: randomUUID(),
       expiresAt,
     })
@@ -60,13 +62,13 @@ describe.skipIf(!pool)('PostgreSQL authentication store', () => {
       [accountId],
     )
     expect(sessions.rows).toEqual([
-      { token_hash: 'first-token', revoked: true },
-      { token_hash: 'second-token', revoked: false },
+      { token_hash: firstToken, revoked: true },
+      { token_hash: secondToken, revoked: false },
     ])
     expect(
-      (await store.findActiveSession('second-token', new Date()))?.roles,
+      (await store.findActiveSession(secondToken, new Date()))?.roles,
     ).toEqual(['administrator'])
-    expect(await store.findActiveSession('first-token', new Date())).toBeNull()
+    expect(await store.findActiveSession(firstToken, new Date())).toBeNull()
   })
 
   it('provisions an initial super administrator on the migrated store', async () => {
