@@ -9,6 +9,23 @@ export type RequisitionTotalsView = {
   totalMinor: string
 }
 
+export type RequisitionHistoryCursor = { updatedAt: number; id: string }
+
+export type RequisitionHistoryPage = {
+  records: {
+    id: string
+    displayNo: string
+    projectName: string
+    site: string
+    workflowStatus: string
+    procurementMode: string | null
+    primaryCurrency: string
+    totalMinor: string
+    updatedAt: number
+  }[]
+  nextCursor: RequisitionHistoryCursor | null
+}
+
 export type OwnerQuoteSource =
   | { kind: 'catalog_price'; materialPriceId: string }
   | { kind: 'manual_reference'; unitPriceMinor: string; reason: string }
@@ -30,6 +47,9 @@ export type OwnerLinePricingView = {
 }
 
 export type RequisitionApi = {
+  listRequisitionHistory(
+    cursor?: RequisitionHistoryCursor,
+  ): Promise<RequisitionHistoryPage>
   saveRequisitionDraft(draft: RequisitionDraft): Promise<RequisitionTotalsView>
   setProcurementMode(orderId: string, mode: string): Promise<void>
   saveOwnerPurchasePricing(input: {
@@ -53,6 +73,10 @@ function tauriInvoke(): TauriInvoke {
 }
 
 export const tauriRequisitionApi: RequisitionApi = {
+  listRequisitionHistory: (cursor) =>
+    tauriInvoke()<RequisitionHistoryPage>('list_requisition_history', {
+      cursor: cursor ?? null,
+    }),
   saveRequisitionDraft: (draft) =>
     tauriInvoke()<RequisitionTotalsView>('save_requisition_draft', { draft }),
   setProcurementMode: (orderId, mode) =>

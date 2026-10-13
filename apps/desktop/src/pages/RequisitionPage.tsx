@@ -7,6 +7,7 @@ import { Alert, Button, Card, Input, Select, Space } from 'antd'
 import { Minus, Plus, Send } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { OrderWorkflowPanel } from '../components/OrderWorkflowPanel'
+import { RequisitionHistoryPanel } from '../components/RequisitionHistoryPanel'
 import type { CatalogApi, CatalogMaterialView } from '../lib/catalog-api'
 import type {
   OwnerLinePricingInput,
@@ -717,6 +718,7 @@ export function RequisitionPage({
           </p>
         ) : null}
       </Card>
+      <RequisitionHistoryPanel api={api} refreshKey={status} />
     </>
   )
 }
