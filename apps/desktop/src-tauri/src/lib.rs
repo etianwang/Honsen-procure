@@ -3835,6 +3835,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<Vec<CatalogMaterialView>, AuthError> {
         self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
         if query.len() > 255 {
             return Err(AuthError::InvalidInput);
         }
@@ -3892,6 +3893,7 @@ impl LocalAuthService {
                  WHERE p.material_id = ?1 AND p.is_active = 1 AND p.deleted_at IS NULL
                    AND s.country_id IS NOT NULL AND s.is_active = 1 AND s.is_blacklisted = 0 AND s.deleted_at IS NULL
                    AND (?2 IS NULL OR s.country_id = (SELECT country_id FROM local_projects WHERE id = ?2 AND deleted_at IS NULL))
+                   AND EXISTS (SELECT 1 FROM local_authorization_snapshots a JOIN local_projects authorized_project ON authorized_project.id = a.project_id AND authorized_project.is_active = 1 AND authorized_project.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?3 AND a.expires_at >= ?4 AND authorized_project.country_id = s.country_id AND (?2 IS NULL OR a.project_id = ?2))
                  ORDER BY s.is_preferred DESC, p.effective_at DESC, s.name
                  LIMIT 4",
             )
@@ -3917,7 +3919,12 @@ impl LocalAuthService {
                         serde_json::from_str(&aliases_json).map_err(|_| AuthError::Database)?;
                     let price_rows = prices
                         .query_map(
-                            params![&id, project_id.map(|value| value.to_string())],
+                            params![
+                                &id,
+                                project_id.map(|value| value.to_string()),
+                                account_id.to_string(),
+                                unix_seconds(now)
+                            ],
                             |row| {
                                 Ok((
                                     row.get::<_, String>(0)?,
@@ -3979,18 +3986,20 @@ impl LocalAuthService {
 
     pub fn list_suppliers(&self, now: SystemTime) -> Result<Vec<SupplierView>, AuthError> {
         self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let mut statement = connection
             .prepare(
                 "SELECT id, business_code, name, contact_name, address, city, country, phone, whatsapp, email,
                         payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version
                  FROM local_suppliers
-                 WHERE deleted_at IS NULL
+                 WHERE deleted_at IS NULL AND country_id IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 AND p.country_id = local_suppliers.country_id)
                  ORDER BY is_active DESC, name",
             )
             .map_err(|_| AuthError::Database)?;
         statement
-            .query_map([], |row| {
+            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -10563,12 +10572,20 @@ mod tests {
         connection.execute("INSERT INTO local_suppliers (id, business_code, name, country_id, is_active, is_blacklisted, version) VALUES (?1, 'CI-SUP', 'CI supplier', ?2, 1, 0, 1), (?3, 'LEGACY-SUP', 'legacy supplier', NULL, 1, 0, 1)", params![ci_supplier.to_string(), ci.to_string(), legacy_supplier.to_string()]).unwrap();
         connection.execute("INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'XOF', 5600, 'bag', '2026-10-12', 1, 1), (?4, ?2, ?5, 'XOF', 5700, 'bag', '2026-10-12', 1, 1)", params![ci_price.to_string(), material.to_string(), ci_supplier.to_string(), legacy_price.to_string(), legacy_supplier.to_string()]).unwrap();
         drop(connection);
+        grant_test_scope(&service, engineer.id, ci_project, department, team, now);
 
         let ci_catalog = service
             .search_catalog("global", Some(ci_project), now)
             .unwrap();
         assert_eq!(ci_catalog[0].prices.len(), 1);
         assert_eq!(ci_catalog[0].prices[0].supplier_id, ci_supplier);
+        assert_eq!(
+            service.search_catalog("global", None, now).unwrap()[0]
+                .prices
+                .len(),
+            1
+        );
+        assert_eq!(service.list_suppliers(now).unwrap().len(), 1);
         assert!(
             service
                 .search_catalog("global", Some(cm_project), now)
@@ -10627,6 +10644,42 @@ mod tests {
             service.save_requisition_draft(cross_country, now),
             Err(AuthError::InvalidInput)
         );
+        let cm_supplier = Uuid::new_v4();
+        let cm_price = Uuid::new_v4();
+        service.connection.lock().unwrap().execute(
+            "INSERT INTO local_suppliers (id, business_code, name, country_id, is_active, is_blacklisted, version) VALUES (?1, 'CM-SUP', 'CM supplier', ?2, 1, 0, 1)",
+            params![cm_supplier.to_string(), cm.to_string()],
+        ).unwrap();
+        service.connection.lock().unwrap().execute(
+            "INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'XAF', 5800, 'bag', '2026-10-12', 1, 1)",
+            params![cm_price.to_string(), material.to_string(), cm_supplier.to_string()],
+        ).unwrap();
+        assert_eq!(service.list_suppliers(now).unwrap().len(), 2);
+        service.connection.lock().unwrap().execute(
+            "DELETE FROM local_authorization_snapshots WHERE account_id = ?1 AND project_id = ?2",
+            params![engineer.id.to_string(), ci_project.to_string()],
+        ).unwrap();
+        let visible_suppliers = service.list_suppliers(now).unwrap();
+        assert_eq!(visible_suppliers.len(), 1);
+        assert_eq!(visible_suppliers[0].id, cm_supplier);
+        let visible_quotes = service.search_catalog("global", None, now).unwrap();
+        assert_eq!(visible_quotes[0].prices.len(), 1);
+        assert_eq!(visible_quotes[0].prices[0].supplier_id, cm_supplier);
+        assert!(
+            service
+                .search_catalog("global", Some(ci_project), now)
+                .unwrap()[0]
+                .prices
+                .is_empty()
+        );
+        service.connection.lock().unwrap().execute(
+            "UPDATE local_authorization_snapshots SET verified_at = ?1, expires_at = ?2 WHERE account_id = ?3 AND project_id = ?4",
+            params![unix_seconds(now) - 2, unix_seconds(now) - 1, engineer.id.to_string(), cm_project.to_string()],
+        ).unwrap();
+        assert!(service.list_suppliers(now).unwrap().is_empty());
+        let expired_catalog = service.search_catalog("global", None, now).unwrap();
+        assert_eq!(expired_catalog.len(), 1);
+        assert!(expired_catalog[0].prices.is_empty());
         let connection = service.connection.lock().unwrap();
         assert_eq!(
             connection
