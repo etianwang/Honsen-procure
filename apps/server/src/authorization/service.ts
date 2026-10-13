@@ -21,6 +21,11 @@ export type AuthorizationStore = {
     scope: z.infer<typeof scopeSchema>
     actorId: string
   }): Promise<AuthorizationScope>
+  revokeScope(input: {
+    accountId: string
+    scope: z.infer<typeof scopeSchema>
+    actorId: string
+  }): Promise<void>
 }
 
 export class AuthorizationError extends Error {
@@ -51,6 +56,27 @@ export class AuthorizationService {
     const parsed = scopeSchema.safeParse(input)
     if (!parsed.success) throw new AuthorizationError('INVALID_SCOPE')
     return this.store.saveScope({
+      accountId,
+      scope: parsed.data,
+      actorId: actor.id,
+    })
+  }
+
+  async revoke(
+    actor: { id: string; roles: Role[] },
+    accountId: string,
+    input: unknown,
+  ): Promise<void> {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    ) {
+      throw new AuthorizationError('FORBIDDEN')
+    }
+    const parsed = scopeSchema.safeParse(input)
+    if (!parsed.success) throw new AuthorizationError('INVALID_SCOPE')
+    await this.store.revokeScope({
       accountId,
       scope: parsed.data,
       actorId: actor.id,
