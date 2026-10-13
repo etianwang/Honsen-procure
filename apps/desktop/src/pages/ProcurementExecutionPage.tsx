@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { RfqPanel } from '../components/RfqPanel'
 import { SupplierAllocationPanel } from '../components/SupplierAllocationPanel'
 import { SupplierChildTermsPanel } from '../components/SupplierChildTermsPanel'
+import { ReceiptPanel } from '../components/ReceiptPanel'
 import type { SupplierView } from '../lib/catalog-api'
 import type {
   ProcurementExecutionApi,
@@ -10,12 +11,14 @@ import type {
 } from '../lib/procurement-execution-api'
 import type { RfqApi } from '../lib/rfq-api'
 import type { SupplierOrderApi } from '../lib/supplier-order-api'
+import { tauriReceiptApi } from '../lib/receipt-api'
 
 type Props = {
   api: ProcurementExecutionApi
   supplierApi: { listSuppliers(): Promise<SupplierView[]> }
   supplierOrderApi: SupplierOrderApi
   rfqApi: RfqApi
+  receiverId: string
 }
 
 export function ProcurementExecutionPage({
@@ -23,6 +26,7 @@ export function ProcurementExecutionPage({
   supplierApi,
   supplierOrderApi,
   rfqApi,
+  receiverId,
 }: Props) {
   const [orders, setOrders] = useState<ProcurementExecutionOrder[]>([])
   const [suppliers, setSuppliers] = useState<SupplierView[]>([])
@@ -99,8 +103,8 @@ export function ProcurementExecutionPage({
           </Card>
           {selected.children.length ? (
             selected.children.map((child) => (
+              <section key={child.id} aria-label={`供应商子订单 ${child.displayNo}`}>
               <SupplierChildTermsPanel
-                key={child.id}
                 api={supplierOrderApi}
                 orderId={child.id}
                 lines={child.lines.map((line) => ({
@@ -109,6 +113,18 @@ export function ProcurementExecutionPage({
                   currency: line.currency,
                 }))}
               />
+              <ReceiptPanel
+                api={tauriReceiptApi}
+                orderId={child.id}
+                receiverId={receiverId}
+                lines={child.lines.map((line) => ({
+                  id: line.id,
+                  materialName: line.materialName,
+                  unit: line.unit,
+                  orderedQuantity: line.quantity,
+                }))}
+              />
+              </section>
             ))
           ) : (
             <>
