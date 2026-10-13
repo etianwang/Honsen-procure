@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ConfigProvider } from 'antd'
 import { calculateDraftTotals } from '@honsen/shared'
 import { AppShell, type AppPage } from './components/AppShell'
@@ -161,6 +161,52 @@ function App() {
     roles: string[]
     requires_password_change: boolean
   } | null>(null)
+  const [authorizationContext, setAuthorizationContext] =
+    useState<RequisitionContext | null>(null)
+  const [contextError, setContextError] = useState('')
+  useEffect(() => {
+    if (!session) {
+      setAuthorizationContext(null)
+      return
+    }
+    const invoke = (
+      window as Window & {
+        __TAURI__?: { core?: { invoke?: <T>(command: string) => Promise<T> } }
+      }
+    ).__TAURI__?.core?.invoke
+    if (!invoke) return
+    void invoke<
+      Omit<
+        RequisitionContext,
+        | 'displayNo'
+        | 'applicantId'
+        | 'urgency'
+        | 'urgencyReason'
+        | 'orderDate'
+        | 'deliveryAddress'
+        | 'expectedDeliveryDate'
+        | 'notes'
+      >
+    >('get_authorization_context')
+      .then((context) => {
+        setAuthorizationContext({
+          ...context,
+          displayNo: `REQ-${crypto.randomUUID()}`,
+          applicantId: session.user_id,
+          urgency: 'normal',
+          urgencyReason: null,
+          orderDate: new Date().toISOString().slice(0, 10),
+          deliveryAddress: context.site,
+          expectedDeliveryDate: null,
+          notes: null,
+        })
+        setContextError('')
+      })
+      .catch(() => {
+        setAuthorizationContext(null)
+        setContextError('当前账户没有有效的离线授权范围，无法新建采购申请。')
+      })
+  }, [session])
   const role: UserRole = session?.roles.includes('super_administrator')
     ? 'super_administrator'
     : session?.roles.includes('administrator')
@@ -171,7 +217,7 @@ function App() {
           ? 'viewer'
           : 'engineer'
   const requisitionContext = session
-    ? { ...previewRequisitionContext, applicantId: session.user_id }
+    ? authorizationContext
     : previewRequisitionContext
   const canApprove =
     role === 'purchaser' ||
@@ -268,7 +314,7 @@ function App() {
                     }
               }
             />
-          ) : page === 'requisition' ? (
+          ) : page === 'requisition' && requisitionContext ? (
             <RequisitionPage
               api={
                 (
@@ -300,6 +346,10 @@ function App() {
               }
               canApprove={session ? canApprove : true}
             />
+          ) : page === 'requisition' ? (
+            <main className="empty-state" role="alert">
+              {contextError || '正在加载授权范围…'}
+            </main>
           ) : page === 'execution' ? (
             <ProcurementExecutionPage
               api={tauriProcurementExecutionApi}
