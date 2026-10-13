@@ -10,6 +10,7 @@ export type ProcurementExecutionChild = {
   id: string
   displayNo: string
   currency: string
+  workflowStatus: string
   lines: ProcurementExecutionLine[]
 }
 

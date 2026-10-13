@@ -18,6 +18,7 @@ export const syncEntityTypeSchema = z.enum([
   'purchase_order',
   'order_comment',
   'receipt',
+  'procurement_expenditure',
   'rfq',
   'attachment',
 ])

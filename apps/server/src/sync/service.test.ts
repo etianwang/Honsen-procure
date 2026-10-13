@@ -9,6 +9,14 @@ const engineer = {
 const projectId = '00000000-0000-4000-8000-000000000002'
 const departmentId = '00000000-0000-4000-8000-000000000011'
 const teamId = '00000000-0000-4000-8000-000000000012'
+const countryId = '00000000-0000-4000-8000-000000000013'
+const supplierId = '00000000-0000-4000-8000-000000000014'
+const purchaser = {
+  id: '00000000-0000-4000-8000-000000000020',
+  roles: ['purchaser'] as const,
+}
+const expenditureId = '00000000-0000-4000-8000-000000000021'
+const orderId = '00000000-0000-4000-8000-000000000022'
 
 class FixtureStore implements SyncStore {
   pushed = 0
@@ -19,6 +27,8 @@ class FixtureStore implements SyncStore {
     projectId,
   }
   project: Record<string, unknown> | null = null
+  expense: Record<string, unknown> | null = null
+  supplier: Record<string, unknown> | null = null
 
   async pushEvent(input: Parameters<SyncStore['pushEvent']>[0]) {
     this.pushed += 1
@@ -48,7 +58,10 @@ class FixtureStore implements SyncStore {
   }
 
   async getEntityPayload(entityType: string) {
-    return entityType === 'project' ? this.project : this.order
+    if (entityType === 'project') return this.project
+    if (entityType === 'procurement_expenditure') return this.expense
+    if (entityType === 'supplier') return this.supplier
+    return this.order
   }
 }
 
@@ -63,7 +76,137 @@ function purchaseOrderEvent(applicantId = engineer.id) {
   }
 }
 
+function expenditureEvent() {
+  return {
+    eventId: '00000000-0000-4000-8000-000000000023',
+    entityType: 'procurement_expenditure' as const,
+    entityId: expenditureId,
+    operation: 'upsert' as const,
+    baseVersion: 0,
+    payload: {
+      id: expenditureId,
+      orderId,
+      projectId,
+      receiptId: null,
+      counterpartyType: 'market_casual',
+      supplierId: null,
+      counterpartySnapshot: null,
+      payeeName: 'fixture payee',
+      currency: 'XOF',
+      amountMinor: '1200',
+      paymentDate: '2026-10-13',
+      paymentMethod: 'cash',
+      paymentHandlerId: purchaser.id,
+      notes: null,
+      status: 'recorded',
+      correctsExpenditureId: null,
+      correctionReason: null,
+      createdBy: purchaser.id,
+      createdAt: 1,
+    },
+  }
+}
+
 describe('SyncService', () => {
+  it('accepts only scoped Honsen expenditure and rejects owner, engineer and invalid corrections', async () => {
+    const store = new FixtureStore()
+    store.order = {
+      projectId,
+      departmentId,
+      teamId,
+      procurementMode: 'honsen_self_purchase',
+      workflowStatus: 'executing',
+      countryId,
+    }
+    const service = new SyncService(store)
+    const push = (
+      actor: typeof purchaser | typeof engineer,
+      event: Parameters<
+        SyncStore['pushEvent']
+      >[0]['event'] = expenditureEvent(),
+    ) =>
+      service.push(actor, {
+        deviceId: '00000000-0000-4000-8000-000000000005',
+        events: [event],
+      })
+    expect((await push(purchaser)).results[0]?.status).toBe('accepted')
+    expect((await push(engineer)).results[0]?.status).toBe('validation_error')
+    store.bound = false
+    expect((await push(purchaser)).results[0]?.status).toBe('validation_error')
+    store.bound = true
+    store.order = {
+      projectId,
+      departmentId,
+      teamId,
+      procurementMode: 'owner_self_purchase',
+      workflowStatus: 'executing',
+    }
+    expect((await push(purchaser)).results[0]?.status).toBe('validation_error')
+    store.order = {
+      projectId,
+      departmentId,
+      teamId,
+      procurementMode: 'honsen_self_purchase',
+      workflowStatus: 'approved',
+    }
+    expect((await push(purchaser)).results[0]?.status).toBe('validation_error')
+    store.order = {
+      projectId,
+      departmentId,
+      teamId,
+      procurementMode: 'honsen_self_purchase',
+      workflowStatus: 'executing',
+      countryId,
+    }
+    const malformed = expenditureEvent()
+    malformed.payload.amountMinor = '0'
+    expect((await push(purchaser, malformed)).results[0]?.status).toBe(
+      'validation_error',
+    )
+    const unlinked = expenditureEvent()
+    unlinked.payload.status = 'reversed'
+    expect((await push(purchaser, unlinked)).results[0]?.status).toBe(
+      'validation_error',
+    )
+    const reversal = {
+      ...expenditureEvent(),
+      entityId: '00000000-0000-4000-8000-000000000024',
+      payload: {
+        ...expenditureEvent().payload,
+        id: '00000000-0000-4000-8000-000000000024',
+        status: 'reversed',
+        correctsExpenditureId: expenditureId,
+        correctionReason: 'fixture correction',
+      },
+    }
+    store.expense = expenditureEvent().payload
+    expect((await push(purchaser, reversal)).results[0]?.status).toBe(
+      'accepted',
+    )
+    reversal.payload.amountMinor = '1300'
+    expect((await push(purchaser, reversal)).results[0]?.status).toBe(
+      'validation_error',
+    )
+    expect(store.pushed).toBe(2)
+    store.supplier = { countryId, name: 'new supplier name' }
+    const registered = {
+      ...expenditureEvent(),
+      payload: {
+        ...expenditureEvent().payload,
+        counterpartyType: 'registered_supplier',
+        supplierId,
+        counterpartySnapshot: {
+          id: supplierId,
+          name: 'historical supplier name',
+          countryId,
+        },
+        payeeName: 'historical supplier name',
+      },
+    }
+    expect((await push(purchaser, registered)).results[0]?.status).toBe(
+      'accepted',
+    )
+  })
   it('accepts an engineer order only for the engineer and a bound project', async () => {
     const store = new FixtureStore()
     const service = new SyncService(store)

@@ -353,6 +353,7 @@ pub struct ProcurementExecutionChildView {
     pub id: Uuid,
     pub display_no: String,
     pub currency: String,
+    pub workflow_status: String,
     pub lines: Vec<ProcurementExecutionLineView>,
 }
 
@@ -555,6 +556,47 @@ pub struct ReceiptView {
     pub order_id: Uuid,
     pub workflow_status: String,
     pub received_item_count: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordProcurementExpenditureInput {
+    pub id: Uuid,
+    pub order_id: Uuid,
+    pub receipt_id: Option<Uuid>,
+    pub counterparty_type: String,
+    pub supplier_id: Option<Uuid>,
+    pub payee_name: String,
+    pub currency: String,
+    pub amount_minor: String,
+    pub payment_date: String,
+    pub payment_method: String,
+    pub payment_handler_id: Uuid,
+    pub notes: Option<String>,
+    pub corrects_expenditure_id: Option<Uuid>,
+    pub correction_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcurementExpenditureView {
+    pub id: Uuid,
+    pub order_id: Uuid,
+    pub receipt_id: Option<Uuid>,
+    pub counterparty_type: String,
+    pub supplier_id: Option<Uuid>,
+    pub payee_name: String,
+    pub currency: String,
+    pub amount_minor: String,
+    pub payment_date: String,
+    pub payment_method: String,
+    pub payment_handler_id: Uuid,
+    pub notes: Option<String>,
+    pub status: String,
+    pub corrects_expenditure_id: Option<Uuid>,
+    pub correction_reason: Option<String>,
+    pub created_by: Uuid,
+    pub created_at: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -2272,7 +2314,7 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let parents = connection
-            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
+            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving', 'completed', 'completed_with_conditions') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
             .map_err(|_| AuthError::Database)?
             .query_map(params![account_id.to_string(), unix_seconds(now)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?)))
             .map_err(|_| AuthError::Database)?
@@ -2298,14 +2340,14 @@ impl LocalAuthService {
             .into_iter()
             .map(|(id, display_no, primary_currency, procurement_mode, workflow_status)| {
                 let children = connection
-                    .prepare("SELECT id, display_no, currency FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
+                    .prepare("SELECT id, display_no, currency, workflow_status FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
                     .map_err(|_| AuthError::Database)?
-                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)))
                     .map_err(|_| AuthError::Database)?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| AuthError::Database)?
                     .into_iter()
-                    .map(|(child_id, child_display_no, currency)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, currency, lines: read_lines(&child_id)? }))
+                    .map(|(child_id, child_display_no, currency, workflow_status)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, currency, workflow_status, lines: read_lines(&child_id)? }))
                     .collect::<Result<Vec<_>, AuthError>>()?;
                 Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
             })
@@ -3351,6 +3393,305 @@ impl LocalAuthService {
         })
     }
 
+    pub fn list_procurement_expenditures(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Vec<ProcurementExpenditureView>, AuthError> {
+        let connection = self.historical_order_connection(order_id, now)?;
+        let mut statement = connection.prepare(
+            "SELECT id, receipt_id, counterparty_type, supplier_id, payee_name, currency, amount_minor, payment_date, payment_method, payment_handler_id, notes, status, corrects_expenditure_id, correction_reason, created_by, created_at FROM local_procurement_expenditures WHERE order_id = ?1 ORDER BY created_at, id",
+        ).map_err(|_| AuthError::Database)?;
+        let rows = statement
+            .query_map([order_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, String>(14)?,
+                    row.get::<_, i64>(15)?,
+                ))
+            })
+            .map_err(|_| AuthError::Database)?;
+        rows.map(|row| {
+            let (
+                id,
+                receipt_id,
+                counterparty_type,
+                supplier_id,
+                payee_name,
+                currency,
+                amount_minor,
+                payment_date,
+                payment_method,
+                payment_handler_id,
+                notes,
+                status,
+                corrects_expenditure_id,
+                correction_reason,
+                created_by,
+                created_at,
+            ) = row.map_err(|_| AuthError::Database)?;
+            Ok(ProcurementExpenditureView {
+                id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
+                order_id,
+                receipt_id: receipt_id
+                    .map(|id| Uuid::parse_str(&id).map_err(|_| AuthError::Database))
+                    .transpose()?,
+                counterparty_type,
+                supplier_id: supplier_id
+                    .map(|id| Uuid::parse_str(&id).map_err(|_| AuthError::Database))
+                    .transpose()?,
+                payee_name,
+                currency,
+                amount_minor: amount_minor.to_string(),
+                payment_date,
+                payment_method,
+                payment_handler_id: Uuid::parse_str(&payment_handler_id)
+                    .map_err(|_| AuthError::Database)?,
+                notes,
+                status,
+                corrects_expenditure_id: corrects_expenditure_id
+                    .map(|id| Uuid::parse_str(&id).map_err(|_| AuthError::Database))
+                    .transpose()?,
+                correction_reason,
+                created_by: Uuid::parse_str(&created_by).map_err(|_| AuthError::Database)?,
+                created_at,
+            })
+        })
+        .collect()
+    }
+
+    pub fn record_procurement_expenditure(
+        &self,
+        input: RecordProcurementExpenditureInput,
+        now: SystemTime,
+    ) -> Result<ProcurementExpenditureView, AuthError> {
+        self.write_procurement_expenditure(input, "recorded", now)
+    }
+
+    pub fn reverse_procurement_expenditure(
+        &self,
+        expenditure_id: Uuid,
+        reversal_id: Uuid,
+        reason: String,
+        now: SystemTime,
+    ) -> Result<ProcurementExpenditureView, AuthError> {
+        if !valid_required_text(&reason, 1000) {
+            return Err(AuthError::InvalidInput);
+        }
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        let prior = {
+            let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            connection.query_row(
+                "SELECT order_id, receipt_id, counterparty_type, supplier_id, payee_name, currency, amount_minor, payment_date, payment_method, payment_handler_id, notes FROM local_procurement_expenditures WHERE id = ?1 AND status = 'recorded'",
+                [expenditure_id.to_string()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, i64>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, String>(9)?, row.get::<_, Option<String>>(10)?)),
+            ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::Forbidden)?
+        };
+        self.write_procurement_expenditure(
+            RecordProcurementExpenditureInput {
+                id: reversal_id,
+                order_id: Uuid::parse_str(&prior.0).map_err(|_| AuthError::Database)?,
+                receipt_id: prior
+                    .1
+                    .map(|id| Uuid::parse_str(&id).map_err(|_| AuthError::Database))
+                    .transpose()?,
+                counterparty_type: prior.2,
+                supplier_id: prior
+                    .3
+                    .map(|id| Uuid::parse_str(&id).map_err(|_| AuthError::Database))
+                    .transpose()?,
+                payee_name: prior.4,
+                currency: prior.5,
+                amount_minor: prior.6.to_string(),
+                payment_date: prior.7,
+                payment_method: prior.8,
+                payment_handler_id: Uuid::parse_str(&prior.9).map_err(|_| AuthError::Database)?,
+                notes: prior.10,
+                corrects_expenditure_id: Some(expenditure_id),
+                correction_reason: Some(reason),
+            },
+            "reversed",
+            now,
+        )
+    }
+
+    fn write_procurement_expenditure(
+        &self,
+        input: RecordProcurementExpenditureInput,
+        status: &str,
+        now: SystemTime,
+    ) -> Result<ProcurementExpenditureView, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        self.require_active_scope_for_order(input.order_id, now)?;
+        let amount_minor = input
+            .amount_minor
+            .parse::<i64>()
+            .map_err(|_| AuthError::InvalidInput)?;
+        if amount_minor <= 0
+            || !valid_currency(&input.currency)
+            || !valid_iso_date(&input.payment_date)
+            || !matches!(
+                input.payment_method.as_str(),
+                "cash" | "bank_transfer" | "mobile_payment" | "other"
+            )
+            || !valid_required_text(&input.payee_name, 255)
+            || !valid_optional_text(&input.notes, 2000)
+            || input
+                .correction_reason
+                .as_ref()
+                .is_some_and(|reason| !valid_required_text(reason, 1000))
+            || (input.corrects_expenditure_id.is_some() != input.correction_reason.is_some())
+            || (status == "reversed" && input.corrects_expenditure_id.is_none())
+            || (input.counterparty_type == "market_casual" && input.supplier_id.is_some())
+            || (input.counterparty_type == "registered_supplier" && input.supplier_id.is_none())
+            || !matches!(
+                input.counterparty_type.as_str(),
+                "market_casual" | "registered_supplier"
+            )
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let (project_id, country_id, mode, workflow_status, is_child): (String, String, Option<String>, String, i64) = transaction.query_row(
+            "SELECT o.project_id, o.country_id, COALESCE(o.procurement_mode, parent.procurement_mode), o.workflow_status, o.parent_order_id IS NOT NULL FROM local_purchase_orders o LEFT JOIN local_purchase_orders parent ON parent.id = o.parent_order_id WHERE o.id = ?1 AND o.deleted_at IS NULL",
+            [input.order_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        ).map_err(|_| AuthError::Forbidden)?;
+        if mode.as_deref() != Some("honsen_self_purchase")
+            || !(if is_child == 0 {
+                matches!(
+                    workflow_status.as_str(),
+                    "executing" | "receiving" | "completed" | "completed_with_conditions"
+                )
+            } else {
+                matches!(
+                    workflow_status.as_str(),
+                    "sent" | "receiving" | "completed" | "completed_with_conditions"
+                )
+            })
+        {
+            return Err(AuthError::Forbidden);
+        }
+        if let Some(receipt_id) = input.receipt_id {
+            let linked: bool = transaction
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM local_receipts WHERE id = ?1 AND order_id = ?2)",
+                    params![receipt_id.to_string(), input.order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Database)?;
+            if !linked {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        let prior_snapshot = if let Some(corrects_id) = input.corrects_expenditure_id {
+            let expected_status = if status == "reversed" {
+                "recorded"
+            } else {
+                "reversed"
+            };
+            let prior: Option<(String, String, i64, Option<String>)> = transaction.query_row(
+                "SELECT order_id, status, amount_minor, counterparty_snapshot_json FROM local_procurement_expenditures WHERE id = ?1",
+                [corrects_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            ).optional().map_err(|_| AuthError::Database)?;
+            match prior {
+                Some((order_id, prior_status, prior_amount, snapshot))
+                    if order_id == input.order_id.to_string()
+                        && prior_status == expected_status
+                        && (status != "reversed" || prior_amount == amount_minor) =>
+                {
+                    snapshot
+                }
+                _ => return Err(AuthError::InvalidInput),
+            }
+        } else {
+            None
+        };
+        let counterparty_snapshot = if status == "reversed" {
+            prior_snapshot
+        } else if let Some(supplier_id) = input.supplier_id {
+            let supplier: (String, String) = transaction.query_row(
+                "SELECT name, country_id FROM local_suppliers WHERE id = ?1 AND is_active = 1 AND deleted_at IS NULL",
+                [supplier_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).map_err(|_| AuthError::InvalidInput)?;
+            if supplier.1 != country_id || supplier.0 != input.payee_name {
+                return Err(AuthError::InvalidInput);
+            }
+            Some(
+                serde_json::json!({"id": supplier_id, "name": supplier.0, "countryId": supplier.1})
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        let created_at = unix_seconds(now);
+        transaction.execute(
+            "INSERT INTO local_procurement_expenditures (id, order_id, project_id, receipt_id, counterparty_type, supplier_id, payee_name, counterparty_snapshot_json, currency, amount_minor, payment_date, payment_method, payment_handler_id, notes, status, corrects_expenditure_id, correction_reason, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            params![input.id.to_string(), input.order_id.to_string(), project_id, input.receipt_id.map(|id| id.to_string()), input.counterparty_type, input.supplier_id.map(|id| id.to_string()), input.payee_name, counterparty_snapshot, input.currency, amount_minor, input.payment_date, input.payment_method, input.payment_handler_id.to_string(), input.notes, status, input.corrects_expenditure_id.map(|id| id.to_string()), input.correction_reason, actor_id.to_string(), created_at],
+        ).map_err(|_| AuthError::Database)?;
+        let payload = serde_json::json!({"id": input.id, "orderId": input.order_id, "projectId": project_id, "receiptId": input.receipt_id, "counterpartyType": input.counterparty_type, "supplierId": input.supplier_id, "payeeName": input.payee_name, "counterpartySnapshot": counterparty_snapshot.as_ref().and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok()), "currency": input.currency, "amountMinor": amount_minor.to_string(), "paymentDate": input.payment_date, "paymentMethod": input.payment_method, "paymentHandlerId": input.payment_handler_id, "notes": input.notes, "status": status, "correctsExpenditureId": input.corrects_expenditure_id, "correctionReason": input.correction_reason, "createdBy": actor_id, "createdAt": created_at}).to_string();
+        append_order_audit(
+            &transaction,
+            input.order_id,
+            actor_id,
+            if status == "reversed" {
+                "expenditure_reversed"
+            } else {
+                "expenditure_recorded"
+            },
+            input.correction_reason.as_deref(),
+            None,
+            Some(&payload),
+            now,
+        )?;
+        insert_local_sync_outbox(
+            &transaction,
+            "procurement_expenditure",
+            input.id,
+            &payload,
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(ProcurementExpenditureView {
+            id: input.id,
+            order_id: input.order_id,
+            receipt_id: input.receipt_id,
+            counterparty_type: input.counterparty_type,
+            supplier_id: input.supplier_id,
+            payee_name: input.payee_name,
+            currency: input.currency,
+            amount_minor: amount_minor.to_string(),
+            payment_date: input.payment_date,
+            payment_method: input.payment_method,
+            payment_handler_id: input.payment_handler_id,
+            notes: input.notes,
+            status: status.into(),
+            corrects_expenditure_id: input.corrects_expenditure_id,
+            correction_reason: input.correction_reason,
+            created_by: actor_id,
+            created_at,
+        })
+    }
+
     pub fn close_supplier_order_with_conditions(
         &self,
         order_id: Uuid,
@@ -4149,7 +4490,7 @@ impl LocalAuthService {
         }
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, event_id LIMIT ?1")
+            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY rowid LIMIT ?1")
             .map_err(|_| AuthError::Database)?
             .query_map([limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -4217,7 +4558,7 @@ impl LocalAuthService {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String)> = transaction.query_row(
-                "SELECT event_id, base_version, payload_json FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, event_id LIMIT 1",
+                "SELECT event_id, base_version, payload_json FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY rowid LIMIT 1",
                 params![change.entity_type, change.entity_id.to_string()],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             ).optional().map_err(|_| AuthError::Database)?;
@@ -5034,6 +5375,35 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn list_procurement_expenditures(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<Vec<super::ProcurementExpenditureView>, CommandError> {
+        auth.list_procurement_expenditures(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn record_procurement_expenditure(
+        auth: State<'_, LocalAuthService>,
+        input: super::RecordProcurementExpenditureInput,
+    ) -> Result<super::ProcurementExpenditureView, CommandError> {
+        auth.record_procurement_expenditure(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn reverse_procurement_expenditure(
+        auth: State<'_, LocalAuthService>,
+        expenditure_id: Uuid,
+        reversal_id: Uuid,
+        reason: String,
+    ) -> Result<super::ProcurementExpenditureView, CommandError> {
+        auth.reverse_procurement_expenditure(expenditure_id, reversal_id, reason, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn save_supplier_child_terms(
         auth: State<'_, LocalAuthService>,
         input: super::SupplierChildTermsInput,
@@ -5526,6 +5896,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0031_procurement_workflow_states",
             include_str!("../migrations/0031_procurement_workflow_states.sql"),
+        ),
+        (
+            "0032_procurement_expenditures",
+            include_str!("../migrations/0032_procurement_expenditures.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -10300,6 +10674,205 @@ mod tests {
             service.start_honsen_market_execution(market_id, now),
             Err(AuthError::Forbidden)
         );
+        let expenditure = RecordProcurementExpenditureInput {
+            id: Uuid::new_v4(),
+            order_id: market_id,
+            receipt_id: None,
+            counterparty_type: "market_casual".into(),
+            supplier_id: None,
+            payee_name: "fixture market seller".into(),
+            currency: "XOF".into(),
+            amount_minor: "1200".into(),
+            payment_date: "2026-10-11".into(),
+            payment_method: "cash".into(),
+            payment_handler_id: purchaser_id,
+            notes: None,
+            corrects_expenditure_id: None,
+            correction_reason: None,
+        };
+        let pending_before = service.pending_sync_events(100, now).unwrap().len();
+        assert_eq!(
+            service
+                .record_procurement_expenditure(
+                    RecordProcurementExpenditureInput {
+                        amount_minor: "0".into(),
+                        ..expenditure.clone()
+                    },
+                    now
+                )
+                .err(),
+            Some(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service
+                .record_procurement_expenditure(
+                    RecordProcurementExpenditureInput {
+                        receipt_id: Some(Uuid::new_v4()),
+                        ..expenditure.clone()
+                    },
+                    now
+                )
+                .err(),
+            Some(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service.pending_sync_events(100, now).unwrap().len(),
+            pending_before
+        );
+        service
+            .record_procurement_expenditure(expenditure.clone(), now)
+            .unwrap();
+        let second = service
+            .record_procurement_expenditure(
+                RecordProcurementExpenditureInput {
+                    id: Uuid::new_v4(),
+                    amount_minor: "300".into(),
+                    ..expenditure.clone()
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .list_procurement_expenditures(market_id, now)
+                .unwrap()
+                .len(),
+            2
+        );
+        let reversal = service
+            .reverse_procurement_expenditure(
+                expenditure.id,
+                Uuid::new_v4(),
+                "fixture correction".into(),
+                now,
+            )
+            .unwrap();
+        assert_eq!(reversal.status, "reversed");
+        assert_eq!(
+            service
+                .reverse_procurement_expenditure(
+                    expenditure.id,
+                    Uuid::new_v4(),
+                    "duplicate".into(),
+                    now
+                )
+                .err(),
+            Some(AuthError::Database)
+        );
+        let replacement = service
+            .record_procurement_expenditure(
+                RecordProcurementExpenditureInput {
+                    id: Uuid::new_v4(),
+                    amount_minor: "1250".into(),
+                    corrects_expenditure_id: Some(reversal.id),
+                    correction_reason: Some("correct amount".into()),
+                    ..expenditure.clone()
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(replacement.corrects_expenditure_id, Some(reversal.id));
+        let all_expenditures = service
+            .list_procurement_expenditures(market_id, now)
+            .unwrap();
+        assert_eq!(all_expenditures.len(), 4);
+        assert_eq!(
+            all_expenditures
+                .iter()
+                .filter(|row| row.status == "recorded")
+                .map(|row| row.amount_minor.parse::<i64>().unwrap())
+                .sum::<i64>()
+                - all_expenditures
+                    .iter()
+                    .filter(|row| row.status == "reversed")
+                    .map(|row| row.amount_minor.parse::<i64>().unwrap())
+                    .sum::<i64>(),
+            1550
+        );
+        assert_eq!(second.amount_minor, "300");
+        let expenditure_outbox = service
+            .pending_sync_events(100, now)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.entity_type == "procurement_expenditure")
+            .map(|event| event.entity_id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            expenditure_outbox,
+            vec![expenditure.id, second.id, reversal.id, replacement.id]
+        );
+        let registered = service
+            .record_procurement_expenditure(
+                RecordProcurementExpenditureInput {
+                    id: Uuid::new_v4(),
+                    counterparty_type: "registered_supplier".into(),
+                    supplier_id: Some(supplier.id),
+                    payee_name: supplier.name.clone(),
+                    ..expenditure.clone()
+                },
+                now,
+            )
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_active = 0 WHERE id = ?1",
+                [supplier.id.to_string()],
+            )
+            .unwrap();
+        let registered_reversal = service
+            .reverse_procurement_expenditure(
+                registered.id,
+                Uuid::new_v4(),
+                "supplier later deactivated".into(),
+                now,
+            )
+            .unwrap();
+        assert_eq!(registered_reversal.supplier_id, Some(supplier.id));
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_active = 1 WHERE id = ?1",
+                [supplier.id.to_string()],
+            )
+            .unwrap();
+        let market_line_id = market_draft.lines[0].id;
+        let owner_id = Uuid::new_v4();
+        market_draft.id = owner_id;
+        market_draft.display_no = "OWNER-EXPENDITURE-DENIAL".into();
+        market_draft.lines[0].id = Uuid::new_v4();
+        service
+            .save_requisition_draft(market_draft.clone(), now)
+            .unwrap();
+        service
+            .set_procurement_mode(owner_id, "owner_self_purchase".into(), now)
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'executing' WHERE id = ?1",
+                [owner_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .record_procurement_expenditure(
+                    RecordProcurementExpenditureInput {
+                        id: Uuid::new_v4(),
+                        order_id: owner_id,
+                        ..expenditure.clone()
+                    },
+                    now
+                )
+                .err(),
+            Some(AuthError::Forbidden)
+        );
         let partial = service
             .record_receipt(
                 RecordReceiptInput {
@@ -10310,7 +10883,7 @@ mod tests {
                     over_receipt_reason: None,
                     attachment_ids: vec![],
                     items: vec![ReceiptItemInput {
-                        order_item_id: market_draft.lines[0].id,
+                        order_item_id: market_line_id,
                         quantity: "1".into(),
                         unit: "pcs".into(),
                     }],
@@ -10329,7 +10902,7 @@ mod tests {
                     over_receipt_reason: None,
                     attachment_ids: vec![],
                     items: vec![ReceiptItemInput {
-                        order_item_id: market_draft.lines[0].id,
+                        order_item_id: market_line_id,
                         quantity: "1.5".into(),
                         unit: "pcs".into(),
                     }],
@@ -10491,6 +11064,8 @@ mod tests {
         connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'MIG-ORDER', ?2, ?3, 'migration site', ?4, ?5, 'migration-applicant', 'CNY', 'CNY', 'zh_en', 'draft', 'draft', 'normal', '2026-10-11', 'migration address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![order_id, country_id, project_id, department_id, team_id]).unwrap();
         connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_snapshot_json, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, '{\"nameZh\":\"migration material\"}', '1', 'pcs', 100, 100, 0, 0, 0)", params![item_id, order_id]).unwrap();
 
+        let expenditure_before: i64 = connection.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_procurement_expenditures'", [], |row| row.get(0)).unwrap();
+        assert_eq!(expenditure_before, 0);
         migrate(&mut connection).unwrap();
         migrate(&mut connection).unwrap();
 
@@ -10634,6 +11209,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(receipt_table_exists, 1);
+        let expenditure_table_exists: i64 = connection.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_procurement_expenditures'", [], |row| row.get(0)).unwrap();
+        assert_eq!(expenditure_table_exists, 1);
+        let expenditure_id = Uuid::new_v4().to_string();
+        connection.execute(
+            "INSERT INTO local_procurement_expenditures (id, order_id, project_id, counterparty_type, payee_name, currency, amount_minor, payment_date, payment_method, payment_handler_id, status, created_by, created_at) VALUES (?1, ?2, ?3, 'market_casual', 'fixture payee', 'XOF', 1, '2026-10-13', 'cash', ?4, 'recorded', ?4, 1)",
+            params![expenditure_id, &order_id, &project_id, Uuid::new_v4().to_string()],
+        ).unwrap();
+        assert!(connection.execute(
+            "INSERT INTO local_procurement_expenditures (id, order_id, project_id, counterparty_type, payee_name, currency, amount_minor, payment_date, payment_method, payment_handler_id, status, corrects_expenditure_id, created_by, created_at) VALUES (?1, ?2, ?3, 'market_casual', 'fixture payee', 'XOF', 1, '2026-10-13', 'cash', ?4, 'reversed', ?5, ?4, 2)",
+            params![Uuid::new_v4().to_string(), &order_id, &project_id, Uuid::new_v4().to_string(), expenditure_id],
+        ).is_err());
         let supplier_terms_column_exists: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('local_purchase_orders') WHERE name = 'supplier_terms_completed_at'",
