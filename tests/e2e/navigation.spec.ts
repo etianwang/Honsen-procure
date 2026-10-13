@@ -1534,6 +1534,9 @@ test('authenticated desktop switches between cached authorization scopes', async
     let selected = contexts[0]
     let historicalStatus = 'pending_confirmation'
     Object.assign(window, {
+      __setHistoryPending: () => {
+        historicalStatus = 'pending_confirmation'
+      },
       __TAURI_INTERNALS__: {},
       __TAURI__: {
         core: {
@@ -1593,6 +1596,7 @@ test('authenticated desktop switches between cached authorization scopes', async
               return Promise.resolve({
                 id: '00000000-0000-4000-8000-000000000009',
                 displayNo: 'REQ-HISTORY-1',
+                applicantId: '00000000-0000-4000-8000-000000000007',
                 projectName: '项目乙',
                 projectId: '00000000-0000-4000-8000-000000000005',
                 site: '乙工地',
@@ -1639,6 +1643,10 @@ test('authenticated desktop switches between cached authorization scopes', async
               return Promise.resolve([])
             if (command === 'confirm_requisition') {
               historicalStatus = 'confirmed'
+              return Promise.resolve()
+            }
+            if (command === 'withdraw_requisition') {
+              historicalStatus = 'draft'
               return Promise.resolve()
             }
             return Promise.reject(new Error(`unexpected command: ${command}`))
@@ -1689,6 +1697,16 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(page.getByLabel('税率（基点）')).toHaveValue('0')
   await expect(page.getByLabel('单价（最小货币单位）')).toHaveValue('0')
   await expect(page.getByText(/历史材料：测试电缆/)).toBeVisible()
+  await page.evaluate(() => {
+    ;(
+      window as Window & { __setHistoryPending?: () => void }
+    ).__setHistoryPending?.()
+  })
+  await page.getByRole('button', { name: '查看详情：REQ-HISTORY-1' }).click()
+  await page.getByRole('button', { name: '撤回历史申请' }).click()
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    'draft',
+  )
   await page.getByLabel('搜索单号、项目或工地').fill('不存在')
   await page.getByRole('button', { name: '筛选' }).click()
   await expect(page.getByText('暂无请购记录。')).toBeVisible()

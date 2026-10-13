@@ -430,6 +430,7 @@ pub struct RequisitionAttachmentView {
 pub struct RequisitionDetailView {
     pub id: Uuid,
     pub display_no: String,
+    pub applicant_id: Uuid,
     pub project_name: String,
     pub project_id: Uuid,
     pub site: String,
@@ -2212,10 +2213,10 @@ impl LocalAuthService {
     ) -> Result<RequisitionDetailView, AuthError> {
         let audits = self.list_order_audits(order_id, now)?;
         let connection = self.historical_order_connection(order_id, now)?;
-        let (display_no, project_name, project_id, site, workflow_status, procurement_mode, order_date, delivery_address, expected_delivery_date, notes, primary_currency, total_minor) = connection.query_row(
-            "SELECT o.display_no, p.name, o.project_id, o.site, o.workflow_status, o.procurement_mode, o.order_date, o.delivery_address, o.expected_delivery_date, o.notes, o.primary_currency, o.total_minor FROM local_purchase_orders o JOIN local_projects p ON p.id = o.project_id WHERE o.id = ?1 AND o.parent_order_id IS NULL AND o.deleted_at IS NULL",
+        let (display_no, applicant_id, project_name, project_id, site, workflow_status, procurement_mode, order_date, delivery_address, expected_delivery_date, notes, primary_currency, total_minor) = connection.query_row(
+            "SELECT o.display_no, o.applicant_id, p.name, o.project_id, o.site, o.workflow_status, o.procurement_mode, o.order_date, o.delivery_address, o.expected_delivery_date, o.notes, o.primary_currency, o.total_minor FROM local_purchase_orders o JOIN local_projects p ON p.id = o.project_id WHERE o.id = ?1 AND o.parent_order_id IS NULL AND o.deleted_at IS NULL",
             [order_id.to_string()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, Option<String>>(5)?, row.get::<_, String>(6)?, row.get::<_, String>(7)?, row.get::<_, Option<String>>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, String>(10)?, row.get::<_, i64>(11)?)),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, Option<String>>(10)?, row.get::<_, String>(11)?, row.get::<_, i64>(12)?)),
         ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::Forbidden)?;
         let lines = connection.prepare(
             "SELECT material_snapshot_json, quantity_decimal, unit, currency, unit_price_minor, line_total_minor FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id"
@@ -2241,6 +2242,7 @@ impl LocalAuthService {
         Ok(RequisitionDetailView {
             id: order_id,
             display_no,
+            applicant_id: Uuid::parse_str(&applicant_id).map_err(|_| AuthError::Database)?,
             project_name,
             project_id: Uuid::parse_str(&project_id).map_err(|_| AuthError::Database)?,
             site,
@@ -9633,6 +9635,7 @@ mod tests {
         ));
         let detail = service.get_requisition_detail(requisition_id, now).unwrap();
         assert_eq!(detail.id, requisition_id);
+        assert_eq!(detail.applicant_id, purchaser_id);
         assert_eq!(detail.lines[0].material_name, "测试材料");
         service.connection.lock().unwrap().execute(
             "UPDATE local_authorization_snapshots SET verified_at = ?1, expires_at = ?2 WHERE account_id = ?3 AND project_id = ?4",

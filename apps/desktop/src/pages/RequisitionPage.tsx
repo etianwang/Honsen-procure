@@ -817,6 +817,7 @@ export function RequisitionPage({
         api={api}
         refreshKey={status}
         projectId={context.projectId}
+        applicantId={context.applicantId}
         onCopy={copyFromHistory}
         workflowApi={workflowApi}
         canApprove={canApprove}

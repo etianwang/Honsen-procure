@@ -35,6 +35,7 @@ export type RequisitionHistoryPage = {
 export type RequisitionDetail = {
   id: string
   displayNo: string
+  applicantId: string
   projectName: string
   projectId: string
   site: string
