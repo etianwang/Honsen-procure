@@ -94,4 +94,48 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
       client.release()
     }
   }
+
+  async revokeScope(input: {
+    accountId: string
+    scope: Pick<AuthorizationScope, 'projectId' | 'departmentId' | 'teamId'>
+    actorId: string
+  }): Promise<void> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        `UPDATE user_project_scope_bindings
+         SET deleted_at = NOW(), updated_at = NOW()
+         WHERE user_id = $1 AND project_id = $2 AND department_id = $3 AND team_id = $4
+           AND deleted_at IS NULL`,
+        [
+          input.accountId,
+          input.scope.projectId,
+          input.scope.departmentId,
+          input.scope.teamId,
+        ],
+      )
+      await client.query(
+        `UPDATE user_project_bindings
+         SET deleted_at = NOW()
+         WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM user_project_scope_bindings
+             WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL
+           )`,
+        [input.accountId, input.scope.projectId],
+      )
+      await client.query(
+        `INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action)
+         VALUES (gen_random_uuid(), $1, 'user_project_scope_binding', $2, 'revoke')`,
+        [input.actorId, input.accountId],
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
 }

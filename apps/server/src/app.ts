@@ -86,6 +86,27 @@ export function createApp(
         }
       },
     )
+    app.delete(
+      '/api/authorization/bindings/:accountId',
+      async (request, reply) => {
+        try {
+          const account = await authenticateRequest(request)
+          const params = z.object({ accountId: z.uuid() }).parse(request.params)
+          await authorization.revoke(account, params.accountId, request.body)
+          return reply.status(204).send()
+        } catch (error) {
+          if (error instanceof AuthenticationError)
+            return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+          if (error instanceof AuthorizationError)
+            return reply
+              .status(error.code === 'FORBIDDEN' ? 403 : 400)
+              .send({ code: error.code })
+          if (error instanceof z.ZodError)
+            return reply.status(400).send({ code: 'INVALID_REQUEST' })
+          throw error
+        }
+      },
+    )
   }
 
   if (masterData) {
