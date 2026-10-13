@@ -250,10 +250,11 @@
 - Full T01 gate passed on 2026-10-10: format check, lint, typecheck, five unit tests, build and two Playwright browser flows. Success screenshots are in ignored `test-results/`; CI uploads the Playwright report artifact.
 - The local npm client rejected `workspace:*`; the desktop uses the explicit local `file:../../packages/shared` dependency. Do not treat `npm ls` as proof: all four runtime/type/test/build gates must pass.
 
-## Admin Master Data Management — in progress
+## Admin Master Data Management — completed
 
-- Branch: `codex/admin-master-data` from merged OPA-2 (`224bc29`). The selected scope is country, project and project-site management only; no production database, Seed data, supplier/material/rate management, remote push or PR activity.
-- Completed locally on 2026-10-13: additive SQLite audit migration, local reference-data listing/saving through the trusted Tauri boundary, editable management UI, server-side sync payload validation, project-country change rejection after local business use, and an inactive-site guard for new requisitions. Focused Rust/server/DOM tests and the full quality gates passed; no production database, Seed data, remote push or PR activity occurred.
+- Merged through PR #8 on 2026-10-13 as squash commit `45b7664` after both GitHub Actions `quality` checks passed. The original task branch was deleted and local `main` was synchronized before this documentation-only closeout checkpoint.
+- Scope delivered: country, project and project-site management only. It adds an additive SQLite audit migration, trusted local reference-data listing/saving, editable management UI, server-side sync validation, project-country change rejection after business use, and an inactive-site guard for new requisitions. No production database, Seed data, supplier/material/rate management, or unrelated master-data UI was changed.
+- Evidence: local Rust, server sync, unit/build and 22-worker-serial Playwright gates passed on 2026-10-13; the two GitHub Actions `quality` checks passed before merge. The PostgreSQL integration suite was not run locally because `TEST_DATABASE_URL` was absent; CI quality remains the remote validation evidence.
 
 ## T02 historical partial-gate evidence — full acceptance still open
 
