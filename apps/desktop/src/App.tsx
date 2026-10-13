@@ -56,6 +56,9 @@ const previewRequisitionContext: RequisitionContext = {
 }
 
 const previewRequisitionApi: RequisitionApi = {
+  async getRequisitionDetail() {
+    throw new Error('预览环境没有历史记录')
+  },
   async listRequisitionHistory() {
     return { records: [], nextCursor: null }
   },
@@ -78,6 +81,7 @@ const previewRequisitionApi: RequisitionApi = {
     }))
   },
   async submitRequisitionDraft() {},
+  async withdrawRequisition() {},
 }
 
 const previewCatalogApi = {
@@ -389,6 +393,7 @@ function App() {
             />
           ) : page === 'requisition' && requisitionContext ? (
             <RequisitionPage
+              key={`${requisitionContext.projectId}:${requisitionContext.departmentId}:${requisitionContext.teamId}`}
               api={
                 (
                   window as Window & {

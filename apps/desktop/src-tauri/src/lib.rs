@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -387,11 +387,63 @@ pub struct RequisitionHistoryCursor {
     pub id: Uuid,
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequisitionHistoryFilter {
+    pub query: Option<String>,
+    pub workflow_status: Option<String>,
+    pub project_id: Option<Uuid>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequisitionHistoryPageView {
     pub records: Vec<RequisitionHistoryView>,
     pub next_cursor: Option<RequisitionHistoryCursor>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequisitionDetailLineView {
+    pub material_name: String,
+    pub model: String,
+    pub specification: String,
+    pub quantity: String,
+    pub unit: String,
+    pub currency: String,
+    pub unit_price_minor: String,
+    pub line_total_minor: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequisitionAttachmentView {
+    pub id: Uuid,
+    pub original_name: String,
+    pub content_type: String,
+    pub byte_length: i64,
+    pub upload_state: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequisitionDetailView {
+    pub id: Uuid,
+    pub display_no: String,
+    pub project_name: String,
+    pub project_id: Uuid,
+    pub site: String,
+    pub workflow_status: String,
+    pub procurement_mode: Option<String>,
+    pub order_date: String,
+    pub delivery_address: String,
+    pub expected_delivery_date: Option<String>,
+    pub notes: Option<String>,
+    pub primary_currency: String,
+    pub total_minor: String,
+    pub lines: Vec<RequisitionDetailLineView>,
+    pub attachments: Vec<RequisitionAttachmentView>,
+    pub audits: Vec<OrderAuditView>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -2063,9 +2115,36 @@ impl LocalAuthService {
     pub fn list_requisition_history(
         &self,
         cursor: Option<RequisitionHistoryCursor>,
+        filter: RequisitionHistoryFilter,
         now: SystemTime,
     ) -> Result<RequisitionHistoryPageView, AuthError> {
         self.require_catalog_read(now)?;
+        let query = filter
+            .query
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if query
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 100)
+            || filter.workflow_status.as_deref().is_some_and(|value| {
+                !matches!(
+                    value,
+                    "draft"
+                        | "pending_confirmation"
+                        | "rejected"
+                        | "confirmed"
+                        | "approved"
+                        | "formally_issued"
+                        | "executing"
+                        | "receiving"
+                        | "completed"
+                        | "completed_with_conditions"
+                        | "cancelled"
+                )
+            })
+        {
+            return Err(AuthError::InvalidInput);
+        }
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let cursor_at = cursor.as_ref().map(|value| value.updated_at);
@@ -2077,11 +2156,21 @@ impl LocalAuthService {
              JOIN local_projects p ON p.id = o.project_id
              WHERE o.parent_order_id IS NULL AND o.deleted_at IS NULL
                AND (?2 IS NULL OR o.updated_at < ?2 OR (o.updated_at = ?2 AND o.id < ?3))
+               AND (?4 IS NULL OR instr(lower(o.display_no), lower(?4)) > 0 OR instr(lower(p.name), lower(?4)) > 0 OR instr(lower(o.site), lower(?4)) > 0)
+               AND (?5 IS NULL OR o.workflow_status = ?5)
+               AND (?6 IS NULL OR o.project_id = ?6)
              ORDER BY o.updated_at DESC, o.id DESC LIMIT 51"
         ).map_err(|_| AuthError::Database)?;
         let mut records = statement
             .query_map(
-                params![account_id.to_string(), cursor_at, cursor_id],
+                params![
+                    account_id.to_string(),
+                    cursor_at,
+                    cursor_id,
+                    query,
+                    filter.workflow_status,
+                    filter.project_id.map(|value| value.to_string())
+                ],
                 |row| {
                     Ok(RequisitionHistoryView {
                         id: Uuid::parse_str(&row.get::<_, String>(0)?)
@@ -2113,6 +2202,59 @@ impl LocalAuthService {
         Ok(RequisitionHistoryPageView {
             records,
             next_cursor,
+        })
+    }
+
+    pub fn get_requisition_detail(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<RequisitionDetailView, AuthError> {
+        let audits = self.list_order_audits(order_id, now)?;
+        let connection = self.historical_order_connection(order_id, now)?;
+        let (display_no, project_name, project_id, site, workflow_status, procurement_mode, order_date, delivery_address, expected_delivery_date, notes, primary_currency, total_minor) = connection.query_row(
+            "SELECT o.display_no, p.name, o.project_id, o.site, o.workflow_status, o.procurement_mode, o.order_date, o.delivery_address, o.expected_delivery_date, o.notes, o.primary_currency, o.total_minor FROM local_purchase_orders o JOIN local_projects p ON p.id = o.project_id WHERE o.id = ?1 AND o.parent_order_id IS NULL AND o.deleted_at IS NULL",
+            [order_id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, Option<String>>(5)?, row.get::<_, String>(6)?, row.get::<_, String>(7)?, row.get::<_, Option<String>>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, String>(10)?, row.get::<_, i64>(11)?)),
+        ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::Forbidden)?;
+        let lines = connection.prepare(
+            "SELECT material_snapshot_json, quantity_decimal, unit, currency, unit_price_minor, line_total_minor FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id"
+        ).map_err(|_| AuthError::Database)?
+            .query_map([order_id.to_string()], |row| {
+                let snapshot: serde_json::Value = serde_json::from_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                let field = |key: &str| snapshot.get(key).and_then(|value| value.as_str()).unwrap_or("").to_string();
+                Ok(RequisitionDetailLineView {
+                    material_name: field("nameZh"), model: field("model"), specification: field("specification"),
+                    quantity: row.get(1)?, unit: row.get(2)?, currency: row.get(3)?,
+                    unit_price_minor: row.get::<_, i64>(4)?.to_string(), line_total_minor: row.get::<_, i64>(5)?.to_string(),
+                })
+            }).map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)?;
+        let attachments = connection.prepare(
+            "SELECT id, original_name, content_type, byte_length, upload_state FROM local_order_attachments WHERE order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id"
+        ).map_err(|_| AuthError::Database)?
+            .query_map([order_id.to_string()], |row| Ok(RequisitionAttachmentView {
+                id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                original_name: row.get(1)?, content_type: row.get(2)?, byte_length: row.get(3)?, upload_state: row.get(4)?,
+            })).map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)?;
+        Ok(RequisitionDetailView {
+            id: order_id,
+            display_no,
+            project_name,
+            project_id: Uuid::parse_str(&project_id).map_err(|_| AuthError::Database)?,
+            site,
+            workflow_status,
+            procurement_mode,
+            order_date,
+            delivery_address,
+            expected_delivery_date,
+            notes,
+            primary_currency,
+            total_minor: total_minor.to_string(),
+            lines,
+            attachments,
+            audits,
         })
     }
 
@@ -3361,6 +3503,34 @@ impl LocalAuthService {
         Ok(())
     }
 
+    pub fn withdraw_requisition(&self, order_id: Uuid, now: SystemTime) -> Result<(), AuthError> {
+        self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(order_id, now)?;
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let changed = transaction.execute(
+            "UPDATE local_purchase_orders SET workflow_status = 'draft', version = version + 1, updated_at = ?2 WHERE id = ?1 AND applicant_id = ?3 AND workflow_status = 'pending_confirmation' AND parent_order_id IS NULL AND deleted_at IS NULL",
+            params![order_id.to_string(), unix_seconds(now), actor_id.to_string()],
+        ).map_err(|_| AuthError::Database)?;
+        if changed != 1 {
+            return Err(AuthError::Forbidden);
+        }
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            "withdrawn",
+            None,
+            Some("pending_confirmation"),
+            Some("draft"),
+            now,
+        )?;
+        let payload = order_sync_payload(&transaction, order_id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
     pub fn confirm_requisition(&self, order_id: Uuid, now: SystemTime) -> Result<(), AuthError> {
         if !self.require_order_mutation(now)? {
             return Err(AuthError::Forbidden);
@@ -3589,8 +3759,7 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<Vec<OrderCommentView>, AuthError> {
-        self.require_catalog_read(now)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let connection = self.historical_order_connection(order_id, now)?;
         let mut statement = connection
             .prepare(
                 "SELECT id, order_id, author_id, body, created_at FROM local_order_comments WHERE order_id = ?1 ORDER BY created_at, id",
@@ -3620,21 +3789,7 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<Vec<OrderAuditView>, AuthError> {
-        let privileged = self.require_order_mutation(now)?;
-        let actor_id = self.active_session_user_id()?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        if !privileged {
-            let applicant_id: String = connection
-                .query_row(
-                    "SELECT applicant_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
-                    [order_id.to_string()],
-                    |row| row.get(0),
-                )
-                .map_err(|_| AuthError::Forbidden)?;
-            if applicant_id != actor_id.to_string() {
-                return Err(AuthError::Forbidden);
-            }
-        }
+        let connection = self.historical_order_connection(order_id, now)?;
         let mut statement = connection
             .prepare(
                 "SELECT id, order_id, actor_id, action, reason, previous_json, next_json, created_at FROM local_order_audit_entries WHERE order_id = ?1 ORDER BY created_at, id",
@@ -4258,6 +4413,26 @@ impl LocalAuthService {
         Uuid::parse_str(&user_id).map_err(|_| AuthError::Database)
     }
 
+    fn historical_order_connection(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<MutexGuard<'_, Connection>, AuthError> {
+        self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let authorized: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?2 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id WHERE o.id = ?1 AND o.deleted_at IS NULL)",
+            params![order_id.to_string(), account_id.to_string()],
+            |row| row.get(0),
+        ).map_err(|_| AuthError::Database)?;
+        if authorized {
+            Ok(connection)
+        } else {
+            Err(AuthError::Forbidden)
+        }
+    }
+
     fn require_active_scope_for_order(
         &self,
         order_id: Uuid,
@@ -4633,11 +4808,21 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn get_requisition_detail(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<super::RequisitionDetailView, CommandError> {
+        auth.get_requisition_detail(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn list_requisition_history(
         auth: State<'_, LocalAuthService>,
         cursor: Option<super::RequisitionHistoryCursor>,
+        filter: Option<super::RequisitionHistoryFilter>,
     ) -> Result<super::RequisitionHistoryPageView, CommandError> {
-        auth.list_requisition_history(cursor, SystemTime::now())
+        auth.list_requisition_history(cursor, filter.unwrap_or_default(), SystemTime::now())
             .map_err(Into::into)
     }
 
@@ -4929,6 +5114,15 @@ pub mod commands {
         body: String,
     ) -> Result<super::OrderCommentView, CommandError> {
         auth.add_order_comment(order_id, body, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn withdraw_requisition(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<(), CommandError> {
+        auth.withdraw_requisition(order_id, SystemTime::now())
             .map_err(Into::into)
     }
 
@@ -7782,6 +7976,14 @@ mod tests {
         let order_id = Uuid::new_v4();
         connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'SYNC-ORDER', ?2, ?3, 'sync site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'pending_confirmation', 'pending_confirmation', 'normal', '2026-10-11', 'sync address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![order_id.to_string(), country_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), purchaser_id.to_string()]).unwrap();
         drop(connection);
+        grant_test_scope(
+            &service,
+            purchaser_id,
+            project_id,
+            department_id,
+            team_id,
+            now,
+        );
         let comment_id = Uuid::new_v4();
         service.apply_sync_pull_page(SyncPullPageInput { changes: vec![SyncPullChangeInput { cursor: "10".into(), entity_type: "order_comment".into(), entity_id: comment_id, operation: "upsert".into(), version: 1, payload: serde_json::json!({ "orderId": order_id, "authorId": purchaser_id, "projectId": project_id, "body": "remote immutable comment", "createdAt": 10 }), changed_at: "2026-10-11T00:02:00Z".into() }], next_cursor: "10".into() }, now).unwrap();
         assert_eq!(
@@ -8321,6 +8523,21 @@ mod tests {
             .unwrap();
         assert_eq!(draft_status, "pending_confirmation");
         drop(connection);
+        service.withdraw_requisition(draft_order_id, now).unwrap();
+        assert!(
+            service
+                .list_order_audits(draft_order_id, now)
+                .unwrap()
+                .iter()
+                .any(|audit| audit.action == "withdrawn")
+        );
+        assert_eq!(
+            service.withdraw_requisition(draft_order_id, now),
+            Err(AuthError::Forbidden)
+        );
+        service
+            .submit_requisition_draft(draft_order_id, now)
+            .unwrap();
         service.lock().unwrap();
         let captcha = service.issue_captcha(now).unwrap();
         service
@@ -8472,7 +8689,7 @@ mod tests {
         assert_eq!(resubmitted.0, "pending_confirmation");
         assert_eq!(resubmitted.1, 1);
         assert_eq!(resubmitted.2, 1);
-        assert_eq!(resubmitted.3, 8);
+        assert_eq!(resubmitted.3, 10);
         drop(connection);
         let applicant_audits = service.list_order_audits(draft_order_id, now).unwrap();
         assert!(applicant_audits.iter().any(|audit| {
@@ -8528,6 +8745,10 @@ mod tests {
         );
         assert_eq!(
             service.submit_requisition_draft(draft_order_id, now),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(
+            service.withdraw_requisition(draft_order_id, now),
             Err(AuthError::Forbidden)
         );
         let connection = service.connection.lock().unwrap();
@@ -9330,10 +9551,93 @@ mod tests {
         let execution_orders = service.list_confirmed_procurement_orders(now).unwrap();
         assert_eq!(execution_orders.len(), 1);
         assert_eq!(execution_orders[0].id, requisition_id);
-        let history = service.list_requisition_history(None, now).unwrap();
+        let history = service
+            .list_requisition_history(None, RequisitionHistoryFilter::default(), now)
+            .unwrap();
         assert_eq!(history.records.len(), 1);
         assert_eq!(history.records[0].id, requisition_id);
         assert!(history.next_cursor.is_none());
+        assert_eq!(
+            service
+                .list_requisition_history(
+                    None,
+                    RequisitionHistoryFilter {
+                        query: Some("OTHER".into()),
+                        ..Default::default()
+                    },
+                    now
+                )
+                .unwrap()
+                .records
+                .len(),
+            0
+        );
+        assert_eq!(
+            service
+                .list_requisition_history(
+                    None,
+                    RequisitionHistoryFilter {
+                        workflow_status: Some("confirmed".into()),
+                        ..Default::default()
+                    },
+                    now
+                )
+                .unwrap()
+                .records
+                .len(),
+            1
+        );
+        assert_eq!(
+            service
+                .list_requisition_history(
+                    None,
+                    RequisitionHistoryFilter {
+                        query: Some("%".into()),
+                        ..Default::default()
+                    },
+                    now
+                )
+                .unwrap()
+                .records
+                .len(),
+            0
+        );
+        assert_eq!(
+            service.list_order_comments(other_order_id, now),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(
+            service.list_order_audits(other_order_id, now),
+            Err(AuthError::Forbidden)
+        );
+        assert!(matches!(
+            service.get_requisition_detail(other_order_id, now),
+            Err(AuthError::Forbidden)
+        ));
+        let detail = service.get_requisition_detail(requisition_id, now).unwrap();
+        assert_eq!(detail.id, requisition_id);
+        assert_eq!(detail.lines[0].material_name, "测试材料");
+        service.connection.lock().unwrap().execute(
+            "UPDATE local_authorization_snapshots SET verified_at = ?1, expires_at = ?2 WHERE account_id = ?3 AND project_id = ?4",
+            params![unix_seconds(now) - 2, unix_seconds(now) - 1, approver_id.to_string(), project_id.to_string()],
+        ).unwrap();
+        assert_eq!(
+            service
+                .list_requisition_history(None, RequisitionHistoryFilter::default(), now)
+                .unwrap()
+                .records
+                .len(),
+            1
+        );
+        assert!(service.get_requisition_detail(requisition_id, now).is_ok());
+        assert_eq!(
+            service.require_active_scope_for_order(requisition_id, now),
+            Err(AuthError::Forbidden)
+        );
+        service.connection.lock().unwrap().execute(
+            "UPDATE local_authorization_snapshots SET expires_at = ?1 WHERE account_id = ?2 AND project_id = ?3",
+            params![unix_seconds(now + AUTHORIZATION_CACHE_WINDOW), approver_id.to_string(), project_id.to_string()],
+        ).unwrap();
         assert_eq!(execution_orders[0].lines.len(), 1);
         assert_eq!(execution_orders[0].lines[0].material_name, "测试材料");
         let mention = service

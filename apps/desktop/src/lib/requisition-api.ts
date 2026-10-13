@@ -1,4 +1,5 @@
 import type { RequisitionDraft } from '@honsen/shared'
+import type { OrderAuditView } from './workflow-api'
 
 export type RequisitionTotalsView = {
   subtotalMinor: string
@@ -10,6 +11,11 @@ export type RequisitionTotalsView = {
 }
 
 export type RequisitionHistoryCursor = { updatedAt: number; id: string }
+export type RequisitionHistoryFilter = {
+  query?: string
+  workflowStatus?: string
+  projectId?: string
+}
 
 export type RequisitionHistoryPage = {
   records: {
@@ -24,6 +30,40 @@ export type RequisitionHistoryPage = {
     updatedAt: number
   }[]
   nextCursor: RequisitionHistoryCursor | null
+}
+
+export type RequisitionDetail = {
+  id: string
+  displayNo: string
+  projectName: string
+  projectId: string
+  site: string
+  workflowStatus: string
+  procurementMode: string | null
+  orderDate: string
+  deliveryAddress: string
+  expectedDeliveryDate: string | null
+  notes: string | null
+  primaryCurrency: string
+  totalMinor: string
+  lines: {
+    materialName: string
+    model: string
+    specification: string
+    quantity: string
+    unit: string
+    currency: string
+    unitPriceMinor: string
+    lineTotalMinor: string
+  }[]
+  attachments: {
+    id: string
+    originalName: string
+    contentType: string
+    byteLength: number
+    uploadState: string
+  }[]
+  audits: OrderAuditView[]
 }
 
 export type OwnerQuoteSource =
@@ -47,8 +87,10 @@ export type OwnerLinePricingView = {
 }
 
 export type RequisitionApi = {
+  getRequisitionDetail(orderId: string): Promise<RequisitionDetail>
   listRequisitionHistory(
     cursor?: RequisitionHistoryCursor,
+    filter?: RequisitionHistoryFilter,
   ): Promise<RequisitionHistoryPage>
   saveRequisitionDraft(draft: RequisitionDraft): Promise<RequisitionTotalsView>
   setProcurementMode(orderId: string, mode: string): Promise<void>
@@ -58,6 +100,7 @@ export type RequisitionApi = {
     revisionReason: string | null
   }): Promise<OwnerLinePricingView[]>
   submitRequisitionDraft(orderId: string): Promise<void>
+  withdrawRequisition(orderId: string): Promise<void>
 }
 
 type TauriInvoke = <T>(command: string, args?: object) => Promise<T>
@@ -73,9 +116,12 @@ function tauriInvoke(): TauriInvoke {
 }
 
 export const tauriRequisitionApi: RequisitionApi = {
-  listRequisitionHistory: (cursor) =>
+  getRequisitionDetail: (orderId) =>
+    tauriInvoke()<RequisitionDetail>('get_requisition_detail', { orderId }),
+  listRequisitionHistory: (cursor, filter) =>
     tauriInvoke()<RequisitionHistoryPage>('list_requisition_history', {
       cursor: cursor ?? null,
+      filter: filter ?? null,
     }),
   saveRequisitionDraft: (draft) =>
     tauriInvoke()<RequisitionTotalsView>('save_requisition_draft', { draft }),
@@ -87,4 +133,6 @@ export const tauriRequisitionApi: RequisitionApi = {
     }),
   submitRequisitionDraft: (orderId) =>
     tauriInvoke()<void>('submit_requisition_draft', { orderId }),
+  withdrawRequisition: (orderId) =>
+    tauriInvoke()<void>('withdraw_requisition', { orderId }),
 }
