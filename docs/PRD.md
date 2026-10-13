@@ -12,9 +12,9 @@
 
 ## 2. Users and access
 
-- Every launch requires account password and local image/arithmetic CAPTCHA. The session locks after 30 minutes idle. A locally cached enabled account may sign in offline for up to 24 hours; it must later reconnect and validate.
+- Every launch requires account password and local image/arithmetic CAPTCHA. The session locks after 30 minutes idle. A locally cached enabled account may sign in offline for up to 24 hours; it must later reconnect and validate. Account, role and project/department/team authorization are cloud-authoritative: the desktop caches the last cloud-verified authorization snapshot solely for offline work. That snapshot permits existing-scope procurement writes for at most 30 days; expiry restricts authorization-dependent writes but never hides or expires historical business data.
 - Engineer: submits requisitions only for assigned projects; edits or withdraws their own unconfirmed/unrejected orders; views all same-project orders and all information.
-- Purchaser and administrator: include engineer capabilities and can create supplier orders/RFQs. They see and approve/reject every project; may edit another creator's order with a mandatory reason and visible field diff; maintain catalog, suppliers, prices, tax/exchange data and master data. Administrators manage engineer/viewer accounts.
+- Purchaser and administrator: include engineer capabilities and can create supplier orders/RFQs. They see and approve/reject every project; may edit another creator's order with a mandatory reason and visible field diff; maintain catalog, suppliers, prices, tax/exchange data and master data. Authorized administrators manage account authorization from the desktop only while online: every grant/change/revocation is cloud-authenticated, server-validated, persisted by the cloud and then projected into the local cache. Authorization management is never an offline-first mutation.
 - Super administrator: a narrow governance role, not a daily purchasing role. It manages administrator/purchaser roles, account provisioning, global approval policy, backup/restore and system audit. It does not normally create, approve, send or receive orders.
 - Super-administrator login uses the standard account password and local CAPTCHA. The bound mobile-number last four digits are displayed only as an operator-recognition cue; they are not a password, one-time code or authorization factor.
 - Optional TOTP two-factor authentication is available to every user and strongly encouraged for super administrators. Once a user enables it, the dynamic code is required at every login, including permitted offline login; users who do not enable it retain the password/CAPTCHA flow.
@@ -75,7 +75,8 @@ This is a separately scheduled post-OPA-2 phase, not an OPA-2 acceptance item an
 
 ## 6. Sync
 
-- Local SQLite is source of immediate UI reads/writes; PostgreSQL is shared cloud state.
+- Local SQLite is source of immediate UI reads/writes for ordinary procurement and a cache of cloud-authoritative authorization; PostgreSQL is the authority for accounts, roles and project/department/team grants.
+- Offline authorization management is prohibited. On reconnect the desktop refreshes authorization before applying ordinary sync/retry rules; the server independently checks authorization for every request and never trusts client-submitted grants.
 - Startup, post-mutation, periodic and network-recovery synchronization. WebSocket change hints trigger normal cursor Pull for online devices; they never replace Push/Pull.
 - Show synced / syncing / offline-pending / error-conflict with counts.
 - Server rejects disabled accounts and revoked sessions; data encrypted in transit.
