@@ -35,8 +35,10 @@ the source stage's intended code diff, review conflicts explicitly, and run
 the affected package, DOM, Rust and isolated PostgreSQL checks. A checkpoint
 PR does not mark T09, AUTH-1 native-desktop acceptance, or the whole PRD done.
 
-Recovery progress: stage 1 merged as PR #9 at `0864d34`; stage 2 is rebuilt
-from that commit on `codex/pr-requisition-history` with its five source commits.
-The stage-2 replay of `8210bee` kept its Rust identity guard/test but excluded
-the original commit's stage-3 supplier/Pull progress paragraphs. Those remain
-assigned to `aadba28` and `4e6f2be` in stage 3.
+Recovery progress: stage 1 merged as PR #9 at `0864d34`; stage 2 merged as
+PR #10 at `b7f2c03`. The stage-2 replay of `8210bee` kept its Rust identity
+guard/test but excluded the original commit's stage-3 supplier/Pull progress
+paragraphs. Stage 3 starts from `b7f2c03` and replays exactly `aadba28` and
+`4e6f2be` as `2205384` and `0bec77e`. The stage-3 code diff contains only
+local supplier/quote read scoping and server supplier/price Pull scoping;
+no stage-4 execution or stage-5 expenditure code is included.

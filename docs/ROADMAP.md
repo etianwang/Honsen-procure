@@ -8,7 +8,7 @@ Original milestone objectives below are retained. Their checkboxes concern the c
 
 AUTH-1 has a local implementation checkpoint dated 2026-10-13; isolated PostgreSQL testing now passes through WSL2, while real desktop acceptance remains open. No milestone status changes.
 
-The five-stage PR recovery map is in `docs/PR-SPLIT-MAP.md`. Stage-1 authorization was merged as PR #9 after CI; the stage-2 requisition candidate has fresh local checks. Neither code merge changes AUTH-1 or milestone acceptance until their remaining gates pass.
+The five-stage PR recovery map is in `docs/PR-SPLIT-MAP.md`. Stage-1 authorization merged as PR #9 and stage-2 requisition history merged as PR #10 after CI and diff review. Stage-3 supplier scope has fresh local checks. These code merges do not change AUTH-1 or milestone acceptance until their remaining gates pass.
 
 The 2026-10-13 requisition-history checkpoint adds an authorized regular-route list and closes a confirmed-order cross-project read leak; full history/copy and M2 acceptance remain open.
 
@@ -20,7 +20,7 @@ Historical pending requisitions now also expose applicant-only withdrawal throug
 
 Existing requisition IDs now retain applicant and authorization-scope identity across draft/revision writes; this closes a cross-project movement path but does not complete M2's formal status and document gates.
 
-The local catalog read path now filters supplier contacts and quotes by live account scope (including grant expiry), while global material names remain shared. Server-side Pull scope still requires a separate synchronization repair; this checkpoint does not complete M1/M3.
+The local catalog read path now filters supplier contacts and quotes by live account scope (including grant expiry), while global material names remain shared. Stage 3 also narrows engineer supplier/price Pull by bound country; broader sync and M1/M3 acceptance remain open.
 
 The supplier/material-price Pull repair now withholds cross-country changes from engineers after grant revocation; purchaser all-project visibility remains as specified. Other sync projections/validations keep M3 incomplete.
 
