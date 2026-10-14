@@ -34,3 +34,9 @@ Stage counts: **9 + 5 + 2 + 2 + 1 = 19**. Stage 2 includes `8210bee` after
 the source stage's intended code diff, review conflicts explicitly, and run
 the affected package, DOM, Rust and isolated PostgreSQL checks. A checkpoint
 PR does not mark T09, AUTH-1 native-desktop acceptance, or the whole PRD done.
+
+Recovery progress: stage 1 merged as PR #9 at `0864d34`; stage 2 is rebuilt
+from that commit on `codex/pr-requisition-history` with its five source commits.
+The stage-2 replay of `8210bee` kept its Rust identity guard/test but excluded
+the original commit's stage-3 supplier/Pull progress paragraphs. Those remain
+assigned to `aadba28` and `4e6f2be` in stage 3.
