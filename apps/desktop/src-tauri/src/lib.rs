@@ -10333,6 +10333,28 @@ mod tests {
             ),
             Err(AuthError::InvalidInput)
         );
+        let connection = service.connection.lock().unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "12"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT checksum FROM local_attachments WHERE id = ?1",
+                    [remote_photo_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "a".repeat(64)
+        );
+        drop(connection);
         let invalid_path = service.media_directory.join("not-a-voucher.txt");
         fs::write(&invalid_path, b"invalid").unwrap();
         assert_eq!(
