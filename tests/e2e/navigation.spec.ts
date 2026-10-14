@@ -844,6 +844,10 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
               Object.assign(window, { __submittedRequisitionId: args?.orderId })
               return Promise.resolve()
             }
+            if (command === 'withdraw_requisition') {
+              Object.assign(window, { __withdrawnRequisitionId: args?.orderId })
+              return Promise.resolve()
+            }
             return Promise.reject(new Error(`unexpected command: ${command}`))
           },
         },
@@ -864,6 +868,8 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
   await page.getByText('请购测试电缆 · RQ-01').click()
   await page.getByLabel('数量').fill('2.5')
   await page.getByLabel('行折扣（最小货币单位）').fill('125')
+  await expect(page.getByLabel('税率（基点）')).toHaveValue('0')
+  await page.getByLabel('税率（基点）').fill('1800')
   await expect(page.getByLabel('订单总金额')).toHaveText('3540 XOF')
   await page.getByRole('button', { name: '新增材料行' }).click()
   await expect(page.getByText('第 2 行')).toBeVisible()
@@ -918,6 +924,18 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
           .__honsenProcurementMode,
     ),
   ).resolves.toBe('honsen_self_purchase')
+  await page.getByRole('button', { name: '撤回申请' }).click()
+  await expect(
+    page.getByText('申请已撤回为草稿，审计记录已保留。'),
+  ).toBeVisible()
+  await expect(page.locator('.page-heading .status')).toHaveText('草稿')
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __withdrawnRequisitionId?: string })
+          .__withdrawnRequisitionId,
+    ),
+  ).resolves.toMatch(/^[0-9a-f-]{36}$/)
   await expect(browserErrors).toEqual([])
 })
 
@@ -1514,13 +1532,20 @@ test('authenticated desktop switches between cached authorization scopes', async
       },
     ]
     let selected = contexts[0]
+    let historicalStatus = 'pending_confirmation'
     Object.assign(window, {
+      __setHistoryPending: () => {
+        historicalStatus = 'pending_confirmation'
+      },
       __TAURI_INTERNALS__: {},
       __TAURI__: {
         core: {
           invoke(
             command: string,
-            args?: { selection?: { projectId: string } },
+            args?: {
+              selection?: { projectId: string }
+              filter?: { query?: string }
+            },
           ) {
             if (command === 'issue_local_captcha')
               return Promise.resolve({
@@ -1533,7 +1558,7 @@ test('authenticated desktop switches between cached authorization scopes', async
               return Promise.resolve({
                 user_id: '00000000-0000-4000-8000-000000000007',
                 username: 'fixture',
-                roles: ['engineer'],
+                roles: ['purchaser'],
                 requires_password_change: false,
               })
             if (command === 'list_authorization_contexts')
@@ -1545,6 +1570,83 @@ test('authenticated desktop switches between cached authorization scopes', async
                 contexts.find(
                   (context) => context.projectId === args?.selection?.projectId,
                 ) ?? contexts[0]
+              return Promise.resolve()
+            }
+            if (command === 'list_requisition_history')
+              return Promise.resolve({
+                records:
+                  args?.filter?.query === '不存在'
+                    ? []
+                    : [
+                        {
+                          id: '00000000-0000-4000-8000-000000000009',
+                          displayNo: 'REQ-HISTORY-1',
+                          projectName: '项目乙',
+                          site: '乙工地',
+                          workflowStatus: historicalStatus,
+                          procurementMode: 'honsen_self_purchase',
+                          primaryCurrency: 'XOF',
+                          totalMinor: '1200',
+                          updatedAt: 1,
+                        },
+                      ],
+                nextCursor: null,
+              })
+            if (command === 'get_requisition_detail')
+              return Promise.resolve({
+                id: '00000000-0000-4000-8000-000000000009',
+                displayNo: 'REQ-HISTORY-1',
+                applicantId: '00000000-0000-4000-8000-000000000007',
+                projectName: '项目乙',
+                projectId: '00000000-0000-4000-8000-000000000005',
+                site: '乙工地',
+                workflowStatus: historicalStatus,
+                procurementMode: 'honsen_self_purchase',
+                orderDate: '2026-10-13',
+                deliveryAddress: '乙工地',
+                expectedDeliveryDate: null,
+                notes: '详情备注',
+                primaryCurrency: 'XOF',
+                totalMinor: '1200',
+                lines: [
+                  {
+                    materialName: '测试电缆',
+                    model: 'FX-01',
+                    specification: '3×2.5',
+                    quantity: '1',
+                    unit: '米',
+                    currency: 'XOF',
+                    unitPriceMinor: '1200',
+                    lineTotalMinor: '1200',
+                  },
+                ],
+                attachments: [],
+                audits: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000011',
+                    orderId: '00000000-0000-4000-8000-000000000009',
+                    actorId: '00000000-0000-4000-8000-000000000007',
+                    action: 'confirmed',
+                    reason: null,
+                    previousJson: null,
+                    nextJson: null,
+                    createdAt: 1,
+                  },
+                ],
+              })
+            if (command === 'save_requisition_draft')
+              return Promise.resolve({ totalMinor: '0' })
+            if (
+              command === 'list_order_comments' ||
+              command === 'list_order_audits'
+            )
+              return Promise.resolve([])
+            if (command === 'confirm_requisition') {
+              historicalStatus = 'confirmed'
+              return Promise.resolve()
+            }
+            if (command === 'withdraw_requisition') {
+              historicalStatus = 'draft'
               return Promise.resolve()
             }
             return Promise.reject(new Error(`unexpected command: ${command}`))
@@ -1568,7 +1670,46 @@ test('authenticated desktop switches between cached authorization scopes', async
     '00000000-0000-4000-8000-000000000005:00000000-0000-4000-8000-000000000003:00000000-0000-4000-8000-000000000006',
   )
   await page.getByRole('button', { name: '采购申请单' }).click()
-  await expect(page.getByText(/REQ-.*乙工地/)).toBeVisible()
+  await expect(page.locator('.page-heading p')).toContainText('乙工地')
+  await expect(page.getByRole('list', { name: '请购历史' })).toContainText(
+    'REQ-HISTORY-1',
+  )
+  await page.getByRole('button', { name: '查看详情：REQ-HISTORY-1' }).click()
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    '测试电缆',
+  )
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    'pending_confirmation',
+  )
+  await page.getByRole('button', { name: '确认订单' }).click()
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    'confirmed',
+  )
+  const originalDraftNo = await page.locator('.page-heading p').textContent()
+  page.once('dialog', (dialog) => void dialog.dismiss())
+  await page.getByRole('button', { name: '复制为新草稿' }).click()
+  await expect(page.locator('.page-heading p')).toHaveText(
+    originalDraftNo ?? '',
+  )
+  page.once('dialog', (dialog) => void dialog.accept())
+  await page.getByRole('button', { name: '复制为新草稿' }).click()
+  await expect(page.getByText(/已复制材料和数量到未保存的新草稿/)).toBeVisible()
+  await expect(page.getByLabel('税率（基点）')).toHaveValue('0')
+  await expect(page.getByLabel('单价（最小货币单位）')).toHaveValue('0')
+  await expect(page.getByText(/历史材料：测试电缆/)).toBeVisible()
+  await page.evaluate(() => {
+    ;(
+      window as Window & { __setHistoryPending?: () => void }
+    ).__setHistoryPending?.()
+  })
+  await page.getByRole('button', { name: '查看详情：REQ-HISTORY-1' }).click()
+  await page.getByRole('button', { name: '撤回历史申请' }).click()
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    'draft',
+  )
+  await page.getByLabel('搜索单号、项目或工地').fill('不存在')
+  await page.getByRole('button', { name: '筛选' }).click()
+  await expect(page.getByText('暂无请购记录。')).toBeVisible()
   await expect(browserErrors).toEqual([])
 })
 

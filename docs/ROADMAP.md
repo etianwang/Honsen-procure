@@ -8,7 +8,17 @@ Original milestone objectives below are retained. Their checkboxes concern the c
 
 AUTH-1 has a local implementation checkpoint dated 2026-10-13; isolated PostgreSQL testing now passes through WSL2, while real desktop acceptance remains open. No milestone status changes.
 
-The five-stage PR recovery map is in `docs/PR-SPLIT-MAP.md`. Stage-1 authorization was rebuilt on `main` and independently checked; a code PR or merge does not change AUTH-1 or milestone acceptance until the remaining native-desktop gates pass.
+The five-stage PR recovery map is in `docs/PR-SPLIT-MAP.md`. Stage-1 authorization was merged as PR #9 after CI; the stage-2 requisition candidate has fresh local checks. Neither code merge changes AUTH-1 or milestone acceptance until their remaining gates pass.
+
+The 2026-10-13 requisition-history checkpoint adds an authorized regular-route list and closes a confirmed-order cross-project read leak; full history/copy and M2 acceptance remain open.
+
+The follow-up checkpoint adds scoped detail/filtering, a safe copy-to-new-editor path and audited pending withdrawal; M2 remains incomplete because full requisition, execution, formal document and print gates are still open.
+
+The next checkpoint connects the existing trusted approval/comment commands to reopened historical details and audits draft submission; this remains partial M2 work, with no formal issue, attachment ingestion or release acceptance.
+
+Historical pending requisitions now also expose applicant-only withdrawal through the trusted command; M2 remains partial and rejected-order reload/revision is still open.
+
+Existing requisition IDs now retain applicant and authorization-scope identity across draft/revision writes; this closes a cross-project movement path but does not complete M2's formal status and document gates.
 
 | Milestone | Acceptance      | Contributing tasks (reverse mapping is in BUILD-TASKS) | Outstanding acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | --------- | --------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

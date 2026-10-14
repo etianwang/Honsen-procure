@@ -7,10 +7,12 @@ import { Alert, Button, Card, Input, Select, Space } from 'antd'
 import { Minus, Plus, Send } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { OrderWorkflowPanel } from '../components/OrderWorkflowPanel'
+import { RequisitionHistoryPanel } from '../components/RequisitionHistoryPanel'
 import type { CatalogApi, CatalogMaterialView } from '../lib/catalog-api'
 import type {
   OwnerLinePricingInput,
   RequisitionApi,
+  RequisitionDetail,
 } from '../lib/requisition-api'
 import type { WorkflowApi } from '../lib/workflow-api'
 
@@ -89,6 +91,7 @@ function toOrder(
   id: string,
   lines: EditorLine[],
   context: RequisitionContext,
+  taxRateBasisPoints: string,
 ): RequisitionDraft {
   return {
     ...context,
@@ -97,7 +100,9 @@ function toOrder(
     orderDiscount: { kind: 'fixed_minor', minor: '0' },
     orderFreight: { kind: 'fixed_minor', minor: '0' },
     taxRateBasisPoints:
-      new Set(lines.map((line) => line.currency)).size > 1 ? 0 : 1800,
+      new Set(lines.map((line) => line.currency)).size > 1
+        ? 0
+        : Number(taxRateBasisPoints),
   }
 }
 
@@ -308,8 +313,10 @@ export function RequisitionPage({
   workflowApi,
   canApprove = false,
 }: RequisitionPageProps) {
+  const [editorContext, setEditorContext] = useState(context)
   const [lines, setLines] = useState<EditorLine[]>([newLine(context.currency)])
-  const [orderId] = useState(() => crypto.randomUUID())
+  const [orderId, setOrderId] = useState(() => crypto.randomUUID())
+  const [taxRateBasisPoints, setTaxRateBasisPoints] = useState('0')
   const [materials, setMaterials] = useState<CatalogMaterialView[]>([])
   const [mode, setMode] = useState<ProcurementMode>('honsen_self_purchase')
   const [ownerPricing, setOwnerPricing] = useState<
@@ -328,8 +335,8 @@ export function RequisitionPage({
   }, [catalogApi, context.projectId])
 
   const draft = useMemo(
-    () => toOrder(orderId, lines, context),
-    [context, lines, orderId],
+    () => toOrder(orderId, lines, editorContext, taxRateBasisPoints),
+    [editorContext, lines, orderId, taxRateBasisPoints],
   )
   const totals = useMemo(() => {
     try {
@@ -343,7 +350,9 @@ export function RequisitionPage({
     if (mode === 'owner_self_purchase' || status === 'pending' || !totals)
       return
     const timer = window.setTimeout(() => {
-      void api.saveRequisitionDraft(draft).catch(() => undefined)
+      void api.saveRequisitionDraft(draft).catch(() => {
+        setMessage('自动保存失败；请检查授权、材料和订单内容后手动保存。')
+      })
     }, 600)
     return () => window.clearTimeout(timer)
   }, [api, draft, mode, status, totals])
@@ -353,6 +362,61 @@ export function RequisitionPage({
       current.map((line, lineIndex) =>
         lineIndex === index ? { ...line, ...update } : line,
       ),
+    )
+  }
+
+  function copyFromHistory(detail: RequisitionDetail) {
+    if (
+      detail.projectId !== context.projectId ||
+      !detail.procurementMode ||
+      detail.lines.length === 0
+    )
+      return
+    if (!window.confirm('复制会替换当前编辑区；请先保存当前草稿。是否继续？'))
+      return
+    const id = crypto.randomUUID()
+    setOrderId(id)
+    setEditorContext({
+      ...context,
+      displayNo: `REQ-${id}`,
+      orderDate: new Date().toISOString().slice(0, 10),
+      deliveryAddress: detail.deliveryAddress,
+      expectedDeliveryDate: detail.expectedDeliveryDate,
+      notes: detail.notes,
+    })
+    setLines(
+      detail.lines.map((line, sortOrder) => ({
+        id: crypto.randomUUID(),
+        materialId: null,
+        materialSnapshot: {
+          nameZh: line.materialName,
+          nameFr: null,
+          model: line.model,
+          specification: line.specification,
+        },
+        supplierId: null,
+        supplierSnapshot: null,
+        currency: line.currency as EditorLine['currency'],
+        quantity: line.quantity,
+        unit: line.unit,
+        unitPriceMinor: '0',
+        lineDiscount: { kind: 'fixed_minor', minor: '0' },
+        lineFreight: { kind: 'fixed_minor', minor: '0' },
+        freightIncluded: false,
+        sortOrder,
+      })),
+    )
+    setMode(
+      detail.procurementMode === 'owner_self_purchase'
+        ? 'owner_self_purchase'
+        : 'honsen_self_purchase',
+    )
+    setOwnerPricing({})
+    setTaxRateBasisPoints('0')
+    setStatus('draft')
+    setPricingIncomplete(false)
+    setMessage(
+      '已复制材料和数量到未保存的新草稿；请重新选择现行材料、报价、税率及其他费用后保存。',
     )
   }
 
@@ -380,7 +444,7 @@ export function RequisitionPage({
                 reason: pricing.manualReason,
               },
         lockedExchangeRateDecimal:
-          line.currency === context.primaryCurrency ? '1' : pricing.rate,
+          line.currency === editorContext.primaryCurrency ? '1' : pricing.rate,
         markup:
           pricing.markupKind === 'percent_basis_points'
             ? {
@@ -457,13 +521,23 @@ export function RequisitionPage({
     }
   }
 
+  async function withdraw() {
+    try {
+      await api.withdrawRequisition(orderId)
+      setStatus('draft')
+      setMessage('申请已撤回为草稿，审计记录已保留。')
+    } catch {
+      setMessage('撤回失败：仅申请人可撤回待确认且授权有效的请购。')
+    }
+  }
+
   return (
     <>
       <section className="page-heading">
         <div>
           <h2>新建采购申请</h2>
           <p>
-            {context.displayNo} · {context.site} ·
+            {editorContext.displayNo} · {editorContext.site} ·
             草稿仅保存在本机，联网后再同步。
           </p>
         </div>
@@ -491,6 +565,16 @@ export function RequisitionPage({
               { value: 'honsen_self_purchase', label: '弘盛自行采购' },
             ]}
             onChange={(value: ProcurementMode) => setMode(value)}
+          />
+        </label>
+        <label>
+          税率（基点）
+          <Input
+            aria-label="税率（基点）"
+            inputMode="numeric"
+            disabled={status === 'pending'}
+            value={taxRateBasisPoints}
+            onChange={(event) => setTaxRateBasisPoints(event.target.value)}
           />
         </label>
         {mode === 'owner_self_purchase' ? (
@@ -549,6 +633,12 @@ export function RequisitionPage({
                     }}
                   />
                 </label>
+                {!line.materialId && line.materialSnapshot.nameZh ? (
+                  <p>
+                    历史材料：{line.materialSnapshot.nameZh}
+                    ；请重新选择现行材料。
+                  </p>
+                ) : null}
                 <label>
                   币种
                   <Select
@@ -567,7 +657,7 @@ export function RequisitionPage({
                     material={materials.find(
                       ({ id }) => id === line.materialId,
                     )}
-                    primaryCurrency={context.primaryCurrency}
+                    primaryCurrency={editorContext.primaryCurrency}
                     pricing={ownerPricing[line.id] ?? newOwnerPricing()}
                     disabled={status === 'pending'}
                     onChange={(update) => updateOwnerPricing(line.id, update)}
@@ -662,7 +752,10 @@ export function RequisitionPage({
             disabled={status === 'pending'}
             icon={<Plus size={16} />}
             onClick={() =>
-              setLines((current) => [...current, newLine(context.currency)])
+              setLines((current) => [
+                ...current,
+                newLine(editorContext.currency),
+              ])
             }
           >
             新增材料行
@@ -694,12 +787,15 @@ export function RequisitionPage({
           }}
         />
       ) : null}
+      {status === 'pending' ? (
+        <Button onClick={() => void withdraw()}>撤回申请</Button>
+      ) : null}
       <Card className="card" title="金额汇总">
         <output aria-label="订单总金额" className="requisition-total">
           {totals
             ? totals.sourceCurrencyTotals.length > 1
               ? '待供应商拆单后汇总主币种'
-              : `${totals.totalMinor} ${context.currency}`
+              : `${totals.totalMinor} ${editorContext.currency}`
             : '待填写'}
         </output>
         <p className="muted">
@@ -717,6 +813,15 @@ export function RequisitionPage({
           </p>
         ) : null}
       </Card>
+      <RequisitionHistoryPanel
+        api={api}
+        refreshKey={status}
+        projectId={context.projectId}
+        applicantId={context.applicantId}
+        onCopy={copyFromHistory}
+        workflowApi={workflowApi}
+        canApprove={canApprove}
+      />
     </>
   )
 }
