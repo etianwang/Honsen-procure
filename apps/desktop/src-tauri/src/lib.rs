@@ -160,6 +160,25 @@ fn sha256_file(path: &Path) -> Result<String, AuthError> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+fn write_attachment_bytes_atomically(path: &Path, bytes: &[u8]) -> Result<(), AuthError> {
+    let temporary = path.with_extension(format!("partial-{}", Uuid::new_v4()));
+    let result = (|| {
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|_| AuthError::Database)?;
+        output.write_all(bytes).map_err(|_| AuthError::Database)?;
+        output.sync_all().map_err(|_| AuthError::Database)?;
+        drop(output);
+        fs::rename(&temporary, path).map_err(|_| AuthError::Database)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -4105,13 +4124,7 @@ impl LocalAuthService {
                     return Err(AuthError::InvalidInput);
                 }
             } else {
-                let mut output = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&path)
-                    .map_err(|_| AuthError::Database)?;
-                output.write_all(&bytes).map_err(|_| AuthError::Database)?;
-                output.sync_all().map_err(|_| AuthError::Database)?;
+                write_attachment_bytes_atomically(&path, &bytes)?;
             }
             self.connection.lock().map_err(|_| AuthError::Database)?
                 .execute("UPDATE local_attachments SET local_path = ?2, upload_state = 'uploaded' WHERE id = ?1 AND upload_state = 'pending_download'", params![id, path.to_string_lossy()])
@@ -12967,6 +12980,24 @@ mod tests {
         assert_eq!(decoded.get_pixel(0, 0)[3], 127);
         fs::remove_file(source).unwrap();
         fs::remove_file(target).unwrap();
+    }
+
+    #[test]
+    fn attachment_download_write_is_atomic_and_leaves_no_partial_file() {
+        let directory = std::env::temp_dir().join(format!("honsen-attachment-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let target = directory.join("attachment");
+        write_attachment_bytes_atomically(&target, b"verified bytes").unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"verified bytes");
+        assert!(fs::read_dir(&directory).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("partial-")
+        }));
+        fs::remove_file(target).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 
     #[test]
