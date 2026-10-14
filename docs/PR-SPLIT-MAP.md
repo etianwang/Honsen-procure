@@ -50,18 +50,19 @@ is still excluded.
 Stage 4 merged as PR #12 at `5139cc8`. Stage 5 starts from that latest main
 and replays source `88b645e` once as `265dfb4`; its `.prettierignore` line
 was already brought forward in stage 1, so the replay contains the remaining
-16 files. Stage 5 is not PR-ready: receipt/expenditure Pull reconstruction is
-being completed, and durable voucher archival, transfer and conflict gates
-remain mandatory.
+16 files. Stage 5 is not PR-ready: receipt/expenditure Pull and managed
+voucher/receipt attachment code have local checkpoints, but legacy receipt
+links, compression, real COS and conflict/desktop gates remain mandatory.
 Stage-5 local checkpoint `5c3e19d` adds receipt/expenditure Pull projection.
 Subsequent unmerged work adds managed expenditure-voucher archival, scoped
 presigned transfer and attachment Pull metadata, with focused SQLite,
-PostgreSQL and DOM evidence. It is still not PR-ready: receipt-attachment
-projection, real object-store integration, and offline conflict/recovery gates
-remain open. The 19 original-source commit ownerships above are unchanged.
+PostgreSQL and DOM evidence. The later `c0a358d` checkpoint also projects
+managed receipt attachments; legacy receipt-link Pull, real object-store
+integration, compression and offline conflict/recovery gates remain open. The
+19 original-source commit ownerships above are unchanged.
 
 Stage-5 local checkpoint `bff75a2` preserves the expenditure voucher transfer
-work. A subsequent local receipt-attachment checkpoint extends the managed
+work. The subsequent `c0a358d` receipt-attachment checkpoint extends the managed
 archive and Pull projection to receipt owners using SQLite 0034 and PostgreSQL
 006, with Rust/isolated PostgreSQL/DOM tests. It remains separate from the
 original 19-commit mapping and does not make stage 5 PR-ready: photo
