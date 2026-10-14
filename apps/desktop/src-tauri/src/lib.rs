@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::{Read, Write},
+    io::{Cursor, Read, Write},
     path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -10277,6 +10277,23 @@ mod tests {
             .unwrap();
         fs::remove_file(&receipt_source).unwrap();
         assert_eq!(local_photo.upload_state, "pending_upload");
+        let archived_photo_path = service
+            .media_directory
+            .join("attachments")
+            .join(local_photo.id.to_string());
+        let archived_photo_bytes = fs::read(&archived_photo_path).unwrap();
+        assert_eq!(local_photo.byte_length, archived_photo_bytes.len() as i64);
+        assert_eq!(
+            local_photo.checksum,
+            format!("{:x}", Sha256::digest(&archived_photo_bytes))
+        );
+        let decoded_archived_photo = ImageReader::new(Cursor::new(&archived_photo_bytes))
+            .with_guessed_format()
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert!(decoded_archived_photo.width() <= RECEIPT_PHOTO_MAX_DIMENSION);
+        assert!(decoded_archived_photo.height() <= RECEIPT_PHOTO_MAX_DIMENSION);
         assert_eq!(
             service.list_receipt_attachments(receipt_id, now).unwrap(),
             vec![local_photo.clone()]
