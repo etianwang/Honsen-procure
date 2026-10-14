@@ -125,6 +125,9 @@ describe.skipIf(!pool)('AttachmentService with isolated PostgreSQL', () => {
     objectPresent = true
     expect(await service.complete(actor, id)).toEqual({ uploaded: true })
     expect(await service.complete(actor, id)).toEqual({ uploaded: true })
+    await expect(
+      service.createIntent(actor, { ...input, checksum: 'b'.repeat(64) }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
     const pulled = await new PostgresSyncStore(pool!).pullChanges({
       actor: { id: actorId, roles: ['engineer'] },
       cursor,
