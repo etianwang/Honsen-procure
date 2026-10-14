@@ -146,27 +146,30 @@ export function ProcurementExecutionPage({
           ) : null}
           {selected.children.length ? (
             selected.children.map((child) => (
-              <section key={child.id} aria-label={`供应商子订单 ${child.displayNo}`}>
-              <SupplierChildTermsPanel
-                api={supplierOrderApi}
-                orderId={child.id}
-                lines={child.lines.map((line) => ({
-                  id: line.id,
-                  materialName: line.materialName,
-                  currency: line.currency,
-                }))}
-              />
-              <ReceiptPanel
-                api={tauriReceiptApi}
-                orderId={child.id}
-                receiverId={receiverId}
-                lines={child.lines.map((line) => ({
-                  id: line.id,
-                  materialName: line.materialName,
-                  unit: line.unit,
-                  orderedQuantity: line.quantity,
-                }))}
-              />
+              <section
+                key={child.id}
+                aria-label={`供应商子订单 ${child.displayNo}`}
+              >
+                <SupplierChildTermsPanel
+                  api={supplierOrderApi}
+                  orderId={child.id}
+                  lines={child.lines.map((line) => ({
+                    id: line.id,
+                    materialName: line.materialName,
+                    currency: line.currency,
+                  }))}
+                />
+                <ReceiptPanel
+                  api={tauriReceiptApi}
+                  orderId={child.id}
+                  receiverId={receiverId}
+                  lines={child.lines.map((line) => ({
+                    id: line.id,
+                    materialName: line.materialName,
+                    unit: line.unit,
+                    orderedQuantity: line.quantity,
+                  }))}
+                />
               </section>
             ))
           ) : ['confirmed', 'approved'].includes(selected.workflowStatus) ? (

@@ -434,7 +434,9 @@ function App() {
               supplierApi={tauriCatalogApi}
               supplierOrderApi={tauriSupplierOrderApi}
               rfqApi={tauriRfqApi}
-              receiverId={session?.user_id ?? previewRequisitionContext.applicantId}
+              receiverId={
+                session?.user_id ?? previewRequisitionContext.applicantId
+              }
             />
           ) : page === 'authorization' &&
             session &&

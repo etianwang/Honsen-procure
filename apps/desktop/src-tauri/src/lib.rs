@@ -2324,6 +2324,15 @@ impl LocalAuthService {
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let previous_status: String = transaction
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .ok_or(AuthError::Forbidden)?;
         let changed = transaction.execute(
             "UPDATE local_purchase_orders SET workflow_status = 'executing', version = version + 1, updated_at = ?2 WHERE id = ?1 AND parent_order_id IS NULL AND procurement_mode = 'honsen_self_purchase' AND workflow_status IN ('confirmed', 'approved') AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_purchase_orders child WHERE child.parent_order_id = ?1 AND child.deleted_at IS NULL)",
             params![order_id.to_string(), unix_seconds(now)],
@@ -2337,7 +2346,7 @@ impl LocalAuthService {
             actor_id,
             "market_execution_started",
             None,
-            Some("approved"),
+            Some(&previous_status),
             Some("executing"),
             now,
         )?;
@@ -10278,6 +10287,15 @@ mod tests {
         service
             .start_honsen_market_execution(market_id, now)
             .unwrap();
+        assert!(
+            service
+                .list_order_audits(market_id, now)
+                .unwrap()
+                .iter()
+                .any(|audit| audit.action == "market_execution_started"
+                    && audit.previous_json.as_deref() == Some("confirmed")
+                    && audit.next_json.as_deref() == Some("executing"))
+        );
         assert_eq!(
             service.start_honsen_market_execution(market_id, now),
             Err(AuthError::Forbidden)
