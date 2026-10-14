@@ -10,7 +10,7 @@ AUTH-1 has a local implementation checkpoint dated 2026-10-13; isolated PostgreS
 
 The five-stage PR recovery map is in `docs/PR-SPLIT-MAP.md`. Stages 1–4 merged as PRs #9–#12 after CI and diff review. Stage-5 expenditure durability is still in development and has no PR. These code merges do not change AUTH-1 or milestone acceptance until their remaining gates pass.
 
-The 2026-10-14 stage-5 receipt-attachment checkpoint adds managed offline receipt file archival and scoped cloud attachment projection with isolated PostgreSQL evidence. T09-C/T11 and M2–M4 remain unchecked: compression, legacy receipt-link reconstruction, real object storage and native multi-device acceptance are outstanding.
+The 2026-10-14 stage-5 receipt-attachment checkpoint adds managed offline receipt file archival and scoped cloud attachment projection with isolated PostgreSQL evidence. On 2026-10-14, the T09-C/T11 responsibility boundary was approved: T09-C owns receipt metadata/domain/permission consistency; T11 owns file ingestion/compression/limits/COS/archive/recovery/integrity; T10 owns projection/idempotency/conflict/recovery. T04 may proceed only in isolated synthetic/disposable environments. The legacy receipt-link Pull child has now passed its isolated PostgreSQL, Rust and DOM evidence, but T09-C/T11 and M2–M4 remain unchecked: compression, real object storage, conflict recovery and native multi-device acceptance are outstanding.
 
 The 2026-10-13 requisition-history checkpoint adds an authorized regular-route list and closes a confirmed-order cross-project read leak; full history/copy and M2 acceptance remain open.
 
@@ -102,12 +102,12 @@ M0 item tracking (all seven original objectives, in order):
 
 - ROADMAP owns milestone progress; BUILD-TASKS owns task dependencies, acceptance evidence and child checkboxes; memory.md owns the current state, blockers and next action. Update all three after each fully accepted task, without marking partial work complete.
 - Original M1 admin-password setup/unlock/lock wording is retained. Implementation must follow the confirmed per-user account model; it does not authorize a new shared-password bypass.
-- Existing downstream implementation does not close T02/T04 prerequisites. Retain original dependencies. T08 owns local owner quote/markup/formal-issue behavior; T10 owns server idempotency, collision/conflict and non-rewrite verification; T09 archival still requires T11. This boundary does not reduce either task's scope.
+- Existing downstream implementation does not close T02/T04 prerequisites. Retain original dependencies. T08 owns local owner quote/markup/formal-issue behavior; T10 owns server idempotency, collision/conflict and non-rewrite verification; T09 archival still requires T11. The 2026-10-14 boundary authorization permits only isolated, independently verifiable work: T09-C owns receipt-domain links/checks, T11 owns file lifecycle, and T10 owns sync recovery. It does not reduce either task's scope or authorize production master data.
 - Owner-mode formal issue freezes local UUID, formal number and quote/markup/final-price snapshots. Catalog price changes/revocation and synchronization cannot silently rewrite them. BUILD-TASKS owns the corresponding acceptance tests; readiness is not completion.
 
 ## Current next-task recommendation
 
-Obtain authority for T04 authorized initial-record acceptance, then complete the remaining T08/T09 prerequisites before T10 final acceptance. See independently tracked child tasks in BUILD-TASKS. No new feature implementation is authorized by this progress update.
+Use the 2026-10-14 isolated-development authorization to complete independently verifiable remaining T08/T09/T10/T11 slices, next beginning with receipt photo compression. Production T04 acceptance still requires deployment authority; all original final acceptance gates remain.
 
 ## Approved / planned: Admin Master Data Management
 

@@ -3642,7 +3642,7 @@ impl LocalAuthService {
             now,
         )?);
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        connection.prepare("SELECT id, original_name, content_type, byte_length, checksum, upload_state FROM local_attachments WHERE owner_type = 'receipt' AND owner_id = ?1 ORDER BY created_at, id")
+        connection.prepare("SELECT id, original_name, content_type, byte_length, checksum, upload_state FROM (SELECT id, original_name, content_type, byte_length, checksum, upload_state, created_at FROM local_attachments WHERE owner_type = 'receipt' AND owner_id = ?1 UNION ALL SELECT a.id, a.original_name, a.content_type, a.byte_length, COALESCE(a.checksum, ''), a.upload_state, a.created_at FROM local_receipt_attachment_links l JOIN local_order_attachments a ON a.id = l.attachment_id WHERE l.receipt_id = ?1 AND a.deleted_at IS NULL) ORDER BY created_at, id")
             .map_err(|_| AuthError::Database)?
             .query_map([receipt_id.to_string()], |row| Ok(ReceiptAttachmentView {
                 id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -6546,6 +6546,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0034_receipt_attachments",
             include_str!("../migrations/0034_receipt_attachments.sql"),
         ),
+        (
+            "0035_legacy_receipt_attachment_links",
+            include_str!("../migrations/0035_legacy_receipt_attachment_links.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -7383,8 +7387,8 @@ fn project_remote_receipt(
     {
         return Err(AuthError::InvalidInput);
     }
-    if !value.attachment_ids.is_empty() {
-        return Ok(false);
+    if value.attachment_ids.iter().collect::<HashSet<_>>().len() != value.attachment_ids.len() {
+        return Err(AuthError::InvalidInput);
     }
     let mut line_ids = HashSet::new();
     for item in &value.items {
@@ -7460,6 +7464,22 @@ fn project_remote_receipt(
         {
             return Err(AuthError::InvalidInput);
         }
+        let stored_attachments = transaction
+            .prepare("SELECT attachment_id FROM local_receipt_attachment_links WHERE receipt_id = ?1 ORDER BY attachment_id")
+            .map_err(|_| AuthError::Database)?
+            .query_map([value.id.to_string()], |row| row.get::<_, String>(0))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        let mut expected_attachments = value
+            .attachment_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        expected_attachments.sort();
+        if stored_attachments != expected_attachments {
+            return Err(AuthError::InvalidInput);
+        }
         return Ok(true);
     }
     transaction.execute(
@@ -7471,6 +7491,14 @@ fn project_remote_receipt(
             "INSERT INTO local_receipt_items (id, receipt_id, order_item_id, quantity_decimal, unit) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![item.id.to_string(), value.id.to_string(), item.order_item_id.to_string(), item.quantity, item.unit],
         ).map_err(|_| AuthError::Database)?;
+    }
+    for attachment_id in value.attachment_ids {
+        transaction
+            .execute(
+                "INSERT INTO local_receipt_attachment_links (receipt_id, attachment_id) VALUES (?1, ?2)",
+                params![change.entity_id.to_string(), attachment_id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
     }
     Ok(true)
 }
@@ -12050,6 +12078,76 @@ mod tests {
             upgraded["attachmentIds"][0],
             receipt_attachment_id.to_string()
         );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_sync_outbox SET acknowledged_at = ?2 WHERE entity_type = 'receipt' AND entity_id = ?1",
+                params![first_receipt.id.to_string(), unix_seconds(now)],
+            )
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "DELETE FROM local_order_attachments WHERE id = ?1",
+                [receipt_attachment_id.to_string()],
+            )
+            .unwrap();
+        let legacy_remote_page = SyncPullPageInput {
+            changes: vec![SyncPullChangeInput {
+                cursor: "1".into(),
+                entity_type: "receipt".into(),
+                entity_id: first_receipt.id,
+                operation: "upsert".into(),
+                version: 1,
+                payload: upgraded.clone(),
+                changed_at: "2026-10-11T00:00:00Z".into(),
+            }],
+            next_cursor: "1".into(),
+        };
+        service
+            .apply_sync_pull_page(legacy_remote_page.clone(), now)
+            .unwrap();
+        service
+            .apply_sync_pull_page(legacy_remote_page, now)
+            .unwrap();
+        let legacy_link_count: i64 = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM local_receipt_attachment_links WHERE receipt_id = ?1 AND attachment_id = ?2",
+                params![
+                    first_receipt.id.to_string(),
+                    receipt_attachment_id.to_string()
+                ],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_link_count, 1);
+        let mut divergent_legacy_receipt = upgraded;
+        divergent_legacy_receipt["attachmentIds"] = serde_json::json!([]);
+        assert_eq!(
+            service.apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "2".into(),
+                        entity_type: "receipt".into(),
+                        entity_id: first_receipt.id,
+                        operation: "upsert".into(),
+                        version: 2,
+                        payload: divergent_legacy_receipt,
+                        changed_at: "2026-10-11T00:00:01Z".into(),
+                    }],
+                    next_cursor: "2".into(),
+                },
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
         let second_receipt = service
             .record_receipt(
                 RecordReceiptInput {
@@ -12655,6 +12753,53 @@ mod tests {
             })
             .unwrap();
         assert_eq!(fk_errors, 0);
+    }
+
+    #[test]
+    fn legacy_receipt_link_migration_preserves_links_without_requiring_local_bytes() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 CREATE TABLE local_receipts (id TEXT PRIMARY KEY);
+                 CREATE TABLE local_order_attachments (id TEXT PRIMARY KEY);
+                 CREATE TABLE local_receipt_attachment_links (
+                   receipt_id TEXT NOT NULL REFERENCES local_receipts(id),
+                   attachment_id TEXT NOT NULL REFERENCES local_order_attachments(id),
+                   PRIMARY KEY (receipt_id, attachment_id)
+                 );
+                 INSERT INTO local_receipts VALUES ('receipt-1');
+                 INSERT INTO local_order_attachments VALUES ('attachment-1');
+                 INSERT INTO local_receipt_attachment_links VALUES ('receipt-1', 'attachment-1');",
+            )
+            .unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0035_legacy_receipt_attachment_links.sql"
+            ))
+            .unwrap();
+        let preserved: String = connection
+            .query_row(
+                "SELECT attachment_id FROM local_receipt_attachment_links WHERE receipt_id = 'receipt-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, "attachment-1");
+        connection
+            .execute(
+                "INSERT INTO local_receipt_attachment_links (receipt_id, attachment_id) VALUES ('receipt-1', 'remote-not-yet-downloaded')",
+                [],
+            )
+            .unwrap();
+        let link_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_receipt_attachment_links WHERE receipt_id = 'receipt-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(link_count, 2);
     }
 
     #[test]
