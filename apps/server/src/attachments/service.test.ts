@@ -1,12 +1,16 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
 import { PostgresSyncStore } from '../sync/postgres-store.js'
+import { attachmentObjectStoreConfig } from './config.js'
+import { S3AttachmentStore } from './s3-store.js'
 import { AttachmentService } from './service.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null
+const realCosEnabled = process.env.RUN_COS_COMPAT_TEST === '1'
 
 describe.skipIf(!pool)('AttachmentService with isolated PostgreSQL', () => {
   const [
@@ -197,4 +201,70 @@ describe.skipIf(!pool)('AttachmentService with isolated PostgreSQL', () => {
     )
     expect(Number(rows.rows[0]?.count)).toBe(10)
   })
+
+  it.skipIf(!realCosEnabled)(
+    'uses server-issued COS URLs to transfer, verify and retrieve one isolated attachment',
+    async () => {
+      const config = attachmentObjectStoreConfig(process.env)
+      const store = new S3AttachmentStore(
+        config.bucket,
+        config.region,
+        config.endpoint,
+        config.accessKeyId,
+        config.secretAccessKey,
+      )
+      const client = new S3Client({
+        region: config.region,
+        endpoint: config.endpoint,
+        forcePathStyle: true,
+        credentials: {
+          accessKeyId: config.accessKeyId,
+          secretAccessKey: config.secretAccessKey,
+        },
+      })
+      await pool!.query(
+        'UPDATE user_project_bindings SET deleted_at = NULL WHERE user_id = $1 AND project_id = $2',
+        [actorId, projectId],
+      )
+      const id = randomUUID()
+      const key = `attachments/${projectId}/${id}`
+      const bytes = Buffer.from(`honsen-stage5-server-cos-${id}`)
+      const input = {
+        id,
+        ownerType: 'procurement_expenditure' as const,
+        ownerId: expenseId,
+        orderId,
+        projectId,
+        originalName: 'server-cos-proof.pdf',
+        contentType: 'application/pdf',
+        byteLength: bytes.length,
+        checksum: createHash('sha256').update(bytes).digest('hex'),
+        createdAt: 125,
+      }
+      const service = new AttachmentService(pool!, store)
+      try {
+        const intent = await service.createIntent(actor, input)
+        expect(intent.uploaded).toBe(false)
+        expect(intent.url).toBeTruthy()
+        expect(
+          (
+            await fetch(intent.url!, {
+              method: 'PUT',
+              headers: { 'content-type': input.contentType },
+              body: bytes,
+            })
+          ).ok,
+        ).toBe(true)
+        expect(await service.complete(actor, id)).toEqual({ uploaded: true })
+        const download = await service.download(actor, id)
+        expect(
+          Buffer.from(await (await fetch(download.url)).arrayBuffer()),
+        ).toEqual(bytes)
+      } finally {
+        await client.send(
+          new DeleteObjectCommand({ Bucket: config.bucket, Key: key }),
+        )
+      }
+    },
+  )
 })
