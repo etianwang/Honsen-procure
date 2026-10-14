@@ -4110,28 +4110,42 @@ impl LocalAuthService {
                 }
                 bytes.extend_from_slice(&chunk);
             }
-            if bytes.len() as i64 != byte_length
-                || format!("{:x}", Sha256::digest(&bytes)) != checksum
-            {
-                return Err(AuthError::InvalidInput);
-            }
-            let directory = self.media_directory.join("attachments");
-            fs::create_dir_all(&directory).map_err(|_| AuthError::Database)?;
-            let path = directory.join(&id);
-            if path.exists() {
-                let existing = fs::read(&path).map_err(|_| AuthError::Database)?;
-                if existing != bytes {
-                    return Err(AuthError::InvalidInput);
-                }
-            } else {
-                write_attachment_bytes_atomically(&path, &bytes)?;
-            }
-            self.connection.lock().map_err(|_| AuthError::Database)?
-                .execute("UPDATE local_attachments SET local_path = ?2, upload_state = 'uploaded' WHERE id = ?1 AND upload_state = 'pending_download'", params![id, path.to_string_lossy()])
-                .map_err(|_| AuthError::Database)?;
+            self.persist_downloaded_attachment_bytes(&id, byte_length, &checksum, &bytes)?;
             downloaded += 1;
         }
         Ok(downloaded)
+    }
+
+    fn persist_downloaded_attachment_bytes(
+        &self,
+        id: &str,
+        byte_length: i64,
+        checksum: &str,
+        bytes: &[u8],
+    ) -> Result<(), AuthError> {
+        if bytes.len() as i64 != byte_length || format!("{:x}", Sha256::digest(bytes)) != checksum {
+            return Err(AuthError::InvalidInput);
+        }
+        let directory = self.media_directory.join("attachments");
+        fs::create_dir_all(&directory).map_err(|_| AuthError::Database)?;
+        let path = directory.join(id);
+        if path.exists() {
+            let existing = fs::read(&path).map_err(|_| AuthError::Database)?;
+            if existing != bytes {
+                return Err(AuthError::InvalidInput);
+            }
+        } else {
+            write_attachment_bytes_atomically(&path, bytes)?;
+        }
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .execute(
+                "UPDATE local_attachments SET local_path = ?2, upload_state = 'uploaded' WHERE id = ?1 AND upload_state = 'pending_download'",
+                params![id, path.to_string_lossy()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Ok(())
     }
 
     pub fn reverse_procurement_expenditure(
@@ -10508,10 +10522,12 @@ mod tests {
             vec![local_photo.clone()]
         );
         let remote_photo_id = Uuid::new_v4();
+        let remote_photo_bytes = archived_photo_bytes.clone();
+        let remote_photo_checksum = format!("{:x}", Sha256::digest(&remote_photo_bytes));
         let remote_photo = serde_json::json!({
             "id": remote_photo_id, "ownerType": "receipt", "ownerId": receipt_id,
             "orderId": order_id, "projectId": project_id, "originalName": "remote-photo.jpg",
-            "contentType": "image/jpeg", "byteLength": 4, "checksum": "a".repeat(64),
+            "contentType": "image/jpeg", "byteLength": remote_photo_bytes.len(), "checksum": remote_photo_checksum.clone(),
             "uploaderId": purchaser_id, "createdAt": 124,
         });
         let remote_photo_page = SyncPullPageInput {
@@ -10532,6 +10548,42 @@ mod tests {
         service
             .apply_sync_pull_page(remote_photo_page, now)
             .unwrap();
+        service
+            .persist_downloaded_attachment_bytes(
+                &remote_photo_id.to_string(),
+                remote_photo_bytes.len() as i64,
+                &remote_photo_checksum,
+                &remote_photo_bytes,
+            )
+            .unwrap();
+        service
+            .persist_downloaded_attachment_bytes(
+                &remote_photo_id.to_string(),
+                remote_photo_bytes.len() as i64,
+                &remote_photo_checksum,
+                &remote_photo_bytes,
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read(
+                service
+                    .media_directory
+                    .join("attachments")
+                    .join(remote_photo_id.to_string()),
+            )
+            .unwrap(),
+            remote_photo_bytes
+        );
+        assert_eq!(
+            service
+                .list_receipt_attachments(receipt_id, now)
+                .unwrap()
+                .into_iter()
+                .find(|attachment| attachment.id == remote_photo_id)
+                .unwrap()
+                .upload_state,
+            "uploaded"
+        );
         assert_eq!(
             service
                 .list_receipt_attachments(receipt_id, now)
@@ -10578,7 +10630,7 @@ mod tests {
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap(),
-            "a".repeat(64)
+            remote_photo_checksum
         );
         drop(connection);
         let invalid_path = service.media_directory.join("not-a-voucher.txt");
@@ -10633,6 +10685,13 @@ mod tests {
                 .media_directory
                 .join("attachments")
                 .join(local_photo.id.to_string()),
+        )
+        .unwrap();
+        fs::remove_file(
+            service
+                .media_directory
+                .join("attachments")
+                .join(remote_photo_id.to_string()),
         )
         .unwrap();
         fs::remove_dir(service.media_directory.join("attachments")).unwrap();
