@@ -1456,6 +1456,7 @@ test('receiver records partial delivery and closes a supplier order with conditi
     if (message.type() === 'error') browserErrors.push(message.text())
   })
   await page.addInitScript(() => {
+    let attachmentSyncAttempts = 0
     Object.assign(window, {
       __TAURI__: {
         core: {
@@ -1503,9 +1504,20 @@ test('receiver records partial delivery and closes a supplier order with conditi
                   contentType: 'image/jpeg',
                   byteLength: 4,
                   checksum: 'a'.repeat(64),
-                  uploadState: 'pending_upload',
+                  uploadState:
+                    attachmentSyncAttempts >= 2 ? 'uploaded' : 'pending_upload',
                 },
               ])
+            }
+            if (command === 'push_pending_sync') {
+              attachmentSyncAttempts += 1
+              Object.assign(window, {
+                __attachmentSyncAttempts: attachmentSyncAttempts,
+              })
+              return Promise.resolve({
+                pendingAttachmentCount: attachmentSyncAttempts === 1 ? 1 : 0,
+                attachmentSyncFailed: attachmentSyncAttempts === 1,
+              })
             }
             return Promise.reject(new Error(`unexpected command: ${command}`))
           },
@@ -1520,6 +1532,20 @@ test('receiver records partial delivery and closes a supplier order with conditi
   await expect(page.getByText('收货已登记，共 1 条明细。')).toBeVisible()
   await page.getByRole('button', { name: '补充收货附件' }).click()
   await expect(page.getByText('delivery.jpg · 待同步')).toBeVisible()
+  await page.getByRole('button', { name: '同步待传附件' }).click()
+  await expect(
+    page.getByText('附件同步失败，仍有 1 个待同步文件；可在联网后重试。'),
+  ).toBeVisible()
+  await page.getByRole('button', { name: '同步待传附件' }).click()
+  await expect(page.getByText('附件已同步到云端。')).toBeVisible()
+  await expect(page.getByText('delivery.jpg · 已同步')).toBeVisible()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __attachmentSyncAttempts?: number })
+          .__attachmentSyncAttempts,
+    ),
+  ).resolves.toBe(2)
   await expect(
     page.evaluate(
       () =>

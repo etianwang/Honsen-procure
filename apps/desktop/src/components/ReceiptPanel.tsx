@@ -1,6 +1,10 @@
 import { Alert, Button, Card, Input } from 'antd'
 import { useState } from 'react'
-import type { ReceiptApi, ReceiptAttachmentView } from '../lib/receipt-api'
+import {
+  attachmentSyncStatusMessage,
+  type ReceiptApi,
+  type ReceiptAttachmentView,
+} from '../lib/receipt-api'
 
 type ReceiptLine = {
   id: string
@@ -41,6 +45,7 @@ export function ReceiptPanel({
   const [message, setMessage] = useState<string | null>(null)
   const [receiptId, setReceiptId] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<ReceiptAttachmentView[]>([])
+  const [syncingAttachments, setSyncingAttachments] = useState(false)
 
   async function record() {
     const items = lines
@@ -90,6 +95,21 @@ export function ReceiptPanel({
       onChanged?.()
     } catch {
       setMessage('附件归档失败：请检查文件类型、容量、收货权限和项目授权。')
+    }
+  }
+
+  async function syncAttachments() {
+    if (!receiptId || syncingAttachments) return
+    setSyncingAttachments(true)
+    try {
+      const result = await api.syncPendingAttachments()
+      setAttachments(await api.listReceiptAttachments(receiptId))
+      setMessage(attachmentSyncStatusMessage(result))
+      onChanged?.()
+    } catch {
+      setMessage('附件同步请求失败，归档文件仍保留在本机，可稍后重试。')
+    } finally {
+      setSyncingAttachments(false)
     }
   }
 
@@ -146,6 +166,12 @@ export function ReceiptPanel({
       {receiptId ? (
         <section aria-label="收货附件">
           <Button onClick={() => void addAttachment()}>补充收货附件</Button>
+          <Button
+            loading={syncingAttachments}
+            onClick={() => void syncAttachments()}
+          >
+            同步待传附件
+          </Button>
           <ul>
             {attachments.map((attachment) => (
               <li key={attachment.id}>

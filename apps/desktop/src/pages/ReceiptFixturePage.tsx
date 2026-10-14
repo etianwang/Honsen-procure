@@ -17,6 +17,9 @@ const fallbackApi: ReceiptApi = {
   async listReceiptAttachments() {
     return []
   },
+  async syncPendingAttachments() {
+    return { pendingAttachmentCount: 0, attachmentSyncFailed: false }
+  },
 }
 
 export function ReceiptFixturePage() {

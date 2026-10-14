@@ -31,12 +31,28 @@ export type ReceiptAttachmentView = {
   uploadState: 'pending_upload' | 'pending_download' | 'uploaded'
 }
 
+export type AttachmentSyncResult = {
+  pendingAttachmentCount: number
+  attachmentSyncFailed: boolean
+}
+
+export function attachmentSyncStatusMessage(
+  result: AttachmentSyncResult,
+): string {
+  if (result.attachmentSyncFailed)
+    return `附件同步失败，仍有 ${result.pendingAttachmentCount} 个待同步文件；可在联网后重试。`
+  if (result.pendingAttachmentCount)
+    return `仍有 ${result.pendingAttachmentCount} 个附件等待同步。`
+  return '附件已同步到云端。'
+}
+
 export type ReceiptApi = {
   recordReceipt(input: RecordReceiptInput): Promise<ReceiptView>
   chooseReceiptAttachment(
     receiptId: string,
   ): Promise<ReceiptAttachmentView | null>
   listReceiptAttachments(receiptId: string): Promise<ReceiptAttachmentView[]>
+  syncPendingAttachments(): Promise<AttachmentSyncResult>
   closeSupplierOrderWithConditions(
     orderId: string,
     reason: string,
@@ -63,6 +79,8 @@ export const tauriReceiptApi: ReceiptApi = {
     invoke()<ReceiptAttachmentView[]>('list_receipt_attachments', {
       receiptId,
     }),
+  syncPendingAttachments: () =>
+    invoke()<AttachmentSyncResult>('push_pending_sync'),
   closeSupplierOrderWithConditions: (orderId, reason) =>
     invoke()<void>('close_supplier_order_with_conditions', { orderId, reason }),
 }
