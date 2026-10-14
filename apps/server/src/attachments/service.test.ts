@@ -18,7 +18,8 @@ describe.skipIf(!pool)('AttachmentService with isolated PostgreSQL', () => {
     teamId,
     orderId,
     expenseId,
-  ] = Array.from({ length: 8 }, () => randomUUID())
+    receiptId,
+  ] = Array.from({ length: 9 }, () => randomUUID())
   let objectPresent = false
   const storage = {
     signUpload: async (key: string) => `https://test-objects.invalid/${key}`,
@@ -78,6 +79,7 @@ describe.skipIf(!pool)('AttachmentService with isolated PostgreSQL', () => {
         expenseId,
         { orderId, projectId, amountMinor: '100' },
       ],
+      ['receipt', receiptId, { orderId, projectId, createdBy: actorId }],
     ] as const)
       await pool!.query(
         'INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ($1, $2, 1, $3, $4)',
@@ -156,5 +158,40 @@ describe.skipIf(!pool)('AttachmentService with isolated PostgreSQL', () => {
     await expect(service.download(actor, id)).rejects.toMatchObject({
       code: 'FORBIDDEN',
     })
+  })
+
+  it('archives receipt photos separately from expense vouchers and limits a receipt to ten photos', async () => {
+    await pool!.query(
+      'UPDATE user_project_bindings SET deleted_at = NULL WHERE user_id = $1 AND project_id = $2',
+      [actorId, projectId],
+    )
+    const input = {
+      ownerType: 'receipt',
+      ownerId: receiptId,
+      orderId,
+      projectId,
+      originalName: 'photo.jpg',
+      contentType: 'image/jpeg',
+      byteLength: 4,
+      checksum: 'a'.repeat(64),
+      createdAt: 124,
+    }
+    await expect(
+      service.createIntent(outsider, { ...input, id: randomUUID() }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    for (let index = 0; index < 10; index += 1) {
+      const id = randomUUID()
+      const intent = await service.createIntent(actor, { ...input, id })
+      expect(intent.uploaded).toBe(false)
+      expect(await service.complete(actor, id)).toEqual({ uploaded: true })
+    }
+    await expect(
+      service.createIntent(actor, { ...input, id: randomUUID() }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' })
+    const rows = await pool!.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM server_change_log WHERE entity_type = 'attachment' AND payload_json->>'ownerType' = 'receipt' AND payload_json->>'ownerId' = $1",
+      [receiptId],
+    )
+    expect(Number(rows.rows[0]?.count)).toBe(10)
   })
 })

@@ -10,6 +10,8 @@ AUTH-1 has a local implementation checkpoint dated 2026-10-13; isolated PostgreS
 
 The five-stage PR recovery map is in `docs/PR-SPLIT-MAP.md`. Stages 1–4 merged as PRs #9–#12 after CI and diff review. Stage-5 expenditure durability is still in development and has no PR. These code merges do not change AUTH-1 or milestone acceptance until their remaining gates pass.
 
+The 2026-10-14 stage-5 receipt-attachment checkpoint adds managed offline receipt file archival and scoped cloud attachment projection with isolated PostgreSQL evidence. T09-C/T11 and M2–M4 remain unchecked: compression, legacy receipt-link reconstruction, real object storage and native multi-device acceptance are outstanding.
+
 The 2026-10-13 requisition-history checkpoint adds an authorized regular-route list and closes a confirmed-order cross-project read leak; full history/copy and M2 acceptance remain open.
 
 The follow-up checkpoint adds scoped detail/filtering, a safe copy-to-new-editor path and audited pending withdrawal; M2 remains incomplete because full requisition, execution, formal document and print gates are still open.

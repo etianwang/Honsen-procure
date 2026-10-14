@@ -1461,7 +1461,11 @@ test('receiver records partial delivery and closes a supplier order with conditi
         core: {
           invoke(
             command: string,
-            args?: { input?: Record<string, unknown>; reason?: string },
+            args?: {
+              input?: Record<string, unknown>
+              reason?: string
+              receiptId?: string
+            },
           ) {
             if (command === 'record_receipt') {
               Object.assign(window, { __receiptInput: args?.input })
@@ -1476,6 +1480,33 @@ test('receiver records partial delivery and closes a supplier order with conditi
               Object.assign(window, { __conditionalCloseReason: args?.reason })
               return Promise.resolve()
             }
+            if (command === 'choose_receipt_attachment') {
+              Object.assign(window, {
+                __receiptAttachmentOwner: args?.receiptId,
+              })
+              return Promise.resolve({
+                id: '00000000-0000-4000-8000-000000000604',
+                receiptId: args?.receiptId,
+                originalName: 'delivery.jpg',
+                contentType: 'image/jpeg',
+                byteLength: 4,
+                checksum: 'a'.repeat(64),
+                uploadState: 'pending_upload',
+              })
+            }
+            if (command === 'list_receipt_attachments') {
+              return Promise.resolve([
+                {
+                  id: '00000000-0000-4000-8000-000000000604',
+                  receiptId: args?.receiptId,
+                  originalName: 'delivery.jpg',
+                  contentType: 'image/jpeg',
+                  byteLength: 4,
+                  checksum: 'a'.repeat(64),
+                  uploadState: 'pending_upload',
+                },
+              ])
+            }
             return Promise.reject(new Error(`unexpected command: ${command}`))
           },
         },
@@ -1487,6 +1518,8 @@ test('receiver records partial delivery and closes a supplier order with conditi
   await page.getByLabel('fixture pipe 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
   await expect(page.getByText('收货已登记，共 1 条明细。')).toBeVisible()
+  await page.getByRole('button', { name: '补充收货附件' }).click()
+  await expect(page.getByText('delivery.jpg · 待同步')).toBeVisible()
   await expect(
     page.evaluate(
       () =>

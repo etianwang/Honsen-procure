@@ -1,6 +1,6 @@
 import { Alert, Button, Card, Input } from 'antd'
 import { useState } from 'react'
-import type { ReceiptApi } from '../lib/receipt-api'
+import type { ReceiptApi, ReceiptAttachmentView } from '../lib/receipt-api'
 
 type ReceiptLine = {
   id: string
@@ -39,6 +39,8 @@ export function ReceiptPanel({
         : '已发送供应商',
   )
   const [message, setMessage] = useState<string | null>(null)
+  const [receiptId, setReceiptId] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<ReceiptAttachmentView[]>([])
 
   async function record() {
     const items = lines
@@ -69,10 +71,25 @@ export function ReceiptPanel({
             ? '收货中'
             : '已发送供应商',
       )
+      setReceiptId(receipt.id)
+      setAttachments([])
       setMessage(`收货已登记，共 ${receipt.receivedItemCount} 条明细。`)
       onChanged?.()
     } catch {
       setMessage('收货失败：超收必须填写原因，且订单必须处于可收货状态。')
+    }
+  }
+
+  async function addAttachment() {
+    if (!receiptId) return
+    try {
+      const attachment = await api.chooseReceiptAttachment(receiptId)
+      if (!attachment) return
+      setAttachments(await api.listReceiptAttachments(receiptId))
+      setMessage(`已将 ${attachment.originalName} 归档到本机，联网后自动同步。`)
+      onChanged?.()
+    } catch {
+      setMessage('附件归档失败：请检查文件类型、容量、收货权限和项目授权。')
     }
   }
 
@@ -126,6 +143,19 @@ export function ReceiptPanel({
       <Button type="primary" onClick={() => void record()}>
         登记收货
       </Button>
+      {receiptId ? (
+        <section aria-label="收货附件">
+          <Button onClick={() => void addAttachment()}>补充收货附件</Button>
+          <ul>
+            {attachments.map((attachment) => (
+              <li key={attachment.id}>
+                {attachment.originalName} ·{' '}
+                {attachment.uploadState === 'uploaded' ? '已同步' : '待同步'}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <hr />
       <label>
         有条件完成原因

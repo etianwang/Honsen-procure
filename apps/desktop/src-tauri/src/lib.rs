@@ -630,6 +630,18 @@ pub struct ExpenditureVoucherView {
     pub upload_state: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptAttachmentView {
+    pub id: Uuid,
+    pub receipt_id: Uuid,
+    pub original_name: String,
+    pub content_type: String,
+    pub byte_length: i64,
+    pub checksum: String,
+    pub upload_state: String,
+}
+
 #[derive(Deserialize)]
 struct AttachmentUploadIntentResponse {
     uploaded: bool,
@@ -3610,13 +3622,84 @@ impl LocalAuthService {
             .map_err(|_| AuthError::Database)
     }
 
+    pub fn list_receipt_attachments(
+        &self,
+        receipt_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Vec<ReceiptAttachmentView>, AuthError> {
+        let order_id: String = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT order_id FROM local_receipts WHERE id = ?1",
+                [receipt_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Forbidden)?;
+        drop(self.historical_order_connection(
+            Uuid::parse_str(&order_id).map_err(|_| AuthError::Database)?,
+            now,
+        )?);
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.prepare("SELECT id, original_name, content_type, byte_length, checksum, upload_state FROM local_attachments WHERE owner_type = 'receipt' AND owner_id = ?1 ORDER BY created_at, id")
+            .map_err(|_| AuthError::Database)?
+            .query_map([receipt_id.to_string()], |row| Ok(ReceiptAttachmentView {
+                id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                receipt_id, original_name: row.get(1)?, content_type: row.get(2)?,
+                byte_length: row.get(3)?, checksum: row.get(4)?, upload_state: row.get(5)?,
+            }))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)
+    }
+
     pub fn archive_expenditure_voucher(
         &self,
         expenditure_id: Uuid,
         source_path: &Path,
         now: SystemTime,
     ) -> Result<ExpenditureVoucherView, AuthError> {
-        if !self.require_order_mutation(now)? {
+        let (id, original_name, content_type, byte_length, checksum) =
+            self.archive_attachment("procurement_expenditure", expenditure_id, source_path, now)?;
+        Ok(ExpenditureVoucherView {
+            id,
+            expenditure_id,
+            original_name,
+            content_type,
+            byte_length,
+            checksum,
+            upload_state: "pending_upload".into(),
+        })
+    }
+
+    pub fn archive_receipt_attachment(
+        &self,
+        receipt_id: Uuid,
+        source_path: &Path,
+        now: SystemTime,
+    ) -> Result<ReceiptAttachmentView, AuthError> {
+        let (id, original_name, content_type, byte_length, checksum) =
+            self.archive_attachment("receipt", receipt_id, source_path, now)?;
+        Ok(ReceiptAttachmentView {
+            id,
+            receipt_id,
+            original_name,
+            content_type,
+            byte_length,
+            checksum,
+            upload_state: "pending_upload".into(),
+        })
+    }
+
+    fn archive_attachment(
+        &self,
+        owner_type: &str,
+        owner_id: Uuid,
+        source_path: &Path,
+        now: SystemTime,
+    ) -> Result<(Uuid, String, String, i64, String), AuthError> {
+        let privileged = self.require_order_mutation(now)?;
+        if owner_type == "procurement_expenditure" && !privileged {
             return Err(AuthError::Forbidden);
         }
         let original_name = source_path
@@ -3627,21 +3710,28 @@ impl LocalAuthService {
             .to_owned();
         let content_type =
             attachment_content_type(&original_name).ok_or(AuthError::InvalidInput)?;
-        let (order_id, project_id): (String, String) = self
-            .connection
-            .lock()
-            .map_err(|_| AuthError::Database)?
-            .query_row(
-                "SELECT order_id, project_id FROM local_procurement_expenditures WHERE id = ?1",
-                [expenditure_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|_| AuthError::Forbidden)?;
+        let (order_id, project_id, owner_actor): (String, String, String) = {
+            let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            match owner_type {
+                "procurement_expenditure" => connection.query_row(
+                    "SELECT order_id, project_id, created_by FROM local_procurement_expenditures WHERE id = ?1",
+                    [owner_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                ),
+                "receipt" => connection.query_row(
+                    "SELECT r.order_id, o.project_id, r.created_by FROM local_receipts r JOIN local_purchase_orders o ON o.id = r.order_id WHERE r.id = ?1",
+                    [owner_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                ),
+                _ => return Err(AuthError::InvalidInput),
+            }.map_err(|_| AuthError::Forbidden)?
+        };
         self.require_active_scope_for_order(
             Uuid::parse_str(&order_id).map_err(|_| AuthError::Database)?,
             now,
         )?;
         let actor_id = self.active_session_user_id()?;
+        if owner_type == "receipt" && !privileged && owner_actor != actor_id.to_string() {
+            return Err(AuthError::Forbidden);
+        }
         let source = fs::File::open(source_path).map_err(|_| AuthError::InvalidInput)?;
         if !source
             .metadata()
@@ -3654,7 +3744,7 @@ impl LocalAuthService {
         fs::create_dir_all(&directory).map_err(|_| AuthError::Database)?;
         let id = Uuid::new_v4();
         let local_path = directory.join(id.to_string());
-        let result = (|| -> Result<ExpenditureVoucherView, AuthError> {
+        let result = (|| -> Result<(Uuid, String, String, i64, String), AuthError> {
             let mut input = source;
             let mut output = fs::OpenOptions::new()
                 .write(true)
@@ -3699,19 +3789,26 @@ impl LocalAuthService {
             {
                 return Err(AuthError::InvalidInput);
             }
-            transaction.execute("INSERT INTO local_attachments (id, owner_type, owner_id, order_id, project_id, original_name, content_type, byte_length, local_path, checksum, uploader_id, created_at) VALUES (?1, 'procurement_expenditure', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                params![id.to_string(), expenditure_id.to_string(), order_id, project_id, original_name, content_type, byte_length as i64, local_path.to_string_lossy(), checksum, actor_id.to_string(), unix_seconds(now)])
+            if owner_type == "receipt" && content_type.starts_with("image/") {
+                let photos: i64 = transaction.query_row(
+                    "SELECT COUNT(*) FROM local_attachments WHERE owner_type = 'receipt' AND owner_id = ?1 AND content_type LIKE 'image/%'",
+                    [owner_id.to_string()], |row| row.get(0),
+                ).map_err(|_| AuthError::Database)?;
+                if photos >= 10 {
+                    return Err(AuthError::InvalidInput);
+                }
+            }
+            transaction.execute("INSERT INTO local_attachments (id, owner_type, owner_id, order_id, project_id, original_name, content_type, byte_length, local_path, checksum, uploader_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![id.to_string(), owner_type, owner_id.to_string(), order_id, project_id, original_name, content_type, byte_length as i64, local_path.to_string_lossy(), checksum, actor_id.to_string(), unix_seconds(now)])
                 .map_err(|_| AuthError::Database)?;
             transaction.commit().map_err(|_| AuthError::Database)?;
-            Ok(ExpenditureVoucherView {
+            Ok((
                 id,
-                expenditure_id,
                 original_name,
-                content_type: content_type.into(),
-                byte_length: byte_length as i64,
+                content_type.into(),
+                byte_length as i64,
                 checksum,
-                upload_state: "pending_upload".into(),
-            })
+            ))
         })();
         if result.is_err() {
             let _ = fs::remove_file(&local_path);
@@ -3731,12 +3828,12 @@ impl LocalAuthService {
             .load_sync_token(account_id)?
             .ok_or(AuthError::NoActiveSession)?;
         let pending = self.connection.lock().map_err(|_| AuthError::Database)?
-            .prepare("SELECT id, owner_id, order_id, project_id, original_name, content_type, byte_length, local_path, checksum, created_at FROM local_attachments WHERE upload_state = 'pending_upload' ORDER BY created_at, id LIMIT 10")
+            .prepare("SELECT id, owner_type, owner_id, order_id, project_id, original_name, content_type, byte_length, local_path, checksum, created_at FROM local_attachments WHERE upload_state = 'pending_upload' ORDER BY created_at, id LIMIT 10")
             .map_err(|_| AuthError::Database)?
             .query_map([], |row| Ok((
                 row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?,
-                row.get::<_, i64>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, i64>(9)?,
+                row.get::<_, String>(6)?, row.get::<_, i64>(7)?, row.get::<_, String>(8)?, row.get::<_, String>(9)?, row.get::<_, i64>(10)?,
             )))
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
@@ -3748,6 +3845,7 @@ impl LocalAuthService {
         let mut uploaded = 0;
         for (
             id,
+            owner_type,
             owner_id,
             order_id,
             project_id,
@@ -3771,7 +3869,7 @@ impl LocalAuthService {
                 .post(attachment_endpoint("intents")?)
                 .bearer_auth(&token)
                 .json(&serde_json::json!({
-                    "id": id, "ownerType": "procurement_expenditure", "ownerId": owner_id,
+                    "id": id, "ownerType": owner_type, "ownerId": owner_id,
                     "orderId": order_id, "projectId": project_id, "originalName": original_name,
                     "contentType": content_type, "byteLength": byte_length, "checksum": checksum,
                     "createdAt": created_at,
@@ -5916,6 +6014,33 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn list_receipt_attachments(
+        auth: State<'_, LocalAuthService>,
+        receipt_id: Uuid,
+    ) -> Result<Vec<super::ReceiptAttachmentView>, CommandError> {
+        auth.list_receipt_attachments(receipt_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn choose_receipt_attachment(
+        app: tauri::AppHandle,
+        auth: State<'_, LocalAuthService>,
+        receipt_id: Uuid,
+    ) -> Result<Option<super::ReceiptAttachmentView>, CommandError> {
+        use tauri_plugin_dialog::DialogExt;
+        let Some(path) = app.dialog().file().blocking_pick_file() else {
+            return Ok(None);
+        };
+        let path = path
+            .into_path()
+            .map_err(|_| CommandError::from(super::AuthError::InvalidInput))?;
+        auth.archive_receipt_attachment(receipt_id, &path, SystemTime::now())
+            .map(Some)
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn save_supplier_child_terms(
         auth: State<'_, LocalAuthService>,
         input: super::SupplierChildTermsInput,
@@ -6416,6 +6541,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0033_local_attachments",
             include_str!("../migrations/0033_local_attachments.sql"),
+        ),
+        (
+            "0034_receipt_attachments",
+            include_str!("../migrations/0034_receipt_attachments.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -7529,7 +7658,10 @@ fn project_staged_attachments(transaction: &Transaction<'_>) -> Result<(), AuthE
         let value: RemoteAttachmentPayload =
             serde_json::from_value(change.payload).map_err(|_| AuthError::InvalidInput)?;
         if value.id != change.entity_id
-            || value.owner_type != "procurement_expenditure"
+            || !matches!(
+                value.owner_type.as_str(),
+                "procurement_expenditure" | "receipt"
+            )
             || value.byte_length < 1
             || value.byte_length > MAX_ATTACHMENT_BYTES as i64
             || value.created_at < 0
@@ -7543,15 +7675,22 @@ fn project_staged_attachments(transaction: &Transaction<'_>) -> Result<(), AuthE
         {
             return Err(AuthError::InvalidInput);
         }
-        let expense: Option<(String, String)> = transaction
-            .query_row(
-                "SELECT order_id, project_id FROM local_procurement_expenditures WHERE id = ?1",
-                [value.owner_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .map_err(|_| AuthError::Database)?;
-        let Some((order_id, project_id)) = expense else {
+        let owner: Option<(String, String)> = if value.owner_type == "receipt" {
+            transaction.query_row(
+                "SELECT r.order_id, o.project_id FROM local_receipts r JOIN local_purchase_orders o ON o.id = r.order_id WHERE r.id = ?1",
+                [value.owner_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional().map_err(|_| AuthError::Database)?
+        } else {
+            transaction
+                .query_row(
+                    "SELECT order_id, project_id FROM local_procurement_expenditures WHERE id = ?1",
+                    [value.owner_id.to_string()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?
+        };
+        let Some((order_id, project_id)) = owner else {
             continue;
         };
         if order_id != value.order_id.to_string() || project_id != value.project_id.to_string() {
@@ -9991,6 +10130,69 @@ mod tests {
                 .unwrap(),
             "11"
         );
+        let receipt_source = service.media_directory.join("receipt-photo.jpg");
+        fs::write(&receipt_source, b"test-only receipt photo").unwrap();
+        let local_photo = service
+            .archive_receipt_attachment(receipt_id, &receipt_source, now)
+            .unwrap();
+        fs::remove_file(&receipt_source).unwrap();
+        assert_eq!(local_photo.upload_state, "pending_upload");
+        assert_eq!(
+            service.list_receipt_attachments(receipt_id, now).unwrap(),
+            vec![local_photo.clone()]
+        );
+        let remote_photo_id = Uuid::new_v4();
+        let remote_photo = serde_json::json!({
+            "id": remote_photo_id, "ownerType": "receipt", "ownerId": receipt_id,
+            "orderId": order_id, "projectId": project_id, "originalName": "remote-photo.jpg",
+            "contentType": "image/jpeg", "byteLength": 4, "checksum": "a".repeat(64),
+            "uploaderId": purchaser_id, "createdAt": 124,
+        });
+        let remote_photo_page = SyncPullPageInput {
+            changes: vec![SyncPullChangeInput {
+                cursor: "12".into(),
+                entity_type: "attachment".into(),
+                entity_id: remote_photo_id,
+                operation: "upsert".into(),
+                version: 1,
+                payload: remote_photo.clone(),
+                changed_at: "2026-10-11T00:04:00Z".into(),
+            }],
+            next_cursor: "12".into(),
+        };
+        service
+            .apply_sync_pull_page(remote_photo_page.clone(), now)
+            .unwrap();
+        service
+            .apply_sync_pull_page(remote_photo_page, now)
+            .unwrap();
+        assert_eq!(
+            service
+                .list_receipt_attachments(receipt_id, now)
+                .unwrap()
+                .len(),
+            2
+        );
+        let mut divergent_photo = remote_photo;
+        divergent_photo["checksum"] = serde_json::json!("b".repeat(64));
+        assert_eq!(
+            service.apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "13".into(),
+                        entity_type: "attachment".into(),
+                        entity_id: remote_photo_id,
+                        operation: "upsert".into(),
+                        version: 2,
+                        payload: divergent_photo,
+                        changed_at: "2026-10-11T00:05:00Z".into(),
+                    }],
+                    next_cursor: "13".into(),
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
         let invalid_path = service.media_directory.join("not-a-voucher.txt");
         fs::write(&invalid_path, b"invalid").unwrap();
         assert_eq!(
@@ -10014,7 +10216,22 @@ mod tests {
             service.archive_expenditure_voucher(original_id, &source_path, now),
             Err(AuthError::Forbidden)
         ));
+        assert!(matches!(
+            service.list_receipt_attachments(receipt_id, now),
+            Err(AuthError::Forbidden)
+        ));
+        assert!(matches!(
+            service.archive_receipt_attachment(receipt_id, &source_path, now),
+            Err(AuthError::Forbidden)
+        ));
         fs::remove_file(&archived_path).unwrap();
+        fs::remove_file(
+            service
+                .media_directory
+                .join("attachments")
+                .join(local_photo.id.to_string()),
+        )
+        .unwrap();
         fs::remove_dir(service.media_directory.join("attachments")).unwrap();
         fs::remove_dir(&service.media_directory).unwrap();
     }
@@ -12381,6 +12598,63 @@ mod tests {
             [market_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).unwrap();
         assert_eq!(market_summary, (0, 0, 1));
+    }
+
+    #[test]
+    fn receipt_attachment_migration_preserves_vouchers_and_allows_receipts() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+            CREATE TABLE local_purchase_orders (id TEXT PRIMARY KEY);
+            CREATE TABLE local_projects (id TEXT PRIMARY KEY);
+            CREATE TABLE local_procurement_expenditures (id TEXT PRIMARY KEY);
+            INSERT INTO local_purchase_orders VALUES ('order-1');
+            INSERT INTO local_projects VALUES ('project-1');
+            INSERT INTO local_procurement_expenditures VALUES ('expense-1');",
+            )
+            .unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0033_local_attachments.sql"))
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO local_attachments
+            (id, owner_type, owner_id, order_id, project_id, original_name, content_type,
+             byte_length, local_path, checksum, uploader_id, created_at)
+            VALUES ('voucher-1', 'procurement_expenditure', 'expense-1', 'order-1',
+                    'project-1', 'voucher.pdf', 'application/pdf', 4, 'managed/path', 'abcd',
+                    'actor-1', 1)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0034_receipt_attachments.sql"))
+            .unwrap();
+        let voucher: (String, String) = connection
+            .query_row(
+                "SELECT owner_id, local_path FROM local_attachments WHERE id = 'voucher-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(voucher, ("expense-1".into(), "managed/path".into()));
+        connection
+            .execute(
+                "INSERT INTO local_attachments
+            (id, owner_type, owner_id, order_id, project_id, original_name, content_type,
+             byte_length, local_path, checksum, uploader_id, created_at)
+            VALUES ('receipt-photo-1', 'receipt', 'receipt-1', 'order-1', 'project-1',
+                    'delivery.jpg', 'image/jpeg', 4, 'managed/photo', 'abcd', 'actor-1', 2)",
+                [],
+            )
+            .unwrap();
+        let fk_errors: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(fk_errors, 0);
     }
 
     #[test]

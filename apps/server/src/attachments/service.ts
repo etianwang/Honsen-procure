@@ -19,7 +19,7 @@ const types: Record<string, string> = {
 export const attachmentIntentSchema = z
   .object({
     id: z.uuid(),
-    ownerType: z.literal('procurement_expenditure'),
+    ownerType: z.enum(['procurement_expenditure', 'receipt']),
     ownerId: z.uuid(),
     orderId: z.uuid(),
     projectId: z.uuid(),
@@ -105,37 +105,15 @@ export class AttachmentService {
 
   async createIntent(actor: SyncActor, input: unknown) {
     const value = attachmentIntentSchema.parse(input)
-    if (
-      !actor.roles.some(
-        (role) => role === 'purchaser' || role === 'administrator',
-      )
-    )
-      throw new AttachmentError('FORBIDDEN')
     const order = await this.requireScope(actor, value.orderId, value.projectId)
-    const expense = await this.pool.query<{
-      payload_json: Record<string, unknown>
-    }>(
-      "SELECT payload_json FROM sync_entities WHERE entity_type = 'procurement_expenditure' AND entity_id = $1 AND NOT is_deleted",
-      [value.ownerId],
+    await this.requireOwnerWrite(
+      actor,
+      value.ownerType,
+      value.ownerId,
+      value.orderId,
+      value.projectId,
+      order,
     )
-    const payment = expense.rows[0]?.payload_json
-    const parentId =
-      typeof order.parentOrderId === 'string' ? order.parentOrderId : null
-    const parent = parentId
-      ? await this.pool.query<{ payload_json: Record<string, unknown> }>(
-          "SELECT payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1 AND NOT is_deleted",
-          [parentId],
-        )
-      : null
-    const mode =
-      order.procurementMode ?? parent?.rows[0]?.payload_json.procurementMode
-    if (
-      !payment ||
-      payment.orderId !== value.orderId ||
-      payment.projectId !== value.projectId ||
-      mode !== 'honsen_self_purchase'
-    )
-      throw new AttachmentError('FORBIDDEN')
     const client = await this.pool.connect()
     let row: UploadRow
     try {
@@ -150,6 +128,7 @@ export class AttachmentService {
       if (prior.rows[0]) {
         row = prior.rows[0]
         if (
+          row.owner_type !== value.ownerType ||
           row.owner_id !== value.ownerId ||
           row.order_id !== value.orderId ||
           row.project_id !== value.projectId ||
@@ -167,6 +146,17 @@ export class AttachmentService {
         )
         if (Number(total.rows[0]?.total ?? 0) + value.byteLength > 209715200)
           throw new AttachmentError('CONFLICT')
+        if (
+          value.ownerType === 'receipt' &&
+          value.contentType.startsWith('image/')
+        ) {
+          const photos = await client.query<{ count: string }>(
+            "SELECT COUNT(*)::text AS count FROM attachment_uploads WHERE owner_type = 'receipt' AND owner_id = $1 AND content_type LIKE 'image/%'",
+            [value.ownerId],
+          )
+          if (Number(photos.rows[0]?.count ?? 0) >= 10)
+            throw new AttachmentError('CONFLICT')
+        }
         const objectKey = `attachments/${value.projectId}/${value.id}`
         const inserted = await client.query<UploadRow>(
           `INSERT INTO attachment_uploads
@@ -204,14 +194,63 @@ export class AttachmentService {
     }
   }
 
-  async complete(actor: SyncActor, id: string) {
+  private async requireOwnerWrite(
+    actor: SyncActor,
+    ownerType: string,
+    ownerId: string,
+    orderId: string,
+    projectId: string,
+    order: Record<string, unknown>,
+  ) {
+    const owner = await this.pool.query<{
+      payload_json: Record<string, unknown>
+    }>(
+      'SELECT payload_json FROM sync_entities WHERE entity_type = $1 AND entity_id = $2 AND NOT is_deleted',
+      [ownerType, ownerId],
+    )
+    const record = owner.rows[0]?.payload_json
+    if (!record || record.orderId !== orderId || record.projectId !== projectId)
+      throw new AttachmentError('FORBIDDEN')
+    if (ownerType === 'receipt') {
+      if (
+        !actor.roles.some(
+          (role) => role === 'purchaser' || role === 'administrator',
+        ) &&
+        !(actor.roles.includes('engineer') && record.createdBy === actor.id)
+      )
+        throw new AttachmentError('FORBIDDEN')
+      return
+    }
+    const parentId =
+      typeof order.parentOrderId === 'string' ? order.parentOrderId : null
+    const parent = parentId
+      ? await this.pool.query<{ payload_json: Record<string, unknown> }>(
+          "SELECT payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1 AND NOT is_deleted",
+          [parentId],
+        )
+      : null
+    const mode =
+      order.procurementMode ?? parent?.rows[0]?.payload_json.procurementMode
     if (
+      mode !== 'honsen_self_purchase' ||
       !actor.roles.some(
         (role) => role === 'purchaser' || role === 'administrator',
       )
     )
       throw new AttachmentError('FORBIDDEN')
+  }
+
+  async complete(actor: SyncActor, id: string) {
     const row = await this.getScoped(actor, id)
+    const order = await this.requireScope(actor, row.order_id, row.project_id)
+    await this.requireOwnerWrite(
+      actor,
+      row.owner_type,
+      row.owner_id,
+      row.order_id,
+      row.project_id,
+      order,
+    )
     if (row.uploaded_at) return { uploaded: true }
     if (
       !(await this.objects.verify(

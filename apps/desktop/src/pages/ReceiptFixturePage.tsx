@@ -11,6 +11,12 @@ const fallbackApi: ReceiptApi = {
     }
   },
   async closeSupplierOrderWithConditions() {},
+  async chooseReceiptAttachment() {
+    return null
+  },
+  async listReceiptAttachments() {
+    return []
+  },
 }
 
 export function ReceiptFixturePage() {

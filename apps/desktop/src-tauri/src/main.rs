@@ -75,6 +75,8 @@ fn main() {
             commands::reverse_procurement_expenditure,
             commands::list_expenditure_vouchers,
             commands::choose_expenditure_voucher,
+            commands::list_receipt_attachments,
+            commands::choose_receipt_attachment,
             commands::save_supplier_child_terms,
             commands::send_supplier_order,
             commands::issue_local_captcha,
