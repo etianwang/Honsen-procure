@@ -10,6 +10,14 @@ use std::{
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use image::{
+    DynamicImage, ImageEncoder, ImageFormat, ImageReader,
+    codecs::{
+        jpeg::JpegEncoder,
+        png::{CompressionType, FilterType, PngEncoder},
+    },
+    imageops::FilterType as ImageFilterType,
+};
 use keyring::Entry;
 use rand_core::OsRng;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -30,6 +38,8 @@ const MAX_FAILURES: i64 = 5;
 const MAX_MATERIAL_IMAGE_BYTES: usize = 100 * 1024 * 1024;
 const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_ORDER_ATTACHMENT_BYTES: i64 = 200 * 1024 * 1024;
+const RECEIPT_PHOTO_MAX_DIMENSION: u32 = 2_048;
+const RECEIPT_PHOTO_JPEG_QUALITY: u8 = 82;
 const SYNC_PULL_PAGE_LIMIT: usize = 500;
 
 fn attachment_content_type(name: &str) -> Option<&'static str> {
@@ -46,6 +56,108 @@ fn attachment_content_type(name: &str) -> Option<&'static str> {
         "zip" => Some("application/zip"),
         _ => None,
     }
+}
+
+fn copy_attachment(input: &mut fs::File, output: &mut fs::File) -> Result<u64, AuthError> {
+    let mut byte_length = 0u64;
+    let mut buffer = [0u8; 65_536];
+    loop {
+        let count = input
+            .read(&mut buffer)
+            .map_err(|_| AuthError::InvalidInput)?;
+        if count == 0 {
+            break;
+        }
+        byte_length = byte_length
+            .checked_add(count as u64)
+            .ok_or(AuthError::InvalidInput)?;
+        if byte_length > MAX_ATTACHMENT_BYTES {
+            return Err(AuthError::InvalidInput);
+        }
+        output
+            .write_all(&buffer[..count])
+            .map_err(|_| AuthError::Database)?;
+    }
+    Ok(byte_length)
+}
+
+fn compress_receipt_photo(
+    source_path: &Path,
+    content_type: &str,
+    output: &mut fs::File,
+) -> Result<u64, AuthError> {
+    let source_length = fs::metadata(source_path)
+        .map_err(|_| AuthError::InvalidInput)?
+        .len();
+    if source_length == 0 || source_length > MAX_ATTACHMENT_BYTES {
+        return Err(AuthError::InvalidInput);
+    }
+    let format = if content_type == "image/jpeg" {
+        ImageFormat::Jpeg
+    } else {
+        ImageFormat::Png
+    };
+    let image = ImageReader::open(source_path)
+        .map_err(|_| AuthError::InvalidInput)?
+        .with_guessed_format()
+        .map_err(|_| AuthError::InvalidInput)?
+        .decode()
+        .map_err(|_| AuthError::InvalidInput)?;
+    let resized = resize_receipt_photo(image);
+    match format {
+        ImageFormat::Jpeg => {
+            JpegEncoder::new_with_quality(&mut *output, RECEIPT_PHOTO_JPEG_QUALITY)
+                .write_image(
+                    resized.as_bytes(),
+                    resized.width(),
+                    resized.height(),
+                    resized.color().into(),
+                )
+                .map_err(|_| AuthError::InvalidInput)?
+        }
+        ImageFormat::Png => {
+            PngEncoder::new_with_quality(&mut *output, CompressionType::Best, FilterType::Adaptive)
+                .write_image(
+                    resized.as_bytes(),
+                    resized.width(),
+                    resized.height(),
+                    resized.color().into(),
+                )
+                .map_err(|_| AuthError::InvalidInput)?
+        }
+        _ => return Err(AuthError::InvalidInput),
+    }
+    let length = output.metadata().map_err(|_| AuthError::Database)?.len();
+    if length == 0 || length > MAX_ATTACHMENT_BYTES {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok(length)
+}
+
+fn resize_receipt_photo(image: DynamicImage) -> DynamicImage {
+    if image.width() <= RECEIPT_PHOTO_MAX_DIMENSION && image.height() <= RECEIPT_PHOTO_MAX_DIMENSION
+    {
+        return image;
+    }
+    image.resize(
+        RECEIPT_PHOTO_MAX_DIMENSION,
+        RECEIPT_PHOTO_MAX_DIMENSION,
+        ImageFilterType::Lanczos3,
+    )
+}
+
+fn sha256_file(path: &Path) -> Result<String, AuthError> {
+    let mut input = fs::File::open(path).map_err(|_| AuthError::Database)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 65_536];
+    loop {
+        let count = input.read(&mut buffer).map_err(|_| AuthError::Database)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -3732,7 +3844,7 @@ impl LocalAuthService {
         if owner_type == "receipt" && !privileged && owner_actor != actor_id.to_string() {
             return Err(AuthError::Forbidden);
         }
-        let source = fs::File::open(source_path).map_err(|_| AuthError::InvalidInput)?;
+        let mut source = fs::File::open(source_path).map_err(|_| AuthError::InvalidInput)?;
         if !source
             .metadata()
             .map_err(|_| AuthError::InvalidInput)?
@@ -3745,38 +3857,23 @@ impl LocalAuthService {
         let id = Uuid::new_v4();
         let local_path = directory.join(id.to_string());
         let result = (|| -> Result<(Uuid, String, String, i64, String), AuthError> {
-            let mut input = source;
             let mut output = fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&local_path)
                 .map_err(|_| AuthError::Database)?;
-            let mut digest = Sha256::new();
-            let mut byte_length = 0u64;
-            let mut buffer = [0u8; 65_536];
-            loop {
-                let count = input
-                    .read(&mut buffer)
-                    .map_err(|_| AuthError::InvalidInput)?;
-                if count == 0 {
-                    break;
-                }
-                byte_length = byte_length
-                    .checked_add(count as u64)
-                    .ok_or(AuthError::InvalidInput)?;
-                if byte_length > MAX_ATTACHMENT_BYTES {
-                    return Err(AuthError::InvalidInput);
-                }
-                output
-                    .write_all(&buffer[..count])
-                    .map_err(|_| AuthError::Database)?;
-                digest.update(&buffer[..count]);
-            }
+            let byte_length =
+                if owner_type == "receipt" && matches!(content_type, "image/jpeg" | "image/png") {
+                    compress_receipt_photo(source_path, content_type, &mut output)?
+                } else {
+                    copy_attachment(&mut source, &mut output)?
+                };
             if byte_length == 0 {
                 return Err(AuthError::InvalidInput);
             }
             output.sync_all().map_err(|_| AuthError::Database)?;
-            let checksum = format!("{:x}", digest.finalize());
+            drop(output);
+            let checksum = sha256_file(&local_path)?;
             let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
             let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
             let existing_bytes: i64 = transaction.query_row(
@@ -10159,7 +10256,9 @@ mod tests {
             "11"
         );
         let receipt_source = service.media_directory.join("receipt-photo.jpg");
-        fs::write(&receipt_source, b"test-only receipt photo").unwrap();
+        image::RgbImage::from_pixel(3_000, 2_400, image::Rgb([32, 64, 128]))
+            .save_with_format(&receipt_source, ImageFormat::Jpeg)
+            .unwrap();
         let local_photo = service
             .archive_receipt_attachment(receipt_id, &receipt_source, now)
             .unwrap();
@@ -10228,6 +10327,21 @@ mod tests {
             Err(AuthError::InvalidInput)
         );
         fs::remove_file(&invalid_path).unwrap();
+        let invalid_receipt_photo = service.media_directory.join("corrupt-photo.jpg");
+        fs::write(&invalid_receipt_photo, b"not a jpeg").unwrap();
+        let attachment_count: i64 = service.connection.lock().unwrap().query_row(
+            "SELECT COUNT(*) FROM local_attachments WHERE owner_type = 'receipt' AND owner_id = ?1",
+            [receipt_id.to_string()], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            service.archive_receipt_attachment(receipt_id, &invalid_receipt_photo, now),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(service.connection.lock().unwrap().query_row(
+            "SELECT COUNT(*) FROM local_attachments WHERE owner_type = 'receipt' AND owner_id = ?1",
+            [receipt_id.to_string()], |row| row.get::<_, i64>(0),
+        ).unwrap(), attachment_count);
+        fs::remove_file(&invalid_receipt_photo).unwrap();
         service.connection.lock().unwrap().execute(
             "DELETE FROM local_authorization_snapshots WHERE account_id = ?1 AND project_id = ?2",
             params![purchaser_id.to_string(), project_id.to_string()],
@@ -12800,6 +12914,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(link_count, 2);
+    }
+
+    #[test]
+    fn receipt_photo_compression_downsizes_jpeg_and_rejects_invalid_bytes() {
+        let source =
+            std::env::temp_dir().join(format!("honsen-receipt-photo-{}.jpg", Uuid::new_v4()));
+        let target =
+            std::env::temp_dir().join(format!("honsen-receipt-photo-{}.jpg", Uuid::new_v4()));
+        image::RgbImage::from_pixel(3_000, 2_400, image::Rgb([32, 64, 128]))
+            .save_with_format(&source, ImageFormat::Jpeg)
+            .unwrap();
+        let mut output = fs::File::create(&target).unwrap();
+        let compressed = compress_receipt_photo(&source, "image/jpeg", &mut output).unwrap();
+        drop(output);
+        let decoded = ImageReader::open(&target).unwrap().decode().unwrap();
+        assert!(decoded.width() <= RECEIPT_PHOTO_MAX_DIMENSION);
+        assert!(decoded.height() <= RECEIPT_PHOTO_MAX_DIMENSION);
+        assert_eq!(compressed, fs::metadata(&target).unwrap().len());
+        fs::write(&source, b"not an image").unwrap();
+        let mut invalid = fs::File::create(&target).unwrap();
+        assert_eq!(
+            compress_receipt_photo(&source, "image/jpeg", &mut invalid),
+            Err(AuthError::InvalidInput)
+        );
+        drop(invalid);
+        fs::remove_file(source).unwrap();
+        fs::remove_file(target).unwrap();
+    }
+
+    #[test]
+    fn receipt_photo_compression_preserves_png_alpha_and_bounds() {
+        let source =
+            std::env::temp_dir().join(format!("honsen-receipt-photo-{}.png", Uuid::new_v4()));
+        let target =
+            std::env::temp_dir().join(format!("honsen-receipt-photo-{}.png", Uuid::new_v4()));
+        image::RgbaImage::from_pixel(2_500, 2_100, image::Rgba([1, 2, 3, 127]))
+            .save(&source)
+            .unwrap();
+        let mut output = fs::File::create(&target).unwrap();
+        compress_receipt_photo(&source, "image/png", &mut output).unwrap();
+        drop(output);
+        let decoded = ImageReader::open(&target)
+            .unwrap()
+            .decode()
+            .unwrap()
+            .to_rgba8();
+        assert!(
+            decoded.width() <= RECEIPT_PHOTO_MAX_DIMENSION
+                && decoded.height() <= RECEIPT_PHOTO_MAX_DIMENSION
+        );
+        assert_eq!(decoded.get_pixel(0, 0)[3], 127);
+        fs::remove_file(source).unwrap();
+        fs::remove_file(target).unwrap();
     }
 
     #[test]
