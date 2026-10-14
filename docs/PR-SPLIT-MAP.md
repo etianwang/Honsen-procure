@@ -42,3 +42,8 @@ paragraphs. Stage 3 starts from `b7f2c03` and replays exactly `aadba28` and
 `4e6f2be` as `2205384` and `0bec77e`. The stage-3 code diff contains only
 local supplier/quote read scoping and server supplier/price Pull scoping;
 no stage-4 execution or stage-5 expenditure code is included.
+Stage 3 merged as PR #11 at `f9f65c9`. Stage 4 starts there and replays
+`14dcb84` and `9666494` as `f7ee767` and `c1128b8`. Their code diff is limited
+to the receipt entry, workflow-state migration, market-direct execution,
+parent receipts, and associated UI/tests. The stage-5 expense source commit
+is still excluded.

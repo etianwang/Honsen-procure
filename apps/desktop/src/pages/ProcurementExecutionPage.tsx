@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { RfqPanel } from '../components/RfqPanel'
 import { SupplierAllocationPanel } from '../components/SupplierAllocationPanel'
 import { SupplierChildTermsPanel } from '../components/SupplierChildTermsPanel'
+import { ReceiptPanel } from '../components/ReceiptPanel'
 import type { SupplierView } from '../lib/catalog-api'
 import type {
   ProcurementExecutionApi,
@@ -10,12 +11,14 @@ import type {
 } from '../lib/procurement-execution-api'
 import type { RfqApi } from '../lib/rfq-api'
 import type { SupplierOrderApi } from '../lib/supplier-order-api'
+import { tauriReceiptApi } from '../lib/receipt-api'
 
 type Props = {
   api: ProcurementExecutionApi
   supplierApi: { listSuppliers(): Promise<SupplierView[]> }
   supplierOrderApi: SupplierOrderApi
   rfqApi: RfqApi
+  receiverId: string
 }
 
 export function ProcurementExecutionPage({
@@ -23,6 +26,7 @@ export function ProcurementExecutionPage({
   supplierApi,
   supplierOrderApi,
   rfqApi,
+  receiverId,
 }: Props) {
   const [orders, setOrders] = useState<ProcurementExecutionOrder[]>([])
   const [suppliers, setSuppliers] = useState<SupplierView[]>([])
@@ -35,7 +39,11 @@ export function ProcurementExecutionPage({
         .listConfirmedProcurementOrders()
         .then((value) => {
           setOrders(value)
-          setSelectedId((current) => current ?? value[0]?.id ?? null)
+          setSelectedId((current) =>
+            value.some((order) => order.id === current)
+              ? current
+              : (value[0]?.id ?? null),
+          )
         })
         .catch(() => setMessage('无法读取已确认采购申请，请重新登录后重试。')),
     [api],
@@ -60,7 +68,7 @@ export function ProcurementExecutionPage({
       <section className="page-heading">
         <div>
           <h2>采购执行</h2>
-          <p>选择已确认父单后进行供应商拆单、RFQ 和子单条款维护。</p>
+          <p>选择已批准的 Honsen 采购申请；市场直采无需 RFQ 或供应商子订单。</p>
         </div>
       </section>
       {message ? <Alert type="error" title={message} showIcon /> : null}
@@ -85,8 +93,8 @@ export function ProcurementExecutionPage({
         <section aria-label="采购执行详情">
           <Card className="card" title={`父单详情 · ${selected.displayNo}`}>
             <p className="muted">
-              主币种：{selected.primaryCurrency} · {selected.lines.length}{' '}
-              条材料
+              状态：{selected.workflowStatus} · 主币种：
+              {selected.primaryCurrency} · {selected.lines.length} 条材料
             </p>
             <ul>
               {selected.lines.map((line) => (
@@ -97,20 +105,74 @@ export function ProcurementExecutionPage({
               ))}
             </ul>
           </Card>
+          {selected.procurementMode === 'honsen_self_purchase' &&
+          ['confirmed', 'approved'].includes(selected.workflowStatus) &&
+          selected.children.length === 0 ? (
+            <Button
+              type="primary"
+              onClick={() =>
+                void api
+                  .startHonsenMarketExecution(selected.id)
+                  .then(() => {
+                    setMessage(
+                      '市场直采已开始；可直接登记收货，无需 RFQ 或供应商子订单。',
+                    )
+                    void refresh()
+                  })
+                  .catch(() =>
+                    setMessage('无法开始市场直采，请检查模式、状态及授权。'),
+                  )
+              }
+            >
+              开始市场直采
+            </Button>
+          ) : null}
+          {selected.procurementMode === 'honsen_self_purchase' &&
+          ['executing', 'receiving'].includes(selected.workflowStatus) ? (
+            <ReceiptPanel
+              key={selected.id}
+              api={tauriReceiptApi}
+              orderId={selected.id}
+              receiverId={receiverId}
+              initialStatus={selected.workflowStatus}
+              onChanged={refresh}
+              lines={selected.lines.map((line) => ({
+                id: line.id,
+                materialName: line.materialName,
+                unit: line.unit,
+                orderedQuantity: line.quantity,
+              }))}
+            />
+          ) : null}
           {selected.children.length ? (
             selected.children.map((child) => (
-              <SupplierChildTermsPanel
+              <section
                 key={child.id}
-                api={supplierOrderApi}
-                orderId={child.id}
-                lines={child.lines.map((line) => ({
-                  id: line.id,
-                  materialName: line.materialName,
-                  currency: line.currency,
-                }))}
-              />
+                aria-label={`供应商子订单 ${child.displayNo}`}
+              >
+                <SupplierChildTermsPanel
+                  api={supplierOrderApi}
+                  orderId={child.id}
+                  lines={child.lines.map((line) => ({
+                    id: line.id,
+                    materialName: line.materialName,
+                    currency: line.currency,
+                  }))}
+                />
+                <ReceiptPanel
+                  api={tauriReceiptApi}
+                  orderId={child.id}
+                  receiverId={receiverId}
+                  lines={child.lines.map((line) => ({
+                    id: line.id,
+                    materialName: line.materialName,
+                    unit: line.unit,
+                    orderedQuantity: line.quantity,
+                  }))}
+                />
+              </section>
             ))
-          ) : (
+          ) : ['confirmed', 'approved'].includes(selected.workflowStatus) ? (
             <>
               <SupplierAllocationPanel
                 api={supplierOrderApi}
@@ -125,7 +187,7 @@ export function ProcurementExecutionPage({
                 suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
               />
             </>
-          )}
+          ) : null}
         </section>
       ) : null}
     </>

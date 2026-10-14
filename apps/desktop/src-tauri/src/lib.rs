@@ -362,6 +362,8 @@ pub struct ProcurementExecutionOrderView {
     pub id: Uuid,
     pub display_no: String,
     pub primary_currency: String,
+    pub procurement_mode: Option<String>,
+    pub workflow_status: String,
     pub lines: Vec<ProcurementExecutionLineView>,
     pub children: Vec<ProcurementExecutionChildView>,
 }
@@ -2270,9 +2272,9 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let parents = connection
-            .prepare("SELECT o.id, o.display_no, o.primary_currency FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id WHERE o.parent_order_id IS NULL AND o.workflow_status = 'confirmed' AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
+            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
             .map_err(|_| AuthError::Database)?
-            .query_map([account_id.to_string()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?)))
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| AuthError::Database)?;
@@ -2294,7 +2296,7 @@ impl LocalAuthService {
         };
         parents
             .into_iter()
-            .map(|(id, display_no, primary_currency)| {
+            .map(|(id, display_no, primary_currency, procurement_mode, workflow_status)| {
                 let children = connection
                     .prepare("SELECT id, display_no, currency FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
                     .map_err(|_| AuthError::Database)?
@@ -2305,9 +2307,52 @@ impl LocalAuthService {
                     .into_iter()
                     .map(|(child_id, child_display_no, currency)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, currency, lines: read_lines(&child_id)? }))
                     .collect::<Result<Vec<_>, AuthError>>()?;
-                Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, display_no, primary_currency, lines: read_lines(&id)?, children })
+                Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
             })
             .collect()
+    }
+
+    pub fn start_honsen_market_execution(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        self.require_active_scope_for_order(order_id, now)?;
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let previous_status: String = transaction
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .ok_or(AuthError::Forbidden)?;
+        let changed = transaction.execute(
+            "UPDATE local_purchase_orders SET workflow_status = 'executing', version = version + 1, updated_at = ?2 WHERE id = ?1 AND parent_order_id IS NULL AND procurement_mode = 'honsen_self_purchase' AND workflow_status IN ('confirmed', 'approved') AND deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_purchase_orders child WHERE child.parent_order_id = ?1 AND child.deleted_at IS NULL)",
+            params![order_id.to_string(), unix_seconds(now)],
+        ).map_err(|_| AuthError::Database)?;
+        if changed != 1 {
+            return Err(AuthError::Forbidden);
+        }
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            "market_execution_started",
+            None,
+            Some(&previous_status),
+            Some("executing"),
+            now,
+        )?;
+        let payload = order_sync_payload(&transaction, order_id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)
     }
 
     pub fn save_owner_purchase_pricing(
@@ -2606,7 +2651,16 @@ impl LocalAuthService {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?, row.get(13)?, row.get(14)?)),
             )
             .map_err(|_| AuthError::Database)?;
-        if parent.14 != "confirmed" {
+        let parent_mode: Option<String> = transaction
+            .query_row(
+                "SELECT procurement_mode FROM local_purchase_orders WHERE id = ?1",
+                [parent_order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if !matches!(parent.14.as_str(), "confirmed" | "approved")
+            || parent_mode.as_deref() == Some("owner_self_purchase")
+        {
             return Err(AuthError::InvalidInput);
         }
 
@@ -3015,14 +3069,16 @@ impl LocalAuthService {
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let (status, country_id): (String, String) = transaction
+        let (status, country_id, mode): (String, String, Option<String>) = transaction
             .query_row(
-                "SELECT workflow_status, country_id FROM local_purchase_orders WHERE id = ?1 AND parent_order_id IS NULL AND deleted_at IS NULL",
+                "SELECT workflow_status, country_id, procurement_mode FROM local_purchase_orders WHERE id = ?1 AND parent_order_id IS NULL AND deleted_at IS NULL",
                 [input.source_order_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .map_err(|_| AuthError::Database)?;
-        if status != "confirmed" {
+        if !matches!(status.as_str(), "confirmed" | "approved")
+            || mode.as_deref() == Some("owner_self_purchase")
+        {
             return Err(AuthError::InvalidInput);
         }
         let supplier_name = transaction
@@ -3104,15 +3160,18 @@ impl LocalAuthService {
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let (applicant_id, status, is_child): (String, String, i64) = transaction
+        let (applicant_id, status, is_child, mode): (String, String, i64, Option<String>) = transaction
             .query_row(
-                "SELECT applicant_id, workflow_status, parent_order_id IS NOT NULL FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT applicant_id, workflow_status, parent_order_id IS NOT NULL, procurement_mode FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
                 [input.order_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(|_| AuthError::Database)?;
-        if status != "sent"
-            || is_child == 0
+        let supplier_child = is_child != 0 && status == "sent";
+        let market_parent = is_child == 0
+            && mode.as_deref() == Some("honsen_self_purchase")
+            && matches!(status.as_str(), "executing" | "receiving");
+        if (!supplier_child && !market_parent)
             || (!privileged && applicant_id != actor_id.to_string())
         {
             return Err(AuthError::Forbidden);
@@ -3237,7 +3296,13 @@ impl LocalAuthService {
                 complete = false;
             }
         }
-        let workflow_status = if complete { "completed" } else { "sent" };
+        let workflow_status = if complete {
+            "completed"
+        } else if market_parent {
+            "receiving"
+        } else {
+            "sent"
+        };
         transaction.execute(
             "UPDATE local_purchase_orders SET workflow_status = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1",
             params![input.order_id.to_string(), workflow_status, unix_seconds(now)],
@@ -3300,15 +3365,18 @@ impl LocalAuthService {
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let (applicant_id, status, is_child): (String, String, i64) = transaction
+        let (applicant_id, status, is_child, mode): (String, String, i64, Option<String>) = transaction
             .query_row(
-                "SELECT applicant_id, workflow_status, parent_order_id IS NOT NULL FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT applicant_id, workflow_status, parent_order_id IS NOT NULL, procurement_mode FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
                 [order_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(|_| AuthError::Database)?;
-        if status != "sent"
-            || is_child == 0
+        let supplier_child = is_child != 0 && status == "sent";
+        let market_parent = is_child == 0
+            && mode.as_deref() == Some("honsen_self_purchase")
+            && status == "receiving";
+        if (!supplier_child && !market_parent)
             || (!privileged && applicant_id != actor_id.to_string())
         {
             return Err(AuthError::Forbidden);
@@ -4865,6 +4933,15 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn start_honsen_market_execution(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<(), CommandError> {
+        auth.start_honsen_market_execution(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn allocate_supplier_child_orders(
         auth: State<'_, LocalAuthService>,
         parent_order_id: Uuid,
@@ -5445,6 +5522,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0030_authorization_remote_cache",
             include_str!("../migrations/0030_authorization_remote_cache.sql"),
+        ),
+        (
+            "0031_procurement_workflow_states",
+            include_str!("../migrations/0031_procurement_workflow_states.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -9738,7 +9819,7 @@ mod tests {
                 .unwrap();
             assert_eq!(notification_count, 1);
         }
-        let mut revised = draft;
+        let mut revised = draft.clone();
         revised.delivery_address = "revised fixture address".into();
         revised.notes = Some("purchaser correction".into());
         service
@@ -10167,6 +10248,162 @@ mod tests {
                 .unwrap()
                 .is_some_and(|value| value.starts_with("data:image/png;base64,iVBOR"))
         );
+        let market_id = Uuid::new_v4();
+        let mut market_draft = draft.clone();
+        market_draft.id = market_id;
+        market_draft.display_no = "HONSEN-MARKET-FIXTURE".into();
+        market_draft.lines[0].id = Uuid::new_v4();
+        service
+            .save_requisition_draft(market_draft.clone(), now)
+            .unwrap();
+        service
+            .set_procurement_mode(market_id, "honsen_self_purchase".into(), now)
+            .unwrap();
+        service.submit_requisition_draft(market_id, now).unwrap();
+        service.confirm_requisition(market_id, now).unwrap();
+        assert_eq!(
+            service.record_receipt(
+                RecordReceiptInput {
+                    id: Uuid::new_v4(),
+                    order_id: market_id,
+                    received_at: "2026-10-11".into(),
+                    receiver_id: purchaser_id,
+                    over_receipt_reason: None,
+                    attachment_ids: vec![],
+                    items: vec![ReceiptItemInput {
+                        order_item_id: market_draft.lines[0].id,
+                        quantity: "1".into(),
+                        unit: "pcs".into(),
+                    }],
+                },
+                now
+            ),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(
+            service.start_honsen_market_execution(requisition_id, now),
+            Err(AuthError::Forbidden)
+        );
+        service
+            .start_honsen_market_execution(market_id, now)
+            .unwrap();
+        assert!(
+            service
+                .list_order_audits(market_id, now)
+                .unwrap()
+                .iter()
+                .any(|audit| audit.action == "market_execution_started"
+                    && audit.previous_json.as_deref() == Some("confirmed")
+                    && audit.next_json.as_deref() == Some("executing"))
+        );
+        assert_eq!(
+            service.start_honsen_market_execution(market_id, now),
+            Err(AuthError::Forbidden)
+        );
+        let partial = service
+            .record_receipt(
+                RecordReceiptInput {
+                    id: Uuid::new_v4(),
+                    order_id: market_id,
+                    received_at: "2026-10-11".into(),
+                    receiver_id: purchaser_id,
+                    over_receipt_reason: None,
+                    attachment_ids: vec![],
+                    items: vec![ReceiptItemInput {
+                        order_item_id: market_draft.lines[0].id,
+                        quantity: "1".into(),
+                        unit: "pcs".into(),
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(partial.workflow_status, "receiving");
+        let complete = service
+            .record_receipt(
+                RecordReceiptInput {
+                    id: Uuid::new_v4(),
+                    order_id: market_id,
+                    received_at: "2026-10-11".into(),
+                    receiver_id: purchaser_id,
+                    over_receipt_reason: None,
+                    attachment_ids: vec![],
+                    items: vec![ReceiptItemInput {
+                        order_item_id: market_draft.lines[0].id,
+                        quantity: "1.5".into(),
+                        unit: "pcs".into(),
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(complete.workflow_status, "completed");
+        let conditional_id = Uuid::new_v4();
+        market_draft.id = conditional_id;
+        market_draft.display_no = "HONSEN-MARKET-CONDITIONAL".into();
+        market_draft.lines[0].id = Uuid::new_v4();
+        service
+            .save_requisition_draft(market_draft.clone(), now)
+            .unwrap();
+        service
+            .set_procurement_mode(conditional_id, "honsen_self_purchase".into(), now)
+            .unwrap();
+        service
+            .submit_requisition_draft(conditional_id, now)
+            .unwrap();
+        service.confirm_requisition(conditional_id, now).unwrap();
+        service
+            .start_honsen_market_execution(conditional_id, now)
+            .unwrap();
+        assert_eq!(
+            service.close_supplier_order_with_conditions(
+                conditional_id,
+                "not yet received".into(),
+                now
+            ),
+            Err(AuthError::Forbidden)
+        );
+        service
+            .record_receipt(
+                RecordReceiptInput {
+                    id: Uuid::new_v4(),
+                    order_id: conditional_id,
+                    received_at: "2026-10-11".into(),
+                    receiver_id: purchaser_id,
+                    over_receipt_reason: None,
+                    attachment_ids: vec![],
+                    items: vec![ReceiptItemInput {
+                        order_item_id: market_draft.lines[0].id,
+                        quantity: "1".into(),
+                        unit: "pcs".into(),
+                    }],
+                },
+                now,
+            )
+            .unwrap();
+        service
+            .close_supplier_order_with_conditions(
+                conditional_id,
+                "market short delivery".into(),
+                now,
+            )
+            .unwrap();
+        let conditional_status: String = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1",
+                [conditional_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(conditional_status, "completed_with_conditions");
+        let market_summary: (i64, i64, i64) = service.connection.lock().unwrap().query_row(
+            "SELECT (SELECT COUNT(*) FROM local_purchase_orders WHERE parent_order_id = ?1), (SELECT COUNT(*) FROM local_rfqs WHERE source_order_id = ?1), (SELECT COUNT(*) FROM local_order_audit_entries WHERE order_id = ?1 AND action = 'market_execution_started')",
+            [market_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(market_summary, (0, 0, 1));
     }
 
     #[test]
@@ -10255,6 +10492,7 @@ mod tests {
         connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_snapshot_json, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, '{\"nameZh\":\"migration material\"}', '1', 'pcs', 100, 100, 0, 0, 0)", params![item_id, order_id]).unwrap();
 
         migrate(&mut connection).unwrap();
+        migrate(&mut connection).unwrap();
 
         let image_column_exists: i64 = connection
             .query_row(
@@ -10296,6 +10534,50 @@ mod tests {
             )
             .unwrap();
         assert_eq!(workflow_column_exists, 1);
+        let preserved_status: String = connection
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1",
+                [&order_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved_status, "draft");
+        assert!(
+            connection
+                .execute(
+                    "UPDATE local_purchase_orders SET workflow_status = 'invalid' WHERE id = ?1",
+                    [&order_id]
+                )
+                .is_err()
+        );
+        connection
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'executing' WHERE id = ?1",
+                [&order_id],
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1",
+                    [&order_id],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "executing"
+        );
+        let broken_references: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(broken_references, 0);
+        connection
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'draft' WHERE id = ?1",
+                [&order_id],
+            )
+            .unwrap();
         let audit_table_exists: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_order_audit_entries'",
