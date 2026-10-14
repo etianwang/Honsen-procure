@@ -45,6 +45,11 @@ export function SyncConflictPanel({ api }: { api: SyncApi }) {
               <p>
                 云端版本 {item.serverVersion} · {item.serverOperation}
               </p>
+              {item.entityType === 'attachment' && (
+                <p>
+                  附件归档元数据不可覆盖；保留本地会记录管理员决定并恢复游标。
+                </p>
+              )}
               <button
                 className="secondary-button"
                 type="button"
@@ -52,13 +57,15 @@ export function SyncConflictPanel({ api }: { api: SyncApi }) {
               >
                 保留本地
               </button>{' '}
-              <button
-                className="primary-button"
-                type="button"
-                onClick={() => void resolve(item, 'use_server')}
-              >
-                采用云端
-              </button>
+              {item.entityType !== 'attachment' && (
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => void resolve(item, 'use_server')}
+                >
+                  采用云端
+                </button>
+              )}
             </div>
           </article>
         ))}

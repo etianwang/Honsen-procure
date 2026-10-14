@@ -163,8 +163,12 @@ function App() {
     new URLSearchParams(window.location.search).get('test') === 'rfq'
   const isReceiptFixture =
     new URLSearchParams(window.location.search).get('test') === 'receipt'
+  const syncConflictFixture = new URLSearchParams(window.location.search).get(
+    'test',
+  )
   const isSyncConflictFixture =
-    new URLSearchParams(window.location.search).get('test') === 'sync-conflict'
+    syncConflictFixture === 'sync-conflict' ||
+    syncConflictFixture === 'sync-attachment-conflict'
   const [page, setPage] = useState<AppPage>('home')
   const [isPreviewOpen, setPreviewOpen] = useState(false)
   const [session, setSession] = useState<{

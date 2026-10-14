@@ -5220,9 +5220,19 @@ impl LocalAuthService {
         if !page.changes.is_empty() && parse_sync_cursor(&page.next_cursor)? < prior_cursor {
             return Err(AuthError::InvalidInput);
         }
+        if self.record_divergent_attachment_pull_conflicts(&page, now)? {
+            return Err(AuthError::InvalidInput);
+        }
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         for change in &page.changes {
+            if attachment_pull_conflict_was_kept_locally(&transaction, change)? {
+                transaction.execute(
+                    "INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)",
+                    params![change.entity_type, change.entity_id.to_string(), change.version],
+                ).map_err(|_| AuthError::Database)?;
+                continue;
+            }
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String)> = transaction.query_row(
@@ -5269,10 +5279,90 @@ impl LocalAuthService {
     pub fn list_sync_conflicts(&self, now: SystemTime) -> Result<Vec<SyncConflictView>, AuthError> {
         self.require_conflict_resolution(now)?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        connection.prepare("SELECT id, entity_type, entity_id, server_version, local_payload_json, server_payload_json, server_operation FROM local_sync_conflicts WHERE resolved_at IS NULL ORDER BY created_at, id")
+        connection.prepare("SELECT id, entity_type, entity_id, server_version, local_payload_json, server_payload_json, server_operation FROM (SELECT id, entity_type, entity_id, server_version, local_payload_json, server_payload_json, server_operation, created_at FROM local_sync_conflicts WHERE resolved_at IS NULL UNION ALL SELECT id, 'attachment', attachment_id, server_version, local_payload_json, server_payload_json, 'upsert', created_at FROM local_attachment_pull_conflicts WHERE resolved_at IS NULL) ORDER BY created_at, id")
             .map_err(|_| AuthError::Database)?
             .query_map([], |row| Ok(SyncConflictView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, server_version: row.get(3)?, local_payload_json: row.get(4)?, server_payload_json: row.get(5)?, server_operation: row.get(6)? }))
             .map_err(|_| AuthError::Database)?.collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)
+    }
+
+    fn record_divergent_attachment_pull_conflicts(
+        &self,
+        page: &SyncPullPageInput,
+        now: SystemTime,
+    ) -> Result<bool, AuthError> {
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let mut found = false;
+        for change in page
+            .changes
+            .iter()
+            .filter(|change| change.entity_type == "attachment")
+        {
+            if change.operation != "upsert" {
+                continue;
+            }
+            let remote: RemoteAttachmentPayload =
+                match serde_json::from_value(change.payload.clone()) {
+                    Ok(remote) => remote,
+                    Err(_) => continue,
+                };
+            if remote.id != change.entity_id {
+                continue;
+            }
+            let local: Option<(String, String, String, String, String, String, i64, String, String, i64)> = transaction.query_row(
+                "SELECT owner_type, owner_id, order_id, project_id, original_name, content_type, byte_length, checksum, uploader_id, created_at FROM local_attachments WHERE id = ?1",
+                [remote.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?)),
+            ).optional().map_err(|_| AuthError::Database)?;
+            let Some(local) = local else {
+                continue;
+            };
+            let expected = (
+                remote.owner_type.clone(),
+                remote.owner_id.to_string(),
+                remote.order_id.to_string(),
+                remote.project_id.to_string(),
+                remote.original_name.clone(),
+                remote.content_type.clone(),
+                remote.byte_length,
+                remote.checksum.clone(),
+                remote.uploader_id.to_string(),
+                remote.created_at,
+            );
+            if local == expected {
+                continue;
+            }
+            let server_payload_json =
+                serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
+            let existing: Option<(String, Option<i64>)> = transaction.query_row(
+                "SELECT server_payload_json, resolved_at FROM local_attachment_pull_conflicts WHERE attachment_id = ?1 AND server_version = ?2",
+                params![remote.id.to_string(), change.version],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional().map_err(|_| AuthError::Database)?;
+            if let Some((prior_payload, resolved_at)) = existing {
+                if prior_payload != server_payload_json {
+                    return Err(AuthError::InvalidInput);
+                }
+                if resolved_at.is_none() {
+                    found = true;
+                }
+                continue;
+            }
+            let local_payload_json = serde_json::to_string(&serde_json::json!({
+                "id": remote.id, "ownerType": local.0, "ownerId": local.1,
+                "orderId": local.2, "projectId": local.3, "originalName": local.4,
+                "contentType": local.5, "byteLength": local.6, "checksum": local.7,
+                "uploaderId": local.8, "createdAt": local.9,
+            }))
+            .map_err(|_| AuthError::Database)?;
+            transaction.execute(
+                "INSERT INTO local_attachment_pull_conflicts (id, attachment_id, server_version, local_payload_json, server_payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![Uuid::new_v4().to_string(), remote.id.to_string(), change.version, local_payload_json, server_payload_json, unix_seconds(now)],
+            ).map_err(|_| AuthError::Database)?;
+            found = true;
+        }
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(found)
     }
 
     pub fn resolve_sync_conflict(
@@ -5289,6 +5379,21 @@ impl LocalAuthService {
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let attachment_conflict: Option<String> = transaction.query_row(
+            "SELECT attachment_id FROM local_attachment_pull_conflicts WHERE id = ?1 AND resolved_at IS NULL",
+            [input.conflict_id.to_string()],
+            |row| row.get(0),
+        ).optional().map_err(|_| AuthError::Database)?;
+        if attachment_conflict.is_some() {
+            if input.resolution != "keep_local" {
+                return Err(AuthError::InvalidInput);
+            }
+            transaction.execute(
+                "UPDATE local_attachment_pull_conflicts SET resolved_at = ?2, resolved_by = ?3, resolution_reason = ?4 WHERE id = ?1",
+                params![input.conflict_id.to_string(), unix_seconds(now), actor_id.to_string(), input.reason],
+            ).map_err(|_| AuthError::Database)?;
+            return transaction.commit().map_err(|_| AuthError::Database);
+        }
         let row: (String, String, String, i64, String, String, String) = transaction.query_row("SELECT c.entity_type, c.entity_id, c.event_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c WHERE c.id = ?1 AND c.resolved_at IS NULL", [input.conflict_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).map_err(|_| AuthError::InvalidInput)?;
         let entity_id = Uuid::parse_str(&row.1).map_err(|_| AuthError::Database)?;
         if !is_directly_resolvable_sync_entity(&row.0) {
@@ -6660,6 +6765,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0035_legacy_receipt_attachment_links",
             include_str!("../migrations/0035_legacy_receipt_attachment_links.sql"),
         ),
+        (
+            "0036_attachment_pull_conflicts",
+            include_str!("../migrations/0036_attachment_pull_conflicts.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -7072,6 +7181,23 @@ fn is_directly_resolvable_sync_entity(entity_type: &str) -> bool {
             | "material_price"
             | "order_comment"
     )
+}
+
+fn attachment_pull_conflict_was_kept_locally(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+) -> Result<bool, AuthError> {
+    if change.entity_type != "attachment" || change.operation != "upsert" {
+        return Ok(false);
+    }
+    let payload = serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
+    transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_attachment_pull_conflicts WHERE attachment_id = ?1 AND server_version = ?2 AND server_payload_json = ?3 AND resolved_at IS NOT NULL)",
+            params![change.entity_id.to_string(), change.version, payload],
+            |row| row.get(0),
+        )
+        .map_err(|_| AuthError::Database)
 }
 
 fn project_remote_master_data_change(
@@ -10237,22 +10363,20 @@ mod tests {
         );
         let mut divergent_voucher = remote_voucher;
         divergent_voucher["checksum"] = serde_json::json!("b".repeat(64));
+        let divergent_voucher_page = SyncPullPageInput {
+            changes: vec![SyncPullChangeInput {
+                cursor: "12".into(),
+                entity_type: "attachment".into(),
+                entity_id: remote_voucher_id,
+                operation: "upsert".into(),
+                version: 2,
+                payload: divergent_voucher,
+                changed_at: "2026-10-11T00:04:00Z".into(),
+            }],
+            next_cursor: "12".into(),
+        };
         assert_eq!(
-            service.apply_sync_pull_page(
-                SyncPullPageInput {
-                    changes: vec![SyncPullChangeInput {
-                        cursor: "12".into(),
-                        entity_type: "attachment".into(),
-                        entity_id: remote_voucher_id,
-                        operation: "upsert".into(),
-                        version: 2,
-                        payload: divergent_voucher,
-                        changed_at: "2026-10-11T00:04:00Z".into(),
-                    }],
-                    next_cursor: "12".into(),
-                },
-                now
-            ),
+            service.apply_sync_pull_page(divergent_voucher_page.clone(), now),
             Err(AuthError::InvalidInput)
         );
         assert_eq!(
@@ -10268,6 +10392,91 @@ mod tests {
                 .unwrap(),
             "11"
         );
+        let administrator_id = Uuid::new_v4();
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: administrator_id,
+                    username: "attachment-conflict-administrator".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "attachment-conflict-administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let conflict = service
+            .list_sync_conflicts(now)
+            .unwrap()
+            .into_iter()
+            .find(|conflict| conflict.entity_type == "attachment")
+            .unwrap();
+        assert_eq!(conflict.entity_id, remote_voucher_id);
+        assert_eq!(conflict.server_version, 2);
+        assert_eq!(
+            service.resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: conflict.id,
+                    resolution: "keep_local".into(),
+                    reason: "the archived checksum is the retained audit record".into(),
+                },
+                now,
+            ),
+            Ok(())
+        );
+        assert!(service.list_sync_conflicts(now).unwrap().is_empty());
+        service
+            .apply_sync_pull_page(divergent_voucher_page, now)
+            .unwrap();
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "12"
+        );
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT checksum FROM local_attachments WHERE id = ?1",
+                    [remote_voucher_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "a".repeat(64)
+        );
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "order-sync",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
         let receipt_source = service.media_directory.join("receipt-photo.jpg");
         image::RgbImage::from_pixel(3_000, 2_400, image::Rgb([32, 64, 128]))
             .save_with_format(&receipt_source, ImageFormat::Jpeg)

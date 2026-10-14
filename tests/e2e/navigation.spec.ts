@@ -1558,6 +1558,23 @@ test('administrator resolves a sync conflict through the accessible control', as
   await expect(page.getByText('没有待处理的同步冲突。')).toBeVisible()
 })
 
+test('attachment conflict only offers the immutable local archive recovery', async ({
+  page,
+}) => {
+  await page.goto('/?test=sync-attachment-conflict')
+  await expect(
+    page.getByText(
+      '附件归档元数据不可覆盖；保留本地会记录管理员决定并恢复游标。',
+    ),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: '采用云端' })).toHaveCount(0)
+  await page.getByLabel('处理原因').fill('归档校验和已核对')
+  await page.getByRole('button', { name: '保留本地' }).click()
+  await expect(page.getByRole('status')).toHaveText(
+    '冲突已解决，并保留审计记录。',
+  )
+})
+
 test('purchaser rejects with a reason and posts an immutable internal comment', async ({
   page,
 }) => {
