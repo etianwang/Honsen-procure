@@ -99,6 +99,7 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'attachment') return false
     if (event.entityType === 'procurement_expenditure') {
       return this.canWriteExpenditure(actor, event)
     }

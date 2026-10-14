@@ -18,6 +18,16 @@ export type ProcurementExpenditure = {
   createdAt: number
 }
 
+export type ExpenditureVoucher = {
+  id: string
+  expenditureId: string
+  originalName: string
+  contentType: string
+  byteLength: number
+  checksum: string
+  uploadState: 'pending_upload' | 'pending_download' | 'uploaded'
+}
+
 export type RecordProcurementExpenditureInput = Omit<
   ProcurementExpenditure,
   'status' | 'createdBy' | 'createdAt'
@@ -25,6 +35,8 @@ export type RecordProcurementExpenditureInput = Omit<
 
 export type ProcurementExpenditureApi = {
   list(orderId: string): Promise<ProcurementExpenditure[]>
+  listVouchers(expenditureId: string): Promise<ExpenditureVoucher[]>
+  chooseVoucher(expenditureId: string): Promise<ExpenditureVoucher | null>
   record(
     input: RecordProcurementExpenditureInput,
   ): Promise<ProcurementExpenditure>
@@ -49,6 +61,14 @@ export const tauriProcurementExpenditureApi: ProcurementExpenditureApi = {
   list: (orderId) =>
     invoke()<ProcurementExpenditure[]>('list_procurement_expenditures', {
       orderId,
+    }),
+  listVouchers: (expenditureId) =>
+    invoke()<ExpenditureVoucher[]>('list_expenditure_vouchers', {
+      expenditureId,
+    }),
+  chooseVoucher: (expenditureId) =>
+    invoke()<ExpenditureVoucher | null>('choose_expenditure_voucher', {
+      expenditureId,
     }),
   record: (input) =>
     invoke()<ProcurementExpenditure>('record_procurement_expenditure', {

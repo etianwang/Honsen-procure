@@ -1185,6 +1185,7 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
     let status = 'confirmed'
     let receiptCount = 0
     const expenditures: Record<string, unknown>[] = []
+    const vouchers: Record<string, Record<string, unknown>[]> = {}
     const orderId = '00000000-0000-4000-8000-000000000811'
     Object.assign(window, {
       __TAURI__: {
@@ -1222,6 +1223,22 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
             if (command === 'list_suppliers') return Promise.resolve([])
             if (command === 'list_procurement_expenditures')
               return Promise.resolve([...expenditures])
+            if (command === 'list_expenditure_vouchers')
+              return Promise.resolve(vouchers[args?.expenditureId ?? ''] ?? [])
+            if (command === 'choose_expenditure_voucher') {
+              const id = args?.expenditureId ?? ''
+              const voucher = {
+                id: crypto.randomUUID(),
+                expenditureId: id,
+                originalName: 'fixture-voucher.pdf',
+                contentType: 'application/pdf',
+                byteLength: 32,
+                checksum: 'fixture-checksum',
+                uploadState: 'pending_upload',
+              }
+              vouchers[id] = [...(vouchers[id] ?? []), voucher]
+              return Promise.resolve(voucher)
+            }
             if (command === 'record_procurement_expenditure') {
               if (args?.input?.orderId !== orderId)
                 return Promise.reject(new Error('wrong order'))
@@ -1294,6 +1311,12 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   const firstExpense = page
     .getByRole('listitem')
     .filter({ hasText: '1200 XOF' })
+  await firstExpense
+    .getByRole('button', { name: '为 fixture market payee 的支出补充凭证' })
+    .click()
+  await expect(
+    firstExpense.getByText('fixture-voucher.pdf（待上传）'),
+  ).toBeVisible()
   await firstExpense
     .getByLabel('冲销原因 fixture market payee')
     .fill('fixture correction')

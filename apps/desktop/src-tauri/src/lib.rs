@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -27,7 +28,25 @@ const LOCK_WINDOW: Duration = Duration::from_secs(15 * 60);
 const AUTHORIZATION_CACHE_WINDOW: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const MAX_FAILURES: i64 = 5;
 const MAX_MATERIAL_IMAGE_BYTES: usize = 100 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_ORDER_ATTACHMENT_BYTES: i64 = 200 * 1024 * 1024;
 const SYNC_PULL_PAGE_LIMIT: usize = 500;
+
+fn attachment_content_type(name: &str) -> Option<&'static str> {
+    match name.rsplit_once('.')?.1.to_ascii_lowercase().as_str() {
+        "pdf" => Some("application/pdf"),
+        "doc" => Some("application/msword"),
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "xls" => Some("application/vnd.ms-excel"),
+        "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "heic" => Some("image/heic"),
+        "dwg" => Some("image/vnd.dwg"),
+        "zip" => Some("application/zip"),
+        _ => None,
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -601,6 +620,29 @@ pub struct ProcurementExpenditureView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ExpenditureVoucherView {
+    pub id: Uuid,
+    pub expenditure_id: Uuid,
+    pub original_name: String,
+    pub content_type: String,
+    pub byte_length: i64,
+    pub checksum: String,
+    pub upload_state: String,
+}
+
+#[derive(Deserialize)]
+struct AttachmentUploadIntentResponse {
+    uploaded: bool,
+    url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AttachmentDownloadResponse {
+    url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncOutboxEventView {
     pub event_id: Uuid,
     pub entity_type: String,
@@ -623,6 +665,8 @@ pub struct SyncAcknowledgementInput {
 pub struct SyncPushView {
     pub accepted_count: usize,
     pub pending_count: usize,
+    pub pending_attachment_count: usize,
+    pub attachment_sync_failed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -630,6 +674,8 @@ pub struct SyncPushView {
 pub struct SyncPullView {
     pub applied_count: usize,
     pub next_cursor: String,
+    pub pending_attachment_count: usize,
+    pub attachment_sync_failed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -759,6 +805,22 @@ struct RemoteReceiptItem {
     order_item_id: Uuid,
     quantity: String,
     unit: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteAttachmentPayload {
+    id: Uuid,
+    owner_type: String,
+    owner_id: Uuid,
+    order_id: Uuid,
+    project_id: Uuid,
+    original_name: String,
+    content_type: String,
+    byte_length: i64,
+    checksum: String,
+    uploader_id: Uuid,
+    created_at: i64,
 }
 
 #[derive(Deserialize)]
@@ -3516,6 +3578,354 @@ impl LocalAuthService {
         self.write_procurement_expenditure(input, "recorded", now)
     }
 
+    pub fn list_expenditure_vouchers(
+        &self,
+        expenditure_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Vec<ExpenditureVoucherView>, AuthError> {
+        let order_id: String = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT order_id FROM local_procurement_expenditures WHERE id = ?1",
+                [expenditure_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Forbidden)?;
+        drop(self.historical_order_connection(
+            Uuid::parse_str(&order_id).map_err(|_| AuthError::Database)?,
+            now,
+        )?);
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.prepare("SELECT id, original_name, content_type, byte_length, checksum, upload_state FROM local_attachments WHERE owner_type = 'procurement_expenditure' AND owner_id = ?1 ORDER BY created_at, id")
+            .map_err(|_| AuthError::Database)?
+            .query_map([expenditure_id.to_string()], |row| Ok(ExpenditureVoucherView {
+                id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                expenditure_id, original_name: row.get(1)?, content_type: row.get(2)?,
+                byte_length: row.get(3)?, checksum: row.get(4)?, upload_state: row.get(5)?,
+            }))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
+    pub fn archive_expenditure_voucher(
+        &self,
+        expenditure_id: Uuid,
+        source_path: &Path,
+        now: SystemTime,
+    ) -> Result<ExpenditureVoucherView, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        let original_name = source_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|name| valid_required_text(name, 255))
+            .ok_or(AuthError::InvalidInput)?
+            .to_owned();
+        let content_type =
+            attachment_content_type(&original_name).ok_or(AuthError::InvalidInput)?;
+        let (order_id, project_id): (String, String) = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT order_id, project_id FROM local_procurement_expenditures WHERE id = ?1",
+                [expenditure_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| AuthError::Forbidden)?;
+        self.require_active_scope_for_order(
+            Uuid::parse_str(&order_id).map_err(|_| AuthError::Database)?,
+            now,
+        )?;
+        let actor_id = self.active_session_user_id()?;
+        let source = fs::File::open(source_path).map_err(|_| AuthError::InvalidInput)?;
+        if !source
+            .metadata()
+            .map_err(|_| AuthError::InvalidInput)?
+            .is_file()
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let directory = self.media_directory.join("attachments");
+        fs::create_dir_all(&directory).map_err(|_| AuthError::Database)?;
+        let id = Uuid::new_v4();
+        let local_path = directory.join(id.to_string());
+        let result = (|| -> Result<ExpenditureVoucherView, AuthError> {
+            let mut input = source;
+            let mut output = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&local_path)
+                .map_err(|_| AuthError::Database)?;
+            let mut digest = Sha256::new();
+            let mut byte_length = 0u64;
+            let mut buffer = [0u8; 65_536];
+            loop {
+                let count = input
+                    .read(&mut buffer)
+                    .map_err(|_| AuthError::InvalidInput)?;
+                if count == 0 {
+                    break;
+                }
+                byte_length = byte_length
+                    .checked_add(count as u64)
+                    .ok_or(AuthError::InvalidInput)?;
+                if byte_length > MAX_ATTACHMENT_BYTES {
+                    return Err(AuthError::InvalidInput);
+                }
+                output
+                    .write_all(&buffer[..count])
+                    .map_err(|_| AuthError::Database)?;
+                digest.update(&buffer[..count]);
+            }
+            if byte_length == 0 {
+                return Err(AuthError::InvalidInput);
+            }
+            output.sync_all().map_err(|_| AuthError::Database)?;
+            let checksum = format!("{:x}", digest.finalize());
+            let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+            let existing_bytes: i64 = transaction.query_row(
+                "SELECT COALESCE((SELECT SUM(byte_length) FROM local_order_attachments WHERE order_id = ?1 AND deleted_at IS NULL), 0) + COALESCE((SELECT SUM(byte_length) FROM local_attachments WHERE order_id = ?1), 0)",
+                [order_id.as_str()], |row| row.get(0),
+            ).map_err(|_| AuthError::Database)?;
+            if existing_bytes
+                .checked_add(byte_length as i64)
+                .is_none_or(|total| total > MAX_ORDER_ATTACHMENT_BYTES)
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            transaction.execute("INSERT INTO local_attachments (id, owner_type, owner_id, order_id, project_id, original_name, content_type, byte_length, local_path, checksum, uploader_id, created_at) VALUES (?1, 'procurement_expenditure', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![id.to_string(), expenditure_id.to_string(), order_id, project_id, original_name, content_type, byte_length as i64, local_path.to_string_lossy(), checksum, actor_id.to_string(), unix_seconds(now)])
+                .map_err(|_| AuthError::Database)?;
+            transaction.commit().map_err(|_| AuthError::Database)?;
+            Ok(ExpenditureVoucherView {
+                id,
+                expenditure_id,
+                original_name,
+                content_type: content_type.into(),
+                byte_length: byte_length as i64,
+                checksum,
+                upload_state: "pending_upload".into(),
+            })
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&local_path);
+        }
+        result
+    }
+
+    pub async fn upload_pending_attachments_https(
+        &self,
+        now: SystemTime,
+    ) -> Result<usize, AuthError> {
+        self.require_catalog_read(now)?;
+        self.refresh_authorization_https(now).await?;
+        let account_id = self.active_session_user_id()?;
+        let token = self
+            .credential_vault
+            .load_sync_token(account_id)?
+            .ok_or(AuthError::NoActiveSession)?;
+        let pending = self.connection.lock().map_err(|_| AuthError::Database)?
+            .prepare("SELECT id, owner_id, order_id, project_id, original_name, content_type, byte_length, local_path, checksum, created_at FROM local_attachments WHERE upload_state = 'pending_upload' ORDER BY created_at, id LIMIT 10")
+            .map_err(|_| AuthError::Database)?
+            .query_map([], |row| Ok((
+                row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, i64>(9)?,
+            )))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?;
+        let mut uploaded = 0;
+        for (
+            id,
+            owner_id,
+            order_id,
+            project_id,
+            original_name,
+            content_type,
+            byte_length,
+            local_path,
+            checksum,
+            created_at,
+        ) in pending
+        {
+            let order_uuid = Uuid::parse_str(&order_id).map_err(|_| AuthError::Database)?;
+            self.require_active_scope_for_order(order_uuid, now)?;
+            let bytes = fs::read(&local_path).map_err(|_| AuthError::Database)?;
+            if bytes.len() as i64 != byte_length
+                || format!("{:x}", Sha256::digest(&bytes)) != checksum
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            let intent = client
+                .post(attachment_endpoint("intents")?)
+                .bearer_auth(&token)
+                .json(&serde_json::json!({
+                    "id": id, "ownerType": "procurement_expenditure", "ownerId": owner_id,
+                    "orderId": order_id, "projectId": project_id, "originalName": original_name,
+                    "contentType": content_type, "byteLength": byte_length, "checksum": checksum,
+                    "createdAt": created_at,
+                }))
+                .send()
+                .await
+                .map_err(|_| AuthError::SyncTransport)?;
+            if intent.status() == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(AuthError::NoActiveSession);
+            }
+            if intent.status() == reqwest::StatusCode::FORBIDDEN {
+                return Err(AuthError::Forbidden);
+            }
+            if !intent.status().is_success() {
+                return Err(AuthError::SyncTransport);
+            }
+            let intent: AttachmentUploadIntentResponse =
+                intent.json().await.map_err(|_| AuthError::SyncTransport)?;
+            if !intent.uploaded {
+                let url =
+                    signed_attachment_url(intent.url.as_deref().ok_or(AuthError::SyncTransport)?)?;
+                let response = client
+                    .put(url)
+                    .header(reqwest::header::CONTENT_TYPE, content_type)
+                    .body(bytes)
+                    .send()
+                    .await
+                    .map_err(|_| AuthError::SyncTransport)?;
+                if !response.status().is_success() {
+                    return Err(AuthError::SyncTransport);
+                }
+                let completed = client
+                    .post(attachment_endpoint(&format!("{id}/complete"))?)
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .map_err(|_| AuthError::SyncTransport)?;
+                if !completed.status().is_success() {
+                    return Err(AuthError::SyncTransport);
+                }
+            }
+            self.connection.lock().map_err(|_| AuthError::Database)?
+                .execute("UPDATE local_attachments SET upload_state = 'uploaded' WHERE id = ?1 AND upload_state = 'pending_upload'", [id])
+                .map_err(|_| AuthError::Database)?;
+            uploaded += 1;
+        }
+        Ok(uploaded)
+    }
+
+    pub async fn download_pending_attachments_https(
+        &self,
+        now: SystemTime,
+    ) -> Result<usize, AuthError> {
+        self.require_catalog_read(now)?;
+        self.refresh_authorization_https(now).await?;
+        let account_id = self.active_session_user_id()?;
+        let token = self
+            .credential_vault
+            .load_sync_token(account_id)?
+            .ok_or(AuthError::NoActiveSession)?;
+        let pending = self.connection.lock().map_err(|_| AuthError::Database)?
+            .prepare("SELECT id, order_id, byte_length, checksum FROM local_attachments WHERE upload_state = 'pending_download' ORDER BY created_at, id LIMIT 10")
+            .map_err(|_| AuthError::Database)?
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, String>(3)?)))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()
+            .map_err(|_| AuthError::SyncTransport)?;
+        let mut downloaded = 0;
+        for (id, order_id, byte_length, checksum) in pending {
+            self.require_active_scope_for_order(
+                Uuid::parse_str(&order_id).map_err(|_| AuthError::Database)?,
+                now,
+            )?;
+            let response = client
+                .get(attachment_endpoint(&format!("{id}/download"))?)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .map_err(|_| AuthError::SyncTransport)?;
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(AuthError::NoActiveSession);
+            }
+            if response.status() == reqwest::StatusCode::FORBIDDEN {
+                return Err(AuthError::Forbidden);
+            }
+            if !response.status().is_success() {
+                return Err(AuthError::SyncTransport);
+            }
+            let link: AttachmentDownloadResponse = response
+                .json()
+                .await
+                .map_err(|_| AuthError::SyncTransport)?;
+            let signed = signed_attachment_url(&link.url)?;
+            let mut response = client
+                .get(signed)
+                .send()
+                .await
+                .map_err(|_| AuthError::SyncTransport)?;
+            if !response.status().is_success()
+                || response
+                    .content_length()
+                    .is_some_and(|size| size > MAX_ATTACHMENT_BYTES)
+            {
+                return Err(AuthError::SyncTransport);
+            }
+            let mut bytes = Vec::with_capacity(byte_length as usize);
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| AuthError::SyncTransport)?
+            {
+                if bytes
+                    .len()
+                    .checked_add(chunk.len())
+                    .is_none_or(|size| size > MAX_ATTACHMENT_BYTES as usize)
+                {
+                    return Err(AuthError::InvalidInput);
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            if bytes.len() as i64 != byte_length
+                || format!("{:x}", Sha256::digest(&bytes)) != checksum
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            let directory = self.media_directory.join("attachments");
+            fs::create_dir_all(&directory).map_err(|_| AuthError::Database)?;
+            let path = directory.join(&id);
+            if path.exists() {
+                let existing = fs::read(&path).map_err(|_| AuthError::Database)?;
+                if existing != bytes {
+                    return Err(AuthError::InvalidInput);
+                }
+            } else {
+                let mut output = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .map_err(|_| AuthError::Database)?;
+                output.write_all(&bytes).map_err(|_| AuthError::Database)?;
+                output.sync_all().map_err(|_| AuthError::Database)?;
+            }
+            self.connection.lock().map_err(|_| AuthError::Database)?
+                .execute("UPDATE local_attachments SET local_path = ?2, upload_state = 'uploaded' WHERE id = ?1 AND upload_state = 'pending_download'", params![id, path.to_string_lossy()])
+                .map_err(|_| AuthError::Database)?;
+            downloaded += 1;
+        }
+        Ok(downloaded)
+    }
+
     pub fn reverse_procurement_expenditure(
         &self,
         expenditure_id: Uuid,
@@ -4640,6 +5050,7 @@ impl LocalAuthService {
         project_staged_order_comments(&transaction)?;
         project_staged_receipts(&transaction)?;
         project_staged_procurement_expenditures(&transaction)?;
+        project_staged_attachments(&transaction)?;
         transaction.execute(
             "UPDATE local_sync_state SET last_pull_cursor = ?1, last_success_at = ?2 WHERE singleton = 1",
             params![page.next_cursor, unix_seconds(now)],
@@ -4719,9 +5130,12 @@ impl LocalAuthService {
         self.refresh_authorization_https(now).await?;
         let events = self.pending_sync_events(100, now)?;
         if events.is_empty() {
+            let attachment_sync_failed = self.upload_pending_attachments_https(now).await.is_err();
             return Ok(SyncPushView {
                 accepted_count: 0,
                 pending_count: 0,
+                pending_attachment_count: self.pending_attachment_count("pending_upload")?,
+                attachment_sync_failed,
             });
         }
         let account_id = self.active_session_user_id()?;
@@ -4781,9 +5195,12 @@ impl LocalAuthService {
             .filter(|result| result.status == "accepted")
             .count();
         self.apply_sync_acknowledgements(acknowledgements.results, now)?;
+        let attachment_sync_failed = self.upload_pending_attachments_https(now).await.is_err();
         Ok(SyncPushView {
             accepted_count,
             pending_count: self.pending_sync_events(100, now)?.len(),
+            pending_attachment_count: self.pending_attachment_count("pending_upload")?,
+            attachment_sync_failed,
         })
     }
 
@@ -4839,10 +5256,26 @@ impl LocalAuthService {
                 break;
             }
         }
+        let attachment_sync_failed = self.download_pending_attachments_https(now).await.is_err();
         Ok(SyncPullView {
             applied_count,
             next_cursor: cursor,
+            pending_attachment_count: self.pending_attachment_count("pending_download")?,
+            attachment_sync_failed,
         })
+    }
+
+    fn pending_attachment_count(&self, state: &str) -> Result<usize, AuthError> {
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT COUNT(*) FROM local_attachments WHERE upload_state = ?1",
+                [state],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count as usize)
+            .map_err(|_| AuthError::Database)
     }
 
     fn require_master_data_mutation(&self, now: SystemTime) -> Result<(), AuthError> {
@@ -5456,6 +5889,33 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn list_expenditure_vouchers(
+        auth: State<'_, LocalAuthService>,
+        expenditure_id: Uuid,
+    ) -> Result<Vec<super::ExpenditureVoucherView>, CommandError> {
+        auth.list_expenditure_vouchers(expenditure_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn choose_expenditure_voucher(
+        app: tauri::AppHandle,
+        auth: State<'_, LocalAuthService>,
+        expenditure_id: Uuid,
+    ) -> Result<Option<super::ExpenditureVoucherView>, CommandError> {
+        use tauri_plugin_dialog::DialogExt;
+        let Some(path) = app.dialog().file().blocking_pick_file() else {
+            return Ok(None);
+        };
+        let path = path
+            .into_path()
+            .map_err(|_| CommandError::from(super::AuthError::InvalidInput))?;
+        auth.archive_expenditure_voucher(expenditure_id, &path, SystemTime::now())
+            .map(Some)
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn save_supplier_child_terms(
         auth: State<'_, LocalAuthService>,
         input: super::SupplierChildTermsInput,
@@ -5952,6 +6412,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0032_procurement_expenditures",
             include_str!("../migrations/0032_procurement_expenditures.sql"),
+        ),
+        (
+            "0033_local_attachments",
+            include_str!("../migrations/0033_local_attachments.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -6537,6 +7001,81 @@ fn project_remote_purchase_order_change(
         {
             return Err(AuthError::InvalidInput);
         }
+        let local_payload: serde_json::Value =
+            serde_json::from_str(&order_sync_payload(transaction, change.entity_id)?)
+                .map_err(|_| AuthError::Database)?;
+        for field in [
+            "parentOrderId",
+            "displayNo",
+            "countryId",
+            "projectId",
+            "site",
+            "departmentId",
+            "teamId",
+            "applicantId",
+            "supplierId",
+            "supplierSnapshotJson",
+            "currency",
+            "primaryCurrency",
+            "lockedExchangeRateDecimal",
+            "languagePair",
+            "urgency",
+            "urgencyReason",
+            "orderDate",
+            "deliveryAddress",
+            "expectedDeliveryDate",
+            "notes",
+            "subtotalMinor",
+            "lineDiscountMinor",
+            "orderDiscountMinor",
+            "freightMinor",
+            "taxRateBasisPoints",
+            "taxMinor",
+            "totalMinor",
+            "confirmedBy",
+            "confirmedAt",
+            "selfApproved",
+            "supplierTermsCompletedAt",
+        ] {
+            if local_payload.get(field) != change.payload.get(field) {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        let local_lines = local_payload["lines"]
+            .as_array()
+            .ok_or(AuthError::Database)?;
+        let remote_lines = change.payload["lines"]
+            .as_array()
+            .ok_or(AuthError::InvalidInput)?;
+        if local_lines.len() != remote_lines.len() {
+            return Err(AuthError::InvalidInput);
+        }
+        for local_line in local_lines {
+            let remote_line = remote_lines
+                .iter()
+                .find(|line| line.get("id") == local_line.get("id"))
+                .ok_or(AuthError::InvalidInput)?;
+            for field in [
+                "materialId",
+                "materialSnapshotJson",
+                "supplierSnapshotJson",
+                "currency",
+                "quantity",
+                "unit",
+                "unitPriceMinor",
+                "lineDiscountJson",
+                "lineFreightJson",
+                "freightIncluded",
+                "lineTotalMinor",
+                "sortOrder",
+                "createdAt",
+                "updatedAt",
+            ] {
+                if local_line.get(field) != remote_line.get(field) {
+                    return Err(AuthError::InvalidInput);
+                }
+            }
+        }
         if local.1.is_none() {
             transaction
                 .execute(
@@ -6767,6 +7306,31 @@ fn project_remote_receipt(
         {
             return Err(AuthError::InvalidInput);
         }
+        let stored_items = transaction.prepare(
+            "SELECT id, order_item_id, quantity_decimal, unit FROM local_receipt_items WHERE receipt_id = ?1 ORDER BY id",
+        ).map_err(|_| AuthError::Database)?
+            .query_map([value.id.to_string()], |row| Ok((
+                row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+            )))
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        if stored_items.len() != value.items.len()
+            || value.items.iter().any(|item| {
+                !stored_items.iter().any(|stored| {
+                    stored
+                        == &(
+                            item.id.to_string(),
+                            item.order_item_id.to_string(),
+                            item.quantity.clone(),
+                            item.unit.clone(),
+                        )
+                })
+            })
+        {
+            return Err(AuthError::InvalidInput);
+        }
         return Ok(true);
     }
     transaction.execute(
@@ -6944,6 +7508,84 @@ fn project_remote_procurement_expenditure(
         params![value.id.to_string(), value.order_id.to_string(), value.project_id.to_string(), value.receipt_id.map(|id| id.to_string()), value.counterparty_type, value.supplier_id.map(|id| id.to_string()), value.payee_name, snapshot_json, value.currency, amount_minor, value.payment_date, value.payment_method, value.payment_handler_id.to_string(), value.notes, value.status, value.corrects_expenditure_id.map(|id| id.to_string()), value.correction_reason, value.created_by.to_string(), value.created_at],
     ).map_err(|_| AuthError::InvalidInput)?;
     Ok(true)
+}
+
+fn project_staged_attachments(transaction: &Transaction<'_>) -> Result<(), AuthError> {
+    let changes = transaction.prepare(
+        "SELECT entity_id, operation, server_version, payload_json, changed_at FROM local_sync_remote_entities WHERE entity_type = 'attachment' ORDER BY entity_id",
+    ).map_err(|_| AuthError::Database)?
+        .query_map([], |row| Ok(SyncPullChangeInput {
+            cursor: "0".into(), entity_type: "attachment".into(),
+            entity_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+            operation: row.get(1)?, version: row.get(2)?,
+            payload: serde_json::from_str(&row.get::<_, String>(3)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+            changed_at: row.get(4)?,
+        })).map_err(|_| AuthError::Database)?
+        .collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)?;
+    for change in changes {
+        if change.operation != "upsert" {
+            return Err(AuthError::InvalidInput);
+        }
+        let value: RemoteAttachmentPayload =
+            serde_json::from_value(change.payload).map_err(|_| AuthError::InvalidInput)?;
+        if value.id != change.entity_id
+            || value.owner_type != "procurement_expenditure"
+            || value.byte_length < 1
+            || value.byte_length > MAX_ATTACHMENT_BYTES as i64
+            || value.created_at < 0
+            || !valid_required_text(&value.original_name, 255)
+            || attachment_content_type(&value.original_name) != Some(value.content_type.as_str())
+            || value.checksum.len() != 64
+            || !value
+                .checksum
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let expense: Option<(String, String)> = transaction
+            .query_row(
+                "SELECT order_id, project_id FROM local_procurement_expenditures WHERE id = ?1",
+                [value.owner_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        let Some((order_id, project_id)) = expense else {
+            continue;
+        };
+        if order_id != value.order_id.to_string() || project_id != value.project_id.to_string() {
+            return Err(AuthError::InvalidInput);
+        }
+        let prior: Option<(String, String, String, String, String, String, i64, String, String, i64)> = transaction.query_row(
+            "SELECT owner_type, owner_id, order_id, project_id, original_name, content_type, byte_length, checksum, uploader_id, created_at FROM local_attachments WHERE id = ?1",
+            [value.id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?)),
+        ).optional().map_err(|_| AuthError::Database)?;
+        let expected = (
+            value.owner_type,
+            value.owner_id.to_string(),
+            value.order_id.to_string(),
+            value.project_id.to_string(),
+            value.original_name,
+            value.content_type,
+            value.byte_length,
+            value.checksum,
+            value.uploader_id.to_string(),
+            value.created_at,
+        );
+        if let Some(prior) = prior {
+            if prior != expected {
+                return Err(AuthError::InvalidInput);
+            }
+            transaction.execute("UPDATE local_attachments SET upload_state = CASE WHEN local_path = '' THEN 'pending_download' ELSE 'uploaded' END WHERE id = ?1", [value.id.to_string()])
+                .map_err(|_| AuthError::Database)?;
+        } else {
+            transaction.execute("INSERT INTO local_attachments (id, owner_type, owner_id, order_id, project_id, original_name, content_type, byte_length, local_path, upload_state, checksum, uploader_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', 'pending_download', ?9, ?10, ?11)",
+                params![value.id.to_string(), expected.0, expected.1, expected.2, expected.3, expected.4, expected.5, expected.6, expected.7, expected.8, expected.9])
+                .map_err(|_| AuthError::Database)?;
+        }
+    }
+    Ok(())
 }
 
 fn remote_order_references_exist(
@@ -7465,6 +8107,23 @@ fn authorization_binding_endpoint(account_id: Uuid) -> Result<reqwest::Url, Auth
 fn cloud_auth_endpoint(operation: &str) -> Result<reqwest::Url, AuthError> {
     let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
     api_endpoint_from(&value, &format!("auth/{operation}"))
+}
+
+fn attachment_endpoint(operation: &str) -> Result<reqwest::Url, AuthError> {
+    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    api_endpoint_from(&value, &format!("attachments/{operation}"))
+}
+
+fn signed_attachment_url(value: &str) -> Result<reqwest::Url, AuthError> {
+    let url = reqwest::Url::parse(value).map_err(|_| AuthError::SyncTransport)?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(AuthError::SyncTransport);
+    }
+    Ok(url)
 }
 
 fn sync_endpoint_from(value: &str, operation: &str) -> Result<reqwest::Url, AuthError> {
@@ -9012,8 +9671,8 @@ mod tests {
         let mut changed_payload = order_payload;
         changed_payload["displayNo"] = serde_json::json!("REMOTE-ORDER-2");
         changed_payload["totalMinor"] = serde_json::json!("999");
-        service
-            .apply_sync_pull_page(
+        assert_eq!(
+            service.apply_sync_pull_page(
                 SyncPullPageInput {
                     changes: vec![SyncPullChangeInput {
                         cursor: "6".into(),
@@ -9027,8 +9686,9 @@ mod tests {
                     next_cursor: "6".into(),
                 },
                 now,
-            )
-            .unwrap();
+            ),
+            Err(AuthError::InvalidInput)
+        );
         let connection = service.connection.lock().unwrap();
         let unchanged: (String, i64) = connection
             .query_row(
@@ -9038,6 +9698,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(unchanged, ("REMOTE-ORDER-1".into(), 100));
+        let cursor: String = connection
+            .query_row(
+                "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cursor, "5");
         drop(connection);
         grant_test_scope(
             &service,
@@ -9075,6 +9743,43 @@ mod tests {
                 .unwrap(),
             "1"
         );
+        let changed_receipt = serde_json::json!({
+            "id": receipt_id, "orderId": order_id, "projectId": project_id,
+            "receivedAt": "2026-10-11", "receiverId": purchaser_id,
+            "overReceiptReason": null, "createdBy": purchaser_id, "createdAt": 10,
+            "completed": true, "items": [{
+                "id": receipt_item_id, "orderItemId": line_id, "quantity": "2", "unit": "pcs"
+            }], "attachmentIds": [],
+        });
+        assert_eq!(
+            service.apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "8".into(),
+                        entity_type: "receipt".into(),
+                        entity_id: receipt_id,
+                        operation: "upsert".into(),
+                        version: 2,
+                        payload: changed_receipt,
+                        changed_at: "2026-10-11T00:03:00Z".into(),
+                    }],
+                    next_cursor: "8".into(),
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        let receipt_cursor: String = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(receipt_cursor, "7");
         let original_id = Uuid::new_v4();
         let reversal_id = Uuid::new_v4();
         let replacement_id = Uuid::new_v4();
@@ -9188,6 +9893,111 @@ mod tests {
                 .unwrap(),
             "10"
         );
+        fs::create_dir_all(&service.media_directory).unwrap();
+        let source_path = service.media_directory.join("selected-voucher.pdf");
+        fs::write(&source_path, b"%PDF-1.4 test-only voucher").unwrap();
+        let voucher = service
+            .archive_expenditure_voucher(original_id, &source_path, now)
+            .unwrap();
+        assert_eq!(voucher.upload_state, "pending_upload");
+        assert_eq!(voucher.byte_length, 26);
+        fs::remove_file(&source_path).unwrap();
+        let archived_path = service
+            .media_directory
+            .join("attachments")
+            .join(voucher.id.to_string());
+        assert_eq!(
+            fs::read(&archived_path).unwrap(),
+            b"%PDF-1.4 test-only voucher"
+        );
+        assert_eq!(
+            service.list_expenditure_vouchers(original_id, now).unwrap(),
+            vec![voucher]
+        );
+        let remote_voucher_id = Uuid::new_v4();
+        let remote_voucher = serde_json::json!({
+            "id": remote_voucher_id, "ownerType": "procurement_expenditure",
+            "ownerId": original_id, "orderId": order_id, "projectId": project_id,
+            "originalName": "other-device.pdf", "contentType": "application/pdf",
+            "byteLength": 4, "checksum": "a".repeat(64),
+            "uploaderId": purchaser_id, "createdAt": 123,
+        });
+        let attachment_page = SyncPullPageInput {
+            changes: vec![SyncPullChangeInput {
+                cursor: "11".into(),
+                entity_type: "attachment".into(),
+                entity_id: remote_voucher_id,
+                operation: "upsert".into(),
+                version: 1,
+                payload: remote_voucher.clone(),
+                changed_at: "2026-10-11T00:03:00Z".into(),
+            }],
+            next_cursor: "11".into(),
+        };
+        service
+            .apply_sync_pull_page(attachment_page.clone(), now)
+            .unwrap();
+        service.apply_sync_pull_page(attachment_page, now).unwrap();
+        assert_eq!(
+            service
+                .list_expenditure_vouchers(original_id, now)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT upload_state FROM local_attachments WHERE id = ?1",
+                    [remote_voucher_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "pending_download"
+        );
+        let mut divergent_voucher = remote_voucher;
+        divergent_voucher["checksum"] = serde_json::json!("b".repeat(64));
+        assert_eq!(
+            service.apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "12".into(),
+                        entity_type: "attachment".into(),
+                        entity_id: remote_voucher_id,
+                        operation: "upsert".into(),
+                        version: 2,
+                        payload: divergent_voucher,
+                        changed_at: "2026-10-11T00:04:00Z".into(),
+                    }],
+                    next_cursor: "12".into(),
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "11"
+        );
+        let invalid_path = service.media_directory.join("not-a-voucher.txt");
+        fs::write(&invalid_path, b"invalid").unwrap();
+        assert_eq!(
+            service.archive_expenditure_voucher(original_id, &invalid_path, now),
+            Err(AuthError::InvalidInput)
+        );
+        fs::remove_file(&invalid_path).unwrap();
         service.connection.lock().unwrap().execute(
             "DELETE FROM local_authorization_snapshots WHERE account_id = ?1 AND project_id = ?2",
             params![purchaser_id.to_string(), project_id.to_string()],
@@ -9196,6 +10006,17 @@ mod tests {
             service.list_procurement_expenditures(order_id, now),
             Err(AuthError::Forbidden)
         ));
+        assert!(matches!(
+            service.list_expenditure_vouchers(original_id, now),
+            Err(AuthError::Forbidden)
+        ));
+        assert!(matches!(
+            service.archive_expenditure_voucher(original_id, &source_path, now),
+            Err(AuthError::Forbidden)
+        ));
+        fs::remove_file(&archived_path).unwrap();
+        fs::remove_dir(service.media_directory.join("attachments")).unwrap();
+        fs::remove_dir(&service.media_directory).unwrap();
     }
 
     #[test]

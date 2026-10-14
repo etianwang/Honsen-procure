@@ -43,6 +43,7 @@ fn main() {
     .expect("open local SQLite database");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(auth)
         .setup(move |app| {
             if is_test_profile {
@@ -72,6 +73,8 @@ fn main() {
             commands::list_procurement_expenditures,
             commands::record_procurement_expenditure,
             commands::reverse_procurement_expenditure,
+            commands::list_expenditure_vouchers,
+            commands::choose_expenditure_voucher,
             commands::save_supplier_child_terms,
             commands::send_supplier_order,
             commands::issue_local_captcha,

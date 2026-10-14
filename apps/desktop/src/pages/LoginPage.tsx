@@ -194,6 +194,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
             })
               .then(async (authenticated) => {
                 await desktopInvoke('refresh_authorization')
+                await desktopInvoke('push_pending_sync')
                 await desktopInvoke('pull_sync')
                 onLogin(authenticated)
               })

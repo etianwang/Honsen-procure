@@ -40,6 +40,7 @@ sha2 = "0.10.9"
 tauri = { version = "2.10.2", default-features = false, features = ["wry"] }
 thiserror = "2.0.17"
 uuid = { version = "1.18.1", features = ["serde", "v4"] }
+tauri-plugin-dialog = "2"
 
 [build-dependencies]
 tauri-build = { version = "2.7.1", features = [] }

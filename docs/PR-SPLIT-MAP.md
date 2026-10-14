@@ -53,3 +53,9 @@ was already brought forward in stage 1, so the replay contains the remaining
 16 files. Stage 5 is not PR-ready: receipt/expenditure Pull reconstruction is
 being completed, and durable voucher archival, transfer and conflict gates
 remain mandatory.
+Stage-5 local checkpoint `5c3e19d` adds receipt/expenditure Pull projection.
+Subsequent unmerged work adds managed expenditure-voucher archival, scoped
+presigned transfer and attachment Pull metadata, with focused SQLite,
+PostgreSQL and DOM evidence. It is still not PR-ready: receipt-attachment
+projection, real object-store integration, and offline conflict/recovery gates
+remain open. The 19 original-source commit ownerships above are unchanged.

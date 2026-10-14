@@ -108,6 +108,24 @@ function expenditureEvent() {
 }
 
 describe('SyncService', () => {
+  it('rejects generic attachment Push so only verified object completion can publish it', async () => {
+    const store = new FixtureStore()
+    const result = await new SyncService(store).push(purchaser, {
+      deviceId: '00000000-0000-4000-8000-000000000027',
+      events: [
+        {
+          eventId: '00000000-0000-4000-8000-000000000028',
+          entityType: 'attachment',
+          entityId: '00000000-0000-4000-8000-000000000029',
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: { projectId },
+        },
+      ],
+    })
+    expect(result.results[0]?.status).toBe('validation_error')
+    expect(store.pushed).toBe(0)
+  })
   it('accepts only bound receipt lines from the order and rejects malformed or cross-project writes', async () => {
     const store = new FixtureStore()
     const lineId = '00000000-0000-4000-8000-000000000024'

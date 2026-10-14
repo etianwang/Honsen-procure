@@ -4,6 +4,7 @@ import type { SupplierView } from '../lib/catalog-api'
 import type {
   ProcurementExpenditure,
   ProcurementExpenditureApi,
+  ExpenditureVoucher,
 } from '../lib/procurement-expenditure-api'
 
 type Props = {
@@ -22,6 +23,9 @@ export function ProcurementExpenditurePanel({
   suppliers,
 }: Props) {
   const [rows, setRows] = useState<ProcurementExpenditure[]>([])
+  const [vouchers, setVouchers] = useState<
+    Record<string, ExpenditureVoucher[]>
+  >({})
   const [supplierId, setSupplierId] = useState('')
   const [payeeName, setPayeeName] = useState('')
   const [amountMinor, setAmountMinor] = useState('')
@@ -42,8 +46,16 @@ export function ProcurementExpenditurePanel({
     let mounted = true
     api
       .list(orderId)
-      .then((value) => {
-        if (mounted) setRows(value)
+      .then(async (value) => {
+        const entries = await Promise.all(
+          value.map(
+            async (row) => [row.id, await api.listVouchers(row.id)] as const,
+          ),
+        )
+        if (mounted) {
+          setRows(value)
+          setVouchers(Object.fromEntries(entries))
+        }
       })
       .catch(() => {
         if (mounted) setMessage('无法读取采购支出记录。')
@@ -110,6 +122,25 @@ export function ProcurementExpenditurePanel({
       setMessage('冲销记录已追加；原支出未被改写。')
     } catch {
       setMessage('冲销失败：请检查授权，或该记录可能已冲销。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function attachVoucher(expenditureId: string) {
+    if (busy) return
+    setBusy(true)
+    try {
+      const voucher = await api.chooseVoucher(expenditureId)
+      if (voucher) {
+        setVouchers((current) => ({
+          ...current,
+          [expenditureId]: [...(current[expenditureId] ?? []), voucher],
+        }))
+        setMessage('凭证已安全保存在本机，等待云端上传。')
+      }
+    } catch {
+      setMessage('凭证归档失败；请检查授权、格式和文件大小。')
     } finally {
       setBusy(false)
     }
@@ -222,7 +253,21 @@ export function ProcurementExpenditurePanel({
             <li key={row.id}>
               {row.status === 'reversed' ? '冲销' : '已登记'} · {row.payeeName}{' '}
               · {row.amountMinor} {row.currency} · {row.paymentDate} ·
-              凭证未上传
+              {(vouchers[row.id] ?? []).length === 0
+                ? '凭证未归档'
+                : (vouchers[row.id] ?? [])
+                    .map(
+                      (voucher) =>
+                        `${voucher.originalName}（${voucher.uploadState === 'uploaded' ? '已同步' : voucher.uploadState === 'pending_download' ? '待下载' : '待上传'}）`,
+                    )
+                    .join('、')}
+              <Button
+                disabled={busy}
+                aria-label={`为 ${row.payeeName} 的支出补充凭证`}
+                onClick={() => void attachVoucher(row.id)}
+              >
+                补充凭证
+              </Button>
               {row.correctionReason ? ` · 原因：${row.correctionReason}` : null}
               {row.status === 'recorded' &&
               !rows.some(

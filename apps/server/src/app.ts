@@ -1,6 +1,7 @@
 import Fastify from 'fastify'
 import websocket from '@fastify/websocket'
 import { z } from 'zod'
+import { AttachmentError, AttachmentService } from './attachments/service.js'
 import { AuthenticationError, AuthService } from './auth/service.js'
 import { MasterDataError, MasterDataService } from './master-data/service.js'
 import { SyncService } from './sync/service.js'
@@ -17,6 +18,7 @@ export function createApp(
   masterData?: MasterDataService,
   sync?: SyncService,
   authorization?: AuthorizationService,
+  attachments?: AttachmentService,
 ) {
   const app = Fastify({ logger: false })
   const sockets = new Set<{
@@ -284,6 +286,63 @@ export function createApp(
           }
         },
       )
+    })
+  }
+
+  if (attachments) {
+    const attachmentIdSchema = z.object({ id: z.uuid() })
+    function attachmentFailure(
+      error: unknown,
+      reply: { status(code: number): { send(body: object): unknown } },
+    ) {
+      if (error instanceof AuthenticationError)
+        return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+      if (error instanceof z.ZodError)
+        return reply.status(400).send({ code: 'INVALID_REQUEST' })
+      if (error instanceof AttachmentError) {
+        const status =
+          error.code === 'FORBIDDEN'
+            ? 403
+            : error.code === 'NOT_FOUND'
+              ? 404
+              : error.code === 'NOT_UPLOADED'
+                ? 409
+                : 409
+        return reply.status(status).send({ code: error.code })
+      }
+      throw error
+    }
+    app.post('/api/attachments/intents', async (request, reply) => {
+      try {
+        return await attachments.createIntent(
+          await authenticateRequest(request),
+          request.body,
+        )
+      } catch (error) {
+        return attachmentFailure(error, reply)
+      }
+    })
+    app.post('/api/attachments/:id/complete', async (request, reply) => {
+      try {
+        const { id } = attachmentIdSchema.parse(request.params)
+        return await attachments.complete(
+          await authenticateRequest(request),
+          id,
+        )
+      } catch (error) {
+        return attachmentFailure(error, reply)
+      }
+    })
+    app.get('/api/attachments/:id/download', async (request, reply) => {
+      try {
+        const { id } = attachmentIdSchema.parse(request.params)
+        return await attachments.download(
+          await authenticateRequest(request),
+          id,
+        )
+      } catch (error) {
+        return attachmentFailure(error, reply)
+      }
     })
   }
 
