@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { SyncEvent } from '@honsen/shared'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
@@ -192,6 +193,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         ).status,
       ).toBe('accepted')
     }
+    const beforeExpense = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
     const paymentId = randomUUID()
     const event = {
       eventId: randomUUID(),
@@ -222,12 +228,65 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       },
     }
     const actor = { id: actorId, roles: ['purchaser' as const] }
-    const push = (submitted = event) =>
+    const push = (submitted: SyncEvent = event) =>
       service.push(actor, { deviceId: randomUUID(), events: [submitted] })
     expect((await push()).results[0]).toMatchObject({
       status: 'accepted',
       serverVersion: 1,
     })
+    const reversalId = randomUUID()
+    expect(
+      (
+        await push({
+          ...event,
+          eventId: randomUUID(),
+          entityId: reversalId,
+          payload: {
+            ...event.payload,
+            id: reversalId,
+            status: 'reversed',
+            correctsExpenditureId: paymentId,
+            correctionReason: 'incorrect amount',
+            createdAt: 2,
+          },
+        })
+      ).results[0]?.status,
+    ).toBe('accepted')
+    const replacementId = randomUUID()
+    expect(
+      (
+        await push({
+          ...event,
+          eventId: randomUUID(),
+          entityId: replacementId,
+          payload: {
+            ...event.payload,
+            id: replacementId,
+            amountMinor: '1500',
+            correctsExpenditureId: reversalId,
+            correctionReason: 'replacement',
+            createdAt: 3,
+          },
+        })
+      ).results[0]?.status,
+    ).toBe('accepted')
+    const allowed = await store.pullChanges({
+      actor: { id: actorId, roles: ['engineer'] },
+      cursor: beforeExpense,
+      limit: 20,
+    })
+    expect(allowed.changes.map((change) => change.entityId)).toEqual([
+      paymentId,
+      reversalId,
+      replacementId,
+    ])
+    const denied = await store.pullChanges({
+      actor: { id: randomUUID(), roles: ['engineer'] },
+      cursor: beforeExpense,
+      limit: 20,
+    })
+    expect(denied.changes).toEqual([])
+    expect(denied.nextCursor).toBe(beforeExpense)
     expect((await push()).results[0]).toMatchObject({
       status: 'accepted',
       serverVersion: 1,

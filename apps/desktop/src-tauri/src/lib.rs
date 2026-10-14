@@ -690,6 +690,7 @@ struct RemotePurchaseOrderPayload {
     language_pair: String,
     status: String,
     workflow_status: String,
+    procurement_mode: Option<String>,
     urgency: String,
     urgency_reason: Option<String>,
     order_date: String,
@@ -709,6 +710,55 @@ struct RemotePurchaseOrderPayload {
     self_approved: bool,
     supplier_terms_completed_at: Option<i64>,
     lines: Vec<RemotePurchaseOrderLine>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteProcurementExpenditurePayload {
+    id: Uuid,
+    order_id: Uuid,
+    project_id: Uuid,
+    receipt_id: Option<Uuid>,
+    counterparty_type: String,
+    supplier_id: Option<Uuid>,
+    payee_name: String,
+    counterparty_snapshot: Option<serde_json::Value>,
+    currency: String,
+    amount_minor: String,
+    payment_date: String,
+    payment_method: String,
+    payment_handler_id: Uuid,
+    notes: Option<String>,
+    status: String,
+    corrects_expenditure_id: Option<Uuid>,
+    correction_reason: Option<String>,
+    created_by: Uuid,
+    created_at: i64,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteReceiptPayload {
+    id: Uuid,
+    order_id: Uuid,
+    project_id: Uuid,
+    received_at: String,
+    receiver_id: Uuid,
+    over_receipt_reason: Option<String>,
+    created_by: Uuid,
+    created_at: i64,
+    completed: bool,
+    items: Vec<RemoteReceiptItem>,
+    attachment_ids: Vec<Uuid>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteReceiptItem {
+    id: Uuid,
+    order_item_id: Uuid,
+    quantity: String,
+    unit: String,
 }
 
 #[derive(Deserialize)]
@@ -3359,22 +3409,7 @@ impl LocalAuthService {
             Some(&serde_json::json!({ "receiptId": input.id, "completed": complete }).to_string()),
             now,
         )?;
-        let project_id: String = transaction
-            .query_row(
-                "SELECT project_id FROM local_purchase_orders WHERE id = ?1",
-                [input.order_id.to_string()],
-                |row| row.get(0),
-            )
-            .map_err(|_| AuthError::Database)?;
-        let receipt_payload = serde_json::json!({
-            "id": input.id,
-            "orderId": input.order_id,
-            "projectId": project_id,
-            "receiverId": input.receiver_id,
-            "receivedAt": input.received_at,
-            "completed": complete,
-        })
-        .to_string();
+        let receipt_payload = receipt_sync_payload(&transaction, input.id, complete)?;
         insert_local_sync_outbox(&transaction, "receipt", input.id, &receipt_payload, now)?;
         let order_payload = order_sync_payload(&transaction, input.order_id)?;
         insert_local_sync_outbox(
@@ -4489,7 +4524,7 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        connection
+        let mut events = connection
             .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY rowid LIMIT ?1")
             .map_err(|_| AuthError::Database)?
             .query_map([limit as i64], |row| Ok(SyncOutboxEventView {
@@ -4498,7 +4533,22 @@ impl LocalAuthService {
             }))
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| AuthError::Database)
+            .map_err(|_| AuthError::Database)?;
+        for event in &mut events {
+            if event.entity_type == "receipt"
+                && serde_json::from_str::<serde_json::Value>(&event.payload_json)
+                    .map_err(|_| AuthError::Database)?
+                    .get("items")
+                    .is_none()
+            {
+                let completed = serde_json::from_str::<serde_json::Value>(&event.payload_json)
+                    .map_err(|_| AuthError::Database)?["completed"]
+                    .as_bool()
+                    .ok_or(AuthError::InvalidInput)?;
+                event.payload_json = receipt_sync_payload(&connection, event.entity_id, completed)?;
+            }
+        }
+        Ok(events)
     }
 
     pub fn apply_sync_acknowledgements(
@@ -4588,6 +4638,8 @@ impl LocalAuthService {
         }
         project_staged_purchase_orders(&transaction, now)?;
         project_staged_order_comments(&transaction)?;
+        project_staged_receipts(&transaction)?;
+        project_staged_procurement_expenditures(&transaction)?;
         transaction.execute(
             "UPDATE local_sync_state SET last_pull_cursor = ?1, last_success_at = ?2 WHERE singleton = 1",
             params![page.next_cursor, unix_seconds(now)],
@@ -6467,6 +6519,32 @@ fn project_remote_purchase_order_change(
         .as_deref()
         .is_some_and(|status| !matches!(status, "draft" | "pending_confirmation" | "rejected"))
     {
+        if change.operation != "upsert" {
+            return Err(AuthError::InvalidInput);
+        }
+        let remote: RemotePurchaseOrderPayload =
+            serde_json::from_value(change.payload.clone()).map_err(|_| AuthError::InvalidInput)?;
+        validate_remote_purchase_order(&remote)?;
+        let local: (String, Option<String>) = transaction
+            .query_row(
+                "SELECT project_id, procurement_mode FROM local_purchase_orders WHERE id = ?1",
+                [change.entity_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if local.0 != remote.project_id.to_string()
+            || (local.1.is_some() && local.1 != remote.procurement_mode)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        if local.1.is_none() {
+            transaction
+                .execute(
+                    "UPDATE local_purchase_orders SET procurement_mode = ?2 WHERE id = ?1",
+                    params![change.entity_id.to_string(), remote.procurement_mode],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
         return Ok(true);
     }
     if change.operation == "soft_delete" {
@@ -6513,10 +6591,10 @@ fn project_remote_purchase_order_change(
     }
     transaction
         .execute(
-            "INSERT INTO local_purchase_orders (id, parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38)
-             ON CONFLICT(id) DO UPDATE SET parent_order_id = excluded.parent_order_id, display_no = excluded.display_no, country_id = excluded.country_id, project_id = excluded.project_id, site = excluded.site, department_id = excluded.department_id, team_id = excluded.team_id, applicant_id = excluded.applicant_id, supplier_id = excluded.supplier_id, supplier_snapshot_json = excluded.supplier_snapshot_json, currency = excluded.currency, primary_currency = excluded.primary_currency, locked_exchange_rate_decimal = excluded.locked_exchange_rate_decimal, language_pair = excluded.language_pair, status = excluded.status, workflow_status = excluded.workflow_status, urgency = excluded.urgency, urgency_reason = excluded.urgency_reason, order_date = excluded.order_date, delivery_address = excluded.delivery_address, expected_delivery_date = excluded.expected_delivery_date, notes = excluded.notes, subtotal_minor = excluded.subtotal_minor, line_discount_minor = excluded.line_discount_minor, order_discount_minor = excluded.order_discount_minor, freight_minor = excluded.freight_minor, tax_rate_basis_points = excluded.tax_rate_basis_points, tax_minor = excluded.tax_minor, total_minor = excluded.total_minor, version = excluded.version, updated_at = excluded.updated_at, confirmed_by = excluded.confirmed_by, confirmed_at = excluded.confirmed_at, rejection_reason = excluded.rejection_reason, self_approved = excluded.self_approved, supplier_terms_completed_at = excluded.supplier_terms_completed_at, deleted_at = NULL WHERE excluded.version >= local_purchase_orders.version",
-            params![change.entity_id.to_string(), order.parent_order_id.map(|value| value.to_string()), order.display_no, order.country_id.to_string(), order.project_id.to_string(), order.site, order.department_id.to_string(), order.team_id.to_string(), order.applicant_id.to_string(), order.supplier_id.map(|value| value.to_string()), order.supplier_snapshot_json, order.currency, order.primary_currency, order.locked_exchange_rate_decimal, order.language_pair, order.status, order.workflow_status, order.urgency, order.urgency_reason, order.order_date, order.delivery_address, order.expected_delivery_date, order.notes, remote_minor(&order.subtotal_minor)?, remote_minor(&order.line_discount_minor)?, remote_minor(&order.order_discount_minor)?, remote_minor(&order.freight_minor)?, order.tax_rate_basis_points, remote_minor(&order.tax_minor)?, remote_minor(&order.total_minor)?, change.version, unix_seconds(now), unix_seconds(now), order.confirmed_by.map(|value| value.to_string()), order.confirmed_at, order.rejection_reason, order.self_approved as i64, order.supplier_terms_completed_at],
+            "INSERT INTO local_purchase_orders (id, parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at, procurement_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39)
+             ON CONFLICT(id) DO UPDATE SET parent_order_id = excluded.parent_order_id, display_no = excluded.display_no, country_id = excluded.country_id, project_id = excluded.project_id, site = excluded.site, department_id = excluded.department_id, team_id = excluded.team_id, applicant_id = excluded.applicant_id, supplier_id = excluded.supplier_id, supplier_snapshot_json = excluded.supplier_snapshot_json, currency = excluded.currency, primary_currency = excluded.primary_currency, locked_exchange_rate_decimal = excluded.locked_exchange_rate_decimal, language_pair = excluded.language_pair, status = excluded.status, workflow_status = excluded.workflow_status, urgency = excluded.urgency, urgency_reason = excluded.urgency_reason, order_date = excluded.order_date, delivery_address = excluded.delivery_address, expected_delivery_date = excluded.expected_delivery_date, notes = excluded.notes, subtotal_minor = excluded.subtotal_minor, line_discount_minor = excluded.line_discount_minor, order_discount_minor = excluded.order_discount_minor, freight_minor = excluded.freight_minor, tax_rate_basis_points = excluded.tax_rate_basis_points, tax_minor = excluded.tax_minor, total_minor = excluded.total_minor, version = excluded.version, updated_at = excluded.updated_at, confirmed_by = excluded.confirmed_by, confirmed_at = excluded.confirmed_at, rejection_reason = excluded.rejection_reason, self_approved = excluded.self_approved, supplier_terms_completed_at = excluded.supplier_terms_completed_at, procurement_mode = excluded.procurement_mode, deleted_at = NULL WHERE excluded.version >= local_purchase_orders.version",
+            params![change.entity_id.to_string(), order.parent_order_id.map(|value| value.to_string()), order.display_no, order.country_id.to_string(), order.project_id.to_string(), order.site, order.department_id.to_string(), order.team_id.to_string(), order.applicant_id.to_string(), order.supplier_id.map(|value| value.to_string()), order.supplier_snapshot_json, order.currency, order.primary_currency, order.locked_exchange_rate_decimal, order.language_pair, order.status, order.workflow_status, order.urgency, order.urgency_reason, order.order_date, order.delivery_address, order.expected_delivery_date, order.notes, remote_minor(&order.subtotal_minor)?, remote_minor(&order.line_discount_minor)?, remote_minor(&order.order_discount_minor)?, remote_minor(&order.freight_minor)?, order.tax_rate_basis_points, remote_minor(&order.tax_minor)?, remote_minor(&order.total_minor)?, change.version, unix_seconds(now), unix_seconds(now), order.confirmed_by.map(|value| value.to_string()), order.confirmed_at, order.rejection_reason, order.self_approved as i64, order.supplier_terms_completed_at, order.procurement_mode],
         )
         .map_err(|_| AuthError::Database)?;
     for line in order.lines {
@@ -6595,6 +6673,279 @@ fn project_staged_order_comments(transaction: &Transaction<'_>) -> Result<(), Au
     Ok(())
 }
 
+fn project_staged_receipts(transaction: &Transaction<'_>) -> Result<(), AuthError> {
+    let changes = transaction.prepare("SELECT entity_id, operation, server_version, payload_json, changed_at FROM local_sync_remote_entities WHERE entity_type = 'receipt' ORDER BY entity_id")
+        .map_err(|_| AuthError::Database)?
+        .query_map([], |row| Ok(SyncPullChangeInput {
+            cursor: "0".into(), entity_type: "receipt".into(),
+            entity_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+            operation: row.get(1)?, version: row.get(2)?,
+            payload: serde_json::from_str(&row.get::<_, String>(3)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+            changed_at: row.get(4)?,
+        })).map_err(|_| AuthError::Database)?
+        .collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)?;
+    for change in &changes {
+        project_remote_receipt(transaction, change)?;
+    }
+    Ok(())
+}
+
+fn project_remote_receipt(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+) -> Result<bool, AuthError> {
+    if change.operation != "upsert" {
+        return Err(AuthError::InvalidInput);
+    }
+    if change.payload.get("items").is_none() {
+        return Ok(false);
+    }
+    let value: RemoteReceiptPayload =
+        serde_json::from_value(change.payload.clone()).map_err(|_| AuthError::InvalidInput)?;
+    if value.id != change.entity_id
+        || !valid_iso_date(&value.received_at)
+        || value.created_at < 0
+        || value.items.is_empty()
+        || value.items.len() > 500
+        || value.attachment_ids.len() > 10
+        || value
+            .over_receipt_reason
+            .as_ref()
+            .is_some_and(|reason| !valid_required_text(reason, 1000))
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    if !value.attachment_ids.is_empty() {
+        return Ok(false);
+    }
+    let mut line_ids = HashSet::new();
+    for item in &value.items {
+        if !line_ids.insert(item.order_item_id)
+            || parse_quantity_hundredths(&item.quantity).is_err()
+            || !valid_required_text(&item.unit, 64)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+    }
+    let project_id: Option<String> = transaction
+        .query_row(
+            "SELECT project_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            [value.order_id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    let Some(project_id) = project_id else {
+        return Ok(false);
+    };
+    if project_id != value.project_id.to_string() {
+        return Err(AuthError::InvalidInput);
+    }
+    for item in &value.items {
+        let linked: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_purchase_order_items WHERE id = ?1 AND order_id = ?2)",
+            params![item.order_item_id.to_string(), value.order_id.to_string()], |row| row.get(0),
+        ).map_err(|_| AuthError::Database)?;
+        if !linked {
+            return Ok(false);
+        }
+    }
+    let prior: Option<(String, String, String, Option<String>, String, i64)> = transaction.query_row(
+        "SELECT order_id, received_at, receiver_id, over_receipt_reason, created_by, created_at FROM local_receipts WHERE id = ?1",
+        [value.id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+    ).optional().map_err(|_| AuthError::Database)?;
+    if let Some(prior) = prior {
+        if prior
+            != (
+                value.order_id.to_string(),
+                value.received_at,
+                value.receiver_id.to_string(),
+                value.over_receipt_reason,
+                value.created_by.to_string(),
+                value.created_at,
+            )
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        return Ok(true);
+    }
+    transaction.execute(
+        "INSERT INTO local_receipts (id, order_id, received_at, receiver_id, over_receipt_reason, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![value.id.to_string(), value.order_id.to_string(), value.received_at, value.receiver_id.to_string(), value.over_receipt_reason, value.created_by.to_string(), value.created_at],
+    ).map_err(|_| AuthError::Database)?;
+    for item in value.items {
+        transaction.execute(
+            "INSERT INTO local_receipt_items (id, receipt_id, order_item_id, quantity_decimal, unit) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![item.id.to_string(), value.id.to_string(), item.order_item_id.to_string(), item.quantity, item.unit],
+        ).map_err(|_| AuthError::Database)?;
+    }
+    Ok(true)
+}
+
+fn project_staged_procurement_expenditures(transaction: &Transaction<'_>) -> Result<(), AuthError> {
+    let mut changes = transaction
+        .prepare("SELECT entity_id, operation, server_version, payload_json, changed_at FROM local_sync_remote_entities WHERE entity_type = 'procurement_expenditure' ORDER BY json_extract(payload_json, '$.createdAt'), entity_id")
+        .map_err(|_| AuthError::Database)?
+        .query_map([], |row| {
+            Ok(SyncPullChangeInput {
+                cursor: "0".into(),
+                entity_type: "procurement_expenditure".into(),
+                entity_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                operation: row.get(1)?,
+                version: row.get(2)?,
+                payload: serde_json::from_str(&row.get::<_, String>(3)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                changed_at: row.get(4)?,
+            })
+        })
+        .map_err(|_| AuthError::Database)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| AuthError::Database)?;
+    while !changes.is_empty() {
+        let mut projected_any = false;
+        let mut deferred = Vec::new();
+        for change in changes {
+            if project_remote_procurement_expenditure(transaction, &change)? {
+                projected_any = true;
+            } else {
+                deferred.push(change);
+            }
+        }
+        if !projected_any {
+            return Ok(());
+        }
+        changes = deferred;
+    }
+    Ok(())
+}
+
+fn project_remote_procurement_expenditure(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+) -> Result<bool, AuthError> {
+    if change.operation != "upsert" {
+        return Err(AuthError::InvalidInput);
+    }
+    let value: RemoteProcurementExpenditurePayload =
+        serde_json::from_value(change.payload.clone()).map_err(|_| AuthError::InvalidInput)?;
+    let amount_minor = value
+        .amount_minor
+        .parse::<i64>()
+        .map_err(|_| AuthError::InvalidInput)?;
+    if value.id != change.entity_id
+        || amount_minor <= 0
+        || value.created_at < 0
+        || !valid_currency(&value.currency)
+        || !valid_iso_date(&value.payment_date)
+        || !valid_required_text(&value.payee_name, 255)
+        || !valid_optional_text(&value.notes, 2000)
+        || !matches!(
+            value.payment_method.as_str(),
+            "cash" | "bank_transfer" | "mobile_payment" | "other"
+        )
+        || !matches!(value.status.as_str(), "recorded" | "reversed")
+        || !matches!(
+            value.counterparty_type.as_str(),
+            "registered_supplier" | "market_casual"
+        )
+        || (value.counterparty_type == "registered_supplier") != value.supplier_id.is_some()
+        || (value.corrects_expenditure_id.is_some() != value.correction_reason.is_some())
+        || (value.status == "reversed" && value.corrects_expenditure_id.is_none())
+        || value
+            .correction_reason
+            .as_ref()
+            .is_some_and(|reason| !valid_required_text(reason, 1000))
+        || value
+            .counterparty_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| !snapshot.is_object())
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    let normalized = serde_json::to_value(&value).map_err(|_| AuthError::InvalidInput)?;
+    if normalized != change.payload {
+        return Err(AuthError::InvalidInput);
+    }
+    let existing_json: Option<String> = transaction.query_row(
+        "SELECT json_object('id', id, 'orderId', order_id, 'projectId', project_id, 'receiptId', receipt_id, 'counterpartyType', counterparty_type, 'supplierId', supplier_id, 'payeeName', payee_name, 'counterpartySnapshot', json(counterparty_snapshot_json), 'currency', currency, 'amountMinor', CAST(amount_minor AS TEXT), 'paymentDate', payment_date, 'paymentMethod', payment_method, 'paymentHandlerId', payment_handler_id, 'notes', notes, 'status', status, 'correctsExpenditureId', corrects_expenditure_id, 'correctionReason', correction_reason, 'createdBy', created_by, 'createdAt', created_at) FROM local_procurement_expenditures WHERE id = ?1",
+        [value.id.to_string()], |row| row.get(0),
+    ).optional().map_err(|_| AuthError::Database)?;
+    if let Some(existing_json) = existing_json {
+        let existing: serde_json::Value =
+            serde_json::from_str(&existing_json).map_err(|_| AuthError::Database)?;
+        if existing != normalized {
+            return Err(AuthError::InvalidInput);
+        }
+        return Ok(true);
+    }
+    let order: Option<(String, Option<String>, Option<String>)> = transaction
+        .query_row(
+            "SELECT o.project_id, o.procurement_mode, parent.procurement_mode FROM local_purchase_orders o LEFT JOIN local_purchase_orders parent ON parent.id = o.parent_order_id WHERE o.id = ?1 AND o.deleted_at IS NULL",
+            [value.order_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    let Some((project_id, mode, parent_mode)) = order else {
+        return Ok(false);
+    };
+    if project_id != value.project_id.to_string()
+        || mode.or(parent_mode).as_deref() != Some("honsen_self_purchase")
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    if let Some(receipt_id) = value.receipt_id {
+        let exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_receipts WHERE id = ?1 AND order_id = ?2)",
+                params![receipt_id.to_string(), value.order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if !exists {
+            return Ok(false);
+        }
+    }
+    if let Some(supplier_id) = value.supplier_id {
+        let exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_suppliers WHERE id = ?1)",
+                [supplier_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if !exists {
+            return Ok(false);
+        }
+    }
+    if let Some(prior_id) = value.corrects_expenditure_id {
+        let prior: Option<(String, String)> = transaction
+            .query_row(
+                "SELECT order_id, status FROM local_procurement_expenditures WHERE id = ?1",
+                [prior_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        let Some((prior_order, prior_status)) = prior else {
+            return Ok(false);
+        };
+        if prior_order != value.order_id.to_string() || prior_status == value.status {
+            return Err(AuthError::InvalidInput);
+        }
+    }
+    let snapshot_json = value
+        .counterparty_snapshot
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|_| AuthError::InvalidInput)?;
+    transaction.execute(
+        "INSERT INTO local_procurement_expenditures (id, order_id, project_id, receipt_id, counterparty_type, supplier_id, payee_name, counterparty_snapshot_json, currency, amount_minor, payment_date, payment_method, payment_handler_id, notes, status, corrects_expenditure_id, correction_reason, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+        params![value.id.to_string(), value.order_id.to_string(), value.project_id.to_string(), value.receipt_id.map(|id| id.to_string()), value.counterparty_type, value.supplier_id.map(|id| id.to_string()), value.payee_name, snapshot_json, value.currency, amount_minor, value.payment_date, value.payment_method, value.payment_handler_id.to_string(), value.notes, value.status, value.corrects_expenditure_id.map(|id| id.to_string()), value.correction_reason, value.created_by.to_string(), value.created_at],
+    ).map_err(|_| AuthError::InvalidInput)?;
+    Ok(true)
+}
+
 fn remote_order_references_exist(
     transaction: &Transaction<'_>,
     order: &RemotePurchaseOrderPayload,
@@ -6650,6 +7001,10 @@ fn validate_remote_purchase_order(order: &RemotePurchaseOrderPayload) -> Result<
         || !valid_currency(&order.currency)
         || !valid_currency(&order.primary_currency)
         || !matches!(order.language_pair.as_str(), "zh_fr" | "zh_en")
+        || order
+            .procurement_mode
+            .as_deref()
+            .is_some_and(|mode| !matches!(mode, "owner_self_purchase" | "honsen_self_purchase"))
         || !matches!(order.status.as_str(), "draft" | "pending_confirmation")
         || !matches!(
             order.workflow_status.as_str(),
@@ -6657,6 +7012,10 @@ fn validate_remote_purchase_order(order: &RemotePurchaseOrderPayload) -> Result<
                 | "pending_confirmation"
                 | "rejected"
                 | "confirmed"
+                | "approved"
+                | "formally_issued"
+                | "executing"
+                | "receiving"
                 | "sent"
                 | "completed"
                 | "completed_with_conditions"
@@ -7242,6 +7601,40 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
     let mut payload = header.as_object().cloned().ok_or(AuthError::Database)?;
     payload.insert("lines".into(), serde_json::Value::Array(lines));
     serde_json::to_string(&serde_json::Value::Object(payload)).map_err(|_| AuthError::Database)
+}
+
+fn receipt_sync_payload(
+    transaction: &Connection,
+    receipt_id: Uuid,
+    completed: bool,
+) -> Result<String, AuthError> {
+    let mut payload = transaction.query_row(
+        "SELECT r.order_id, o.project_id, r.received_at, r.receiver_id, r.over_receipt_reason, r.created_by, r.created_at FROM local_receipts r JOIN local_purchase_orders o ON o.id = r.order_id WHERE r.id = ?1",
+        [receipt_id.to_string()],
+        |row| Ok(serde_json::json!({
+            "id": receipt_id, "orderId": row.get::<_, String>(0)?, "projectId": row.get::<_, String>(1)?,
+            "receivedAt": row.get::<_, String>(2)?, "receiverId": row.get::<_, String>(3)?,
+            "overReceiptReason": row.get::<_, Option<String>>(4)?, "createdBy": row.get::<_, String>(5)?,
+            "createdAt": row.get::<_, i64>(6)?, "completed": completed,
+        })),
+    ).map_err(|_| AuthError::Database)?;
+    let items = transaction.prepare(
+        "SELECT id, order_item_id, quantity_decimal, unit FROM local_receipt_items WHERE receipt_id = ?1 ORDER BY id",
+    ).map_err(|_| AuthError::Database)?
+        .query_map([receipt_id.to_string()], |row| Ok(serde_json::json!({
+            "id": row.get::<_, String>(0)?, "orderItemId": row.get::<_, String>(1)?,
+            "quantity": row.get::<_, String>(2)?, "unit": row.get::<_, String>(3)?,
+        }))).map_err(|_| AuthError::Database)?
+        .collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)?;
+    let attachment_ids = transaction.prepare(
+        "SELECT attachment_id FROM local_receipt_attachment_links WHERE receipt_id = ?1 ORDER BY attachment_id",
+    ).map_err(|_| AuthError::Database)?
+        .query_map([receipt_id.to_string()], |row| row.get::<_, String>(0))
+        .map_err(|_| AuthError::Database)?
+        .collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)?;
+    payload["items"] = serde_json::Value::Array(items);
+    payload["attachmentIds"] = serde_json::json!(attachment_ids);
+    serde_json::to_string(&payload).map_err(|_| AuthError::Database)
 }
 
 fn append_order_audit(
@@ -8511,10 +8904,11 @@ mod tests {
         let team_id = Uuid::new_v4();
         let order_id = Uuid::new_v4();
         let line_id = Uuid::new_v4();
-        let order_payload: serde_json::Value = serde_json::from_str(&format!(
+        let mut order_payload: serde_json::Value = serde_json::from_str(&format!(
             r#"{{"parentOrderId":null,"displayNo":"REMOTE-ORDER-1","countryId":"{country_id}","projectId":"{project_id}","site":"remote site","departmentId":"{department_id}","teamId":"{team_id}","applicantId":"{purchaser_id}","supplierId":null,"supplierSnapshotJson":null,"currency":"XOF","primaryCurrency":"XOF","lockedExchangeRateDecimal":null,"languagePair":"zh_fr","status":"pending_confirmation","workflowStatus":"confirmed","urgency":"normal","urgencyReason":null,"orderDate":"2026-10-11","deliveryAddress":"remote address","expectedDeliveryDate":null,"notes":null,"subtotalMinor":"100","lineDiscountMinor":"0","orderDiscountMinor":"0","freightMinor":"0","taxRateBasisPoints":0,"taxMinor":"0","totalMinor":"100","confirmedBy":"{purchaser_id}","confirmedAt":1,"rejectionReason":null,"selfApproved":false,"supplierTermsCompletedAt":null,"lines":[{{"id":"{line_id}","materialId":null,"materialSnapshotJson":"{{\"nameZh\":\"remote item\"}}","supplierSnapshotJson":null,"currency":"XOF","quantity":"1","unit":"pcs","unitPriceMinor":"100","lineDiscountJson":"{{\"kind\":\"fixed_minor\",\"minor\":\"0\"}}","lineFreightJson":"{{\"kind\":\"fixed_minor\",\"minor\":\"0\"}}","freightIncluded":false,"lineTotalMinor":"100","sortOrder":0,"createdAt":1,"updatedAt":1}}]}}"#
         ))
         .unwrap();
+        order_payload["procurementMode"] = serde_json::json!("honsen_self_purchase");
         service
             .apply_sync_pull_page(
                 SyncPullPageInput {
@@ -8644,6 +9038,164 @@ mod tests {
             )
             .unwrap();
         assert_eq!(unchanged, ("REMOTE-ORDER-1".into(), 100));
+        drop(connection);
+        grant_test_scope(
+            &service,
+            purchaser_id,
+            project_id,
+            department_id,
+            team_id,
+            now,
+        );
+        let receipt_id = Uuid::new_v4();
+        let receipt_item_id = Uuid::new_v4();
+        service.apply_sync_pull_page(SyncPullPageInput {
+            changes: vec![SyncPullChangeInput {
+                cursor: "7".into(), entity_type: "receipt".into(), entity_id: receipt_id,
+                operation: "upsert".into(), version: 1,
+                payload: serde_json::json!({
+                    "id": receipt_id, "orderId": order_id, "projectId": project_id,
+                    "receivedAt": "2026-10-11", "receiverId": purchaser_id,
+                    "overReceiptReason": null, "createdBy": purchaser_id, "createdAt": 10,
+                    "completed": true, "items": [{"id": receipt_item_id, "orderItemId": line_id, "quantity": "1", "unit": "pcs"}],
+                    "attachmentIds": [],
+                }), changed_at: "2026-10-11T00:02:00Z".into(),
+            }], next_cursor: "7".into(),
+        }, now).unwrap();
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT quantity_decimal FROM local_receipt_items WHERE id = ?1",
+                    [receipt_item_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "1"
+        );
+        let original_id = Uuid::new_v4();
+        let reversal_id = Uuid::new_v4();
+        let replacement_id = Uuid::new_v4();
+        let expense = |id: Uuid,
+                       status: &str,
+                       corrects: Option<Uuid>,
+                       reason: Option<&str>,
+                       amount: &str| {
+            serde_json::json!({
+                "id": id, "orderId": order_id, "projectId": project_id, "receiptId": receipt_id,
+                "counterpartyType": "market_casual", "supplierId": null, "payeeName": "remote market",
+                "counterpartySnapshot": null, "currency": "XOF", "amountMinor": amount,
+                "paymentDate": "2026-10-11", "paymentMethod": "cash", "paymentHandlerId": purchaser_id,
+                "notes": null, "status": status, "correctsExpenditureId": corrects,
+                "correctionReason": reason, "createdBy": purchaser_id, "createdAt": 10,
+            })
+        };
+        let pulled = vec![
+            (
+                "8",
+                original_id,
+                expense(original_id, "recorded", None, None, "100"),
+            ),
+            (
+                "9",
+                reversal_id,
+                expense(
+                    reversal_id,
+                    "reversed",
+                    Some(original_id),
+                    Some("wrong payee"),
+                    "100",
+                ),
+            ),
+            (
+                "10",
+                replacement_id,
+                expense(
+                    replacement_id,
+                    "recorded",
+                    Some(reversal_id),
+                    Some("corrected"),
+                    "120",
+                ),
+            ),
+        ]
+        .into_iter()
+        .map(|(cursor, entity_id, payload)| SyncPullChangeInput {
+            cursor: cursor.into(),
+            entity_type: "procurement_expenditure".into(),
+            entity_id,
+            operation: "upsert".into(),
+            version: 1,
+            payload,
+            changed_at: "2026-10-11T00:02:00Z".into(),
+        })
+        .collect::<Vec<_>>();
+        let page = SyncPullPageInput {
+            changes: pulled,
+            next_cursor: "10".into(),
+        };
+        service.apply_sync_pull_page(page.clone(), now).unwrap();
+        service.apply_sync_pull_page(page, now).unwrap();
+        let expenses = service
+            .list_procurement_expenditures(order_id, now)
+            .unwrap();
+        assert_eq!(expenses.len(), 3);
+        assert!(
+            expenses
+                .iter()
+                .any(|row| row.id == original_id && row.status == "recorded")
+        );
+        assert!(
+            expenses.iter().any(
+                |row| row.id == reversal_id && row.corrects_expenditure_id == Some(original_id)
+            )
+        );
+        assert!(expenses.iter().any(
+            |row| row.id == replacement_id && row.corrects_expenditure_id == Some(reversal_id)
+        ));
+        let mut divergent = expense(original_id, "recorded", None, None, "999");
+        divergent["amountMinor"] = serde_json::json!("999");
+        assert_eq!(
+            service.apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "11".into(),
+                        entity_type: "procurement_expenditure".into(),
+                        entity_id: original_id,
+                        operation: "upsert".into(),
+                        version: 2,
+                        payload: divergent,
+                        changed_at: "2026-10-11T00:03:00Z".into()
+                    }],
+                    next_cursor: "11".into(),
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "10"
+        );
+        service.connection.lock().unwrap().execute(
+            "DELETE FROM local_authorization_snapshots WHERE account_id = ?1 AND project_id = ?2",
+            params![purchaser_id.to_string(), project_id.to_string()],
+        ).unwrap();
+        assert!(matches!(
+            service.list_procurement_expenditures(order_id, now),
+            Err(AuthError::Forbidden)
+        ));
     }
 
     #[test]
@@ -10420,6 +10972,18 @@ mod tests {
         assert_eq!(first_receipt.workflow_status, "sent");
         {
             let connection = service.connection.lock().unwrap();
+            let receipt_payload: String = connection.query_row(
+                "SELECT payload_json FROM local_sync_outbox WHERE entity_type = 'receipt' AND entity_id = ?1 ORDER BY rowid DESC LIMIT 1",
+                [first_receipt.id.to_string()], |row| row.get(0),
+            ).unwrap();
+            let receipt_payload: serde_json::Value =
+                serde_json::from_str(&receipt_payload).unwrap();
+            assert_eq!(receipt_payload["items"][0]["quantity"], "1");
+            assert_eq!(receipt_payload["items"][0]["orderItemId"], child_item_id);
+            assert_eq!(
+                receipt_payload["attachmentIds"][0],
+                receipt_attachment_id.to_string()
+            );
             let linked_count: i64 = connection
                 .query_row(
                     "SELECT COUNT(*) FROM local_receipt_attachment_links WHERE receipt_id = ?1 AND attachment_id = ?2",
@@ -10429,6 +10993,25 @@ mod tests {
                 .unwrap();
             assert_eq!(linked_count, 1);
         }
+        service.connection.lock().unwrap().execute(
+            "UPDATE local_sync_outbox SET payload_json = ?2 WHERE entity_type = 'receipt' AND entity_id = ?1",
+            params![first_receipt.id.to_string(), serde_json::json!({
+                "id": first_receipt.id, "orderId": children[0].child_order_id,
+                "receiverId": approver_id, "receivedAt": "2026-10-11", "completed": false,
+            }).to_string()],
+        ).unwrap();
+        let upgraded = service
+            .pending_sync_events(100, now)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.entity_type == "receipt" && event.entity_id == first_receipt.id)
+            .unwrap();
+        let upgraded: serde_json::Value = serde_json::from_str(&upgraded.payload_json).unwrap();
+        assert_eq!(upgraded["items"][0]["quantity"], "1");
+        assert_eq!(
+            upgraded["attachmentIds"][0],
+            receipt_attachment_id.to_string()
+        );
         let second_receipt = service
             .record_receipt(
                 RecordReceiptInput {

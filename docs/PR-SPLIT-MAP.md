@@ -47,3 +47,9 @@ Stage 3 merged as PR #11 at `f9f65c9`. Stage 4 starts there and replays
 to the receipt entry, workflow-state migration, market-direct execution,
 parent receipts, and associated UI/tests. The stage-5 expense source commit
 is still excluded.
+Stage 4 merged as PR #12 at `5139cc8`. Stage 5 starts from that latest main
+and replays source `88b645e` once as `265dfb4`; its `.prettierignore` line
+was already brought forward in stage 1, so the replay contains the remaining
+16 files. Stage 5 is not PR-ready: receipt/expenditure Pull reconstruction is
+being completed, and durable voucher archival, transfer and conflict gates
+remain mandatory.

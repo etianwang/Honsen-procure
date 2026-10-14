@@ -8,7 +8,7 @@ Original milestone objectives below are retained. Their checkboxes concern the c
 
 AUTH-1 has a local implementation checkpoint dated 2026-10-13; isolated PostgreSQL testing now passes through WSL2, while real desktop acceptance remains open. No milestone status changes.
 
-The five-stage PR recovery map is in `docs/PR-SPLIT-MAP.md`. Stages 1–3 merged as PRs #9–#11 after CI and diff review. Stage-4 market-direct/receipt candidate has fresh local checks. These code merges do not change AUTH-1 or milestone acceptance until their remaining gates pass.
+The five-stage PR recovery map is in `docs/PR-SPLIT-MAP.md`. Stages 1–4 merged as PRs #9–#12 after CI and diff review. Stage-5 expenditure durability is still in development and has no PR. These code merges do not change AUTH-1 or milestone acceptance until their remaining gates pass.
 
 The 2026-10-13 requisition-history checkpoint adds an authorized regular-route list and closes a confirmed-order cross-project read leak; full history/copy and M2 acceptance remain open.
 

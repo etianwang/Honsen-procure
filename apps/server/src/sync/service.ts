@@ -39,6 +39,29 @@ const expenditurePayloadSchema = z.object({
   createdBy: z.uuid(),
   createdAt: z.number().int().nonnegative(),
 })
+const receiptPayloadSchema = z.object({
+  id: z.uuid(),
+  orderId: z.uuid(),
+  projectId: z.uuid(),
+  receivedAt: z.iso.date(),
+  receiverId: z.uuid(),
+  overReceiptReason: z.string().trim().min(1).max(1000).nullable(),
+  createdBy: z.uuid(),
+  createdAt: z.number().int().nonnegative(),
+  completed: z.boolean(),
+  items: z
+    .array(
+      z.object({
+        id: z.uuid(),
+        orderItemId: z.uuid(),
+        quantity: z.string().regex(/^[0-9]+(?:\.[0-9]{1,2})?$/),
+        unit: z.string().trim().min(1).max(64),
+      }),
+    )
+    .min(1)
+    .max(500),
+  attachmentIds: z.array(z.uuid()).max(10),
+})
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
@@ -78,6 +101,9 @@ export class SyncService {
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
     if (event.entityType === 'procurement_expenditure') {
       return this.canWriteExpenditure(actor, event)
+    }
+    if (event.entityType === 'receipt') {
+      return this.canWriteReceipt(actor, event)
     }
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
@@ -293,6 +319,64 @@ export class SyncService {
         return false
     }
     return true
+  }
+
+  private async canWriteReceipt(
+    actor: SyncActor,
+    event: SyncEvent,
+  ): Promise<boolean> {
+    if (event.operation !== 'upsert') return false
+    const parsed = receiptPayloadSchema.safeParse(event.payload)
+    if (
+      !parsed.success ||
+      parsed.data.id !== event.entityId ||
+      parsed.data.createdBy !== actor.id
+    )
+      return false
+    const receipt = parsed.data
+    if (
+      new Set(receipt.items.map((item) => item.orderItemId)).size !==
+        receipt.items.length ||
+      new Set(receipt.items.map((item) => item.id)).size !==
+        receipt.items.length ||
+      new Set(receipt.attachmentIds).size !== receipt.attachmentIds.length ||
+      receipt.items.some((item) => !/[1-9]/.test(item.quantity))
+    )
+      return false
+    const order = await this.store.getEntityPayload(
+      'purchase_order',
+      receipt.orderId,
+    )
+    if (!order || stringField(order, 'projectId') !== receipt.projectId)
+      return false
+    const orderLines = Array.isArray(order.lines) ? order.lines : []
+    const lineIds = new Set(
+      orderLines.map((line) =>
+        line && typeof line === 'object'
+          ? (line as Record<string, unknown>).id
+          : null,
+      ),
+    )
+    if (receipt.items.some((item) => !lineIds.has(item.orderItemId)))
+      return false
+    if (
+      !actor.roles.some((role) => procurementRoles.includes(role)) &&
+      (!actor.roles.includes('engineer') ||
+        stringField(order, 'applicantId') !== actor.id)
+    )
+      return false
+    const departmentId = stringField(order, 'departmentId')
+    const teamId = stringField(order, 'teamId')
+    return Boolean(
+      departmentId &&
+      teamId &&
+      (await this.store.hasActiveProjectBinding(
+        actor.id,
+        receipt.projectId,
+        departmentId,
+        teamId,
+      )),
+    )
   }
 
   private async canChangeProjectCountry(event: SyncEvent): Promise<boolean> {

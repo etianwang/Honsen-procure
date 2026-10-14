@@ -108,6 +108,83 @@ function expenditureEvent() {
 }
 
 describe('SyncService', () => {
+  it('accepts only bound receipt lines from the order and rejects malformed or cross-project writes', async () => {
+    const store = new FixtureStore()
+    const lineId = '00000000-0000-4000-8000-000000000024'
+    const receiptId = '00000000-0000-4000-8000-000000000025'
+    store.order = {
+      applicantId: engineer.id,
+      projectId,
+      departmentId,
+      teamId,
+      lines: [{ id: lineId }],
+    }
+    const service = new SyncService(store)
+    const event = {
+      eventId: '00000000-0000-4000-8000-000000000026',
+      entityType: 'receipt' as const,
+      entityId: receiptId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        id: receiptId,
+        orderId,
+        projectId,
+        receiverId: engineer.id,
+        receivedAt: '2026-10-13',
+        overReceiptReason: null,
+        createdBy: engineer.id,
+        createdAt: 1,
+        completed: false,
+        items: [
+          {
+            id: '00000000-0000-4000-8000-000000000027',
+            orderItemId: lineId,
+            quantity: '1.5',
+            unit: 'pcs',
+          },
+        ],
+        attachmentIds: [],
+      },
+    }
+    const push = (submitted = event) =>
+      service.push(engineer, {
+        deviceId: '00000000-0000-4000-8000-000000000028',
+        events: [submitted],
+      })
+    expect((await push()).results[0]?.status).toBe('accepted')
+    store.bound = false
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    store.bound = true
+    expect(
+      (
+        await push({
+          ...event,
+          payload: {
+            ...event.payload,
+            projectId: '00000000-0000-4000-8000-000000000029',
+          },
+        })
+      ).results[0]?.status,
+    ).toBe('validation_error')
+    expect(
+      (
+        await push({
+          ...event,
+          payload: {
+            ...event.payload,
+            items: [
+              {
+                ...event.payload.items[0]!,
+                orderItemId: '00000000-0000-4000-8000-000000000030',
+              },
+            ],
+          },
+        })
+      ).results[0]?.status,
+    ).toBe('validation_error')
+    expect(store.pushed).toBe(1)
+  })
   it('accepts only scoped Honsen expenditure and rejects owner, engineer and invalid corrections', async () => {
     const store = new FixtureStore()
     store.order = {
