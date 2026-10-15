@@ -1,4 +1,4 @@
-import { referenceMasterDataSchema } from '@honsen/shared'
+import { referenceMasterDataSchema, taxTemplateSchema } from '@honsen/shared'
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
 import type { Pool, PoolClient } from 'pg'
 import type { SyncStore } from './types.js'
@@ -98,6 +98,22 @@ export class PostgresSyncStore implements SyncStore {
           return result
         }
       }
+      if (input.event.entityType === 'tax_template') {
+        const business = await client.query<{ version: string }>(
+          'SELECT version FROM tax_templates WHERE id = $1 FOR UPDATE',
+          [input.event.entityId],
+        )
+        const row = business.rows[0]
+        if (row && Number(row.version) !== currentVersion) {
+          const result = await this.recordTaxBusinessConflict(
+            client,
+            input,
+            current,
+          )
+          await client.query('COMMIT')
+          return result
+        }
+      }
       if (currentVersion !== input.event.baseVersion) {
         const result = {
           eventId: input.event.eventId,
@@ -116,6 +132,18 @@ export class PostgresSyncStore implements SyncStore {
           ? canonicalUnitPayload(input.event)
           : null
       if (input.event.entityType === 'unit' && !unitPayload) {
+        await client.query('ROLLBACK')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+        }
+      }
+      const taxPayload =
+        input.event.entityType === 'tax_template'
+          ? canonicalTaxTemplatePayload(input.event)
+          : null
+      if (input.event.entityType === 'tax_template' && !taxPayload) {
         await client.query('ROLLBACK')
         return {
           eventId: input.event.eventId,
@@ -213,6 +241,31 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      if (input.event.entityType === 'tax_template') {
+        const projected = await this.projectTaxTemplate(
+          client,
+          { ...input.event, payload: taxPayload! },
+          input.actorId,
+          currentVersion,
+        )
+        if (projected === 'conflict') {
+          const result = await this.recordTaxBusinessConflict(
+            client,
+            input,
+            current,
+          )
+          await client.query('COMMIT')
+          return result
+        }
+        if (projected === 'validation_error') {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+      }
       await client.query(
         `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
@@ -228,7 +281,7 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           serverVersion,
           deleted,
-          unitPayload ?? input.event.payload,
+          taxPayload ?? unitPayload ?? input.event.payload,
           input.actorId,
         ],
       )
@@ -256,7 +309,7 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           input.event.operation,
           serverVersion,
-          unitPayload ?? input.event.payload,
+          taxPayload ?? unitPayload ?? input.event.payload,
           input.actorId,
         ],
       )
@@ -269,9 +322,15 @@ export class PostgresSyncStore implements SyncStore {
     } catch (error) {
       await client.query('ROLLBACK')
       if (
-        ['country', 'project', 'site', 'department', 'team', 'unit'].includes(
-          input.event.entityType,
-        ) &&
+        [
+          'country',
+          'project',
+          'site',
+          'department',
+          'team',
+          'unit',
+          'tax_template',
+        ].includes(input.event.entityType) &&
         typeof error === 'object' &&
         error !== null &&
         'code' in error &&
@@ -569,6 +628,136 @@ export class PostgresSyncStore implements SyncStore {
     return true
   }
 
+  private async projectTaxTemplate(
+    client: PoolClient,
+    event: SyncEvent,
+    actorId: string,
+    expectedVersion: number,
+  ): Promise<'accepted' | 'validation_error' | 'conflict'> {
+    if (event.operation !== 'upsert') return 'validation_error'
+    const payload = event.payload
+    const businessCode = payload.businessCode ?? payload.business_code
+    const name = payload.name
+    const countryId =
+      payload.countryId !== undefined ? payload.countryId : payload.country_id
+    const rateBasisPoints = payload.rateBasisPoints ?? payload.rate_basis_points
+    const effectiveAt = payload.effectiveAt ?? payload.effective_at
+    const isActive = payload.isActive ?? payload.is_active
+    if (
+      typeof businessCode !== 'string' ||
+      typeof name !== 'string' ||
+      (countryId !== null && typeof countryId !== 'string') ||
+      typeof rateBasisPoints !== 'number' ||
+      typeof effectiveAt !== 'string' ||
+      typeof isActive !== 'boolean'
+    )
+      return 'validation_error'
+    const previous = await client.query<{ business_code: string }>(
+      'SELECT business_code FROM tax_templates WHERE id = $1 FOR UPDATE',
+      [event.entityId],
+    )
+    if (previous.rows[0] && previous.rows[0].business_code !== businessCode)
+      return expectedVersion === 0 ? 'conflict' : 'validation_error'
+    if (isActive && countryId !== null) {
+      const country = await client.query(
+        'SELECT 1 FROM countries WHERE id = $1 AND is_active = TRUE AND deleted_at IS NULL FOR SHARE',
+        [countryId],
+      )
+      if (country.rowCount !== 1) return 'validation_error'
+    }
+    const written = await client.query(
+      `INSERT INTO tax_templates (id, business_code, name, country_id, rate_basis_points, effective_at, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name,
+         country_id = EXCLUDED.country_id, rate_basis_points = EXCLUDED.rate_basis_points,
+         effective_at = EXCLUDED.effective_at, is_active = EXCLUDED.is_active,
+         version = tax_templates.version + 1, updated_at = NOW(), deleted_at = NULL
+       WHERE tax_templates.version = $8`,
+      [
+        event.entityId,
+        businessCode,
+        name,
+        countryId,
+        rateBasisPoints,
+        effectiveAt,
+        isActive,
+        expectedVersion,
+      ],
+    )
+    if (written.rowCount !== 1) return 'conflict'
+    await client.query(
+      "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'tax_template', $2, 'upsert')",
+      [actorId, event.entityId],
+    )
+    return 'accepted'
+  }
+
+  private async recordTaxBusinessConflict(
+    client: PoolClient,
+    input: { event: SyncEvent; installationId: string; actorId: string },
+    current: StoredEntity | undefined,
+  ): Promise<SyncEventResult> {
+    const business = await client.query<{
+      business_code: string
+      name: string
+      country_id: string | null
+      rate_basis_points: number
+      effective_at: string
+      is_active: boolean
+      version: string
+    }>(
+      'SELECT business_code, name, country_id::text AS country_id, rate_basis_points, effective_at::text AS effective_at, is_active, version FROM tax_templates WHERE id = $1 FOR UPDATE',
+      [input.event.entityId],
+    )
+    const row = business.rows[0]
+    if (!row)
+      throw new Error('tax template disappeared during conflict detection')
+    const payload = {
+      businessCode: row.business_code,
+      name: row.name,
+      countryId: row.country_id,
+      rateBasisPoints: row.rate_basis_points,
+      effectiveAt: row.effective_at,
+      isActive: row.is_active,
+    }
+    const businessVersion = Number(row.version)
+    const currentVersion = current ? Number(current.version) : 0
+    if (businessVersion > currentVersion) {
+      const audit = await client.query<{ actor_id: string | null }>(
+        "SELECT actor_id::text AS actor_id FROM audit_entries WHERE entity_type = 'tax_template' AND entity_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        [input.event.entityId],
+      )
+      const actorId = audit.rows[0]?.actor_id ?? input.actorId
+      await client.query(
+        `INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
+         VALUES ('tax_template', $1, $2, FALSE, $3, $4)
+         ON CONFLICT (entity_type, entity_id) DO UPDATE SET version = EXCLUDED.version,
+           is_deleted = FALSE, payload_json = EXCLUDED.payload_json,
+           updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+        [input.event.entityId, businessVersion, payload, actorId],
+      )
+      await client.query(
+        `INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id)
+         VALUES ('tax_template', $1, 'upsert', $2, $3, $4)`,
+        [input.event.entityId, businessVersion, payload, actorId],
+      )
+    }
+    const result: SyncEventResult = {
+      eventId: input.event.eventId,
+      status: 'conflict',
+      serverVersion: Math.max(businessVersion, currentVersion),
+    }
+    await this.recordConflict(
+      client,
+      input,
+      businessVersion >= currentVersion
+        ? { version: row.version, payload_json: payload }
+        : current,
+      result,
+    )
+    return result
+  }
+
   async pullChanges(input: {
     actor: { id: string; roles: import('@honsen/shared').Role[] }
     cursor: string
@@ -817,5 +1006,43 @@ function canonicalUnitPayload(
     name: parsed.data.name,
     ...('isActive' in payload ? { isActive: parsed.data.isActive } : {}),
     ...('is_active' in payload ? { is_active: parsed.data.isActive } : {}),
+  }
+}
+
+function canonicalTaxTemplatePayload(
+  event: SyncEvent,
+): Record<string, unknown> | null {
+  const payload = event.payload
+  const parsed = taxTemplateSchema.safeParse({
+    id: event.entityId,
+    businessCode: payload.businessCode ?? payload.business_code,
+    name: payload.name,
+    countryId:
+      payload.countryId !== undefined ? payload.countryId : payload.country_id,
+    rateBasisPoints: payload.rateBasisPoints ?? payload.rate_basis_points,
+    effectiveAt: payload.effectiveAt ?? payload.effective_at,
+    isActive: payload.isActive ?? payload.is_active,
+  })
+  if (!parsed.success) return null
+  const value = parsed.data
+  return {
+    ...payload,
+    ...('businessCode' in payload ? { businessCode: value.businessCode } : {}),
+    ...('business_code' in payload
+      ? { business_code: value.businessCode }
+      : {}),
+    name: value.name,
+    ...('countryId' in payload ? { countryId: value.countryId } : {}),
+    ...('country_id' in payload ? { country_id: value.countryId } : {}),
+    ...('rateBasisPoints' in payload
+      ? { rateBasisPoints: value.rateBasisPoints }
+      : {}),
+    ...('rate_basis_points' in payload
+      ? { rate_basis_points: value.rateBasisPoints }
+      : {}),
+    ...('effectiveAt' in payload ? { effectiveAt: value.effectiveAt } : {}),
+    ...('effective_at' in payload ? { effective_at: value.effectiveAt } : {}),
+    ...('isActive' in payload ? { isActive: value.isActive } : {}),
+    ...('is_active' in payload ? { is_active: value.isActive } : {}),
   }
 }

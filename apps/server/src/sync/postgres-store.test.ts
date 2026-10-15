@@ -1277,6 +1277,19 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
             version: 1,
           },
         },
+        {
+          eventId: randomUUID(),
+          entityType: 'country',
+          entityId: otherCountryId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            business_code: `COUNTRY-${otherCountryId}`,
+            name: 'Other fixture country',
+            time_zone: 'UTC',
+            is_active: true,
+          },
+        },
         tax(taxId, countryId, true),
         tax(otherTaxId, otherCountryId, true),
         tax(globalTaxId, null, true),
@@ -1541,6 +1554,525 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       [taxId],
     )
     expect(stored.rows[0]?.payload_json.name).toBe('Fixture tax')
+  })
+
+  it('projects tax-template Push into the business row and audit only once', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const taxId = randomUUID()
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'tax_template' as const,
+      entityId: taxId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `TAX-${taxId}`,
+        name: ' Test tax ',
+        country_id: null,
+        rate_basis_points: 1800,
+        effective_at: '2026-10-15',
+        is_active: true,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [event] }
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const first = await service.push(actor, request)
+    expect(first.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(first)
+    const row = await pool!.query<{
+      business_code: string
+      name: string
+      country_id: string | null
+      rate_basis_points: number
+      effective_at: Date
+      is_active: boolean
+      version: string
+    }>(
+      'SELECT business_code, name, country_id, rate_basis_points, effective_at, is_active, version FROM tax_templates WHERE id = $1',
+      [taxId],
+    )
+    expect(row.rows[0]).toMatchObject({
+      business_code: `TAX-${taxId}`,
+      name: 'Test tax',
+      country_id: null,
+      rate_basis_points: 1800,
+      is_active: true,
+      version: '1',
+    })
+    expect(row.rows[0]?.effective_at.toISOString().slice(0, 10)).toBe(
+      '2026-10-15',
+    )
+    const synced = await pool!.query<{
+      payload_json: { name: string; country_id: null }
+    }>(
+      "SELECT payload_json FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+      [taxId],
+    )
+    expect(synced.rows[0]?.payload_json).toMatchObject({
+      name: 'Test tax',
+      country_id: null,
+    })
+    const audit = await pool!.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM audit_entries WHERE entity_type = 'tax_template' AND entity_id = $1",
+      [taxId],
+    )
+    expect(audit.rows[0]?.count).toBe('1')
+  })
+
+  it('keeps a rejected tax-template event retryable after its country arrives', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const [countryId, taxId] = [randomUUID(), randomUUID()]
+    const taxEvent = {
+      eventId: randomUUID(),
+      entityType: 'tax_template' as const,
+      entityId: taxId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        businessCode: `TAX-${taxId}`,
+        name: 'Scoped tax',
+        countryId,
+        rateBasisPoints: 2000,
+        effectiveAt: '2026-10-15',
+        isActive: true,
+      },
+    }
+    const countryEvent = {
+      eventId: randomUUID(),
+      entityType: 'country' as const,
+      entityId: countryId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `COUNTRY-${countryId}`,
+        name: 'Fixture country',
+        time_zone: 'UTC',
+        is_active: true,
+      },
+    }
+    const partial = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [taxEvent, countryEvent],
+    })
+    expect(partial.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+    ])
+    expect(
+      (await pool!.query('SELECT 1 FROM tax_templates WHERE id = $1', [taxId]))
+        .rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM sync_events WHERE event_id = $1', [
+          taxEvent.eventId,
+        ])
+      ).rowCount,
+    ).toBe(0)
+    const retry = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [taxEvent],
+    })
+    expect(retry.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    const row = await pool!.query<{ country_id: string }>(
+      'SELECT country_id::text AS country_id FROM tax_templates WHERE id = $1',
+      [taxId],
+    )
+    expect(row.rows[0]?.country_id).toBe(countryId)
+  })
+
+  it('conflicts instead of overwriting a tax template edited through REST', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const master = new PostgresMasterDataStore(pool!)
+    const taxId = randomUUID()
+    const businessCode = `TAX-${taxId}`
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'tax_template' as const,
+      entityId: taxId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: businessCode,
+        name: 'Initial',
+        country_id: null,
+        rate_basis_points: 1800,
+        effective_at: '2026-10-15',
+        is_active: true,
+      },
+    }
+    expect(
+      (await service.push(actor, { deviceId: randomUUID(), events: [event] }))
+        .results[0]?.status,
+    ).toBe('accepted')
+    await master.saveTaxTemplate(
+      {
+        id: taxId,
+        businessCode,
+        name: 'REST edit',
+        countryId: null,
+        rateBasisPoints: 1900,
+        effectiveAt: '2026-10-15',
+        isActive: true,
+      },
+      actorId,
+    )
+    const staleEventId = randomUUID()
+    const stale = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: staleEventId,
+          baseVersion: 1,
+          payload: {
+            ...event.payload,
+            name: 'Offline edit',
+            rate_basis_points: 2100,
+          },
+        },
+      ],
+    })
+    expect(stale.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 2,
+    })
+    const row = await pool!.query<{
+      name: string
+      rate_basis_points: number
+      version: string
+    }>(
+      'SELECT name, rate_basis_points, version FROM tax_templates WHERE id = $1',
+      [taxId],
+    )
+    expect(row.rows[0]).toMatchObject({
+      name: 'REST edit',
+      rate_basis_points: 1900,
+      version: '2',
+    })
+    const conflict = await pool!.query<{
+      server_payload_json: { name: string; rateBasisPoints: number }
+    }>('SELECT server_payload_json FROM sync_conflicts WHERE event_id = $1', [
+      staleEventId,
+    ])
+    expect(conflict.rows[0]?.server_payload_json).toMatchObject({
+      name: 'REST edit',
+      rateBasisPoints: 1900,
+    })
+    const reconciled = await pool!.query<{
+      version: string
+      payload_json: { name: string; effectiveAt: string }
+    }>(
+      "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+      [taxId],
+    )
+    expect(reconciled.rows[0]).toMatchObject({
+      version: '2',
+      payload_json: { name: 'REST edit', effectiveAt: '2026-10-15' },
+    })
+    const published = await pool!.query<{
+      payload_json: { name: string; effectiveAt: string }
+    }>(
+      "SELECT payload_json FROM server_change_log WHERE entity_type = 'tax_template' AND entity_id = $1 AND version = 2",
+      [taxId],
+    )
+    expect(published.rows[0]?.payload_json).toMatchObject({
+      name: 'REST edit',
+      effectiveAt: '2026-10-15',
+    })
+    const resolved = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          baseVersion: 2,
+          payload: {
+            ...event.payload,
+            name: 'Resolved',
+            rate_basis_points: 2000,
+          },
+        },
+      ],
+    })
+    expect(resolved.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 3,
+    })
+    const resolvedRow = await pool!.query<{ name: string; version: string }>(
+      'SELECT name, version FROM tax_templates WHERE id = $1',
+      [taxId],
+    )
+    expect(resolvedRow.rows[0]).toMatchObject({
+      name: 'Resolved',
+      version: '3',
+    })
+  })
+
+  it('rejects a tax-template code collision and preserves the accepted template', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const [taxId, duplicateId, independentId] = [
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+    ]
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'tax_template' as const,
+      entityId: taxId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `TAX-${taxId}`,
+        name: 'Original',
+        country_id: null,
+        rate_basis_points: 1800,
+        effective_at: '2026-10-15',
+        is_active: true,
+      },
+    }
+    expect(
+      (await service.push(actor, { deviceId: randomUUID(), events: [event] }))
+        .results[0]?.status,
+    ).toBe('accepted')
+    const batch = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        { ...event, eventId: randomUUID(), entityId: duplicateId },
+        {
+          ...event,
+          eventId: randomUUID(),
+          entityId: independentId,
+          payload: { ...event.payload, business_code: `TAX-${independentId}` },
+        },
+      ],
+    })
+    expect(batch.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+    ])
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM tax_templates WHERE id = $1', [
+          duplicateId,
+        ])
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+          [duplicateId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM tax_templates WHERE id = $1', [
+          independentId,
+        ])
+      ).rowCount,
+    ).toBe(1)
+    const changedCode = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...event.payload, business_code: `OTHER-${taxId}` },
+        },
+      ],
+    })
+    expect(changedCode.results[0]?.status).toBe('validation_error')
+    const revised = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: {
+            ...event.payload,
+            name: 'Revised',
+            rate_basis_points: 1950,
+            effective_at: '2026-10-16',
+            is_active: false,
+          },
+        },
+      ],
+    })
+    expect(revised.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 2,
+    })
+    const row = await pool!.query<{
+      business_code: string
+      name: string
+      rate_basis_points: number
+      effective_at: Date
+      is_active: boolean
+      version: string
+    }>(
+      'SELECT business_code, name, rate_basis_points, effective_at, is_active, version FROM tax_templates WHERE id = $1',
+      [taxId],
+    )
+    expect(row.rows[0]).toMatchObject({
+      business_code: `TAX-${taxId}`,
+      name: 'Revised',
+      rate_basis_points: 1950,
+      is_active: false,
+      version: '2',
+    })
+    expect(row.rows[0]?.effective_at.toISOString().slice(0, 10)).toBe(
+      '2026-10-16',
+    )
+  })
+
+  it('rolls back a tax-template row when its audit write fails', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const taxId = randomUUID()
+    const eventId = randomUUID()
+    await expect(
+      store.pushEvent({
+        event: {
+          eventId,
+          entityType: 'tax_template',
+          entityId: taxId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            business_code: `TAX-${taxId}`,
+            name: 'Rollback fixture',
+            country_id: null,
+            rate_basis_points: 1000,
+            effective_at: '2026-10-15',
+            is_active: true,
+          },
+        },
+        installationId: randomUUID(),
+        actorId: randomUUID(),
+      }),
+    ).resolves.toMatchObject({ status: 'validation_error' })
+    for (const [table, clause, id] of [
+      ['tax_templates', 'id = $1', taxId],
+      [
+        'sync_entities',
+        "entity_type = 'tax_template' AND entity_id = $1",
+        taxId,
+      ],
+      ['sync_events', 'event_id = $1', eventId],
+      [
+        'server_change_log',
+        "entity_type = 'tax_template' AND entity_id = $1",
+        taxId,
+      ],
+      [
+        'audit_entries',
+        "entity_type = 'tax_template' AND entity_id = $1",
+        taxId,
+      ],
+    ]) {
+      expect(
+        (await pool!.query(`SELECT 1 FROM ${table} WHERE ${clause}`, [id]))
+          .rowCount,
+      ).toBe(0)
+    }
+  })
+
+  it('retains a concurrent REST tax-template creation instead of overwriting it', async () => {
+    const taxId = randomUUID()
+    const businessCode = `TAX-${taxId}`
+    const master = new PostgresMasterDataStore(pool!)
+    let inserted = false
+    const racingPool = {
+      async connect() {
+        const client = await pool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            const result = await client.query(sql, values)
+            if (
+              !inserted &&
+              sql.startsWith(
+                'SELECT version FROM tax_templates WHERE id = $1 FOR UPDATE',
+              ) &&
+              values?.[0] === taxId
+            ) {
+              inserted = true
+              await master.saveTaxTemplate(
+                {
+                  id: taxId,
+                  businessCode: `${businessCode}-REST`,
+                  name: 'REST winner',
+                  countryId: null,
+                  rateBasisPoints: 1900,
+                  effectiveAt: '2026-10-15',
+                  isActive: true,
+                },
+                actorId,
+              )
+            }
+            return result
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    const service = new SyncService(new PostgresSyncStore(racingPool))
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'tax_template' as const,
+      entityId: taxId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: businessCode,
+        name: 'Offline loser',
+        country_id: null,
+        rate_basis_points: 1800,
+        effective_at: '2026-10-15',
+        is_active: true,
+      },
+    }
+    const result = await service.push(
+      { id: actorId, roles: ['administrator'] },
+      { deviceId: randomUUID(), events: [event] },
+    )
+    expect(inserted).toBe(true)
+    expect(result.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 1,
+    })
+    const business = await pool!.query<{ name: string; version: string }>(
+      'SELECT name, version FROM tax_templates WHERE id = $1',
+      [taxId],
+    )
+    expect(business.rows[0]).toMatchObject({
+      name: 'REST winner',
+      version: '1',
+    })
+    const synced = await pool!.query<{
+      version: string
+      payload_json: { name: string }
+    }>(
+      "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+      [taxId],
+    )
+    expect(synced.rows[0]).toMatchObject({
+      version: '1',
+      payload_json: { name: 'REST winner' },
+    })
   })
 
   it('pulls supplier and price changes only from an engineer’s bound countries', async () => {

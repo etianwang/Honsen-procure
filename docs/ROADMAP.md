@@ -141,6 +141,8 @@ The team Push slice now projects into the PostgreSQL `teams` table and aligns RE
 
 The unit Push slice now projects validated unit changes into PostgreSQL `units` atomically with audit/sync. Test-first isolated PostgreSQL coverage includes replay, code collision, rollback after audit failure, canonical values and a REST-edit conflict guard that prevents stale Push overwrite. REST-originated changes still need Pull publication/resolution under T10; tax, exchange-rate and project-default business projection, authorized deployment and native evidence remain open. T04/T10 and milestone checkboxes are unchanged.
 
+The tax-template Push slice now projects validated tax templates into PostgreSQL `tax_templates` with audit/sync in one transaction. Isolated PostgreSQL tests cover country dependencies, replay, rollback, REST-edit and concurrent-create conflicts, change-log reconciliation and a resolved retry; the existing tax-editor DOM gate passed. Proactive REST-to-Pull publication, exchange-rate/project-default business projection, deployment records and native multi-client evidence remain open. T04/T10 and milestone checkboxes remain unchanged.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
