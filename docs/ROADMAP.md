@@ -107,7 +107,7 @@ M0 item tracking (all seven original objectives, in order):
 
 ## Current next-task recommendation
 
-Use the 2026-10-14 isolated-development authorization to complete independently verifiable remaining T08/T09/T10/T11 slices, next beginning with dedicated attachment sync-conflict resolution and server-issued transfer/progress coverage. Production T04 acceptance still requires deployment authority; all original final acceptance gates remain.
+Use the 2026-10-14 isolated-development authorization to complete independently verifiable remaining T08/T09/T10/T11 slices, next beginning with byte-level attachment transfer progress and the native dual-client restore/reconnect proof. On 2026-10-15 the non-bundled Tauri candidate-build command was repaired and verified, so the later native T14 environment has a reproducible executable prerequisite; this is not an installer, Toolbox, or native-E2E acceptance. Production T04 acceptance still requires deployment authority; all original final acceptance gates remain.
 
 ## Approved / planned: Admin Master Data Management
 
