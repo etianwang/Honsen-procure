@@ -502,6 +502,28 @@ test('administrator master-data fixture adds a country', async ({ page }) => {
   await expect(browserErrors).toEqual([])
 })
 
+test('administrator can create, edit and disable a unit offline', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByRole('tab', { name: '单位' }).click()
+  await expect(page.getByRole('button', { name: '新增单位' })).toBeDisabled()
+  await page.getByLabel('单位代码').fill('fixture-ea')
+  await page.getByLabel('单位名称', { exact: true }).fill('Each')
+  await page.getByRole('button', { name: '新增单位' }).click()
+  await expect(page.getByLabel('编辑单位名称-fixture-ea')).toHaveValue('Each')
+  await page.getByLabel('编辑单位名称-fixture-ea').fill('Piece')
+  await page.getByLabel('编辑单位名称-fixture-ea').blur()
+  await expect(page.getByLabel('编辑单位名称-fixture-ea')).toHaveValue('Piece')
+  await page.getByRole('button', { name: /停\s*用/ }).click()
+  await expect(page.getByRole('button', { name: /启\s*用/ })).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
 test('administrator master-data fixture creates a project and a site', async ({
   page,
 }) => {

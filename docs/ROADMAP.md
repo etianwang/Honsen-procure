@@ -107,7 +107,9 @@ Obtain authority for T04 authorized initial-record acceptance, then complete the
 
 ## Approved / planned: Admin Master Data Management
 
-**Status: COMPLETED — not part of OPA-2 completion.** The approved administrator UI and audited offline workflows for dynamic country, project and site records are complete. Departments, teams, suppliers, quotations, materials/categories/units, tax templates and exchange rates remain out of scope. The slice supports creating a future country/project without Seed edits or direct SQL, preserves global materials, retains country-scoped supplier/quotation enforcement, and stops rather than deletes referenced master data.
+**Status: COMPLETED — not part of OPA-2 completion.** The approved administrator UI and audited offline workflows for dynamic country, project and site records are complete. Departments, teams, suppliers, quotations, materials/categories/units, tax templates and exchange rates were out of scope for this earlier slice. The slice supports creating a future country/project without Seed edits or direct SQL, preserves global materials, retains country-scoped supplier/quotation enforcement, and stops rather than deletes referenced master data.
+
+The 2026-10-15 T04 isolated local unit-management slice subsequently added trusted read, editor and unit audit migration with synthetic Rust/DOM evidence. It does not accept T04-A/B/C, online synchronization, real desktop roles or authorized deployment records. T04, M0 and M1 remain unchecked. Functional completion stays ahead of non-blocking visual/UI polish; blocked controls, errors and accessibility still require immediate repair when they prevent a workflow.
 
 ## Original foundation instruction (retained; not current progress)
 
