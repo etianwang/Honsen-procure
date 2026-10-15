@@ -1309,7 +1309,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         project_id: projectId,
         department_title: 'Fixture department',
         company_address: 'Fixture address',
-        company_contact: 'Fixture contact',
+        company_contact: null,
         default_currency: 'XOF',
         default_language_pair: 'zh_fr',
         default_tax_template_id: id,
@@ -1344,14 +1344,22 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       serverVersion: 2,
     })
     const retained = await pool!.query<{
-      payload_json: { default_tax_template_id: string }
+      payload_json: { defaultTaxTemplateId: string }
     }>(
       "SELECT payload_json FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
       [projectId],
     )
-    expect(retained.rows[0]?.payload_json.default_tax_template_id).toBe(
+    expect(retained.rows[0]?.payload_json.defaultTaxTemplateId).toBe(
       globalTaxId,
     )
+    expect(
+      (
+        await pool!.query(
+          'SELECT default_tax_template_id::text AS tax_id, version FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({ tax_id: globalTaxId, version: '2' })
   })
 
   it('checks a preexisting REST project and tax template when sync entities are absent', async () => {
@@ -1374,6 +1382,10 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       )
       expect(await store.isCompatibleProjectTax(projectId, taxId)).toBe(true)
       await pool!.query(
+        "INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by) VALUES ('tax_template', $1, 1, FALSE, $2, $3)",
+        [taxId, { countryId, isActive: true }, actorId],
+      )
+      await pool!.query(
         'UPDATE tax_templates SET is_active = FALSE WHERE id = $1',
         [taxId],
       )
@@ -1383,8 +1395,41 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         [taxId],
       )
       await pool!.query(
-        "INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by) VALUES ('tax_template', $1, 1, TRUE, '{}', $2)",
-        [taxId, actorId],
+        "UPDATE sync_entities SET payload_json = $2 WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId, { countryId, isActive: false }],
+      )
+      expect(await store.isCompatibleProjectTax(projectId, taxId)).toBe(true)
+      expect(
+        (
+          await new SyncService(store).push(
+            { id: actorId, roles: ['administrator'] },
+            {
+              deviceId: randomUUID(),
+              events: [
+                {
+                  eventId: randomUUID(),
+                  entityType: 'project_defaults',
+                  entityId: projectId,
+                  operation: 'upsert',
+                  baseVersion: 0,
+                  payload: {
+                    projectId,
+                    departmentTitle: 'Procurement',
+                    companyAddress: 'Fixture address',
+                    companyContact: null,
+                    defaultCurrency: 'XOF',
+                    defaultLanguagePair: 'zh_fr',
+                    defaultTaxTemplateId: taxId,
+                  },
+                },
+              ],
+            },
+          )
+        ).results[0]?.status,
+      ).toBe('accepted')
+      await pool!.query(
+        "UPDATE sync_entities SET is_deleted = TRUE, payload_json = '{}' WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
       )
       expect(await store.isCompatibleProjectTax(projectId, taxId)).toBe(false)
       await pool!.query(
@@ -1397,6 +1442,14 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       )
       expect(await store.isCompatibleProjectTax(projectId, taxId)).toBe(false)
     } finally {
+      await pool!.query(
+        'DELETE FROM project_print_defaults WHERE project_id = $1',
+        [projectId],
+      )
+      await pool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+        [projectId],
+      )
       await pool!.query(
         "DELETE FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
         [taxId],
@@ -1414,6 +1467,15 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
   it('persists validated project defaults with replay and conflict retention', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const entityId = randomUUID()
+    const countryId = randomUUID()
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'Fixture country', 'UTC')",
+      [countryId, `DEFAULT-C-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'Fixture project', 'Fixture site', 'Fixture department', 'XOF', 'zh_fr')",
+      [entityId, countryId, `DEFAULT-P-${entityId}`],
+    )
     const cursor = (
       await pool!.query<{ sequence: string }>(
         'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
@@ -1443,6 +1505,19 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       serverVersion: 1,
     })
     expect(await service.push(actor, request)).toEqual(first)
+    expect(
+      (
+        await pool!.query(
+          'SELECT department_title, company_address, company_contact, version FROM project_print_defaults WHERE project_id = $1',
+          [entityId],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      department_title: 'Procurement',
+      company_address: 'Fixture address',
+      company_contact: 'Fixture contact',
+      version: '1',
+    })
     const pulled = await service.pull(
       { id: actorId, roles: ['engineer'] },
       { cursor, limit: 500 },
@@ -1450,6 +1525,15 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(
       pulled.changes.filter((change) => change.entityId === entityId),
     ).toHaveLength(1)
+    expect(
+      pulled.changes.find((change) => change.entityId === entityId)?.payload,
+    ).toMatchObject({
+      projectId: entityId,
+      departmentTitle: 'Procurement',
+      companyAddress: 'Fixture address',
+      defaultCurrency: 'XOF',
+      defaultTaxTemplateId: null,
+    })
     const conflict = await service.push(actor, {
       deviceId: request.deviceId,
       events: [
@@ -1471,6 +1555,391 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       [entityId],
     )
     expect(stored.rows[0]?.payload_json.companyAddress).toBe('Fixture address')
+  })
+
+  it('rejects defaults without a project, then accepts the same event after its dependency arrives', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const [projectId, countryId] = [randomUUID(), randomUUID()]
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'project_defaults',
+      entityId: projectId,
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        project_id: projectId,
+        department_title: ' Procurement ',
+        company_address: ' Fixture address ',
+        company_contact: null,
+        default_currency: 'XOF',
+        default_language_pair: 'zh_fr',
+        default_tax_template_id: null,
+      },
+    }
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const request = { deviceId: randomUUID(), events: [event] }
+    expect((await service.push(actor, request)).results[0]?.status).toBe(
+      'validation_error',
+    )
+    expect(
+      (
+        await pool!.query(
+          'SELECT 1 FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+          [projectId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM sync_events WHERE event_id = $1', [
+          event.eventId,
+        ])
+      ).rowCount,
+    ).toBe(0)
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'Fixture country', 'UTC')",
+      [countryId, `DEFAULT-C-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'Fixture project', 'Fixture site', 'Fixture department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `DEFAULT-P-${projectId}`],
+    )
+    expect((await service.push(actor, request)).results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(
+      (
+        await pool!.query(
+          'SELECT department_title, company_address, company_contact FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      department_title: 'Procurement',
+      company_address: 'Fixture address',
+      company_contact: null,
+    })
+  })
+
+  it('keeps a REST-edited default and publishes its actual version when stale Push conflicts', async () => {
+    const [projectId, countryId] = [randomUUID(), randomUUID()]
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'Fixture country', 'UTC')",
+      [countryId, `DEFAULT-C-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'Fixture project', 'Fixture site', 'Fixture department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `DEFAULT-P-${projectId}`],
+    )
+    const store = new PostgresSyncStore(pool!)
+    const service = new SyncService(store)
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const makeEvent = (baseVersion: number, address: string) => ({
+      eventId: randomUUID(),
+      entityType: 'project_defaults',
+      entityId: projectId,
+      operation: 'upsert',
+      baseVersion,
+      payload: {
+        projectId,
+        departmentTitle: 'Procurement',
+        companyAddress: address,
+        companyContact: 'Fixture contact',
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        defaultTaxTemplateId: null,
+      },
+    })
+    expect(
+      (
+        await service.push(actor, {
+          deviceId: randomUUID(),
+          events: [makeEvent(0, 'First address')],
+        })
+      ).results[0]?.status,
+    ).toBe('accepted')
+    await new PostgresMasterDataStore(pool!).saveProjectDefaults(
+      {
+        projectId,
+        departmentTitle: 'Procurement',
+        companyAddress: 'REST address',
+        companyContact: 'Fixture contact',
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        defaultTaxTemplateId: null,
+      },
+      actorId,
+    )
+    const stale = makeEvent(1, 'Stale address')
+    expect(
+      (await service.push(actor, { deviceId: randomUUID(), events: [stale] }))
+        .results[0],
+    ).toMatchObject({ status: 'conflict', serverVersion: 2 })
+    expect(
+      (
+        await pool!.query(
+          'SELECT company_address, version FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({ company_address: 'REST address', version: '2' })
+    expect(
+      (
+        await pool!.query(
+          'SELECT server_payload_json FROM sync_conflicts WHERE event_id = $1',
+          [stale.eventId],
+        )
+      ).rows[0]?.server_payload_json,
+    ).toMatchObject({ projectId, companyAddress: 'REST address' })
+    expect(
+      (
+        await pool!.query(
+          "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      version: '2',
+      payload_json: { companyAddress: 'REST address' },
+    })
+    const resolved = makeEvent(2, 'Resolved address')
+    expect(
+      (
+        await service.push(actor, {
+          deviceId: randomUUID(),
+          events: [resolved],
+        })
+      ).results[0],
+    ).toMatchObject({ status: 'accepted', serverVersion: 3 })
+    expect(
+      (
+        await pool!.query(
+          'SELECT company_address, version FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({ company_address: 'Resolved address', version: '3' })
+  })
+
+  it('reconciles equal-version legacy sync defaults without overwriting divergent REST data', async () => {
+    const [projectId, countryId] = [randomUUID(), randomUUID()]
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'Fixture country', 'UTC')",
+      [countryId, `DEFAULT-C-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'Fixture project', 'Fixture site', 'Fixture department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `DEFAULT-P-${projectId}`],
+    )
+    const rest = {
+      projectId,
+      departmentTitle: 'Procurement',
+      companyAddress: 'REST retained',
+      companyContact: null,
+      defaultCurrency: 'XOF' as const,
+      defaultLanguagePair: 'zh_fr' as const,
+      defaultTaxTemplateId: null,
+    }
+    await new PostgresMasterDataStore(pool!).saveProjectDefaults(rest, actorId)
+    await pool!.query(
+      "INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by) VALUES ('project_defaults', $1, 1, FALSE, $2, $3)",
+      [projectId, { ...rest, companyAddress: 'Legacy sync-only' }, actorId],
+    )
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'project_defaults',
+      entityId: projectId,
+      operation: 'upsert',
+      baseVersion: 1,
+      payload: { ...rest, companyAddress: 'Offline edit' },
+    }
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    expect(
+      (await service.push(actor, { deviceId: randomUUID(), events: [event] }))
+        .results[0],
+    ).toMatchObject({ status: 'conflict', serverVersion: 2 })
+    expect(
+      (
+        await pool!.query(
+          'SELECT company_address, version FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({ company_address: 'REST retained', version: '2' })
+    expect(
+      (
+        await pool!.query(
+          "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      version: '2',
+      payload_json: { companyAddress: 'REST retained', companyContact: null },
+    })
+    expect(
+      (
+        await pool!.query(
+          'SELECT server_payload_json FROM sync_conflicts WHERE event_id = $1',
+          [event.eventId],
+        )
+      ).rows[0]?.server_payload_json,
+    ).toMatchObject({ companyAddress: 'REST retained' })
+    const resolved = {
+      ...event,
+      eventId: randomUUID(),
+      baseVersion: 2,
+      payload: { ...rest, companyAddress: 'Resolved after inspection' },
+    }
+    expect(
+      (
+        await service.push(actor, {
+          deviceId: randomUUID(),
+          events: [resolved],
+        })
+      ).results[0],
+    ).toMatchObject({ status: 'accepted', serverVersion: 3 })
+    expect(
+      (
+        await pool!.query(
+          'SELECT company_address, version FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      company_address: 'Resolved after inspection',
+      version: '3',
+    })
+    await pool!.query(
+      "UPDATE sync_entities SET version = 5, payload_json = $2 WHERE entity_type = 'project_defaults' AND entity_id = $1",
+      [projectId, { ...rest, companyAddress: 'Legacy ahead' }],
+    )
+    const ahead = {
+      ...event,
+      eventId: randomUUID(),
+      baseVersion: 5,
+      payload: { ...rest, companyAddress: 'Another offline edit' },
+    }
+    expect(
+      (await service.push(actor, { deviceId: randomUUID(), events: [ahead] }))
+        .results[0],
+    ).toMatchObject({ status: 'conflict', serverVersion: 6 })
+    expect(
+      (
+        await pool!.query(
+          'SELECT company_address, version FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rows[0],
+    ).toMatchObject({
+      company_address: 'Resolved after inspection',
+      version: '6',
+    })
+    const aheadResolved = {
+      ...ahead,
+      eventId: randomUUID(),
+      baseVersion: 6,
+      payload: { ...rest, companyAddress: 'Resolved after legacy ahead' },
+    }
+    expect(
+      (
+        await service.push(actor, {
+          deviceId: randomUUID(),
+          events: [aheadResolved],
+        })
+      ).results[0],
+    ).toMatchObject({ status: 'accepted', serverVersion: 7 })
+  })
+
+  it('rolls back project defaults and sync bookkeeping when audit insertion fails', async () => {
+    const [projectId, countryId] = [randomUUID(), randomUUID()]
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'Fixture country', 'UTC')",
+      [countryId, `DEFAULT-C-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'Fixture project', 'Fixture site', 'Fixture department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `DEFAULT-P-${projectId}`],
+    )
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'project_defaults' as const,
+      entityId: projectId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        projectId,
+        departmentTitle: 'Procurement',
+        companyAddress: 'Fixture address',
+        companyContact: 'Fixture contact',
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        defaultTaxTemplateId: null,
+      },
+    }
+    expect(
+      await new PostgresSyncStore(pool!).pushEvent({
+        event,
+        installationId: randomUUID(),
+        actorId: randomUUID(),
+      }),
+    ).toMatchObject({ status: 'validation_error', serverVersion: null })
+    expect(
+      (
+        await pool!.query(
+          'SELECT 1 FROM project_print_defaults WHERE project_id = $1',
+          [projectId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+          [projectId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM sync_events WHERE event_id = $1', [
+          event.eventId,
+        ])
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM server_change_log WHERE entity_type = 'project_defaults' AND entity_id = $1",
+          [projectId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM audit_entries WHERE entity_type = 'project_print_defaults' AND entity_id = $1",
+          [projectId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      await new PostgresSyncStore(pool!).pushEvent({
+        event,
+        installationId: randomUUID(),
+        actorId,
+      }),
+    ).toMatchObject({ status: 'accepted', serverVersion: 1 })
   })
 
   it('persists validated tax and exchange-rate events without losing conflicts', async () => {

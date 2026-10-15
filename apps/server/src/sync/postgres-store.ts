@@ -1,5 +1,6 @@
 import {
   exchangeRateSchema,
+  projectDefaultsSchema,
   referenceMasterDataSchema,
   taxTemplateSchema,
 } from '@honsen/shared'
@@ -30,6 +31,16 @@ type StoredEvent = {
 type StoredEntity = {
   version: string
   payload_json: Record<string, unknown>
+}
+
+type ProjectDefaultsBusinessRow = {
+  department_title: string
+  company_address: string
+  company_contact: string | null
+  default_currency: string
+  default_language_pair: string
+  default_tax_template_id: string | null
+  version: string
 }
 
 export class PostgresSyncStore implements SyncStore {
@@ -132,6 +143,39 @@ export class PostgresSyncStore implements SyncStore {
           return result
         }
       }
+      if (input.event.entityType === 'project_defaults') {
+        const business = await client.query<ProjectDefaultsBusinessRow>(
+          `SELECT department_title, company_address, company_contact,
+             default_currency, default_language_pair,
+             default_tax_template_id::text AS default_tax_template_id, version
+           FROM project_print_defaults WHERE project_id = $1 FOR UPDATE`,
+          [input.event.entityId],
+        )
+        const row = business.rows[0]
+        const synced = current
+          ? canonicalProjectDefaultsPayload({
+              ...input.event,
+              payload: current.payload_json,
+            })
+          : null
+        if (
+          row &&
+          (Number(row.version) !== currentVersion ||
+            (current &&
+              JSON.stringify(synced) !==
+                JSON.stringify(
+                  projectDefaultsBusinessPayload(input.event.entityId, row),
+                )))
+        ) {
+          const result = await this.recordProjectDefaultsBusinessConflict(
+            client,
+            input,
+            current,
+          )
+          await client.query('COMMIT')
+          return result
+        }
+      }
       if (currentVersion !== input.event.baseVersion) {
         const result = {
           eventId: input.event.eventId,
@@ -174,6 +218,18 @@ export class PostgresSyncStore implements SyncStore {
           ? canonicalExchangeRatePayload(input.event)
           : null
       if (input.event.entityType === 'exchange_rate' && !ratePayload) {
+        await client.query('ROLLBACK')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+        }
+      }
+      const defaultsPayload =
+        input.event.entityType === 'project_defaults'
+          ? canonicalProjectDefaultsPayload(input.event)
+          : null
+      if (input.event.entityType === 'project_defaults' && !defaultsPayload) {
         await client.query('ROLLBACK')
         return {
           eventId: input.event.eventId,
@@ -320,6 +376,32 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      if (input.event.entityType === 'project_defaults') {
+        const projected = await this.projectProjectDefaults(
+          client,
+          defaultsPayload!,
+          input.event.entityId,
+          input.actorId,
+          currentVersion,
+        )
+        if (projected === 'conflict') {
+          const result = await this.recordProjectDefaultsBusinessConflict(
+            client,
+            input,
+            current,
+          )
+          await client.query('COMMIT')
+          return result
+        }
+        if (projected === 'validation_error') {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+      }
       await client.query(
         `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
@@ -335,7 +417,11 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           serverVersion,
           deleted,
-          ratePayload ?? taxPayload ?? unitPayload ?? input.event.payload,
+          defaultsPayload ??
+            ratePayload ??
+            taxPayload ??
+            unitPayload ??
+            input.event.payload,
           input.actorId,
         ],
       )
@@ -363,7 +449,11 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           input.event.operation,
           serverVersion,
-          ratePayload ?? taxPayload ?? unitPayload ?? input.event.payload,
+          defaultsPayload ??
+            ratePayload ??
+            taxPayload ??
+            unitPayload ??
+            input.event.payload,
           input.actorId,
         ],
       )
@@ -385,6 +475,7 @@ export class PostgresSyncStore implements SyncStore {
           'unit',
           'tax_template',
           'exchange_rate',
+          'project_defaults',
         ].includes(input.event.entityType) &&
         typeof error === 'object' &&
         error !== null &&
@@ -784,6 +875,125 @@ export class PostgresSyncStore implements SyncStore {
     return 'accepted'
   }
 
+  private async projectProjectDefaults(
+    client: PoolClient,
+    payload: Record<string, unknown>,
+    projectId: string,
+    actorId: string,
+    expectedVersion: number,
+  ): Promise<'accepted' | 'validation_error' | 'conflict'> {
+    const project = await client.query<{ country_id: string }>(
+      'SELECT country_id::text AS country_id FROM projects WHERE id = $1 AND deleted_at IS NULL FOR SHARE',
+      [projectId],
+    )
+    if (!project.rows[0]) return 'validation_error'
+    if (payload.defaultTaxTemplateId !== null) {
+      const tax = await client.query(
+        `SELECT 1 FROM tax_templates WHERE id = $1 AND is_active = TRUE
+           AND deleted_at IS NULL AND (country_id IS NULL OR country_id = $2) FOR SHARE`,
+        [payload.defaultTaxTemplateId, project.rows[0].country_id],
+      )
+      if (tax.rowCount !== 1) return 'validation_error'
+    }
+    const written = await client.query(
+      `INSERT INTO project_print_defaults
+         (project_id, department_title, company_address, company_contact,
+          default_currency, default_language_pair, default_tax_template_id, version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (project_id) DO UPDATE SET
+         department_title = EXCLUDED.department_title,
+         company_address = EXCLUDED.company_address,
+         company_contact = EXCLUDED.company_contact,
+         default_currency = EXCLUDED.default_currency,
+         default_language_pair = EXCLUDED.default_language_pair,
+         default_tax_template_id = EXCLUDED.default_tax_template_id,
+         version = project_print_defaults.version + 1,
+         updated_at = NOW(), deleted_at = NULL
+       WHERE project_print_defaults.version = $9`,
+      [
+        projectId,
+        payload.departmentTitle,
+        payload.companyAddress,
+        payload.companyContact,
+        payload.defaultCurrency,
+        payload.defaultLanguagePair,
+        payload.defaultTaxTemplateId,
+        expectedVersion + 1,
+        expectedVersion,
+      ],
+    )
+    if (written.rowCount !== 1) return 'conflict'
+    await client.query(
+      "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'project_print_defaults', $2, 'upsert')",
+      [actorId, projectId],
+    )
+    return 'accepted'
+  }
+
+  private async recordProjectDefaultsBusinessConflict(
+    client: PoolClient,
+    input: { event: SyncEvent; installationId: string; actorId: string },
+    current: StoredEntity | undefined,
+  ): Promise<SyncEventResult> {
+    const business = await client.query<ProjectDefaultsBusinessRow>(
+      `SELECT department_title, company_address, company_contact, default_currency,
+         default_language_pair, default_tax_template_id::text AS default_tax_template_id, version
+       FROM project_print_defaults WHERE project_id = $1 FOR UPDATE`,
+      [input.event.entityId],
+    )
+    const row = business.rows[0]
+    if (!row)
+      throw new Error('project defaults disappeared during conflict detection')
+    const payload = projectDefaultsBusinessPayload(input.event.entityId, row)
+    let businessVersion = Number(row.version)
+    const currentVersion = current ? Number(current.version) : 0
+    if (businessVersion <= currentVersion) {
+      await client.query(
+        'UPDATE project_print_defaults SET version = $2, updated_at = NOW() WHERE project_id = $1',
+        [input.event.entityId, currentVersion + 1],
+      )
+      businessVersion = currentVersion + 1
+      await client.query(
+        "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'project_print_defaults', $2, 'reconcile')",
+        [input.actorId, input.event.entityId],
+      )
+    }
+    if (businessVersion > currentVersion) {
+      const audit = await client.query<{ actor_id: string | null }>(
+        "SELECT actor_id::text AS actor_id FROM audit_entries WHERE entity_type = 'project_print_defaults' AND entity_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        [input.event.entityId],
+      )
+      const actorId = audit.rows[0]?.actor_id ?? input.actorId
+      await client.query(
+        `INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
+         VALUES ('project_defaults', $1, $2, FALSE, $3, $4)
+         ON CONFLICT (entity_type, entity_id) DO UPDATE SET version = EXCLUDED.version,
+           is_deleted = FALSE, payload_json = EXCLUDED.payload_json,
+           updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+        [input.event.entityId, businessVersion, payload, actorId],
+      )
+      await client.query(
+        `INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id)
+         VALUES ('project_defaults', $1, 'upsert', $2, $3, $4)`,
+        [input.event.entityId, businessVersion, payload, actorId],
+      )
+    }
+    const result: SyncEventResult = {
+      eventId: input.event.eventId,
+      status: 'conflict',
+      serverVersion: Math.max(businessVersion, currentVersion),
+    }
+    await this.recordConflict(
+      client,
+      input,
+      businessVersion >= currentVersion
+        ? { version: String(businessVersion), payload_json: payload }
+        : current,
+      result,
+    )
+    return result
+  }
+
   private async recordExchangeRateBusinessConflict(
     client: PoolClient,
     input: { event: SyncEvent; installationId: string; actorId: string },
@@ -1015,55 +1225,23 @@ export class PostgresSyncStore implements SyncStore {
     projectId: string,
     taxTemplateId: string,
   ): Promise<boolean> {
-    const project = await this.pool.query<{
-      is_deleted: boolean
-      payload_json: Record<string, unknown>
-    }>(
-      "SELECT is_deleted, payload_json FROM sync_entities WHERE entity_type = 'project' AND entity_id = $1",
+    const project = await this.pool.query<{ is_deleted: boolean }>(
+      "SELECT is_deleted FROM sync_entities WHERE entity_type = 'project' AND entity_id = $1",
       [projectId],
     )
     if (project.rows[0]?.is_deleted) return false
-    const projectPayload = project.rows[0]?.payload_json
-    const countryId = projectPayload
-      ? (projectPayload.countryId ?? projectPayload.country_id)
-      : (
-          await this.pool.query<{ country_id: string }>(
-            'SELECT country_id::text AS country_id FROM projects WHERE id = $1 AND deleted_at IS NULL',
-            [projectId],
-          )
-        ).rows[0]?.country_id
-    if (typeof countryId !== 'string') return false
-    const tax = await this.pool.query<{
-      is_deleted: boolean
-      payload_json: Record<string, unknown>
-    }>(
-      "SELECT is_deleted, payload_json FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+    const tax = await this.pool.query<{ is_deleted: boolean }>(
+      "SELECT is_deleted FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
       [taxTemplateId],
     )
     if (tax.rows[0]?.is_deleted) return false
-    const taxPayload = tax.rows[0]?.payload_json
-    if (taxPayload) {
-      const active = taxPayload.isActive ?? taxPayload.is_active
-      const taxCountry =
-        taxPayload.countryId !== undefined
-          ? taxPayload.countryId
-          : taxPayload.country_id
-      return (
-        active === true && (taxCountry === null || taxCountry === countryId)
-      )
-    }
-    const stored = await this.pool.query<{
-      country_id: string | null
-      is_active: boolean
-    }>(
-      'SELECT country_id::text AS country_id, is_active FROM tax_templates WHERE id = $1 AND deleted_at IS NULL',
-      [taxTemplateId],
+    const stored = await this.pool.query(
+      `SELECT 1 FROM projects p JOIN tax_templates t ON t.id = $2
+       WHERE p.id = $1 AND p.deleted_at IS NULL AND t.is_active = TRUE
+         AND t.deleted_at IS NULL AND (t.country_id IS NULL OR t.country_id = p.country_id)`,
+      [projectId, taxTemplateId],
     )
-    const row = stored.rows[0]
-    return (
-      row?.is_active === true &&
-      (row.country_id === null || row.country_id === countryId)
-    )
+    return stored.rowCount === 1
   }
 
   async getEntityPayload(
@@ -1126,6 +1304,21 @@ function eventResult(row: StoredEvent): SyncEventResult {
     status: row.result_status,
     serverVersion:
       row.server_version === null ? null : Number(row.server_version),
+  }
+}
+
+function projectDefaultsBusinessPayload(
+  projectId: string,
+  row: ProjectDefaultsBusinessRow,
+): Record<string, unknown> {
+  return {
+    projectId,
+    departmentTitle: row.department_title.trim(),
+    companyAddress: row.company_address.trim(),
+    companyContact: row.company_contact?.trim() ?? null,
+    defaultCurrency: row.default_currency.trim(),
+    defaultLanguagePair: row.default_language_pair,
+    defaultTaxTemplateId: row.default_tax_template_id,
   }
 }
 
@@ -1208,4 +1401,29 @@ function canonicalExchangeRatePayload(
   })
   if (!parsed.success) return null
   return { ...parsed.data, version: 1 }
+}
+
+function canonicalProjectDefaultsPayload(
+  event: SyncEvent,
+): Record<string, unknown> | null {
+  if (event.operation !== 'upsert') return null
+  const payload = event.payload
+  const parsed = projectDefaultsSchema.safeParse({
+    projectId: payload.projectId ?? payload.project_id,
+    departmentTitle: payload.departmentTitle ?? payload.department_title,
+    companyAddress: payload.companyAddress ?? payload.company_address,
+    companyContact:
+      payload.companyContact !== undefined
+        ? payload.companyContact
+        : payload.company_contact,
+    defaultCurrency: payload.defaultCurrency ?? payload.default_currency,
+    defaultLanguagePair:
+      payload.defaultLanguagePair ?? payload.default_language_pair,
+    defaultTaxTemplateId:
+      payload.defaultTaxTemplateId !== undefined
+        ? payload.defaultTaxTemplateId
+        : payload.default_tax_template_id,
+  })
+  if (!parsed.success || parsed.data.projectId !== event.entityId) return null
+  return parsed.data
 }

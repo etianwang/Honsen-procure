@@ -46,11 +46,9 @@ export function ProjectDefaultsEditor({
     return <Alert type="info" title="尚无可维护的同步项目" showIcon />
   }
 
-  const incomplete = [
-    draft.departmentTitle,
-    draft.companyAddress,
-    draft.companyContact,
-  ].some((value) => value.trim() === '')
+  const incomplete = [draft.departmentTitle, draft.companyAddress].some(
+    (value) => value.trim() === '',
+  )
   const projectCountryId = referenceData.find(
     (item) => item.kind === 'project' && item.id === projectId,
   )
@@ -84,7 +82,10 @@ export function ProjectDefaultsEditor({
 
   async function save(): Promise<void> {
     if (!draft) return
-    const defaults = draft
+    const defaults = {
+      ...draft,
+      companyContact: draft.companyContact?.trim() || null,
+    }
     try {
       await api.saveProjectDefaults(defaults)
       setMessage('项目默认值已保存')
@@ -169,7 +170,7 @@ export function ProjectDefaultsEditor({
         <Input
           id="project-contact"
           aria-label="页脚联系方式"
-          value={draft.companyContact}
+          value={draft.companyContact ?? ''}
           onChange={(event) =>
             setDraft({ ...draft, companyContact: event.target.value })
           }

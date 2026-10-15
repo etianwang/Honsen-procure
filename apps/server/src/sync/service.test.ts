@@ -460,6 +460,20 @@ describe('SyncService', () => {
     expect(
       (await push(['super_administrator'], [camel])).results[0]?.status,
     ).toBe('accepted')
+    expect(
+      (
+        await push(
+          ['administrator'],
+          [
+            {
+              ...camel,
+              eventId: randomUUID(),
+              payload: { ...camel.payload, companyContact: null },
+            },
+          ],
+        )
+      ).results[0]?.status,
+    ).toBe('accepted')
     const bad = await push(
       ['administrator'],
       [
@@ -495,7 +509,7 @@ describe('SyncService', () => {
       (await push(['administrator'], [{ ...withTax, eventId: randomUUID() }]))
         .results[0]?.status,
     ).toBe('accepted')
-    expect(store.pushed).toBe(3)
+    expect(store.pushed).toBe(4)
   })
 
   it('rejects changing a used project country without mutation', async () => {

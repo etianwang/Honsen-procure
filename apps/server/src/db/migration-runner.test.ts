@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migration-runner.js'
@@ -41,5 +42,49 @@ describe.skipIf(!pool)('PostgreSQL migrations', () => {
       'user_roles',
       'users',
     ])
+  })
+
+  it('allows an optional contact without losing a row from the prior schema', async () => {
+    const client = await pool!.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        'CREATE TEMP TABLE project_print_defaults (project_id UUID PRIMARY KEY, company_contact TEXT NOT NULL) ON COMMIT DROP',
+      )
+      await client.query(
+        "INSERT INTO project_print_defaults (project_id, company_contact) VALUES ('00000000-0000-4000-8000-000000000111', 'previous contact')",
+      )
+      const migration = await readFile(
+        new URL(
+          '../../migrations/005_nullable_project_default_contact.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      )
+      await client.query(migration)
+      expect(
+        (
+          await client.query(
+            'SELECT company_contact FROM project_print_defaults',
+          )
+        ).rows[0],
+      ).toMatchObject({ company_contact: 'previous contact' })
+      await client.query(
+        "UPDATE project_print_defaults SET company_contact = NULL WHERE project_id = '00000000-0000-4000-8000-000000000111'",
+      )
+      expect(
+        (
+          await client.query(
+            'SELECT company_contact FROM project_print_defaults',
+          )
+        ).rows[0],
+      ).toMatchObject({ company_contact: null })
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
   })
 })

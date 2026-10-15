@@ -485,6 +485,12 @@ test('administrator changes project defaults and sees the selected project value
   await page.getByLabel('页脚联系方式').fill('fixture updated contact')
   await page.getByRole('button', { name: '保存项目默认值' }).click()
   await expect(page.getByText('项目默认值已保存')).toBeVisible()
+  await page.getByLabel('页脚联系方式').fill('')
+  await expect(
+    page.getByRole('button', { name: '保存项目默认值' }),
+  ).toBeEnabled()
+  await page.getByRole('button', { name: '保存项目默认值' }).click()
+  await expect(page.getByText('项目默认值已保存')).toBeVisible()
   await expect(browserErrors).toEqual([])
 })
 

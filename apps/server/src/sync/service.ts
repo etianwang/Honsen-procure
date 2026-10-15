@@ -210,7 +210,10 @@ function referencePayload(
     rateDecimal: payload.rateDecimal ?? payload.rate_decimal,
     departmentTitle: payload.departmentTitle ?? payload.department_title,
     companyAddress: payload.companyAddress ?? payload.company_address,
-    companyContact: payload.companyContact ?? payload.company_contact,
+    companyContact:
+      payload.companyContact !== undefined
+        ? payload.companyContact
+        : payload.company_contact,
     defaultTaxTemplateId:
       payload.defaultTaxTemplateId !== undefined
         ? payload.defaultTaxTemplateId
