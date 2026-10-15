@@ -6,6 +6,7 @@ import {
   Settings,
 } from 'lucide-react'
 import type { UserRole } from '../lib/permissions'
+import type { SyncState } from '../lib/sync-lifecycle'
 
 export type AppPage =
   | 'home'
@@ -31,6 +32,7 @@ type AppShellProps = PropsWithChildren<{
   role: UserRole
   onNavigate: (page: AppPage) => void
   onLock?: () => void
+  syncState?: SyncState
   authorizationContexts?: AuthorizationContextOption[]
   selectedAuthorizationContext?: string
   onSelectAuthorizationContext?: (value: string) => void
@@ -51,6 +53,7 @@ export function AppShell({
   role,
   onNavigate,
   onLock,
+  syncState,
   authorizationContexts,
   selectedAuthorizationContext,
   onSelectAuthorizationContext,
@@ -153,7 +156,19 @@ export function AppShell({
                 </select>
               </label>
             )}
-            <span>离线本地数据</span>
+            <span role="status" aria-label="同步状态">
+              {syncState?.kind === 'syncing'
+                ? '同步中'
+                : syncState?.kind === 'synced'
+                  ? '上次同步成功；新操作可能待同步'
+                  : syncState?.kind === 'pending'
+                    ? `待同步 ${syncState.pendingCount}`
+                    : syncState?.kind === 'retrying'
+                      ? '连接失败，等待重试；本地数据待同步'
+                      : syncState?.kind === 'auth-required'
+                        ? '登录已失效，请重新在线登录'
+                        : '离线本地数据'}
+            </span>
             <span className="avatar">张</span>
             <span>{roleLabel[role]}</span>
             {onLock && (

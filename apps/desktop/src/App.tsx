@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { startSyncLifecycle, type SyncState } from './lib/sync-lifecycle'
 import { ConfigProvider } from 'antd'
 import { calculateDraftTotals } from '@honsen/shared'
 import {
@@ -172,18 +173,36 @@ function App() {
     username: string
     roles: string[]
     requires_password_change: boolean
+    onlineAuthenticated: boolean
   } | null>(null)
+  const [syncState, setSyncState] = useState<SyncState>({
+    kind: 'offline-pending',
+  })
   const [authorizationContext, setAuthorizationContext] =
     useState<RequisitionContext | null>(null)
   const [authorizationContexts, setAuthorizationContexts] = useState<
     AuthorizationContextOption[]
   >([])
   const [contextError, setContextError] = useState('')
+  const authorizationRefreshReady =
+    session?.onlineAuthenticated &&
+    (syncState.kind === 'pending' || syncState.kind === 'synced')
+  useEffect(() => {
+    if (!session?.onlineAuthenticated) return
+    const invoke = (
+      window as Window & {
+        __TAURI__?: { core?: { invoke?: <T>(command: string) => Promise<T> } }
+      }
+    ).__TAURI__?.core?.invoke
+    if (!invoke) return
+    return startSyncLifecycle(invoke, setSyncState, window)
+  }, [session?.user_id, session?.onlineAuthenticated])
   useEffect(() => {
     if (!session) {
       setAuthorizationContext(null)
       return
     }
+    let active = true
     const invoke = (
       window as Window & {
         __TAURI__?: { core?: { invoke?: <T>(command: string) => Promise<T> } }
@@ -207,6 +226,7 @@ function App() {
       >('get_authorization_context'),
     ])
       .then(([contexts, context]) => {
+        if (!active) return
         setAuthorizationContexts(contexts)
         setAuthorizationContext({
           ...context,
@@ -222,11 +242,15 @@ function App() {
         setContextError('')
       })
       .catch(() => {
+        if (!active) return
         setAuthorizationContexts([])
         setAuthorizationContext(null)
         setContextError('当前账户没有有效的离线授权范围，无法新建采购申请。')
       })
-  }, [session])
+    return () => {
+      active = false
+    }
+  }, [session, authorizationRefreshReady])
   const selectAuthorizationContext = (value: string) => {
     const [projectId, departmentId, teamId] = value.split(':')
     const invoke = (
@@ -350,6 +374,11 @@ function App() {
               : undefined
           }
           onSelectAuthorizationContext={selectAuthorizationContext}
+          syncState={
+            session?.onlineAuthenticated
+              ? syncState
+              : { kind: 'offline-pending' }
+          }
           onLock={
             session
               ? () => {
@@ -448,7 +477,15 @@ function App() {
         </AppShell>
       ) : (
         <LoginPage
-          onLogin={setSession}
+          onLogin={(authenticated, mode) => {
+            setSyncState({
+              kind: mode === 'online' ? 'syncing' : 'offline-pending',
+            })
+            setSession({
+              ...authenticated,
+              onlineAuthenticated: mode === 'online',
+            })
+          }}
           onPreview={() => setPreviewOpen(true)}
         />
       )}

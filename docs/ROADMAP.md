@@ -153,6 +153,8 @@ The follow-on T10 Push cursor-order reliability slice serializes each Push chang
 
 The T04 unit REST-to-Pull reliability slice now makes an authorized online unit save visible to another installation's cursor Pull, with Rust-compatible payload, immutable-code protection, monotonic business/sync version and commit-ordered publication. Isolated PostgreSQL tests cover edits, stale Push conflict, legacy divergence, late failure/retry and an earlier uncommitted log writer; the full workspace, Rust and DOM gates passed. This is not publication for all other master-data types, native two-client acceptance or completion of T04/T10 or any milestone; checkboxes and dependencies remain unchanged.
 
+The T10-B desktop runtime checkpoint starts Push→Pull only after successful online account authentication, retains local entry on sync transport failure, and displays pending/retrying/synced state according to the trusted Push acknowledgement. Bounded retries, browser connectivity events and lock cleanup have unit and DOM evidence; the full isolated PostgreSQL workspace suite also passed. This is partial runtime progress: no native two-device/reconnect evidence, complete conflict-aware scheduling, post-mutation trigger, WebSocket lifecycle or parent T10 acceptance. M3 remains unchecked.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
