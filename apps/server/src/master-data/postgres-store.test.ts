@@ -57,6 +57,135 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
   afterAll(async () => {
     await testPool!.end()
   })
+  it('publishes REST tax-template saves to cursor Pull', async () => {
+    const [actorId, taxId] = [randomUUID(), randomUUID()]
+    await testPool!.query(
+      "INSERT INTO users (id, business_code, username, password_hash, ui_locale, is_enabled) VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE)",
+      [actorId, `TAX-A-${actorId}`, `tax-${actorId}`],
+    )
+    const tax = {
+      id: taxId,
+      businessCode: `TAX-${taxId}`,
+      name: 'REST tax',
+      countryId: null,
+      rateBasisPoints: 1800,
+      effectiveAt: '2026-10-15',
+      isActive: true,
+    }
+    try {
+      const cursor = (
+        await testPool!.query<{ sequence: string }>(
+          'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+        )
+      ).rows[0]!.sequence
+      await new PostgresMasterDataStore(testPool!).saveTaxTemplate(tax, actorId)
+      const pulled = await new PostgresSyncStore(testPool!).pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor,
+        limit: 500,
+      })
+      expect(
+        pulled.changes.filter((change) => change.entityId === taxId),
+      ).toMatchObject([
+        {
+          entityType: 'tax_template',
+          version: 1,
+          payload: { ...tax, version: 1 },
+        },
+      ])
+    } finally {
+      await testPool!.query(
+        "DELETE FROM server_change_log WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
+      )
+      await testPool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
+      )
+      await testPool!.query(
+        "DELETE FROM audit_entries WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
+      )
+      await testPool!.query('DELETE FROM tax_templates WHERE id = $1', [taxId])
+      await testPool!.query('DELETE FROM users WHERE id = $1', [actorId])
+    }
+  })
+
+  it('rolls back a REST tax-template save when cursor publication fails', async () => {
+    const [actorId, taxId] = [randomUUID(), randomUUID()]
+    await testPool!.query(
+      "INSERT INTO users (id, business_code, username, password_hash, ui_locale, is_enabled) VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE)",
+      [actorId, `TAX-A-${actorId}`, `tax-${actorId}`],
+    )
+    const tax = {
+      id: taxId,
+      businessCode: `TAX-${taxId}`,
+      name: 'Rollback tax',
+      countryId: null,
+      rateBasisPoints: 1800,
+      effectiveAt: '2026-10-15',
+      isActive: true,
+    }
+    const failingPool = {
+      async connect() {
+        const client = await testPool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            if (sql.includes('INSERT INTO server_change_log'))
+              throw new Error('injected tax publication failure')
+            return client.query(sql, values)
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    try {
+      await expect(
+        new PostgresMasterDataStore(failingPool).saveTaxTemplate(tax, actorId),
+      ).rejects.toThrow('injected tax publication failure')
+      const empty = await testPool!.query(
+        `SELECT
+           (SELECT COUNT(*) FROM tax_templates WHERE id = $1) AS business,
+           (SELECT COUNT(*) FROM audit_entries WHERE entity_type = 'tax_template' AND entity_id = $1) AS audit,
+           (SELECT COUNT(*) FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1) AS synced,
+           (SELECT COUNT(*) FROM server_change_log WHERE entity_type = 'tax_template' AND entity_id = $1) AS changes`,
+        [taxId],
+      )
+      expect(empty.rows[0]).toEqual({
+        business: '0',
+        audit: '0',
+        synced: '0',
+        changes: '0',
+      })
+      await new PostgresMasterDataStore(testPool!).saveTaxTemplate(tax, actorId)
+      expect(
+        (
+          await testPool!.query(
+            "SELECT version FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+            [taxId],
+          )
+        ).rows[0]?.version,
+      ).toBe('1')
+    } finally {
+      await testPool!.query(
+        "DELETE FROM server_change_log WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
+      )
+      await testPool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
+      )
+      await testPool!.query(
+        "DELETE FROM audit_entries WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
+      )
+      await testPool!.query('DELETE FROM tax_templates WHERE id = $1', [taxId])
+      await testPool!.query('DELETE FROM users WHERE id = $1', [actorId])
+    }
+  })
+
   it('publishes online unit saves to cursor Pull and preserves a stale Push as a conflict', async () => {
     const [actorId, unitId] = [randomUUID(), randomUUID()]
     const staleEventId = randomUUID()
