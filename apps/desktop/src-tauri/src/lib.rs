@@ -5873,8 +5873,8 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             include_str!("../migrations/0043_exchange_rate_audit.sql"),
         ),
         (
-            "0044_sync_outbox_account_boundary",
-            include_str!("../migrations/0044_sync_outbox_account_boundary.sql"),
+            "0046_sync_outbox_account_boundary",
+            include_str!("../migrations/0046_sync_outbox_account_boundary.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -7880,7 +7880,7 @@ mod tests {
         connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, 'material', ?2, 'upsert', 0, '{\"legacy\":true}', 1)", params![event_id, Uuid::new_v4().to_string()]).unwrap();
         connection
             .execute_batch(include_str!(
-                "../migrations/0044_sync_outbox_account_boundary.sql"
+                "../migrations/0046_sync_outbox_account_boundary.sql"
             ))
             .unwrap();
         let row: (String, Option<String>) = connection
