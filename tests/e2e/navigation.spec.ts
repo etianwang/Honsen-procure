@@ -1614,6 +1614,21 @@ test('administrator resolves a sync conflict through the accessible control', as
   await expect(page.getByText('没有待处理的同步冲突。')).toBeVisible()
 })
 
+test('cross-account conflict resolution stays visible and gives an actionable error', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('pageerror', (error) => browserErrors.push(error.message))
+  await page.goto('/?test=sync-conflict&deny=account')
+  await page.getByLabel('处理原因').fill('核对另一账户的冲突')
+  await page.getByRole('button', { name: '保留本地' }).click()
+  await expect(page.getByRole('status')).toHaveText(
+    '该冲突属于其他账户或未归属旧事件，当前账户不能处理。',
+  )
+  await expect(page.getByText('云端版本 2 · upsert')).toBeVisible()
+  expect(browserErrors).toEqual([])
+})
+
 test('purchaser rejects with a reason and posts an immutable internal comment', async ({
   page,
 }) => {

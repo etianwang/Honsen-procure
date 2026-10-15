@@ -165,6 +165,8 @@ The desktop read-surface audit found trusted historical/execution/catalog reads 
 
 An unreleased-profile migration compatibility repair now recognizes the exact old account-owner `0044` marker, validates its schema and records equivalent `0046` without repeating `ALTER TABLE` or attributing legacy rows. It is source-branch evidence only; the integrated formal `0044`/expenditure `0045` migration order still needs a dedicated test before T10-SEC-001 acceptance. P1, T10 and M3 remain unchecked.
 
+Desktop conflict resolution now rejects an active account different from the originating outbox owner, and rejects unattributed legacy events, before any supersede/requeue/projection. The UI leaves rejected conflicts visible with an account-boundary message. A same-owner administrator still resolves normally; delegated administrator and legacy recovery need a separate audited contract. This local containment does not close P1, T10 or M3.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

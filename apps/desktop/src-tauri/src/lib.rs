@@ -4578,7 +4578,11 @@ impl LocalAuthService {
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let row: (String, String, String, i64, String, String, String) = transaction.query_row("SELECT c.entity_type, c.entity_id, c.event_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c WHERE c.id = ?1 AND c.resolved_at IS NULL", [input.conflict_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).map_err(|_| AuthError::InvalidInput)?;
+        let row: (String, String, String, i64, String, String, String, Option<String>) = transaction.query_row("SELECT c.entity_type, c.entity_id, c.event_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation, o.owner_account_id FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE c.id = ?1 AND c.resolved_at IS NULL", [input.conflict_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?))).map_err(|_| AuthError::InvalidInput)?;
+        let actor_account_id = actor_id.to_string();
+        if row.7.as_deref() != Some(actor_account_id.as_str()) {
+            return Err(AuthError::SyncAccountBoundary);
+        }
         let entity_id = Uuid::parse_str(&row.1).map_err(|_| AuthError::Database)?;
         if !is_directly_resolvable_sync_entity(&row.0) {
             return Err(AuthError::InvalidInput);
@@ -8542,6 +8546,132 @@ mod tests {
     }
 
     #[test]
+    fn conflict_resolution_never_changes_another_accounts_or_legacy_event_owner() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account_a = Uuid::new_v4();
+        let account_b = Uuid::new_v4();
+        for (id, username) in [(account_a, "conflict-a"), (account_b, "conflict-b")] {
+            service
+                .cache_verified_account(
+                    CachedAccount {
+                        id,
+                        username: username.into(),
+                        roles: vec![Role::Administrator],
+                        enabled: true,
+                        requires_password_change: false,
+                    },
+                    "correct-password",
+                    now,
+                )
+                .unwrap();
+        }
+        let owned_event = Uuid::new_v4();
+        let owned_conflict = Uuid::new_v4();
+        let legacy_event = Uuid::new_v4();
+        let legacy_conflict = Uuid::new_v4();
+        {
+            let connection = service.connection.lock().unwrap();
+            for (event, conflict, owner) in [
+                (owned_event, owned_conflict, Some(account_a)),
+                (legacy_event, legacy_conflict, None),
+            ] {
+                let entity = Uuid::new_v4();
+                connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'material', ?2, 'upsert', 0, '{}', 1, ?3)", params![event.to_string(), entity.to_string(), owner.map(|id| id.to_string())]).unwrap();
+                connection.execute("INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) VALUES (?1, ?2, 'material', ?3, 0, 1, '{}', '{}', 'upsert', 2)", params![conflict.to_string(), event.to_string(), entity.to_string()]).unwrap();
+            }
+        }
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "conflict-b",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        for (conflict, resolution) in [
+            (owned_conflict, "keep_local"),
+            (owned_conflict, "use_server"),
+            (legacy_conflict, "keep_local"),
+        ] {
+            assert_eq!(
+                service.resolve_sync_conflict(
+                    ResolveSyncConflictInput {
+                        conflict_id: conflict,
+                        resolution: resolution.into(),
+                        reason: "cross-account attempt".into()
+                    },
+                    now
+                ),
+                Err(AuthError::SyncAccountBoundary)
+            );
+        }
+        {
+            let connection = service.connection.lock().unwrap();
+            let pending: i64 = connection.query_row("SELECT COUNT(*) FROM local_sync_outbox WHERE superseded_at IS NULL AND acknowledged_at IS NULL", [], |row| row.get(0)).unwrap();
+            let unresolved: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_conflicts WHERE resolved_at IS NULL",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!((pending, unresolved), (2, 2));
+        }
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "conflict-a",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: legacy_conflict,
+                    resolution: "use_server".into(),
+                    reason: "legacy still unowned".into(),
+                },
+                now,
+            ),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        service
+            .resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: owned_conflict,
+                    resolution: "keep_local".into(),
+                    reason: "owner resolves".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let new_owner: String = connection
+            .query_row(
+                "SELECT owner_account_id FROM local_sync_outbox WHERE event_id NOT IN (?1, ?2)",
+                params![owned_event.to_string(), legacy_event.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_owner, account_a.to_string());
+        let legacy_unchanged: (Option<String>, Option<i64>) = connection
+            .query_row(
+                "SELECT owner_account_id, superseded_at FROM local_sync_outbox WHERE event_id = ?1",
+                [legacy_event.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(legacy_unchanged, (None, None));
+    }
+
+    #[test]
     fn sync_outbox_never_reassigns_legacy_or_sends_another_accounts_event() {
         let service = LocalAuthService::open_in_memory().unwrap();
         let now = SystemTime::now();
@@ -9182,7 +9312,7 @@ mod tests {
                 CachedAccount {
                     id: purchaser_id,
                     username: "sync-purchaser".into(),
-                    roles: vec![Role::Purchaser],
+                    roles: vec![Role::Administrator],
                     enabled: true,
                     requires_password_change: false,
                 },
@@ -9381,31 +9511,6 @@ mod tests {
             .unwrap();
         assert_eq!(local_name, "local fixture");
         drop(connection);
-        let administrator_id = Uuid::new_v4();
-        service.lock().unwrap();
-        service
-            .cache_verified_account(
-                CachedAccount {
-                    id: administrator_id,
-                    username: "sync-administrator".into(),
-                    roles: vec![Role::Administrator],
-                    enabled: true,
-                    requires_password_change: false,
-                },
-                "correct-password",
-                now,
-            )
-            .unwrap();
-        let captcha = service.issue_captcha(now).unwrap();
-        service
-            .offline_login(
-                "sync-administrator",
-                "correct-password",
-                captcha.id,
-                answer(&captcha.question),
-                now,
-            )
-            .unwrap();
         let conflict = service
             .list_sync_conflicts(now)
             .unwrap()
