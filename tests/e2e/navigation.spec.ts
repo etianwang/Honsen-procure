@@ -434,6 +434,48 @@ test('authentication fixture exposes invalid and first-login states', async ({
   await expect(browserErrors).toEqual([])
 })
 
+test('desktop login keeps offline failure visible while refreshing captcha', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      __TAURI_INTERNALS__: {},
+      __TAURI__: {
+        core: {
+          invoke(command: string) {
+            if (command === 'issue_local_captcha')
+              return Promise.resolve({
+                id: crypto.randomUUID(),
+                question: '1 + 1 = ?',
+              })
+            if (command === 'issue_cloud_captcha')
+              return Promise.reject({ code: 'sync_transport_error' })
+            if (command === 'offline_login')
+              return Promise.reject({ code: 'invalid_credentials' })
+            return Promise.reject(new Error(`unexpected command: ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '获取验证码' }).click()
+  await expect(
+    page.getByText('云端验证码不可用，在线登录暂不可用。'),
+  ).toBeVisible()
+  await page.getByLabel('账号').fill('test-en')
+  await page.getByLabel('密码').fill('wrong-password')
+  await page.getByLabel('本地验证码：1 + 1 = ?').fill('2')
+  await page.getByRole('button', { name: '离线登录' }).click()
+  await expect(page.getByText('账号、密码或验证码无效或已过期。')).toBeVisible()
+  await expect(page.getByRole('button', { name: '在线登录' })).toBeDisabled()
+  await expect(browserErrors).toEqual([])
+})
+
 test('offline login fixture locks idle engineers and denies a DOM-tampered material edit', async ({
   page,
 }) => {

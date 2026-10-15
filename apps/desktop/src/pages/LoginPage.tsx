@@ -41,21 +41,23 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
   const [answer, setAnswer] = useState('')
   const [cloudAnswer, setCloudAnswer] = useState('')
   const [message, setMessage] = useState('')
+  const [cloudMessage, setCloudMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const refreshCaptcha = async () => {
+  const refreshCaptcha = async (clearMessage = true) => {
     if (!desktopInvoke) return
     try {
       setCaptcha(await desktopInvoke('issue_local_captcha'))
       setCloudCaptcha(null)
       setCloudAnswer('')
+      setCloudMessage('')
       void desktopInvoke<{ id: string; question: string }>(
         'issue_cloud_captcha',
       )
         .then(setCloudCaptcha)
-        .catch(() => undefined)
+        .catch(() => setCloudMessage('云端验证码不可用，在线登录暂不可用。'))
       setAnswer('')
-      setMessage('')
+      if (clearMessage) setMessage('')
     } catch {
       setMessage('无法生成本地验证码。')
     }
@@ -103,6 +105,14 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
             type="error"
             showIcon
             title={message}
+          />
+        )}
+        {cloudMessage && (
+          <Alert
+            className="login-alert"
+            type="info"
+            showIcon
+            title={cloudMessage}
           />
         )}
         <label htmlFor="account">账号</label>
@@ -165,9 +175,21 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
               },
             })
               .then(onLogin)
-              .catch(() => {
-                setMessage('账号、密码或验证码无效。')
-                void refreshCaptcha()
+              .catch((error: unknown) => {
+                const code =
+                  typeof error === 'object' && error !== null && 'code' in error
+                    ? error.code
+                    : undefined
+                setMessage(
+                  code === 'offline_window_expired'
+                    ? '离线登录期限已过，请在线验证账户。'
+                    : code === 'account_locked'
+                      ? '账户已锁定，请稍后重试或联系管理员。'
+                      : code === 'credential_storage_error'
+                        ? '无法读取本机安全凭据，请检查测试配置。'
+                        : '账号、密码或验证码无效或已过期。',
+                )
+                void refreshCaptcha(false)
               })
               .finally(() => setSubmitting(false))
           }}
@@ -202,7 +224,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
                 setMessage(
                   '在线登录或授权刷新失败，请检查连接并重新获取验证码。',
                 )
-                void refreshCaptcha()
+                void refreshCaptcha(false)
               })
               .finally(() => setSubmitting(false))
           }}

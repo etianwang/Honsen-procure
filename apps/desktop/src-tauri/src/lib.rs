@@ -9354,6 +9354,17 @@ fn unix_seconds(value: SystemTime) -> i64 {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_credential_vault_uses_native_backend() {
+        let entry = Entry::new("Honsen Procure backend check", "test-only").unwrap();
+        assert!(
+            entry
+                .get_credential()
+                .is::<keyring::windows::WinCredential>()
+        );
+    }
+
     #[test]
     fn named_test_profile_accounts_keep_distinct_roles_and_scope() {
         let service = LocalAuthService::open_in_memory().unwrap();
