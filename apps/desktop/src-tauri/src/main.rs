@@ -63,6 +63,7 @@ fn main() {
             commands::close_supplier_order_with_conditions,
             commands::push_pending_sync,
             commands::pull_sync,
+            commands::sync_status,
             commands::list_sync_conflicts,
             commands::resolve_sync_conflict,
             commands::create_rfq,
