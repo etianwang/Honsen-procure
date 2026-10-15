@@ -109,6 +109,7 @@ export class PostgresMasterDataStore implements MasterDataStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      let unitVersion: number | null = null
       switch (record.kind) {
         case 'country':
           await assertImmutableBusinessCode(client, 'countries', record)
@@ -199,13 +200,45 @@ export class PostgresMasterDataStore implements MasterDataStore {
           )
           break
         case 'unit':
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+            `unit:${record.id}`,
+          ])
+          const syncedUnit = await client.query<{
+            version: string
+            payload_json: Record<string, unknown>
+          }>(
+            "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'unit' AND entity_id = $1 FOR UPDATE",
+            [record.id],
+          )
+          if (syncedUnit.rows[0]) {
+            const code =
+              syncedUnit.rows[0].payload_json.businessCode ??
+              syncedUnit.rows[0].payload_json.business_code
+            if (code !== record.businessCode)
+              throw new MasterDataError('IMMUTABLE_BUSINESS_CODE')
+          }
+          const businessUnit = await client.query<{ version: string }>(
+            'SELECT version FROM units WHERE id = $1 FOR UPDATE',
+            [record.id],
+          )
+          unitVersion =
+            Math.max(
+              Number(syncedUnit.rows[0]?.version ?? 0),
+              Number(businessUnit.rows[0]?.version ?? 0),
+            ) + 1
           await assertImmutableBusinessCode(client, 'units', record)
           await client.query(
-            `INSERT INTO units (id, business_code, name, is_active)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO units (id, business_code, name, is_active, version)
+             VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, is_active = EXCLUDED.is_active,
-               version = units.version + 1, updated_at = NOW(), deleted_at = NULL`,
-            [record.id, record.businessCode, record.name, record.isActive],
+               version = EXCLUDED.version, updated_at = NOW(), deleted_at = NULL`,
+            [
+              record.id,
+              record.businessCode,
+              record.name,
+              record.isActive,
+              unitVersion,
+            ],
           )
           break
       }
@@ -214,6 +247,34 @@ export class PostgresMasterDataStore implements MasterDataStore {
          VALUES (gen_random_uuid(), $1, $2, $3, 'upsert')`,
         [actorId, record.kind, record.id],
       )
+      if (record.kind === 'unit' && unitVersion !== null) {
+        const payload = {
+          kind: 'unit',
+          id: record.id,
+          business_code: record.businessCode,
+          name: record.name,
+          is_active: record.isActive,
+          version: unitVersion,
+        }
+        await client.query(
+          `INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
+           VALUES ('unit', $1, $2, FALSE, $3, $4)
+           ON CONFLICT (entity_type, entity_id) DO UPDATE SET
+             version = EXCLUDED.version, is_deleted = FALSE,
+             payload_json = EXCLUDED.payload_json, updated_by = EXCLUDED.updated_by,
+             updated_at = NOW()`,
+          [record.id, unitVersion, payload, actorId],
+        )
+        await client.query(
+          'LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE',
+        )
+        await client.query(
+          `INSERT INTO server_change_log
+             (entity_type, entity_id, operation, version, payload_json, actor_id)
+           VALUES ('unit', $1, 'upsert', $2, $3, $4)`,
+          [record.id, unitVersion, payload, actorId],
+        )
+      }
       await client.query('COMMIT')
       return record
     } catch (error) {

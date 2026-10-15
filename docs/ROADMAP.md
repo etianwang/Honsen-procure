@@ -151,6 +151,8 @@ The project-default REST-to-Pull reliability slice now publishes each authorized
 
 The follow-on T10 Push cursor-order reliability slice serializes each Push change-log sequence allocation through commit, including conflict reconciliation. A test-first isolated PostgreSQL two-writer race now proves cursor Pull cannot skip an earlier uncommitted Push; failure rollback, retry and replay are covered. The full isolated workspace, Rust, Playwright DOM and package gates passed. This does not close T10-A–F, native two-client acceptance, other REST-originated publication or any milestone; their existing dependencies and checkboxes remain unchanged.
 
+The T04 unit REST-to-Pull reliability slice now makes an authorized online unit save visible to another installation's cursor Pull, with Rust-compatible payload, immutable-code protection, monotonic business/sync version and commit-ordered publication. Isolated PostgreSQL tests cover edits, stale Push conflict, legacy divergence, late failure/retry and an earlier uncommitted log writer; the full workspace, Rust and DOM gates passed. This is not publication for all other master-data types, native two-client acceptance or completion of T04/T10 or any milestone; checkboxes and dependencies remain unchanged.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
