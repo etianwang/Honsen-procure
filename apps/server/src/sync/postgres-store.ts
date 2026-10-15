@@ -1,3 +1,4 @@
+import { referenceMasterDataSchema } from '@honsen/shared'
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
 import type { Pool, PoolClient } from 'pg'
 import type { SyncStore } from './types.js'
@@ -63,6 +64,40 @@ export class PostgresSyncStore implements SyncStore {
       )
       const current = entity.rows[0]
       const currentVersion = current ? Number(current.version) : 0
+      if (input.event.entityType === 'unit') {
+        const business = await client.query<{
+          business_code: string
+          name: string
+          is_active: boolean
+          version: string
+        }>(
+          'SELECT business_code, name, is_active, version FROM units WHERE id = $1 FOR UPDATE',
+          [input.event.entityId],
+        )
+        const row = business.rows[0]
+        if (row && Number(row.version) !== currentVersion) {
+          const result = {
+            eventId: input.event.eventId,
+            status: 'conflict' as const,
+            serverVersion: Number(row.version),
+          }
+          await this.recordConflict(
+            client,
+            input,
+            {
+              version: row.version,
+              payload_json: {
+                businessCode: row.business_code,
+                name: row.name,
+                isActive: row.is_active,
+              },
+            },
+            result,
+          )
+          await client.query('COMMIT')
+          return result
+        }
+      }
       if (currentVersion !== input.event.baseVersion) {
         const result = {
           eventId: input.event.eventId,
@@ -76,6 +111,18 @@ export class PostgresSyncStore implements SyncStore {
 
       const serverVersion = currentVersion + 1
       const deleted = input.event.operation === 'soft_delete'
+      const unitPayload =
+        input.event.entityType === 'unit'
+          ? canonicalUnitPayload(input.event)
+          : null
+      if (input.event.entityType === 'unit' && !unitPayload) {
+        await client.query('ROLLBACK')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+        }
+      }
       if (input.event.entityType === 'country') {
         const projected = await this.projectCountry(
           client,
@@ -151,6 +198,21 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      if (input.event.entityType === 'unit') {
+        const projected = await this.projectUnit(
+          client,
+          { ...input.event, payload: unitPayload! },
+          input.actorId,
+        )
+        if (!projected) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+      }
       await client.query(
         `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
@@ -166,7 +228,7 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           serverVersion,
           deleted,
-          input.event.payload,
+          unitPayload ?? input.event.payload,
           input.actorId,
         ],
       )
@@ -194,7 +256,7 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           input.event.operation,
           serverVersion,
-          input.event.payload,
+          unitPayload ?? input.event.payload,
           input.actorId,
         ],
       )
@@ -207,7 +269,7 @@ export class PostgresSyncStore implements SyncStore {
     } catch (error) {
       await client.query('ROLLBACK')
       if (
-        ['country', 'project', 'site', 'department', 'team'].includes(
+        ['country', 'project', 'site', 'department', 'team', 'unit'].includes(
           input.event.entityType,
         ) &&
         typeof error === 'object' &&
@@ -470,6 +532,43 @@ export class PostgresSyncStore implements SyncStore {
     return true
   }
 
+  private async projectUnit(
+    client: PoolClient,
+    event: SyncEvent,
+    actorId: string,
+  ): Promise<boolean> {
+    if (event.operation !== 'upsert') return false
+    const payload = event.payload
+    const businessCode = payload.businessCode ?? payload.business_code
+    const name = payload.name
+    const isActive = payload.isActive ?? payload.is_active
+    if (
+      typeof businessCode !== 'string' ||
+      typeof name !== 'string' ||
+      typeof isActive !== 'boolean'
+    )
+      return false
+    const previous = await client.query<{ business_code: string }>(
+      'SELECT business_code FROM units WHERE id = $1 FOR UPDATE',
+      [event.entityId],
+    )
+    if (previous.rows[0] && previous.rows[0].business_code !== businessCode)
+      return false
+    await client.query(
+      `INSERT INTO units (id, business_code, name, is_active)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name,
+         is_active = EXCLUDED.is_active, version = units.version + 1,
+         updated_at = NOW(), deleted_at = NULL`,
+      [event.entityId, businessCode, name, isActive],
+    )
+    await client.query(
+      "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'unit', $2, 'upsert')",
+      [actorId, event.entityId],
+    )
+    return true
+  }
+
   async pullChanges(input: {
     actor: { id: string; roles: import('@honsen/shared').Role[] }
     cursor: string
@@ -692,5 +791,31 @@ function eventResult(row: StoredEvent): SyncEventResult {
     status: row.result_status,
     serverVersion:
       row.server_version === null ? null : Number(row.server_version),
+  }
+}
+
+function canonicalUnitPayload(
+  event: SyncEvent,
+): Record<string, unknown> | null {
+  const payload = event.payload
+  const parsed = referenceMasterDataSchema.safeParse({
+    kind: 'unit',
+    id: event.entityId,
+    businessCode: payload.businessCode ?? payload.business_code,
+    name: payload.name,
+    isActive: payload.isActive ?? payload.is_active,
+  })
+  if (!parsed.success || parsed.data.kind !== 'unit') return null
+  return {
+    ...payload,
+    ...('businessCode' in payload
+      ? { businessCode: parsed.data.businessCode }
+      : {}),
+    ...('business_code' in payload
+      ? { business_code: parsed.data.businessCode }
+      : {}),
+    name: parsed.data.name,
+    ...('isActive' in payload ? { isActive: parsed.data.isActive } : {}),
+    ...('is_active' in payload ? { is_active: parsed.data.isActive } : {}),
   }
 }

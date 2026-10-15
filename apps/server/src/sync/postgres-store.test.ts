@@ -187,6 +187,281 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(stored.rows[0]?.payload_json.name).toBe('Field team')
   })
 
+  it('projects unit Push into the business table without partial conflict writes', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const [unitId, duplicateId, independentId] = Array.from({ length: 3 }, () =>
+      randomUUID(),
+    )
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'unit' as const,
+      entityId: unitId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `UNIT-${unitId}`,
+        name: 'Each',
+        is_active: true,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [event] }
+    const accepted = await service.push(actor, request)
+    expect(accepted.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    const created = await pool!.query<{
+      business_code: string
+      name: string
+      version: string
+    }>('SELECT business_code, name, version FROM units WHERE id = $1', [unitId])
+    expect(created.rows[0]).toMatchObject({
+      business_code: `UNIT-${unitId}`,
+      name: 'Each',
+      version: '1',
+    })
+    expect(await service.push(actor, request)).toEqual(accepted)
+    const collision = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        { ...event, eventId: randomUUID(), entityId: duplicateId },
+        {
+          ...event,
+          eventId: randomUUID(),
+          entityId: independentId,
+          payload: {
+            ...event.payload,
+            business_code: `UNIT-${independentId}`,
+          },
+        },
+      ],
+    })
+    expect(collision.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+    ])
+    expect(
+      (await pool!.query('SELECT 1 FROM units WHERE id = $1', [duplicateId]))
+        .rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM sync_entities WHERE entity_type = 'unit' AND entity_id = $1",
+          [duplicateId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (await pool!.query('SELECT 1 FROM units WHERE id = $1', [independentId]))
+        .rowCount,
+    ).toBe(1)
+    const changedCode = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...event.payload, business_code: `OTHER-${unitId}` },
+        },
+      ],
+    })
+    expect(changedCode.results[0]?.status).toBe('validation_error')
+    const revised = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...event.payload, name: 'Piece', is_active: false },
+        },
+      ],
+    })
+    expect(revised.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 2,
+    })
+    const stale = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [{ ...event, eventId: randomUUID() }],
+    })
+    expect(stale.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 2,
+    })
+    const retained = await pool!.query<{
+      business_code: string
+      name: string
+      is_active: boolean
+      version: string
+    }>(
+      'SELECT business_code, name, is_active, version FROM units WHERE id = $1',
+      [unitId],
+    )
+    expect(retained.rows[0]).toMatchObject({
+      business_code: `UNIT-${unitId}`,
+      name: 'Piece',
+      is_active: false,
+      version: '2',
+    })
+    expect(
+      (
+        await pool!.query(
+          "SELECT COUNT(*)::text AS count FROM audit_entries WHERE entity_type = 'unit' AND entity_id = $1",
+          [unitId],
+        )
+      ).rows[0]?.count,
+    ).toBe('2')
+  })
+
+  it('does not overwrite a unit changed through the master-data API', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const master = new PostgresMasterDataStore(pool!)
+    const unitId = randomUUID()
+    const code = `UNIT-${unitId}`
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const initial = {
+      eventId: randomUUID(),
+      entityType: 'unit' as const,
+      entityId: unitId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: { business_code: code, name: 'Initial', is_active: true },
+    }
+    expect(
+      (await service.push(actor, { deviceId: randomUUID(), events: [initial] }))
+        .results[0]?.status,
+    ).toBe('accepted')
+    await master.saveReferenceData(
+      {
+        kind: 'unit',
+        id: unitId,
+        businessCode: code,
+        name: 'REST edit',
+        isActive: false,
+      },
+      actorId,
+    )
+    const staleEventId = randomUUID()
+    const stale = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...initial,
+          eventId: staleEventId,
+          baseVersion: 1,
+          payload: { ...initial.payload, name: 'Offline edit' },
+        },
+      ],
+    })
+    expect(stale.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 2,
+    })
+    const row = await pool!.query<{
+      name: string
+      is_active: boolean
+      version: string
+    }>('SELECT name, is_active, version FROM units WHERE id = $1', [unitId])
+    expect(row.rows[0]).toMatchObject({
+      name: 'REST edit',
+      is_active: false,
+      version: '2',
+    })
+    const conflict = await pool!.query<{
+      server_payload_json: { name: string }
+    }>('SELECT server_payload_json FROM sync_conflicts WHERE event_id = $1', [
+      staleEventId,
+    ])
+    expect(conflict.rows[0]?.server_payload_json.name).toBe('REST edit')
+  })
+
+  it('stores the canonical unit values in business and sync records', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const unitId = randomUUID()
+    const code = `UNIT-${unitId}`
+    const result = await service.push(
+      { id: actorId, roles: ['administrator'] },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            eventId: randomUUID(),
+            entityType: 'unit',
+            entityId: unitId,
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: {
+              business_code: ` ${code} `,
+              name: ' Each ',
+              is_active: true,
+            },
+          },
+        ],
+      },
+    )
+    expect(result.results[0]?.status).toBe('accepted')
+    const business = await pool!.query<{ business_code: string; name: string }>(
+      'SELECT business_code, name FROM units WHERE id = $1',
+      [unitId],
+    )
+    expect(business.rows[0]).toMatchObject({
+      business_code: code,
+      name: 'Each',
+    })
+    const sync = await pool!.query<{
+      payload_json: { business_code: string; name: string }
+    }>(
+      "SELECT payload_json FROM sync_entities WHERE entity_type = 'unit' AND entity_id = $1",
+      [unitId],
+    )
+    expect(sync.rows[0]?.payload_json).toMatchObject({
+      business_code: code,
+      name: 'Each',
+    })
+  })
+
+  it('rolls back a projected unit when its subsequent audit write fails', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const unitId = randomUUID()
+    const eventId = randomUUID()
+    const missingActor = randomUUID()
+    await expect(
+      store.pushEvent({
+        event: {
+          eventId,
+          entityType: 'unit',
+          entityId: unitId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            business_code: `UNIT-${unitId}`,
+            name: 'Rollback',
+            is_active: true,
+          },
+        },
+        installationId: randomUUID(),
+        actorId: missingActor,
+      }),
+    ).resolves.toMatchObject({ status: 'validation_error' })
+    for (const [table, clause] of [
+      ['units', 'id = $1'],
+      ['sync_entities', "entity_type = 'unit' AND entity_id = $1"],
+      ['sync_events', 'event_id = $1'],
+      ['server_change_log', "entity_type = 'unit' AND entity_id = $1"],
+      ['audit_entries', "entity_type = 'unit' AND entity_id = $1"],
+    ]) {
+      const id = table === 'sync_events' ? eventId : unitId
+      expect(
+        (await pool!.query(`SELECT 1 FROM ${table} WHERE ${clause}`, [id]))
+          .rowCount,
+      ).toBe(0)
+    }
+  })
+
   it('projects department Push atomically and preserves codes on conflicts', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const actor = { id: actorId, roles: ['administrator' as const] }

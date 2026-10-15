@@ -139,6 +139,8 @@ The 2026-10-15 department Push slice projects validated departments into the Pos
 
 The team Push slice now projects into the PostgreSQL `teams` table and aligns REST and sync writes on the active-department requirement. Isolated PostgreSQL tests cover dependency failure, retry, replay and conflict preservation; the department/team DOM gate passed. Unit/tax/rate/default projection, deployment and native acceptance remain open; milestone status is unchanged.
 
+The unit Push slice now projects validated unit changes into PostgreSQL `units` atomically with audit/sync. Test-first isolated PostgreSQL coverage includes replay, code collision, rollback after audit failure, canonical values and a REST-edit conflict guard that prevents stale Push overwrite. REST-originated changes still need Pull publication/resolution under T10; tax, exchange-rate and project-default business projection, authorized deployment and native evidence remain open. T04/T10 and milestone checkboxes are unchanged.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
