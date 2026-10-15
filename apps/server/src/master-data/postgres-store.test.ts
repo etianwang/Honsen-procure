@@ -57,6 +57,456 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
   afterAll(async () => {
     await testPool!.end()
   })
+  it('publishes online country revisions to cursor Pull and retains a stale Push conflict', async () => {
+    const [actorId, countryId, staleEventId] = [
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+    ]
+    await testPool!.query(
+      "INSERT INTO users (id, business_code, username, password_hash, ui_locale, is_enabled) VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE)",
+      [actorId, `COUNTRY-A-${actorId}`, `country-${actorId}`],
+    )
+    const store = new PostgresMasterDataStore(testPool!)
+    const sync = new PostgresSyncStore(testPool!)
+    const country = {
+      kind: 'country' as const,
+      id: countryId,
+      businessCode: `COUNTRY-${countryId}`,
+      name: 'Fixture country',
+      timeZone: 'Africa/Abidjan',
+      isActive: true,
+    }
+    try {
+      const cursor = (
+        await testPool!.query<{ sequence: string }>(
+          'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+        )
+      ).rows[0]!.sequence
+      await store.saveReferenceData(country, actorId)
+      const first = await sync.pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor,
+        limit: 500,
+      })
+      expect(
+        first.changes.filter((change) => change.entityId === countryId),
+      ).toMatchObject([
+        {
+          entityType: 'country',
+          version: 1,
+          payload: {
+            kind: 'country',
+            id: countryId,
+            business_code: country.businessCode,
+            name: 'Fixture country',
+            time_zone: 'Africa/Abidjan',
+            is_active: true,
+            version: 1,
+          },
+        },
+      ])
+      await store.saveReferenceData(
+        { ...country, name: 'Revised country', isActive: false },
+        actorId,
+      )
+      const revised = await sync.pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor: first.nextCursor,
+        limit: 500,
+      })
+      expect(
+        revised.changes.filter((change) => change.entityId === countryId),
+      ).toMatchObject([
+        {
+          entityType: 'country',
+          version: 2,
+          payload: { name: 'Revised country', is_active: false, version: 2 },
+        },
+      ])
+      expect(
+        await sync.pushEvent({
+          event: {
+            eventId: staleEventId,
+            entityType: 'country',
+            entityId: countryId,
+            operation: 'upsert',
+            baseVersion: 1,
+            payload: { ...country, name: 'Stale offline country', version: 1 },
+          },
+          installationId: randomUUID(),
+          actorId,
+        }),
+      ).toMatchObject({ status: 'conflict', serverVersion: 2 })
+      expect(
+        (
+          await testPool!.query<{ name: string; version: string }>(
+            'SELECT name, version FROM countries WHERE id = $1',
+            [countryId],
+          )
+        ).rows[0],
+      ).toEqual({ name: 'Revised country', version: '2' })
+    } finally {
+      await testPool!.query('DELETE FROM sync_conflicts WHERE event_id = $1', [
+        staleEventId,
+      ])
+      await testPool!.query('DELETE FROM sync_events WHERE event_id = $1', [
+        staleEventId,
+      ])
+      await testPool!.query(
+        "DELETE FROM server_change_log WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query(
+        "DELETE FROM audit_entries WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query('DELETE FROM countries WHERE id = $1', [countryId])
+      await testPool!.query('DELETE FROM users WHERE id = $1', [actorId])
+    }
+  })
+  it('rolls back a country REST save after late publication failure and permits retry', async () => {
+    const [actorId, countryId] = [randomUUID(), randomUUID()]
+    await testPool!.query(
+      "INSERT INTO users (id, business_code, username, password_hash, ui_locale, is_enabled) VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE)",
+      [actorId, `COUNTRY-A-${actorId}`, `country-${actorId}`],
+    )
+    const country = {
+      kind: 'country' as const,
+      id: countryId,
+      businessCode: `COUNTRY-${countryId}`,
+      name: 'Retry country',
+      timeZone: 'Africa/Abidjan',
+      isActive: true,
+    }
+    const failingPool = {
+      async connect() {
+        const client = await testPool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            if (sql.includes('INSERT INTO server_change_log'))
+              throw new Error('injected country publication failure')
+            return client.query(sql, values)
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    try {
+      await expect(
+        new PostgresMasterDataStore(failingPool).saveReferenceData(
+          country,
+          actorId,
+        ),
+      ).rejects.toThrow('injected country publication failure')
+      const empty = await testPool!.query(
+        `SELECT
+           (SELECT COUNT(*) FROM countries WHERE id = $1) AS business,
+           (SELECT COUNT(*) FROM audit_entries WHERE entity_type = 'country' AND entity_id = $1) AS audit,
+           (SELECT COUNT(*) FROM sync_entities WHERE entity_type = 'country' AND entity_id = $1) AS synced,
+           (SELECT COUNT(*) FROM server_change_log WHERE entity_type = 'country' AND entity_id = $1) AS changes`,
+        [countryId],
+      )
+      expect(empty.rows[0]).toEqual({
+        business: '0',
+        audit: '0',
+        synced: '0',
+        changes: '0',
+      })
+      await new PostgresMasterDataStore(testPool!).saveReferenceData(
+        country,
+        actorId,
+      )
+      const restored = await testPool!.query<{ version: string }>(
+        'SELECT version FROM countries WHERE id = $1',
+        [countryId],
+      )
+      expect(restored.rows[0]?.version).toBe('1')
+    } finally {
+      await testPool!.query(
+        "DELETE FROM server_change_log WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query(
+        "DELETE FROM audit_entries WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query('DELETE FROM countries WHERE id = $1', [countryId])
+      await testPool!.query('DELETE FROM users WHERE id = $1', [actorId])
+    }
+  })
+  it('keeps a sync-only country code immutable and advances beyond its version', async () => {
+    const [actorId, countryId] = [randomUUID(), randomUUID()]
+    const code = `COUNTRY-${countryId}`
+    await testPool!.query(
+      "INSERT INTO users (id, business_code, username, password_hash, ui_locale, is_enabled) VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE)",
+      [actorId, `COUNTRY-A-${actorId}`, `country-${actorId}`],
+    )
+    await testPool!.query(
+      `INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
+       VALUES ('country', $1, 4, FALSE, $2, $3)`,
+      [
+        countryId,
+        {
+          kind: 'country',
+          id: countryId,
+          business_code: code,
+          name: 'Legacy country',
+          time_zone: 'Africa/Abidjan',
+          is_active: true,
+          version: 4,
+        },
+        actorId,
+      ],
+    )
+    const store = new PostgresMasterDataStore(testPool!)
+    try {
+      await expect(
+        store.saveReferenceData(
+          {
+            kind: 'country',
+            id: countryId,
+            businessCode: `CHANGED-${countryId}`,
+            name: 'Invalid replacement',
+            timeZone: 'Africa/Abidjan',
+            isActive: true,
+          },
+          actorId,
+        ),
+      ).rejects.toEqual(new MasterDataError('IMMUTABLE_BUSINESS_CODE'))
+      expect(
+        (
+          await testPool!.query('SELECT 1 FROM countries WHERE id = $1', [
+            countryId,
+          ])
+        ).rowCount,
+      ).toBe(0)
+      const cursor = (
+        await testPool!.query<{ sequence: string }>(
+          'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+        )
+      ).rows[0]!.sequence
+      await store.saveReferenceData(
+        {
+          kind: 'country',
+          id: countryId,
+          businessCode: code,
+          name: 'Reconciled country',
+          timeZone: 'Africa/Abidjan',
+          isActive: true,
+        },
+        actorId,
+      )
+      expect(
+        (
+          await testPool!.query<{ business_code: string; version: string }>(
+            'SELECT business_code, version FROM countries WHERE id = $1',
+            [countryId],
+          )
+        ).rows[0],
+      ).toEqual({ business_code: code, version: '5' })
+      const pulled = await new PostgresSyncStore(testPool!).pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor,
+        limit: 500,
+      })
+      expect(
+        pulled.changes.filter((change) => change.entityId === countryId),
+      ).toMatchObject([
+        {
+          entityType: 'country',
+          version: 5,
+          payload: {
+            business_code: code,
+            name: 'Reconciled country',
+            version: 5,
+          },
+        },
+      ])
+      await testPool!.query(
+        "UPDATE countries SET name = 'Business-ahead fixture', version = 9 WHERE id = $1",
+        [countryId],
+      )
+      await store.saveReferenceData(
+        {
+          kind: 'country',
+          id: countryId,
+          businessCode: code,
+          name: 'Reconciled business-ahead country',
+          timeZone: 'Africa/Abidjan',
+          isActive: true,
+        },
+        actorId,
+      )
+      expect(
+        (
+          await testPool!.query<{ version: string }>(
+            'SELECT version FROM countries WHERE id = $1',
+            [countryId],
+          )
+        ).rows[0]?.version,
+      ).toBe('10')
+      const resumed = await new PostgresSyncStore(testPool!).pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor: pulled.nextCursor,
+        limit: 500,
+      })
+      expect(
+        resumed.changes.filter((change) => change.entityId === countryId),
+      ).toMatchObject([
+        {
+          version: 10,
+          payload: { name: 'Reconciled business-ahead country', version: 10 },
+        },
+      ])
+    } finally {
+      await testPool!.query(
+        "DELETE FROM server_change_log WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query(
+        "DELETE FROM audit_entries WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query('DELETE FROM countries WHERE id = $1', [countryId])
+      await testPool!.query('DELETE FROM users WHERE id = $1', [actorId])
+    }
+  })
+  it('does not publish a country past an earlier uncommitted cursor', async () => {
+    const [actorId, countryId, materialId] = [
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+    ]
+    await testPool!.query(
+      "INSERT INTO users (id, business_code, username, password_hash, ui_locale, is_enabled) VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE)",
+      [actorId, `COUNTRY-A-${actorId}`, `country-${actorId}`],
+    )
+    const cursor = (
+      await testPool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    const earlierWriter = await testPool!.connect()
+    let signalPublication!: () => void
+    const publicationReached = new Promise<void>((resolve) => {
+      signalPublication = resolve
+    })
+    const observedPool = {
+      async connect() {
+        const writer = await testPool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            if (
+              sql.includes('LOCK TABLE server_change_log') ||
+              sql.includes('INSERT INTO server_change_log')
+            )
+              signalPublication()
+            return writer.query(sql, values)
+          },
+          release() {
+            writer.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    let committed = false
+    let save: Promise<unknown> | undefined
+    try {
+      await earlierWriter.query('BEGIN')
+      const earlierPid = (
+        await earlierWriter.query<{ pid: number }>(
+          'SELECT pg_backend_pid() AS pid',
+        )
+      ).rows[0]!.pid
+      await earlierWriter.query(
+        "INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id) VALUES ('material', $1, 'upsert', 1, $2, $3)",
+        [materialId, { nameZh: 'Earlier fixture' }, actorId],
+      )
+      save = new PostgresMasterDataStore(observedPool).saveReferenceData(
+        {
+          kind: 'country',
+          id: countryId,
+          businessCode: `COUNTRY-${countryId}`,
+          name: 'Later fixture country',
+          timeZone: 'Africa/Abidjan',
+          isActive: true,
+        },
+        actorId,
+      )
+      await publicationReached
+      await expect
+        .poll(
+          async () =>
+            (
+              await testPool!.query<{ waiting: boolean }>(
+                `SELECT EXISTS (
+                   SELECT 1 FROM pg_stat_activity
+                   WHERE $1 = ANY(pg_blocking_pids(pid))
+                 ) AS waiting`,
+                [earlierPid],
+              )
+            ).rows[0]!.waiting,
+          { interval: 25, timeout: 2_000 },
+        )
+        .toBe(true)
+      const sync = new PostgresSyncStore(testPool!)
+      const beforeCommit = await sync.pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor,
+        limit: 500,
+      })
+      const ids = new Set<string>([materialId, countryId])
+      expect(
+        beforeCommit.changes.filter((change) => ids.has(change.entityId)),
+      ).toEqual([])
+      await earlierWriter.query('COMMIT')
+      committed = true
+      await save
+      const pulled = await sync.pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor: beforeCommit.nextCursor,
+        limit: 500,
+      })
+      expect(
+        pulled.changes
+          .filter((change) => ids.has(change.entityId))
+          .map((change) => change.entityId),
+      ).toEqual([materialId, countryId])
+    } finally {
+      if (!committed) await earlierWriter.query('ROLLBACK')
+      earlierWriter.release()
+      await save?.catch(() => undefined)
+      await testPool!.query(
+        'DELETE FROM server_change_log WHERE entity_id = ANY($1::uuid[])',
+        [[materialId, countryId]],
+      )
+      await testPool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query(
+        "DELETE FROM audit_entries WHERE entity_type = 'country' AND entity_id = $1",
+        [countryId],
+      )
+      await testPool!.query('DELETE FROM countries WHERE id = $1', [countryId])
+      await testPool!.query('DELETE FROM users WHERE id = $1', [actorId])
+    }
+  })
   it('publishes REST tax-template saves to cursor Pull', async () => {
     const [actorId, taxId] = [randomUUID(), randomUUID()]
     await testPool!.query(

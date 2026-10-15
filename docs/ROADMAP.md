@@ -153,6 +153,8 @@ The follow-on T10 Push cursor-order reliability slice serializes each Push chang
 
 The T04 unit REST-to-Pull reliability slice now makes an authorized online unit save visible to another installation's cursor Pull, with Rust-compatible payload, immutable-code protection, monotonic business/sync version and commit-ordered publication. Isolated PostgreSQL tests cover edits, stale Push conflict, legacy divergence, late failure/retry and an earlier uncommitted log writer; the full workspace, Rust and DOM gates passed. This is not publication for all other master-data types, native two-client acceptance or completion of T04/T10 or any milestone; checkboxes and dependencies remain unchanged.
 
+The next T04 country REST-to-Pull slice has passed development gates in an isolated PostgreSQL environment: authenticated online saves publish a Rust-compatible country change atomically with business/audit state, preserve immutable codes, and retain stale Push conflicts. Failure/retry, legacy version divergence and cursor-order concurrency were exercised; independent QA and native two-client evidence remain open. Other REST master-data types, authorized deployed records, T04/T10 parent acceptance and every milestone checkbox remain unchanged.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
