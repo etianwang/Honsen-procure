@@ -1534,6 +1534,37 @@ impl LocalAuthService {
         {
             records.push(row.map_err(|_| AuthError::Database)?);
         }
+        let mut departments = connection.prepare("SELECT id, business_code, name, is_active, version FROM local_departments WHERE deleted_at IS NULL ORDER BY name").map_err(|_| AuthError::Database)?;
+        for row in departments
+            .query_map([], |row| {
+                Ok(ReferenceMasterDataInput::Department {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+                    business_code: row.get(1)?,
+                    name: row.get(2)?,
+                    is_active: row.get::<_, i64>(3)? != 0,
+                    version: row.get(4)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+        {
+            records.push(row.map_err(|_| AuthError::Database)?);
+        }
+        let mut teams = connection.prepare("SELECT id, department_id, business_code, name, is_active, version FROM local_teams WHERE deleted_at IS NULL ORDER BY name").map_err(|_| AuthError::Database)?;
+        for row in teams
+            .query_map([], |row| {
+                Ok(ReferenceMasterDataInput::Team {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap(),
+                    department_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap(),
+                    business_code: row.get(2)?,
+                    name: row.get(3)?,
+                    is_active: row.get::<_, i64>(4)? != 0,
+                    version: row.get(5)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+        {
+            records.push(row.map_err(|_| AuthError::Database)?);
+        }
         let mut units = connection.prepare("SELECT id, business_code, name, is_active, version FROM local_units WHERE deleted_at IS NULL ORDER BY name").map_err(|_| AuthError::Database)?;
         for row in units
             .query_map([], |row| {
@@ -1668,14 +1699,31 @@ impl LocalAuthService {
                 )
                 .optional()
                 .map_err(|_| AuthError::Database)?,
+            "department" => transaction
+                .query_row(
+                    "SELECT is_active FROM local_departments WHERE id = ?1",
+                    [entity_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?,
+            "team" => transaction
+                .query_row(
+                    "SELECT is_active FROM local_teams WHERE id = ?1",
+                    [entity_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?,
             _ => None,
         };
         let audit_next_active = match &record {
             ReferenceMasterDataInput::Country { is_active, .. }
             | ReferenceMasterDataInput::Project { is_active, .. }
             | ReferenceMasterDataInput::Site { is_active, .. }
-            | ReferenceMasterDataInput::Unit { is_active, .. } => Some(*is_active),
-            _ => None,
+            | ReferenceMasterDataInput::Unit { is_active, .. }
+            | ReferenceMasterDataInput::Department { is_active, .. }
+            | ReferenceMasterDataInput::Team { is_active, .. } => Some(*is_active),
         };
         match record {
             ReferenceMasterDataInput::Country {
@@ -1775,6 +1823,17 @@ impl LocalAuthService {
                 version,
             } => {
                 validate_reference(&business_code, &name, version)?;
+                if is_active
+                    && !transaction
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM local_departments WHERE id = ?1 AND is_active = 1 AND deleted_at IS NULL)",
+                            [department_id.to_string()],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .map_err(|_| AuthError::Database)?
+                {
+                    return Err(AuthError::InvalidInput);
+                }
                 assert_immutable_local_business_code(
                     &transaction,
                     "local_teams",
@@ -1800,7 +1859,10 @@ impl LocalAuthService {
                 transaction.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
         }
-        if matches!(entity_type, "country" | "project" | "site" | "unit") {
+        if matches!(
+            entity_type,
+            "country" | "project" | "site" | "unit" | "department" | "team"
+        ) {
             let action = match (audit_prior_active, audit_next_active) {
                 (None, _) => "create",
                 (Some(0), Some(true)) => "enable",
@@ -5555,6 +5617,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0032_unit_master_data_audit",
             include_str!("../migrations/0032_unit_master_data_audit.sql"),
         ),
+        (
+            "0033_organization_master_data_audit",
+            include_str!("../migrations/0033_organization_master_data_audit.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -7623,6 +7689,38 @@ mod tests {
     }
 
     #[test]
+    fn organization_audit_migration_preserves_existing_entries() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0027_master_data_audit.sql"))
+            .unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0032_unit_master_data_audit.sql"
+            ))
+            .unwrap();
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('unit-old', 'actor', 'unit', 'unit-id', 'create', '{}', 1)", []).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0033_organization_master_data_audit.sql"
+            ))
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT entity_type FROM local_master_data_audit_entries WHERE id = 'unit-old'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "unit"
+        );
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('department-new', 'actor', 'department', 'department-id', 'create', '{}', 2)", []).unwrap();
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('team-new', 'actor', 'team', 'team-id', 'create', '{}', 3)", []).unwrap();
+        assert!(connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('bad', 'actor', 'other', 'x', 'create', '{}', 4)", []).is_err());
+    }
+
+    #[test]
     fn pull_continues_only_after_a_full_advancing_page() {
         let change = SyncPullChangeInput {
             cursor: "501".into(),
@@ -9428,6 +9526,123 @@ mod tests {
             )
             .unwrap();
         assert_eq!(outbox_count, 3);
+    }
+
+    #[test]
+    fn organization_master_data_validates_parent_and_audits_offline_changes() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let department_id = Uuid::new_v4();
+        let team_id = Uuid::new_v4();
+        let department =
+            |name: &str, is_active: bool, version: i64| ReferenceMasterDataInput::Department {
+                id: department_id,
+                business_code: "fixture-proc".into(),
+                name: name.into(),
+                is_active,
+                version,
+            };
+        let team = |name: &str, is_active: bool, version: i64| ReferenceMasterDataInput::Team {
+            id: team_id,
+            department_id,
+            business_code: "fixture-team".into(),
+            name: name.into(),
+            is_active,
+            version,
+        };
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_reference_master_data(department("Procurement", true, 1), now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: Uuid::new_v4(),
+                    username: "administrator".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_reference_master_data(team("Site team", true, 1), now),
+            Err(AuthError::InvalidInput)
+        );
+        service
+            .save_reference_master_data(department("Procurement", true, 1), now)
+            .unwrap();
+        service
+            .save_reference_master_data(team("Site team", true, 1), now)
+            .unwrap();
+        service
+            .save_reference_master_data(team("Field team", true, 2), now)
+            .unwrap();
+        service
+            .save_reference_master_data(team("Field team", false, 3), now)
+            .unwrap();
+        service
+            .save_reference_master_data(department("Procurement", false, 2), now)
+            .unwrap();
+        assert_eq!(
+            service.save_reference_master_data(team("Field team", true, 4), now),
+            Err(AuthError::InvalidInput)
+        );
+        let records = service.list_reference_master_data(now).unwrap();
+        assert!(records.contains(&department("Procurement", false, 2)));
+        assert!(records.contains(&team("Field team", false, 3)));
+        let connection = service.connection.lock().unwrap();
+        for (entity_type, entity_id, expected_actions, expected_outbox) in [
+            ("department", department_id, vec!["create", "disable"], 2),
+            ("team", team_id, vec!["create", "edit", "disable"], 3),
+        ] {
+            let mut statement = connection
+                .prepare("SELECT action FROM local_master_data_audit_entries WHERE entity_type = ?1 AND entity_id = ?2 ORDER BY rowid")
+                .unwrap();
+            let actions: Vec<String> = statement
+                .query_map(
+                    rusqlite::params![entity_type, entity_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert_eq!(actions, expected_actions);
+            let outbox_count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2",
+                    rusqlite::params![entity_type, entity_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(outbox_count, expected_outbox);
+        }
     }
 
     #[test]

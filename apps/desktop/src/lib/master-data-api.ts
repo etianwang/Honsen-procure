@@ -53,6 +53,23 @@ export type ReferenceMasterDataView =
       is_active: boolean
       version: number
     }
+  | {
+      kind: 'department'
+      id: string
+      business_code: string
+      name: string
+      is_active: boolean
+      version: number
+    }
+  | {
+      kind: 'team'
+      id: string
+      department_id: string
+      business_code: string
+      name: string
+      is_active: boolean
+      version: number
+    }
 
 export type MasterDataApi = {
   listProjectDefaults(): Promise<ProjectDefaultsView[]>

@@ -524,6 +524,39 @@ test('administrator can create, edit and disable a unit offline', async ({
   await expect(browserErrors).toEqual([])
 })
 
+test('administrator creates a department and team with an explicit parent', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByRole('tab', { name: '部门' }).click()
+  await page.getByLabel('部门代码').fill('fixture-proc')
+  await page.getByLabel('部门名称', { exact: true }).fill('Procurement')
+  await page.getByRole('button', { name: '新增部门' }).click()
+  await expect(page.getByLabel('编辑部门名称-fixture-proc')).toHaveValue(
+    'Procurement',
+  )
+
+  await page.getByRole('tab', { name: '团队' }).click()
+  await page.getByLabel('团队代码').fill('fixture-team')
+  await page.getByLabel('团队名称', { exact: true }).fill('Site team')
+  await expect(page.getByRole('button', { name: '新增团队' })).toBeDisabled()
+  await page.getByLabel('团队所属部门').click()
+  await page.getByText('Procurement', { exact: true }).last().click()
+  await page.getByRole('button', { name: '新增团队' }).click()
+  await expect(page.getByLabel('编辑团队名称-fixture-team')).toHaveValue(
+    'Site team',
+  )
+  await page.getByLabel('编辑团队名称-fixture-team').fill('Field team')
+  await page.getByLabel('编辑团队名称-fixture-team').blur()
+  await page.getByRole('button', { name: /停\s*用/ }).click()
+  await expect(page.getByRole('button', { name: /启\s*用/ })).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
 test('administrator master-data fixture creates a project and a site', async ({
   page,
 }) => {

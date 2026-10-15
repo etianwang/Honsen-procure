@@ -111,6 +111,8 @@ Obtain authority for T04 authorized initial-record acceptance, then complete the
 
 The 2026-10-15 T04 isolated local unit-management slice subsequently added trusted read, editor and unit audit migration with synthetic Rust/DOM evidence. It does not accept T04-A/B/C, online synchronization, real desktop roles or authorized deployment records. T04, M0 and M1 remain unchecked. Functional completion stays ahead of non-blocking visual/UI polish; blocked controls, errors and accessibility still require immediate repair when they prevent a workflow.
 
+The next isolated T04 local slice adds department/team administrator workflows, active-parent validation and preserved audit history. Its Rust, disposable PostgreSQL and Playwright gates pass, but remote projection and actual deployment/desktop acceptance remain open. This does not alter the T04 dependency or milestone checkboxes.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
