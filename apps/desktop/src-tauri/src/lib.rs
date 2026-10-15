@@ -1347,6 +1347,26 @@ fn test_profile_accounts() -> [(Uuid, &'static str, Vec<Role>, &'static str); 3]
     ]
 }
 
+fn named_test_profile_accounts() -> [(Uuid, &'static str, Role); 3] {
+    [
+        (
+            Uuid::parse_str("10000000-0000-4000-8000-000000000021").expect("test UUID"),
+            "test-en",
+            Role::Engineer,
+        ),
+        (
+            Uuid::parse_str("10000000-0000-4000-8000-000000000022").expect("test UUID"),
+            "test-pr",
+            Role::Purchaser,
+        ),
+        (
+            Uuid::parse_str("10000000-0000-4000-8000-000000000023").expect("test UUID"),
+            "test-ad",
+            Role::Administrator,
+        ),
+    ]
+}
+
 pub struct LocalAuthService {
     connection: Mutex<Connection>,
     media_directory: PathBuf,
@@ -1355,6 +1375,30 @@ pub struct LocalAuthService {
 }
 
 impl LocalAuthService {
+    pub fn cache_named_test_profile_accounts(
+        &self,
+        password: &str,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if password.len() < 8 {
+            return Err(AuthError::InvalidInput);
+        }
+        for (id, username, role) in named_test_profile_accounts() {
+            self.cache_verified_account(
+                CachedAccount {
+                    id,
+                    username: username.into(),
+                    roles: vec![role],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                password,
+                now,
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn open_in_memory() -> Result<Self, AuthError> {
         Self::open(
             Connection::open_in_memory().map_err(|_| AuthError::Database)?,
@@ -1442,7 +1486,11 @@ impl LocalAuthService {
         if !path.is_absolute() || !path.to_string_lossy().ends_with(".test.sqlite") {
             return Err(AuthError::InvalidInput);
         }
-        for (id, _, _, _) in test_profile_accounts() {
+        for id in test_profile_accounts()
+            .map(|(id, _, _, _)| id)
+            .into_iter()
+            .chain(named_test_profile_accounts().map(|(id, _, _)| id))
+        {
             for service in [
                 "Honsen Procure test offline verifier",
                 "Honsen Procure test sync session",
@@ -9305,6 +9353,44 @@ fn unix_seconds(value: SystemTime) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_test_profile_accounts_keep_distinct_roles_and_scope() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        assert_eq!(
+            service.cache_named_test_profile_accounts("short", now),
+            Err(AuthError::InvalidInput)
+        );
+        service
+            .cache_named_test_profile_accounts("test-only-password", now)
+            .unwrap();
+        service
+            .bootstrap_test_profile(
+                "engineer-a-password",
+                "engineer-b-password",
+                "purchaser-password",
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        for (id, username, role) in named_test_profile_accounts() {
+            let (saved_username, roles_json, scope_count): (String, String, i64) = connection.query_row(
+                "SELECT username, roles_json, (SELECT COUNT(*) FROM local_authorization_snapshots WHERE account_id = ?1) FROM local_accounts WHERE id = ?1",
+                [id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            ).unwrap();
+            assert_eq!(saved_username, username);
+            assert_eq!(
+                serde_json::from_str::<Vec<Role>>(&roles_json).unwrap(),
+                vec![role]
+            );
+            assert_eq!(scope_count, 1);
+            let verifier = service.credential_vault.load_verifier(id).unwrap().unwrap();
+            assert!(verify_password(&verifier, "test-only-password"));
+            assert!(!verify_password(&verifier, "wrong-password"));
+        }
+    }
 
     fn account() -> CachedAccount {
         CachedAccount {

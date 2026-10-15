@@ -22,6 +22,8 @@ npm run desktop:dev --workspace @honsen/desktop
 
 The command creates only `engineer-a`, `engineer-b` and `purchaser`, plus synthetic OPA catalog/rate master data. Each login still uses the normal password/CAPTCHA command and Rust authorization. To clean this exact test profile and its separate verifier entries after closing the app, run `cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --bin honsen-procure-test-profile -- clean` with only `HONSEN_PROCURE_TEST_DB_PATH` set.
 
+For a named-role desktop smoke, optionally set `HONSEN_TEST_NAMED_PASSWORD` in the current process before `seed`. This adds `test-en` (engineer), `test-pr` (purchaser), and `test-ad` (administrator) to the same isolated profile and synthetic project; no password is written to the repository or SQLite. Keep the standard CAPTCHA. The test-only named password may be eight characters; normal account provisioning rules are unchanged. `clean` also removes their test-only OS verifier entries.
+
 1. Launch the desktop application and sign in as the engineer through the real password/CAPTCHA flow.
 2. Open the normal procurement-application workspace. Create an owner-self-purchase draft, select the fixture material and explicitly select its catalog quote. Confirm no quote is selected before this action.
 3. Enter the locked CNY-to-XOF rate and a percentage markup. Save, verify converted and final prices, then submit. Record the visible pending status.

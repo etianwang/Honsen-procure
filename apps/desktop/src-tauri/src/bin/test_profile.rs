@@ -30,6 +30,10 @@ fn main() -> ExitCode {
                     .map_err(|_| "cannot create test profile directory")?;
                 let auth = LocalAuthService::open_test_path(path.to_str().ok_or("non-UTF-8 path")?)
                     .map_err(|error| error.to_string())?;
+                if let Ok(named_password) = env::var("HONSEN_TEST_NAMED_PASSWORD") {
+                    auth.cache_named_test_profile_accounts(&named_password, SystemTime::now())
+                        .map_err(|error| error.to_string())?;
+                }
                 auth.bootstrap_test_profile(
                     &password("HONSEN_TEST_ENGINEER_A_PASSWORD")?,
                     &password("HONSEN_TEST_ENGINEER_B_PASSWORD")?,
