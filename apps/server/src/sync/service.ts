@@ -1,5 +1,6 @@
 import {
   referenceMasterDataSchema,
+  uuidSchema,
   syncPullQuerySchema,
   syncPushRequestSchema,
   type SyncEvent,
@@ -8,10 +9,40 @@ import {
   type SyncPushResponse,
 } from '@honsen/shared'
 import type { Role } from '@honsen/shared'
+import { z } from 'zod'
 import type { SyncActor, SyncStore } from './types.js'
 
 const procurementRoles: Role[] = ['purchaser', 'administrator']
 const referenceMasterDataTypes = ['country', 'project', 'site'] as const
+const rfqPayloadSchema = z.strictObject({
+  id: uuidSchema,
+  sourceOrderId: uuidSchema,
+  supplierId: uuidSchema,
+  supplierSnapshot: z.strictObject({
+    id: uuidSchema,
+    name: z.string().trim().min(1),
+  }),
+  projectId: uuidSchema,
+  displayNo: z.string().trim().min(1),
+  currency: z.enum(['XOF', 'CNY', 'USD', 'EUR']),
+  status: z.enum(['draft', 'sent', 'closed']),
+  items: z
+    .array(
+      z.strictObject({
+        sourceItemId: uuidSchema,
+        materialSnapshot: z.strictObject({
+          nameZh: z.string().trim().min(1),
+          nameFr: z.string().nullable(),
+          model: z.string(),
+          specification: z.string(),
+        }),
+        quantity: z.string().regex(/^(?!0+(?:\.0{1,2})?$)\d+(?:\.\d{1,2})?$/),
+        unit: z.string().trim().min(1),
+        sortOrder: z.number().int().min(0),
+      }),
+    )
+    .min(1),
+})
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
@@ -49,6 +80,39 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'rfq') {
+      if (
+        event.operation !== 'upsert' ||
+        !actor.roles.some((role) => procurementRoles.includes(role))
+      )
+        return false
+      const parsed = rfqPayloadSchema.safeParse(event.payload)
+      if (
+        !parsed.success ||
+        parsed.data.id !== event.entityId ||
+        parsed.data.supplierSnapshot.id !== parsed.data.supplierId
+      )
+        return false
+      const order = await this.store.getEntityPayload(
+        'purchase_order',
+        parsed.data.sourceOrderId,
+      )
+      const mode = order ? stringField(order, 'procurementMode') : null
+      return (
+        order !== null &&
+        stringField(order, 'parentOrderId') === null &&
+        stringField(order, 'projectId') === parsed.data.projectId &&
+        (mode === null || mode === 'honsen_self_purchase') &&
+        [
+          'confirmed',
+          'approved',
+          'executing',
+          'receiving',
+          'completed',
+          'completed_with_conditions',
+        ].includes(stringField(order, 'workflowStatus') ?? '')
+      )
+    }
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
     if (

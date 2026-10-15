@@ -17,6 +17,8 @@ class FixtureStore implements SyncStore {
   order: Record<string, unknown> | null = {
     applicantId: engineer.id,
     projectId,
+    workflowStatus: 'approved',
+    procurementMode: 'honsen_self_purchase',
   }
   project: Record<string, unknown> | null = null
 
@@ -64,6 +66,137 @@ function purchaseOrderEvent(applicantId = engineer.id) {
 }
 
 describe('SyncService', () => {
+  it('rejects an RFQ tombstone or incomplete snapshot before storage', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const event = {
+      ...purchaseOrderEvent(),
+      entityType: 'rfq' as const,
+      payload: { projectId, status: 'sent' },
+    }
+    for (const candidate of [
+      event,
+      { ...event, operation: 'soft_delete' as const },
+    ]) {
+      const response = await service.push(
+        { id: engineer.id, roles: ['purchaser'] },
+        {
+          deviceId: '00000000-0000-4000-8000-000000000005',
+          events: [candidate],
+        },
+      )
+      expect(response.results[0]?.status).toBe('validation_error')
+    }
+    expect(store.pushed).toBe(0)
+  })
+
+  it('accepts only a complete RFQ linked to a same-project Honsen order', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const rfqId = '00000000-0000-4000-8000-000000000020'
+    const supplierId = '00000000-0000-4000-8000-000000000021'
+    const event = {
+      ...purchaseOrderEvent(),
+      entityType: 'rfq' as const,
+      entityId: rfqId,
+      payload: {
+        id: rfqId,
+        sourceOrderId: '00000000-0000-4000-8000-000000000004',
+        supplierId,
+        supplierSnapshot: { id: supplierId, name: 'fixture supplier' },
+        projectId,
+        displayNo: 'TEST-RFQ',
+        currency: 'XOF',
+        status: 'draft',
+        items: [
+          {
+            sourceItemId: '00000000-0000-4000-8000-000000000022',
+            materialSnapshot: {
+              nameZh: 'fixture',
+              nameFr: null,
+              model: '',
+              specification: '',
+            },
+            quantity: '1.50',
+            unit: 'pcs',
+            sortOrder: 0,
+          },
+        ],
+      },
+    }
+    const push = () =>
+      service.push(
+        { id: engineer.id, roles: ['purchaser'] },
+        { deviceId: '00000000-0000-4000-8000-000000000005', events: [event] },
+      )
+    expect((await push()).results[0]?.status).toBe('accepted')
+    for (const payload of [
+      { ...event.payload, unitPriceMinor: '100' },
+      {
+        ...event.payload,
+        items: [{ ...event.payload.items[0]!, unitPriceMinor: '100' }],
+      },
+      {
+        ...event.payload,
+        items: [
+          {
+            ...event.payload.items[0]!,
+            materialSnapshot: {
+              nameZh: 'fixture',
+              nameFr: null,
+              model: '',
+              specification: '',
+              unitPriceMinor: '100',
+            },
+          },
+        ],
+      },
+      {
+        ...event.payload,
+        items: [{ ...event.payload.items[0]!, materialSnapshot: {} }],
+      },
+    ]) {
+      const response = await service.push(
+        { id: engineer.id, roles: ['purchaser'] },
+        {
+          deviceId: '00000000-0000-4000-8000-000000000005',
+          events: [{ ...event, payload }],
+        },
+      )
+      expect(response.results[0]?.status).toBe('validation_error')
+    }
+    expect(
+      (
+        await service.push(engineer, {
+          deviceId: '00000000-0000-4000-8000-000000000005',
+          events: [event],
+        })
+      ).results[0]?.status,
+    ).toBe('validation_error')
+    store.order = {
+      projectId: '00000000-0000-4000-8000-000000000099',
+      workflowStatus: 'approved',
+      procurementMode: 'honsen_self_purchase',
+    }
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    store.order = {
+      projectId,
+      parentOrderId: '00000000-0000-4000-8000-000000000098',
+      workflowStatus: 'approved',
+      procurementMode: 'honsen_self_purchase',
+    }
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    store.order = {
+      projectId,
+      workflowStatus: 'approved',
+      procurementMode: 'owner_self_purchase',
+    }
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    store.order = null
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    expect(store.pushed).toBe(1)
+  })
+
   it('accepts an engineer order only for the engineer and a bound project', async () => {
     const store = new FixtureStore()
     const service = new SyncService(store)

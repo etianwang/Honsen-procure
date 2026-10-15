@@ -3,6 +3,7 @@ import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
 import { PostgresSyncStore } from './postgres-store.js'
+import { SyncService } from './service.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null
@@ -22,6 +23,227 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   afterAll(async () => {
     await pool!.end()
+  })
+
+  it('keeps RFQ snapshots immutable across retry, status transitions and stale writes', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const service = new SyncService(store)
+    const [orderId, rfqId, projectId, supplierId, itemId] = Array.from(
+      { length: 5 },
+      () => randomUUID(),
+    )
+    const deviceId = randomUUID()
+    const order = await store.pushEvent({
+      event: {
+        eventId: randomUUID(),
+        entityType: 'purchase_order',
+        entityId: orderId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          projectId,
+          procurementMode: 'honsen_self_purchase',
+          workflowStatus: 'approved',
+        },
+      },
+      installationId: deviceId,
+      actorId,
+    })
+    expect(order.status).toBe('accepted')
+    const payload = {
+      id: rfqId,
+      sourceOrderId: orderId,
+      supplierId,
+      supplierSnapshot: { id: supplierId, name: 'fixture supplier' },
+      projectId,
+      displayNo: `TEST-${rfqId}`,
+      currency: 'XOF',
+      status: 'draft',
+      items: [
+        {
+          sourceItemId: itemId,
+          materialSnapshot: {
+            nameZh: 'fixture',
+            nameFr: null,
+            model: '',
+            specification: '',
+          },
+          quantity: '2.50',
+          unit: 'pcs',
+          sortOrder: 0,
+        },
+      ],
+    }
+    const actor = { id: actorId, roles: ['purchaser' as const] }
+    const bypassedService = await store.pushEvent({
+      event: {
+        eventId: randomUUID(),
+        entityType: 'rfq',
+        entityId: rfqId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: { ...payload, projectId: randomUUID() },
+      },
+      installationId: deviceId,
+      actorId,
+    })
+    expect(bypassedService.status).toBe('validation_error')
+    const push = (eventId: string, baseVersion: number, next: typeof payload) =>
+      service.push(actor, {
+        deviceId,
+        events: [
+          {
+            eventId,
+            entityType: 'rfq',
+            entityId: rfqId,
+            operation: 'upsert',
+            baseVersion,
+            payload: next,
+          },
+        ],
+      })
+    expect(
+      (await push(randomUUID(), 0, { ...payload, status: 'sent' })).results[0]
+        ?.status,
+    ).toBe('validation_error')
+    const createId = randomUUID()
+    expect((await push(createId, 0, payload)).results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect((await push(createId, 0, payload)).results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(
+      (await push(randomUUID(), 1, { ...payload, status: 'sent' })).results[0],
+    ).toMatchObject({ status: 'accepted', serverVersion: 2 })
+    expect(
+      (
+        await push(randomUUID(), 2, {
+          ...payload,
+          status: 'closed',
+          items: [{ ...payload.items[0]!, quantity: '3.00' }],
+        })
+      ).results[0]?.status,
+    ).toBe('validation_error')
+    expect(
+      (await push(randomUUID(), 2, { ...payload, status: 'closed' }))
+        .results[0],
+    ).toMatchObject({ status: 'accepted', serverVersion: 3 })
+    expect(
+      (await push(randomUUID(), 3, { ...payload, status: 'sent' })).results[0]
+        ?.status,
+    ).toBe('validation_error')
+    expect(
+      (await push(randomUUID(), 1, { ...payload, status: 'closed' })).results[0]
+        ?.status,
+    ).toBe('conflict')
+    const pulled = await service.pull(actor, { cursor: '0', limit: 500 })
+    const rfqs = pulled.changes.filter((change) => change.entityId === rfqId)
+    expect(rfqs.map((change) => change.payload.status)).toEqual([
+      'draft',
+      'sent',
+      'closed',
+    ])
+    expect(
+      rfqs.every(
+        (change) =>
+          JSON.stringify(change.payload.items) ===
+          JSON.stringify(rfqs[0]?.payload.items),
+      ),
+    ).toBe(true)
+  })
+
+  it('rechecks a concurrently changed parent before accepting an RFQ', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const [orderId, rfqId, projectId, otherProjectId, supplierId, itemId] =
+      Array.from({ length: 6 }, () => randomUUID())
+    const deviceId = randomUUID()
+    expect(
+      (
+        await store.pushEvent({
+          event: {
+            eventId: randomUUID(),
+            entityType: 'purchase_order',
+            entityId: orderId,
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: {
+              projectId,
+              workflowStatus: 'approved',
+              procurementMode: 'honsen_self_purchase',
+            },
+          },
+          installationId: deviceId,
+          actorId,
+        })
+      ).status,
+    ).toBe('accepted')
+
+    const blocker = await pool!.connect()
+    await blocker.query('BEGIN')
+    try {
+      await blocker.query(
+        `UPDATE sync_entities SET payload_json = jsonb_set(payload_json,
+        '{projectId}', to_jsonb($2::text)) WHERE entity_type = 'purchase_order' AND entity_id = $1`,
+        [orderId, otherProjectId],
+      )
+      const attempted = store.pushEvent({
+        event: {
+          eventId: randomUUID(),
+          entityType: 'rfq',
+          entityId: rfqId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            id: rfqId,
+            sourceOrderId: orderId,
+            supplierId,
+            supplierSnapshot: { id: supplierId, name: 'fixture supplier' },
+            projectId,
+            displayNo: `TEST-${rfqId}`,
+            currency: 'XOF',
+            status: 'draft',
+            items: [
+              {
+                sourceItemId: itemId,
+                materialSnapshot: {
+                  nameZh: 'fixture',
+                  nameFr: null,
+                  model: '',
+                  specification: '',
+                },
+                quantity: '1',
+                unit: 'pcs',
+                sortOrder: 0,
+              },
+            ],
+          },
+        },
+        installationId: deviceId,
+        actorId,
+      })
+      let waiting = false
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const result = await pool!.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM pg_stat_activity
+           WHERE wait_event_type = 'Lock' AND query LIKE '%sync_entities%'`,
+        )
+        if (Number(result.rows[0]?.count) > 0) {
+          waiting = true
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      expect(waiting).toBe(true)
+      await blocker.query('COMMIT')
+      expect((await attempted).status).toBe('validation_error')
+      expect(await store.getEntityPayload('rfq', rfqId)).toBeNull()
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
   })
 
   it('is idempotent and records an optimistic-concurrency conflict without overwriting', async () => {
