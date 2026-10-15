@@ -4,9 +4,9 @@ This register is maintained by the Fixer/primary agent. A delivery is **not acce
 
 | Submitted (UTC) | Builder branch | Commit | Scope | Builder-reported checks | Fixer state |
 | --- | --- | --- | --- | --- | --- |
-| 2026-10-15 | `codex/t04-parent-acceptance` | `a82050d` | REST tax-template cursor-Pull publication | Static checks passed; final 9-test PostgreSQL rerun blocked by `Wsl/Service/E_UNEXPECTED` | QA in progress; PostgreSQL evidence required |
-| 2026-10-15 | `codex/t09-receipt-payment` | `cbc129a` | Local append-only procurement expenditures, voucher warning, owner-mode denial, atomic outbox | Rust/migration/desktop/Playwright checks reported | QA in progress |
-| 2026-10-15 | `codex/t08-formal-execution` | `6a006ed` | Local owner formal issue, immutable snapshots and local formal numbering | Rust/desktop/Playwright checks reported | QA queued; server registration intentionally absent and remains a T10 integration requirement |
+| 2026-10-15 | `codex/t04-parent-acceptance` | `a82050d` | REST tax-template cursor-Pull publication | Independent PostgreSQL: focused 9/9 passed; related sync 34/35 failed | **QA_FAILED / RETURNED_TO_OWNER** — T04-001 lock-order deadlock |
+| 2026-10-15 | `codex/t09-receipt-payment` | `cbc129a` | Local append-only procurement expenditures, voucher warning, owner-mode denial, atomic outbox | Independent Rust 28/28, desktop typecheck/build, Playwright 1/1 passed | **QA_PASSED (local slice only)**; `INT-002` and `INT-003` block integration |
+| 2026-10-15 | `codex/t08-formal-execution` | `6a006ed` | Local owner formal issue, immutable snapshots and local formal numbering | Independent Rust 27/27, desktop typecheck/build, Playwright 1/1 passed | **QA_PASSED (local slice only)**; `INT-001` and `INT-003` block integration |
 
 ## Handoff contract
 
