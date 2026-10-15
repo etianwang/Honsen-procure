@@ -525,3 +525,9 @@ Build shared contracts and exact money/quantity helpers only:
 - **BLOCKER:** server event-origin binding, conflict ownership/visibility, audited legacy recovery, live native A/B HTTP evidence and final `0044 → 0045 → 0046 → 0047` migration integration remain absent. **WARNING:** PostgreSQL/API tests were intentionally not run because this exact SHA has no server/PostgreSQL diff; no server acceptance is inferred. No Builder worktree, protected E2E data, database or production resource was modified.
 
 - **HOLD NOTICE (not independently reproduced):** Builder merge review requested that Fixer not treat formal server checkpoint `8e20a48` or its combined descendant as full acceptance while it returns reported formal-order transition/snapshot gaps for a test-first repair. Existing `INT-001` remains only partially fixed; wait for a revised clean SHA before new QA.
+
+## FIXER RECOVERY CHECKPOINT — pending Builder integrations 2026-10-15
+
+- `codex/t08-t10-desktop-integration` at `e294b37` is **not testable**: fresh status inspection found unresolved `UU` conflicts in `apps/desktop/src-tauri/src/lib.rs` and `memory.md`, plus staged integration files. Fixer did not inspect, edit, reset, or test that in-progress Builder worktree.
+- `codex/t08-t10-formal-integration` is at `c8204b8` with commit subject `docs: hold formal sync integration for review blockers`; this is an explicit hold, not a QA handoff. Its earlier formal checkpoint stays only partially verified.
+- **Safe next action:** await a clean, explicitly handed-off integrated SHA that includes the final migration chain and formal repair, then independently validate it. Until then, keep all T08/T09/T10 parent acceptance gates open.
