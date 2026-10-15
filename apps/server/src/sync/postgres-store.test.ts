@@ -3271,15 +3271,13 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         const client = await pool!.connect()
         return {
           async query(sql: string, values?: unknown[]) {
-            const result = await client.query(sql, values)
             if (
               !inserted &&
-              sql.startsWith(
-                'SELECT version FROM tax_templates WHERE id = $1 FOR UPDATE',
-              ) &&
-              values?.[0] === taxId
+              sql === 'SELECT pg_advisory_xact_lock(hashtext($1))' &&
+              values?.[0] === `tax_template:${taxId}`
             ) {
               inserted = true
+              // REST must commit before Push takes this same entity lock.
               await master.saveTaxTemplate(
                 {
                   id: taxId,
@@ -3293,7 +3291,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
                 actorId,
               )
             }
-            return result
+            return client.query(sql, values)
           },
           release() {
             client.release()
@@ -3345,6 +3343,62 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       version: '1',
       payload_json: { name: 'REST winner' },
     })
+  })
+
+  it('waits for the tax-template entity lock before committing a REST save', async () => {
+    const taxId = randomUUID()
+    const blocker = await pool!.connect()
+    await blocker.query('BEGIN')
+    const blockerPid = (
+      await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+    ).rows[0]!.pid
+    await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `tax_template:${taxId}`,
+    ])
+    const saved = new PostgresMasterDataStore(pool!).saveTaxTemplate(
+      {
+        id: taxId,
+        businessCode: `TAX-${taxId}`,
+        name: 'Serialized REST tax',
+        countryId: null,
+        rateBasisPoints: 1800,
+        effectiveAt: '2026-10-15',
+        isActive: true,
+      },
+      actorId,
+    )
+    try {
+      await expect
+        .poll(
+          async () =>
+            (
+              await pool!.query<{ blocked: boolean }>(
+                `SELECT EXISTS (
+                   SELECT 1 FROM pg_stat_activity
+                   WHERE $1 = ANY(pg_blocking_pids(pid))
+                 ) AS blocked`,
+                [blockerPid],
+              )
+            ).rows[0]!.blocked,
+          { interval: 25, timeout: 2_000 },
+        )
+        .toBe(true)
+      expect(
+        (
+          await pool!.query('SELECT 1 FROM tax_templates WHERE id = $1', [
+            taxId,
+          ])
+        ).rowCount,
+      ).toBe(0)
+    } finally {
+      await blocker.query('COMMIT')
+      blocker.release()
+      await saved
+    }
+    expect(
+      (await pool!.query('SELECT 1 FROM tax_templates WHERE id = $1', [taxId]))
+        .rowCount,
+    ).toBe(1)
   })
 
   it('pulls supplier and price changes only from an engineer’s bound countries', async () => {
