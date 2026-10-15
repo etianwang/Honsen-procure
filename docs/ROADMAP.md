@@ -137,6 +137,8 @@ The site Push slice now also projects into the PostgreSQL `sites` business table
 
 The 2026-10-15 department Push slice projects validated departments into the PostgreSQL business table atomically with audit and sync. The disposable database gate includes replay, duplicate-code partial-batch rejection and version-conflict retention; the existing department/team DOM gate also passed. Team/unit/tax/rate/default projection and deployment/native acceptance remain open; no parent task or milestone status changed.
 
+The team Push slice now projects into the PostgreSQL `teams` table and aligns REST and sync writes on the active-department requirement. Isolated PostgreSQL tests cover dependency failure, retry, replay and conflict preservation; the department/team DOM gate passed. Unit/tax/rate/default projection, deployment and native acceptance remain open; milestone status is unchanged.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

@@ -136,6 +136,21 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      if (input.event.entityType === 'team') {
+        const projected = await this.projectTeam(
+          client,
+          input.event,
+          input.actorId,
+        )
+        if (!projected) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+      }
       await client.query(
         `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
@@ -192,7 +207,7 @@ export class PostgresSyncStore implements SyncStore {
     } catch (error) {
       await client.query('ROLLBACK')
       if (
-        ['country', 'project', 'site', 'department'].includes(
+        ['country', 'project', 'site', 'department', 'team'].includes(
           input.event.entityType,
         ) &&
         typeof error === 'object' &&
@@ -404,6 +419,52 @@ export class PostgresSyncStore implements SyncStore {
     )
     await client.query(
       "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'department', $2, 'upsert')",
+      [actorId, event.entityId],
+    )
+    return true
+  }
+
+  private async projectTeam(
+    client: PoolClient,
+    event: SyncEvent,
+    actorId: string,
+  ): Promise<boolean> {
+    if (event.operation !== 'upsert') return false
+    const payload = event.payload
+    const businessCode = payload.businessCode ?? payload.business_code
+    const departmentId = payload.departmentId ?? payload.department_id
+    const name = payload.name
+    const isActive = payload.isActive ?? payload.is_active
+    if (
+      typeof businessCode !== 'string' ||
+      typeof departmentId !== 'string' ||
+      typeof name !== 'string' ||
+      typeof isActive !== 'boolean'
+    )
+      return false
+    if (isActive) {
+      const department = await client.query(
+        'SELECT 1 FROM departments WHERE id = $1 AND is_active = TRUE AND deleted_at IS NULL FOR SHARE',
+        [departmentId],
+      )
+      if (department.rowCount !== 1) return false
+    }
+    const previous = await client.query<{ business_code: string }>(
+      'SELECT business_code FROM teams WHERE id = $1 FOR UPDATE',
+      [event.entityId],
+    )
+    if (previous.rows[0] && previous.rows[0].business_code !== businessCode)
+      return false
+    await client.query(
+      `INSERT INTO teams (id, department_id, business_code, name, is_active)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET department_id = EXCLUDED.department_id,
+         name = EXCLUDED.name, is_active = EXCLUDED.is_active,
+         version = teams.version + 1, updated_at = NOW(), deleted_at = NULL`,
+      [event.entityId, departmentId, businessCode, name, isActive],
+    )
+    await client.query(
+      "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'team', $2, 'upsert')",
       [actorId, event.entityId],
     )
     return true

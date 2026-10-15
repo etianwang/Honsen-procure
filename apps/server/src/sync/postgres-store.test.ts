@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
+import { PostgresMasterDataStore } from '../master-data/postgres-store.js'
+import { MasterDataError } from '../master-data/service.js'
 import { PostgresSyncStore } from './postgres-store.js'
 import { SyncService } from './service.js'
 
@@ -312,6 +314,176 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         )
       ).rows[0]?.count,
     ).toBe('2')
+  })
+
+  it('projects teams only under active departments and retries dependency failures', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const [departmentId, teamId, duplicateId] = Array.from({ length: 3 }, () =>
+      randomUUID(),
+    )
+    const team = {
+      eventId: randomUUID(),
+      entityType: 'team' as const,
+      entityId: teamId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `TEAM-${teamId}`,
+        department_id: departmentId,
+        name: 'Field team',
+        is_active: true,
+      },
+    }
+    const department = {
+      eventId: randomUUID(),
+      entityType: 'department' as const,
+      entityId: departmentId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `DEPT-${departmentId}`,
+        name: 'Procurement',
+        is_active: false,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [team] }
+    const batch = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [team, department],
+    })
+    expect(batch.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+    ])
+    expect((await service.push(actor, request)).results[0]?.status).toBe(
+      'validation_error',
+    )
+    expect(
+      (await pool!.query('SELECT 1 FROM teams WHERE id = $1', [teamId]))
+        .rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM sync_entities WHERE entity_type = 'team' AND entity_id = $1",
+          [teamId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    const restStore = new PostgresMasterDataStore(pool!)
+    await expect(
+      restStore.saveReferenceData(
+        {
+          kind: 'team',
+          id: teamId,
+          businessCode: `TEAM-${teamId}`,
+          departmentId,
+          name: 'Field team',
+          isActive: true,
+        },
+        actorId,
+      ),
+    ).rejects.toEqual(new MasterDataError('INVALID_DEFAULTS'))
+    const enabled = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...department,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...department.payload, is_active: true },
+        },
+      ],
+    })
+    expect(enabled.results[0]?.status).toBe('accepted')
+    const accepted = await service.push(actor, request)
+    expect(accepted.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(accepted)
+    const collision = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [{ ...team, eventId: randomUUID(), entityId: duplicateId }],
+    })
+    expect(collision.results[0]?.status).toBe('validation_error')
+    const changedCode = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...team,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...team.payload, business_code: `OTHER-${teamId}` },
+        },
+      ],
+    })
+    expect(changedCode.results[0]?.status).toBe('validation_error')
+    const revised = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...team,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...team.payload, name: 'Revised field team' },
+        },
+      ],
+    })
+    expect(revised.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 2,
+    })
+    const stale = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [{ ...team, eventId: randomUUID() }],
+    })
+    expect(stale.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 2,
+    })
+    const stored = await pool!.query<{
+      department_id: string
+      business_code: string
+      name: string
+      version: string
+    }>(
+      'SELECT department_id::text AS department_id, business_code, name, version FROM teams WHERE id = $1',
+      [teamId],
+    )
+    expect(stored.rows[0]).toMatchObject({
+      department_id: departmentId,
+      business_code: `TEAM-${teamId}`,
+      name: 'Revised field team',
+      version: '2',
+    })
+    expect(
+      (
+        await pool!.query(
+          "SELECT COUNT(*)::text AS count FROM audit_entries WHERE entity_type = 'team' AND entity_id = $1",
+          [teamId],
+        )
+      ).rows[0]?.count,
+    ).toBe('2')
+    expect(
+      (await pool!.query('SELECT 1 FROM teams WHERE id = $1', [duplicateId]))
+        .rowCount,
+    ).toBe(0)
+    const restTeamId = randomUUID()
+    expect(
+      await restStore.saveReferenceData(
+        {
+          kind: 'team',
+          id: restTeamId,
+          businessCode: `TEAM-REST-${restTeamId}`,
+          departmentId,
+          name: 'REST field team',
+          isActive: true,
+        },
+        actorId,
+      ),
+    ).toMatchObject({ id: restTeamId, isActive: true })
   })
 
   it('projects country Push into the business table atomically and preserves immutable codes', async () => {

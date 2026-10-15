@@ -139,6 +139,14 @@ export class PostgresMasterDataStore implements MasterDataStore {
           )
           break
         case 'team':
+          if (record.isActive) {
+            const department = await client.query(
+              'SELECT 1 FROM departments WHERE id = $1 AND is_active = TRUE AND deleted_at IS NULL FOR SHARE',
+              [record.departmentId],
+            )
+            if (department.rowCount !== 1)
+              throw new MasterDataError('INVALID_DEFAULTS')
+          }
           await assertImmutableBusinessCode(client, 'teams', record)
           await client.query(
             `INSERT INTO teams (id, department_id, business_code, name, is_active)
