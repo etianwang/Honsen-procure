@@ -44,7 +44,7 @@ The first T04 server business-table projection slice now applies country Push at
 
 The 2026-10-15 owner-formal server slice adds transactional OPA number/installation-sequence registration and frozen-snapshot conflict handling to Push/Pull. Isolated PostgreSQL migration, retry, collision, rollback and cursor-Pull tests passed without skipped database cases. Desktop projector, source-rate provenance, native multi-client evidence and the original T08/T10 acceptance gates remain open; M2/M3 status is unchanged.
 
-Independent integration review later found that the server does not yet enforce prior approval, signing role, all frozen document fields or valid post-issue transitions. The owner-formal server slice is therefore returned to its Builder owner; its earlier passing tests are partial evidence only, and M2/M3 remain open pending repair and fresh integration QA.
+The first review's direct-issue, engineer-role and frozen-field/status-transition defects were repaired test-first on the source branch. A second independent review found two remaining server blockers: an applicant may claim their own approval through generic Push, and a deleted approved order can be revived by formal issue. The formal server slice remains returned to its owner; source-branch test results are partial evidence, not combined acceptance. Owner receiving, multi-client/native E2E and M2/M3 remain open.
 
 The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 
