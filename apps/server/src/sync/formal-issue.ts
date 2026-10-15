@@ -65,6 +65,8 @@ export function parseFormalIssue(
     payload.formallyIssuedAt <= 0 ||
     !parsedCountryId.success ||
     !parsedProjectId.success ||
+    !uuidSchema.safeParse(payload.applicantId).success ||
+    payload.parentOrderId != null ||
     typeof orderDate !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}$/.test(orderDate) ||
     !parsedPrimaryCurrency.success ||

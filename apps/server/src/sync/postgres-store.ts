@@ -33,6 +33,7 @@ type StoredEvent = {
 type StoredEntity = {
   version: string
   payload_json: Record<string, unknown>
+  is_deleted?: boolean
 }
 
 type ProjectDefaultsBusinessRow = {
@@ -73,7 +74,7 @@ export class PostgresSyncStore implements SyncStore {
       }
 
       const entity = await client.query<StoredEntity>(
-        `SELECT version, payload_json
+        `SELECT version, payload_json, is_deleted
          FROM sync_entities
          WHERE entity_type = $1 AND entity_id = $2
          FOR UPDATE`,
@@ -190,6 +191,61 @@ export class PostgresSyncStore implements SyncStore {
       }
 
       if (input.event.entityType === 'purchase_order') {
+        if (
+          input.event.operation === 'upsert' &&
+          current &&
+          (current.payload_json.applicantId !==
+            input.event.payload.applicantId ||
+            current.payload_json.parentOrderId !==
+              input.event.payload.parentOrderId)
+        ) {
+          const result = {
+            eventId: input.event.eventId,
+            status: 'conflict' as const,
+            serverVersion: currentVersion,
+          }
+          await this.recordConflict(client, input, current, result)
+          await client.query('COMMIT')
+          return result
+        }
+        if (
+          input.event.operation === 'upsert' &&
+          !current &&
+          input.event.payload.parentOrderId == null &&
+          typeof input.event.payload.applicantId === 'string' &&
+          input.event.payload.applicantId !== input.actorId
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+        if (current?.is_deleted && input.event.operation === 'upsert') {
+          const result = {
+            eventId: input.event.eventId,
+            status: 'conflict' as const,
+            serverVersion: currentVersion,
+          }
+          await this.recordConflict(client, input, current, result)
+          await client.query('COMMIT')
+          return result
+        }
+        if (
+          input.event.operation === 'upsert' &&
+          ['approved', 'confirmed'].includes(
+            String(input.event.payload.workflowStatus),
+          ) &&
+          !validOrderApproval(current, input.event.payload, input.actorId)
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
         const formal = await this.registerFormalIssue(client, input, current)
         if (formal === 'validation_error') {
           await client.query('ROLLBACK')
@@ -578,7 +634,11 @@ export class PostgresSyncStore implements SyncStore {
         return current ?? { version: '0', payload_json: {} }
       return null
     }
-    if (!current || current.payload_json.formalDocumentNo != null)
+    if (
+      !current ||
+      current.is_deleted ||
+      current.payload_json.formalDocumentNo != null
+    )
       return current ?? 'validation_error'
     if (input.event.payload.workflowStatus !== 'formally_issued')
       return 'validation_error'
@@ -588,6 +648,10 @@ export class PostgresSyncStore implements SyncStore {
       !['approved', 'confirmed'].includes(
         String(current.payload_json.workflowStatus),
       ) ||
+      current.payload_json.confirmedBy === current.payload_json.applicantId ||
+      current.payload_json.selfApproved !== false ||
+      !Number.isSafeInteger(current.payload_json.confirmedAt) ||
+      Number(current.payload_json.confirmedAt) <= 0 ||
       !isDeepStrictEqual(input.event.payload, {
         ...formal.snapshot,
         workflowStatus: 'formally_issued',
@@ -598,6 +662,14 @@ export class PostgresSyncStore implements SyncStore {
         formallyIssuedAt: input.event.payload.formallyIssuedAt,
         formalSnapshotJson: input.event.payload.formalSnapshotJson,
       })
+    )
+      return 'validation_error'
+    if (
+      !(await hasApprovalProvenance(
+        client,
+        input.event.entityId,
+        current.payload_json,
+      ))
     )
       return 'validation_error'
     const codes = await client.query<{
@@ -1596,4 +1668,96 @@ function validFormalTransition(before: unknown, after: unknown): boolean {
       'cancelled',
     ].includes(String(after))
   return false
+}
+
+function validOrderApproval(
+  current: StoredEntity | undefined,
+  next: Record<string, unknown>,
+  actorId: string,
+): boolean {
+  if (
+    current &&
+    !current.is_deleted &&
+    ['approved', 'confirmed'].includes(
+      String(current.payload_json.workflowStatus),
+    ) &&
+    next.workflowStatus === current.payload_json.workflowStatus
+  )
+    return (
+      next.confirmedBy === current.payload_json.confirmedBy &&
+      next.confirmedAt === current.payload_json.confirmedAt &&
+      next.selfApproved === false &&
+      current.payload_json.selfApproved === false
+    )
+  if (
+    !current ||
+    current.is_deleted ||
+    current.payload_json.workflowStatus !== 'pending_confirmation' ||
+    current.payload_json.confirmedBy != null ||
+    current.payload_json.confirmedAt != null ||
+    current.payload_json.selfApproved === true ||
+    current.payload_json.applicantId === actorId ||
+    next.confirmedBy !== actorId ||
+    next.selfApproved !== false ||
+    !Number.isSafeInteger(next.confirmedAt) ||
+    Number(next.confirmedAt) <= 0
+  )
+    return false
+  return isDeepStrictEqual(next, {
+    ...current.payload_json,
+    workflowStatus: next.workflowStatus,
+    confirmedBy: actorId,
+    confirmedAt: next.confirmedAt,
+    selfApproved: false,
+  })
+}
+
+async function hasApprovalProvenance(
+  client: PoolClient,
+  orderId: string,
+  current: Record<string, unknown>,
+): Promise<boolean> {
+  const approvals = await client.query<{
+    version: string
+    actor_id: string
+    payload_json: Record<string, unknown>
+  }>(
+    `SELECT version, actor_id::text AS actor_id, payload_json
+     FROM server_change_log
+     WHERE entity_type = 'purchase_order' AND entity_id = $1 AND operation = 'upsert'
+       AND payload_json->>'workflowStatus' IN ('approved', 'confirmed')
+     ORDER BY version ASC LIMIT 1`,
+    [orderId],
+  )
+  const approval = approvals.rows[0]
+  if (
+    !approval ||
+    approval.actor_id !== current.confirmedBy ||
+    approval.actor_id === current.applicantId ||
+    approval.payload_json.applicantId !== current.applicantId ||
+    approval.payload_json.confirmedAt !== current.confirmedAt ||
+    approval.payload_json.selfApproved !== false
+  )
+    return false
+  const before = await client.query<{ payload_json: Record<string, unknown> }>(
+    `SELECT payload_json FROM server_change_log
+     WHERE entity_type = 'purchase_order' AND entity_id = $1 AND operation = 'upsert'
+       AND version = $2 LIMIT 1`,
+    [orderId, (BigInt(approval.version) - 1n).toString()],
+  )
+  const pending = before.rows[0]?.payload_json
+  return (
+    !!pending &&
+    pending.workflowStatus === 'pending_confirmation' &&
+    pending.confirmedBy == null &&
+    pending.confirmedAt == null &&
+    pending.selfApproved !== true &&
+    isDeepStrictEqual(approval.payload_json, {
+      ...pending,
+      workflowStatus: approval.payload_json.workflowStatus,
+      confirmedBy: approval.actor_id,
+      confirmedAt: approval.payload_json.confirmedAt,
+      selfApproved: false,
+    })
+  )
 }

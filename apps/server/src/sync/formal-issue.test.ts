@@ -9,6 +9,7 @@ const pool = process.env.TEST_DATABASE_URL
   ? new Pool({ connectionString: process.env.TEST_DATABASE_URL })
   : null
 const actorId = randomUUID()
+const applicantId = randomUUID()
 
 function shortCode(id: string): string {
   const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
@@ -26,8 +27,16 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
     await runMigrations(pool!)
     await pool!.query(
       `INSERT INTO users (id, business_code, username, password_hash, ui_locale, is_enabled)
-       VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE)`,
-      [actorId, `FORMAL-${actorId}`, `formal-${actorId}`],
+       VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE),
+              ($4, $5, $6, 'fixture', 'zh-CN', TRUE)`,
+      [
+        actorId,
+        `FORMAL-${actorId}`,
+        `formal-${actorId}`,
+        applicantId,
+        `FORMAL-${applicantId}`,
+        `formal-${applicantId}`,
+      ],
     )
   }, 60_000)
 
@@ -88,9 +97,12 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
     const snapshot = {
       countryId,
       projectId,
-      applicantId: actorId,
+      applicantId,
       procurementMode: 'owner_self_purchase',
       workflowStatus: 'approved',
+      confirmedBy: actorId,
+      confirmedAt: 1792022400,
+      selfApproved: false,
       primaryCurrency: 'XOF',
       orderDate: '2026-10-15',
       lines: [line],
@@ -118,12 +130,31 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
             entityId: orderId,
             operation: 'upsert',
             baseVersion: 0,
+            payload: {
+              ...approvedPayload,
+              workflowStatus: 'pending_confirmation',
+              confirmedBy: null,
+              confirmedAt: null,
+            },
+          },
+          installationId,
+          actorId: applicantId,
+        }),
+      ).toMatchObject({ status: 'accepted', serverVersion: 1 })
+      expect(
+        await store.pushEvent({
+          event: {
+            eventId: randomUUID(),
+            entityType: 'purchase_order',
+            entityId: orderId,
+            operation: 'upsert',
+            baseVersion: 1,
             payload: approvedPayload,
           },
           installationId,
           actorId,
         }),
-      ).toMatchObject({ status: 'accepted', serverVersion: 1 })
+      ).toMatchObject({ status: 'accepted', serverVersion: 2 })
     }
     const cursor = (
       await pool!.query<{ sequence: string }>(
@@ -137,7 +168,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
         entityType: 'purchase_order' as const,
         entityId: firstId,
         operation: 'upsert' as const,
-        baseVersion: 1,
+        baseVersion: 2,
         payload,
       },
       installationId,
@@ -167,27 +198,27 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
     expect(duplicateStored.rowCount).toBe(1)
     expect(await store.pushEvent(first)).toMatchObject({
       status: 'accepted',
-      serverVersion: 2,
+      serverVersion: 3,
     })
     const receiving = {
       ...first,
       event: {
         ...first.event,
         eventId: randomUUID(),
-        baseVersion: 2,
+        baseVersion: 3,
         payload: { ...payload, workflowStatus: 'receiving' },
       },
     }
     expect(await store.pushEvent(receiving)).toMatchObject({
       status: 'accepted',
-      serverVersion: 3,
+      serverVersion: 4,
     })
     const changedSnapshot = {
       ...receiving,
       event: {
         ...receiving.event,
         eventId: randomUUID(),
-        baseVersion: 3,
+        baseVersion: 4,
         payload: {
           ...receiving.event.payload,
           formalSnapshotJson: JSON.stringify({
@@ -199,7 +230,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
     }
     expect(await store.pushEvent(changedSnapshot)).toMatchObject({
       status: 'conflict',
-      serverVersion: 3,
+      serverVersion: 4,
     })
     const retained = await pool!.query<{ payload_json: typeof payload }>(
       `SELECT payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1`,
@@ -320,9 +351,10 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
         .filter((change) => change.entityId === firstId)
         .map((change) => [change.version, change.payload.workflowStatus]),
     ).toEqual([
-      [1, 'approved'],
-      [2, 'formally_issued'],
-      [3, 'receiving'],
+      [1, 'pending_confirmation'],
+      [2, 'approved'],
+      [3, 'formally_issued'],
+      [4, 'receiving'],
     ])
 
     const retryId = randomUUID()
@@ -385,7 +417,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
           { deviceId: installationId, events: [retryEvent.event] },
         )
       ).results[0],
-    ).toMatchObject({ status: 'accepted', serverVersion: 2 })
+    ).toMatchObject({ status: 'accepted', serverVersion: 3 })
 
     const convertedLine = {
       ...line,
@@ -451,7 +483,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
           },
         },
       }),
-    ).toMatchObject({ status: 'accepted', serverVersion: 2 })
+    ).toMatchObject({ status: 'accepted', serverVersion: 3 })
     const convertedPulled = await store.pullChanges({
       actor: { id: actorId, roles: ['purchaser'] },
       cursor: pulled.nextCursor,

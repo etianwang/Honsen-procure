@@ -102,6 +102,9 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       teamId,
       procurementMode: 'owner_self_purchase',
       workflowStatus: 'approved',
+      confirmedBy: actorId,
+      confirmedAt: 1792022400,
+      selfApproved: false,
       primaryCurrency: 'XOF',
       orderDate: '2026-10-15',
       deliveryAddress: 'original address',
@@ -120,6 +123,12 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       formallyIssuedAt: 1792022400,
       formalSnapshotJson: JSON.stringify(approved),
     }
+    const pending = {
+      ...approved,
+      workflowStatus: 'pending_confirmation',
+      confirmedBy: null,
+      confirmedAt: null,
+    }
     function event(payload: Record<string, unknown>, baseVersion: number) {
       return {
         eventId: randomUUID(),
@@ -130,8 +139,179 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         payload,
       }
     }
-    return { orderId, approved, issued, event }
+    return { orderId, pending, approved, issued, event }
   }
+
+  async function seedApproved(f: ReturnType<typeof fixture>) {
+    expect(
+      (
+        await store.pushEvent({
+          event: f.event(f.pending, 0),
+          installationId,
+          actorId: engineerId,
+        })
+      ).status,
+    ).toBe('accepted')
+    expect(
+      (
+        await store.pushEvent({
+          event: f.event(f.approved, 1),
+          installationId,
+          actorId,
+        })
+      ).status,
+    ).toBe('accepted')
+  }
+
+  it('rejects applicant self-approval lies while accepting a distinct approver', async () => {
+    const own = fixture(106)
+    const ownPending = { ...own.pending, applicantId: actorId }
+    const ownApproved = {
+      ...own.approved,
+      applicantId: actorId,
+      confirmedBy: actorId,
+    }
+    const ownActor = { id: actorId, roles: ['purchaser' as const] }
+    const pushOwn = async (
+      payload: Record<string, unknown>,
+      baseVersion: number,
+    ) =>
+      (
+        await service.push(ownActor, {
+          deviceId: installationId,
+          events: [own.event(payload, baseVersion)],
+        })
+      ).results[0]!.status
+    expect(await pushOwn(ownPending, 0)).toBe('accepted')
+    expect(await pushOwn({ ...ownPending, applicantId: engineerId }, 1)).toBe(
+      'conflict',
+    )
+    expect(await pushOwn(ownApproved, 1)).toBe('validation_error')
+    expect(await pushOwn({ ...ownApproved, selfApproved: true }, 1)).toBe(
+      'validation_error',
+    )
+    const ownStored = await pool!.query<{
+      version: string
+      payload_json: Record<string, unknown>
+    }>(
+      `SELECT version, payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1`,
+      [own.orderId],
+    )
+    expect(ownStored.rows[0]?.version).toBe('1')
+    expect(ownStored.rows[0]?.payload_json.workflowStatus).toBe(
+      'pending_confirmation',
+    )
+
+    const forgedCreator = fixture(109)
+    expect(
+      (
+        await service.push(ownActor, {
+          deviceId: installationId,
+          events: [forgedCreator.event(forgedCreator.pending, 0)],
+        })
+      ).results[0]!.status,
+    ).toBe('validation_error')
+    const directApproval = fixture(110)
+    expect(
+      (
+        await service.push(ownActor, {
+          deviceId: installationId,
+          events: [directApproval.event(directApproval.approved, 0)],
+        })
+      ).results[0]!.status,
+    ).toBe('validation_error')
+
+    const other = fixture(107)
+    expect(
+      (
+        await service.push(
+          { id: engineerId, roles: ['engineer'] },
+          {
+            deviceId: installationId,
+            events: [other.event(other.pending, 0)],
+          },
+        )
+      ).results[0]!.status,
+    ).toBe('accepted')
+    expect(
+      (
+        await service.push(ownActor, {
+          deviceId: installationId,
+          events: [other.event(other.approved, 1)],
+        })
+      ).results[0]!.status,
+    ).toBe('accepted')
+    const repricedApproved = {
+      ...other.approved,
+      lines: [
+        {
+          ...other.approved.lines[0],
+          ownerManualReferenceReason: 'updated fixture quote',
+        },
+      ],
+    }
+    expect(
+      (
+        await service.push(ownActor, {
+          deviceId: installationId,
+          events: [other.event(repricedApproved, 2)],
+        })
+      ).results[0]!.status,
+    ).toBe('accepted')
+    const repricedIssued = {
+      ...other.issued,
+      lines: repricedApproved.lines,
+      formalSnapshotJson: JSON.stringify(repricedApproved),
+    }
+    expect(
+      (
+        await service.push(ownActor, {
+          deviceId: installationId,
+          events: [other.event(repricedIssued, 3)],
+        })
+      ).results[0]!.status,
+    ).toBe('accepted')
+  })
+
+  it('never revives a soft-deleted approved order by formal issue Push', async () => {
+    const f = fixture(108)
+    const push = (
+      payload: Record<string, unknown>,
+      operation: 'upsert' | 'soft_delete',
+      baseVersion: number,
+    ) =>
+      store.pushEvent({
+        event: { ...f.event(payload, baseVersion), operation },
+        installationId,
+        actorId: baseVersion === 0 ? engineerId : actorId,
+      })
+    expect((await push(f.pending, 'upsert', 0)).status).toBe('accepted')
+    expect((await push(f.approved, 'upsert', 1)).status).toBe('accepted')
+    expect((await push(f.approved, 'soft_delete', 2)).status).toBe('accepted')
+    const revival = { event: f.event(f.issued, 3), installationId, actorId }
+    expect((await store.pushEvent(revival)).status).toBe('conflict')
+    expect((await store.pushEvent(revival)).status).toBe('conflict')
+    const stored = await pool!.query<{ is_deleted: boolean; version: string }>(
+      `SELECT is_deleted, version FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1`,
+      [f.orderId],
+    )
+    expect(stored.rows[0]).toEqual({ is_deleted: true, version: '3' })
+    expect(
+      (
+        await pool!.query(
+          'SELECT 1 FROM formal_issue_registry WHERE order_id = $1',
+          [f.orderId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM sync_conflicts WHERE event_id = $1', [
+          revival.event.eventId,
+        ])
+      ).rowCount,
+    ).toBe(1)
+  })
 
   it('denies direct base-version-zero issue, then requires exact approved server snapshot', async () => {
     const f = fixture(101)
@@ -144,15 +324,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         })
       ).status,
     ).toBe('validation_error')
-    expect(
-      (
-        await store.pushEvent({
-          event: f.event(f.approved, 0),
-          installationId,
-          actorId,
-        })
-      ).status,
-    ).toBe('accepted')
+    await seedApproved(f)
     const tampered = {
       ...f.issued,
       formalSnapshotJson: JSON.stringify({
@@ -163,7 +335,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
     expect(
       (
         await store.pushEvent({
-          event: f.event(tampered, 1),
+          event: f.event(tampered, 2),
           installationId,
           actorId,
         })
@@ -174,7 +346,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         await store.pushEvent({
           event: f.event(
             { ...f.issued, deliveryAddress: 'changed at signing' },
-            1,
+            2,
           ),
           installationId,
           actorId,
@@ -184,7 +356,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
     expect(
       (
         await store.pushEvent({
-          event: f.event(f.issued, 1),
+          event: f.event(f.issued, 2),
           installationId,
           actorId,
         })
@@ -211,13 +383,14 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         confirmedBy: engineerId,
       }),
     ).toBe('validation_error')
+    expect(await push(f.pending)).toBe('accepted')
     expect(
       (
         await service.push(
           { id: actorId, roles: ['purchaser'] },
           {
             deviceId: installationId,
-            events: [f.event(f.approved, 0)],
+            events: [f.event(f.approved, 1)],
           },
         )
       ).results[0]!.status,
@@ -232,16 +405,16 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         installationId,
         actorId,
       })
-    expect((await push(f.approved, 0)).status).toBe('accepted')
-    expect((await push(f.issued, 1)).status).toBe('accepted')
-    expect((await push({ ...f.issued, totalMinor: '999' }, 2)).status).toBe(
+    await seedApproved(f)
+    expect((await push(f.issued, 2)).status).toBe('accepted')
+    expect((await push({ ...f.issued, totalMinor: '999' }, 3)).status).toBe(
       'conflict',
     )
-    expect((await push({ ...f.issued, notes: 'rewritten' }, 2)).status).toBe(
+    expect((await push({ ...f.issued, notes: 'rewritten' }, 3)).status).toBe(
       'conflict',
     )
     expect(
-      (await push({ ...f.issued, deliveryAddress: 'rewritten' }, 2)).status,
+      (await push({ ...f.issued, deliveryAddress: 'rewritten' }, 3)).status,
     ).toBe('conflict')
     expect(
       (
@@ -250,24 +423,24 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
             ...f.issued,
             lines: [{ ...f.issued.lines[0], ownerFinalUnitPriceMinor: '121' }],
           },
-          2,
+          3,
         )
       ).status,
     ).toBe('conflict')
     expect(
-      (await push({ ...f.issued, workflowStatus: 'completed' }, 2)).status,
+      (await push({ ...f.issued, workflowStatus: 'completed' }, 3)).status,
     ).toBe('conflict')
-    expect(
-      (await push({ ...f.issued, workflowStatus: 'receiving' }, 2)).status,
-    ).toBe('accepted')
     expect(
       (await push({ ...f.issued, workflowStatus: 'receiving' }, 3)).status,
     ).toBe('accepted')
     expect(
-      (await push({ ...f.issued, workflowStatus: 'completed' }, 4)).status,
+      (await push({ ...f.issued, workflowStatus: 'receiving' }, 4)).status,
     ).toBe('accepted')
     expect(
-      (await push({ ...f.issued, workflowStatus: 'formally_issued' }, 5))
+      (await push({ ...f.issued, workflowStatus: 'completed' }, 5)).status,
+    ).toBe('accepted')
+    expect(
+      (await push({ ...f.issued, workflowStatus: 'formally_issued' }, 6))
         .status,
     ).toBe('conflict')
     const conditions = fixture(105)
@@ -280,15 +453,13 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         installationId,
         actorId,
       })
-    expect((await conditionsPush(conditions.approved, 0)).status).toBe(
-      'accepted',
-    )
-    expect((await conditionsPush(conditions.issued, 1)).status).toBe('accepted')
+    await seedApproved(conditions)
+    expect((await conditionsPush(conditions.issued, 2)).status).toBe('accepted')
     expect(
       (
         await conditionsPush(
           { ...conditions.issued, workflowStatus: 'receiving' },
-          2,
+          3,
         )
       ).status,
     ).toBe('accepted')
@@ -296,12 +467,12 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       (
         await conditionsPush(
           { ...conditions.issued, workflowStatus: 'completed_with_conditions' },
-          3,
+          4,
         )
       ).status,
     ).toBe('accepted')
     expect(
-      (await push({ ...f.issued, workflowStatus: 'completed' }, 5)).status,
+      (await push({ ...f.issued, workflowStatus: 'completed' }, 6)).status,
     ).toBe('conflict')
     const stored = await pool!.query<{ payload_json: Record<string, unknown> }>(
       `SELECT payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1`,
@@ -324,20 +495,12 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         installationId,
         actorId,
       })
-    expect((await cancelPush(cancelled.approved, 0)).status).toBe('accepted')
-    expect((await cancelPush(cancelled.issued, 1)).status).toBe('accepted')
+    await seedApproved(cancelled)
+    expect((await cancelPush(cancelled.issued, 2)).status).toBe('accepted')
     expect(
       (
         await cancelPush(
           { ...cancelled.issued, workflowStatus: 'receiving' },
-          2,
-        )
-      ).status,
-    ).toBe('accepted')
-    expect(
-      (
-        await cancelPush(
-          { ...cancelled.issued, workflowStatus: 'cancelled' },
           3,
         )
       ).status,
@@ -345,10 +508,18 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
     expect(
       (
         await cancelPush(
-          { ...cancelled.issued, workflowStatus: 'receiving' },
+          { ...cancelled.issued, workflowStatus: 'cancelled' },
           4,
         )
       ).status,
+    ).toBe('accepted')
+    expect(
+      (
+        await cancelPush(
+          { ...cancelled.issued, workflowStatus: 'receiving' },
+          5,
+        )
+      ).status,
     ).toBe('conflict')
-  })
+  }, 30_000)
 })
