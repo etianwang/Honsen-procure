@@ -135,6 +135,8 @@ The 2026-10-15 country and project Push slices now project validated master reco
 
 The site Push slice now also projects into the PostgreSQL `sites` business table, with missing-project retry, replay, code-collision and conflict checks. Full isolated workspace tests and the existing site-creation Playwright DOM gate passed on 2026-10-15. Organization/unit/tax/rate/default projection, deployment and native acceptance remain open; milestone checkboxes are unchanged.
 
+The 2026-10-15 department Push slice projects validated departments into the PostgreSQL business table atomically with audit and sync. The disposable database gate includes replay, duplicate-code partial-batch rejection and version-conflict retention; the existing department/team DOM gate also passed. Team/unit/tax/rate/default projection and deployment/native acceptance remain open; no parent task or milestone status changed.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

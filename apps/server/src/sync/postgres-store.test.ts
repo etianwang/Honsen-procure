@@ -185,6 +185,135 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(stored.rows[0]?.payload_json.name).toBe('Field team')
   })
 
+  it('projects department Push atomically and preserves codes on conflicts', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const departmentId = randomUUID()
+    const duplicateId = randomUUID()
+    const independentId = randomUUID()
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'department' as const,
+      entityId: departmentId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `DEPT-${departmentId}`,
+        name: 'Procurement',
+        is_active: true,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [event] }
+    const accepted = await service.push(actor, request)
+    expect(accepted.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(accepted)
+    const collision = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        { ...event, eventId: randomUUID(), entityId: duplicateId },
+        {
+          ...event,
+          eventId: randomUUID(),
+          entityId: independentId,
+          payload: {
+            ...event.payload,
+            business_code: `DEPT-${independentId}`,
+          },
+        },
+      ],
+    })
+    expect(collision.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+    ])
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM departments WHERE id = $1', [
+          duplicateId,
+        ])
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM departments WHERE id = $1', [
+          independentId,
+        ])
+      ).rowCount,
+    ).toBe(1)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM sync_entities WHERE entity_type = 'department' AND entity_id = $1",
+          [duplicateId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    const rejectedCode = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...event.payload, business_code: `OTHER-${departmentId}` },
+        },
+      ],
+    })
+    expect(rejectedCode.results[0]?.status).toBe('validation_error')
+    const revised = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...event.payload, name: 'Revised procurement' },
+        },
+      ],
+    })
+    expect(revised.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 2,
+    })
+    const stale = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, name: 'Stale procurement' },
+        },
+      ],
+    })
+    expect(stale.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 2,
+    })
+    const stored = await pool!.query<{
+      business_code: string
+      name: string
+      version: string
+    }>('SELECT business_code, name, version FROM departments WHERE id = $1', [
+      departmentId,
+    ])
+    expect(stored.rows[0]).toMatchObject({
+      business_code: `DEPT-${departmentId}`,
+      name: 'Revised procurement',
+      version: '2',
+    })
+    expect(
+      (
+        await pool!.query(
+          "SELECT COUNT(*)::text AS count FROM audit_entries WHERE entity_type = 'department' AND entity_id = $1",
+          [departmentId],
+        )
+      ).rows[0]?.count,
+    ).toBe('2')
+  })
+
   it('projects country Push into the business table atomically and preserves immutable codes', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const actor = { id: actorId, roles: ['administrator' as const] }
