@@ -13,9 +13,10 @@
 | `npm run test --workspace @honsen/server -- src/sync/postgres-store.test.ts -t "keeps RFQ snapshots immutable"` | 0 | 1 passed, 0 failed, 36 skipped. The server guard held RFQ snapshots against retry, state transition and stale write attempts. |
 | `npm run test --workspace @honsen/server -- src/db/migration-runner.test.ts` | 0 | 2 passed, 0 failed. |
 | `npm run typecheck --workspace @honsen/server` | 0 | Passed. |
-| Full `src/sync/postgres-store.test.ts` | blocked | The isolated container was externally stopped before `beforeAll`; connection to `127.0.0.1:54347` returned `ECONNREFUSED`. No test assertion ran, so this is not a product failure or a pass. |
+| Initial full `src/sync/postgres-store.test.ts` attempt | blocked | The isolated container was externally stopped before `beforeAll`; connection to `127.0.0.1:54347` returned `ECONNREFUSED`. No test assertion ran, so this was not a product failure or a pass. |
+| Retried `npm run test:postgres` | 0 | On fresh project `honsen_fixer_rfq23c_retry` at `127.0.0.1:54348`, health and Windows-node `SELECT 1` succeeded; migration runner passed 2/2 and full PostgreSQL store suite passed 37/37. |
 
-The disposable normal-user WSL Compose project was `honsen_fixer_rfq23c9` on port `54347`. Its focused tests ran while healthy. After the external shutdown the QA agent ran `down --volumes` and verified its scoped `ps` was empty. No shared Builder Compose project was used.
+The first disposable normal-user WSL Compose project was `honsen_fixer_rfq23c9` on port `54347`; its focused tests ran while healthy and it was scoped-cleaned after the external shutdown. The retry used the distinct `honsen_fixer_rfq23c_retry` at port `54348`, then ran `down --volumes` and verified its scoped `ps` was empty. No shared Builder Compose project was used.
 
 ## Superseded local-only evidence
 
@@ -23,4 +24,4 @@ The preceding RFQ-only ref `334f5d6` was independently checked before it was sup
 
 ## Verdict and remaining gate
 
-**PARTIAL QA ONLY.** The new targeted server guard and migration suite pass, but the full PostgreSQL store regression must be rerun on a stable disposable database before this combined delivery can be accepted. Parent T08/T09/T10, desktop-to-server Push/Pull, native two-client/reconnect and the P1 multi-account protocol gates remain open.
+**QA PASSED for this combined RFQ/server consistency slice.** The retry removes the environment-only gap: focused server protection, migration runner and full store regressions all passed. Parent T08/T09/T10, desktop-to-server Push/Pull, native two-client/reconnect and the P1 multi-account protocol gates remain open.
