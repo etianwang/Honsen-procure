@@ -5,6 +5,7 @@ import {
   taxTemplateSchema,
 } from '@honsen/shared'
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
+import { isDeepStrictEqual } from 'node:util'
 import type { Pool, PoolClient } from 'pg'
 import type { SyncStore } from './types.js'
 
@@ -185,6 +186,19 @@ export class PostgresSyncStore implements SyncStore {
         await this.recordConflict(client, input, current, result)
         await client.query('COMMIT')
         return result
+      }
+
+      if (
+        input.event.entityType === 'rfq' &&
+        (!validRfqTransition(current?.payload_json, input.event) ||
+          !(await validRfqParent(client, input.event.payload)))
+      ) {
+        await client.query('COMMIT')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: currentVersion,
+        }
       }
 
       const serverVersion = currentVersion + 1
@@ -1308,6 +1322,51 @@ export class PostgresSyncStore implements SyncStore {
       ],
     )
   }
+}
+
+async function validRfqParent(
+  client: PoolClient,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  if (typeof payload.sourceOrderId !== 'string') return false
+  const parent = await client.query<{ payload_json: Record<string, unknown> }>(
+    `SELECT payload_json FROM sync_entities
+     WHERE entity_type = 'purchase_order' AND entity_id = $1 AND is_deleted = FALSE
+     FOR UPDATE`,
+    [payload.sourceOrderId],
+  )
+  const order = parent.rows[0]?.payload_json
+  return (
+    !!order &&
+    order.parentOrderId == null &&
+    order.projectId === payload.projectId &&
+    (order.procurementMode == null ||
+      order.procurementMode === 'honsen_self_purchase') &&
+    [
+      'confirmed',
+      'approved',
+      'executing',
+      'receiving',
+      'completed',
+      'completed_with_conditions',
+    ].includes(String(order.workflowStatus))
+  )
+}
+
+function validRfqTransition(
+  previous: Record<string, unknown> | undefined,
+  event: SyncEvent,
+): boolean {
+  if (event.operation !== 'upsert') return false
+  if (!previous) return event.payload.status === 'draft'
+  if (!(
+    (previous.status === 'draft' && event.payload.status === 'sent') ||
+    (previous.status === 'sent' && event.payload.status === 'closed')
+  ))
+    return false
+  const { status: _oldStatus, ...oldSnapshot } = previous
+  const { status: _newStatus, ...newSnapshot } = event.payload
+  return isDeepStrictEqual(oldSnapshot, newSnapshot)
 }
 
 function eventResult(row: StoredEvent): SyncEventResult {
