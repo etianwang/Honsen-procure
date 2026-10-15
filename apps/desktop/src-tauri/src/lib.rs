@@ -1993,6 +1993,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         self.require_master_data_mutation(now)?;
+        let actor_id = self.active_session_user_id()?;
         if !valid_currency(&rate.from_currency)
             || !valid_currency(&rate.to_currency)
             || !valid_decimal_rate(&rate.rate_decimal)
@@ -2018,9 +2019,61 @@ impl LocalAuthService {
                 params![rate.id.to_string(), rate.from_currency, rate.to_currency, rate.rate_decimal, rate.effective_at, rate.source, rate.reason, rate.version],
             )
             .map_err(|_| AuthError::Database)?;
+        transaction.execute(
+            "INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES (?1, ?2, 'exchange_rate', ?3, 'create', ?4, ?5)",
+            params![Uuid::new_v4().to_string(), actor_id.to_string(), rate.id.to_string(), payload, unix_seconds(now)],
+        ).map_err(|_| AuthError::Database)?;
         insert_local_sync_outbox(&transaction, "exchange_rate", rate.id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
+    }
+
+    pub fn list_exchange_rates(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<ExchangeRateInput>, AuthError> {
+        self.require_master_data_mutation(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection.prepare(
+            "SELECT id, from_currency, to_currency, rate_decimal, effective_at, source, reason, version FROM local_exchange_rates WHERE deleted_at IS NULL ORDER BY effective_at DESC, id"
+        ).map_err(|_| AuthError::Database)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            })
+            .map_err(|_| AuthError::Database)?;
+        rows.map(|row| {
+            let (
+                id,
+                from_currency,
+                to_currency,
+                rate_decimal,
+                effective_at,
+                source,
+                reason,
+                version,
+            ) = row.map_err(|_| AuthError::Database)?;
+            Ok(ExchangeRateInput {
+                id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
+                from_currency,
+                to_currency,
+                rate_decimal,
+                effective_at,
+                source,
+                reason,
+                version,
+            })
+        })
+        .collect()
     }
 
     pub fn save_material(&self, material: MaterialInput, now: SystemTime) -> Result<(), AuthError> {
@@ -5559,6 +5612,14 @@ pub mod commands {
         auth.save_exchange_rate(rate, SystemTime::now())
             .map_err(Into::into)
     }
+
+    #[tauri::command]
+    pub fn list_exchange_rates(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::ExchangeRateInput>, CommandError> {
+        auth.list_exchange_rates(SystemTime::now())
+            .map_err(Into::into)
+    }
 }
 
 fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
@@ -5705,6 +5766,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0042_tax_template_audit",
             include_str!("../migrations/0042_tax_template_audit.sql"),
+        ),
+        (
+            "0043_exchange_rate_audit",
+            include_str!("../migrations/0043_exchange_rate_audit.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -7834,6 +7899,35 @@ mod tests {
     }
 
     #[test]
+    fn exchange_rate_audit_migration_preserves_tax_entries() {
+        let connection = Connection::open_in_memory().unwrap();
+        for sql in [
+            include_str!("../migrations/0027_master_data_audit.sql"),
+            include_str!("../migrations/0040_unit_master_data_audit.sql"),
+            include_str!("../migrations/0041_organization_master_data_audit.sql"),
+            include_str!("../migrations/0042_tax_template_audit.sql"),
+        ] {
+            connection.execute_batch(sql).unwrap();
+        }
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('tax-old', 'actor', 'tax_template', 'tax-id', 'create', '{}', 1)", []).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0043_exchange_rate_audit.sql"))
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT entity_type FROM local_master_data_audit_entries WHERE id = 'tax-old'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "tax_template"
+        );
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('rate-new', 'actor', 'exchange_rate', 'rate-id', 'create', '{}', 2)", []).unwrap();
+        assert!(connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('bad', 'actor', 'other', 'x', 'create', '{}', 3)", []).is_err());
+    }
+
+    #[test]
     fn pull_continues_only_after_a_full_advancing_page() {
         let change = SyncPullChangeInput {
             cursor: "501".into(),
@@ -9534,6 +9628,96 @@ mod tests {
             "tax_template",
             "exchange_rate",
         ])));
+    }
+
+    #[test]
+    fn exchange_rate_history_is_authorized_append_only_and_audited() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let rate = ExchangeRateInput {
+            id: Uuid::new_v4(),
+            from_currency: "XOF".into(),
+            to_currency: "EUR".into(),
+            rate_decimal: "0.00152449".into(),
+            effective_at: "2026-10-15".into(),
+            source: "manual".into(),
+            reason: Some("fixture reason".into()),
+            version: 1,
+        };
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(service.list_exchange_rates(now), Err(AuthError::Forbidden));
+        assert_eq!(
+            service.save_exchange_rate(rate.clone(), now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: Uuid::new_v4(),
+                    username: "administrator".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_exchange_rate(
+                ExchangeRateInput {
+                    reason: None,
+                    ..rate.clone()
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        assert!(service.pending_sync_events(100, now).unwrap().is_empty());
+        service.save_exchange_rate(rate.clone(), now).unwrap();
+        assert_eq!(
+            service.list_exchange_rates(now).unwrap(),
+            vec![rate.clone()]
+        );
+        assert_eq!(
+            service.save_exchange_rate(rate.clone(), now),
+            Err(AuthError::Database)
+        );
+        let connection = service.connection.lock().unwrap();
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM local_master_data_audit_entries WHERE entity_type = 'exchange_rate' AND entity_id = ?1", [rate.id.to_string()], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        drop(connection);
+        assert_eq!(
+            service
+                .pending_sync_events(100, now)
+                .unwrap()
+                .iter()
+                .filter(|event| event.entity_type == "exchange_rate")
+                .count(),
+            1
+        );
     }
 
     #[test]

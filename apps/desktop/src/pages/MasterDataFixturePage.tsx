@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ProjectDefaultsEditor } from '../components/ProjectDefaultsEditor'
 import { MasterDataManager } from '../components/MasterDataManager'
 import { TaxTemplateEditor } from '../components/TaxTemplateEditor'
+import { ExchangeRateEditor } from '../components/ExchangeRateEditor'
 import type {
   MasterDataApi,
   ProjectDefaultsView,
@@ -65,6 +66,10 @@ export function MasterDataFixturePage() {
       return []
     },
     async saveTaxTemplate() {},
+    async listExchangeRates() {
+      return []
+    },
+    async saveExchangeRate() {},
   }
 
   return (
@@ -76,6 +81,7 @@ export function MasterDataFixturePage() {
         countries={referenceData.filter((item) => item.kind === 'country')}
         canEdit
       />
+      <ExchangeRateEditor api={api} rates={[]} canEdit />
       <ProjectDefaultsEditor api={api} projects={projects} canEdit />
     </main>
   )

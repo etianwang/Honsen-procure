@@ -564,6 +564,32 @@ test('administrator can create, rename and disable a tax template offline', asyn
   await expect(browserErrors).toEqual([])
 })
 
+test('administrator archives a manual exchange rate with a reason', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByLabel('源币种').click()
+  await page.getByText('XOF', { exact: true }).last().click()
+  await page.getByLabel('目标币种').click()
+  await page.getByText('EUR', { exact: true }).last().click()
+  await page.getByLabel('汇率小数字符串').fill('0.00152449')
+  await page.getByLabel('汇率生效日期').fill('2026-10-15')
+  await expect(
+    page.getByRole('button', { name: '新增手工汇率' }),
+  ).toBeDisabled()
+  await page.getByLabel('手工汇率原因').fill('Fixture manual reference')
+  await page.getByRole('button', { name: '新增手工汇率' }).click()
+  await expect(
+    page.getByLabel('汇率历史').getByText('0.00152449'),
+  ).toBeVisible()
+  await expect(page.getByText('手工汇率已归档；等待同步确认')).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
 test('administrator creates a department and team with an explicit parent', async ({
   page,
 }) => {
@@ -655,6 +681,7 @@ test('desktop project-default page uses the Tauri command adapter', async ({
             if (command === 'list_reference_master_data')
               return Promise.resolve([])
             if (command === 'list_tax_templates') return Promise.resolve([])
+            if (command === 'list_exchange_rates') return Promise.resolve([])
             if (command === 'save_project_defaults') return Promise.resolve()
             return Promise.reject(new Error('unexpected command'))
           },

@@ -1,6 +1,7 @@
-import type { ProjectDefaults, TaxTemplate } from '@honsen/shared'
+import type { ExchangeRate, ProjectDefaults, TaxTemplate } from '@honsen/shared'
 
 export type TaxTemplateView = TaxTemplate & { version: number }
+export type ExchangeRateView = ExchangeRate & { version: number }
 
 export type ProjectDefaultsView = {
   projectId: string
@@ -80,6 +81,8 @@ export type MasterDataApi = {
   saveReferenceMasterData(record: ReferenceMasterDataView): Promise<void>
   listTaxTemplates(): Promise<TaxTemplateView[]>
   saveTaxTemplate(template: TaxTemplateView): Promise<void>
+  listExchangeRates(): Promise<ExchangeRateView[]>
+  saveExchangeRate(rate: ExchangeRateView): Promise<void>
 }
 
 type TauriInvoke = <T>(command: string, args?: object) => Promise<T>
@@ -107,4 +110,8 @@ export const tauriMasterDataApi: MasterDataApi = {
     tauriInvoke()<TaxTemplateView[]>('list_tax_templates'),
   saveTaxTemplate: (template) =>
     tauriInvoke()<void>('save_tax_template', { template }),
+  listExchangeRates: () =>
+    tauriInvoke()<ExchangeRateView[]>('list_exchange_rates'),
+  saveExchangeRate: (rate) =>
+    tauriInvoke()<void>('save_exchange_rate', { rate }),
 }

@@ -107,7 +107,8 @@ fn main() {
             commands::list_reference_master_data,
             commands::save_tax_template,
             commands::list_tax_templates,
-            commands::save_exchange_rate
+            commands::save_exchange_rate,
+            commands::list_exchange_rates
         ])
         .run(tauri::generate_context!())
         .expect("run Honsen Procure desktop");

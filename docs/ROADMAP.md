@@ -34,6 +34,8 @@ The T04 local tax-template maintenance checkpoint adds a trusted read path, admi
 
 Tax-template rate and effective-date revision is now connected to the same trusted save command and covered by DOM interaction. Project-default tax selection, deployment data, native roles and milestone acceptance remain open.
 
+The T04 exchange-rate history checkpoint adds administrator manual-rate entry with a reason, trusted append-only listing and transactional audit/outbox. Rust, DOM and isolated PostgreSQL regressions passed. Authorized rate sources and deployment data, native acceptance and M0/M1 remain open.
+
 The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 
 | Milestone | Acceptance      | Contributing tasks (reverse mapping is in BUILD-TASKS) | Outstanding acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
