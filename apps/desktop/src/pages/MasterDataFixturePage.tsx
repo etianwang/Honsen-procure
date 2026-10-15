@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ProjectDefaultsEditor } from '../components/ProjectDefaultsEditor'
 import { MasterDataManager } from '../components/MasterDataManager'
+import { TaxTemplateEditor } from '../components/TaxTemplateEditor'
 import type {
   MasterDataApi,
   ProjectDefaultsView,
@@ -60,11 +61,21 @@ export function MasterDataFixturePage() {
       return []
     },
     async saveReferenceMasterData() {},
+    async listTaxTemplates() {
+      return []
+    },
+    async saveTaxTemplate() {},
   }
 
   return (
     <main className="fixture-page">
       <MasterDataManager api={api} records={referenceData} canEdit />
+      <TaxTemplateEditor
+        api={api}
+        templates={[]}
+        countries={referenceData.filter((item) => item.kind === 'country')}
+        canEdit
+      />
       <ProjectDefaultsEditor api={api} projects={projects} canEdit />
     </main>
   )

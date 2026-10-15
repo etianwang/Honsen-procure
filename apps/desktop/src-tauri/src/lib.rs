@@ -1885,6 +1885,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         self.require_master_data_mutation(now)?;
+        let actor_id = self.active_session_user_id()?;
         validate_reference(&template.business_code, &template.name, template.version)?;
         if template.rate_basis_points < 0
             || template.rate_basis_points > 100_000
@@ -1901,6 +1902,21 @@ impl LocalAuthService {
             template.id,
             &template.business_code,
         )?;
+        let prior_active = transaction
+            .query_row(
+                "SELECT is_active FROM local_tax_templates WHERE id = ?1",
+                [template.id.to_string()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        if template.is_active && template.country_id.is_some() && !transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_countries WHERE id = ?1 AND is_active = 1 AND deleted_at IS NULL)",
+            [template.country_id.unwrap().to_string()],
+            |row| row.get::<_, bool>(0),
+        ).map_err(|_| AuthError::Database)? {
+            return Err(AuthError::InvalidInput);
+        }
         transaction
             .execute(
                 "INSERT INTO local_tax_templates (id, business_code, name, country_id, rate_basis_points, effective_at, is_active, version)
@@ -1909,9 +1925,66 @@ impl LocalAuthService {
                 params![template.id.to_string(), template.business_code, template.name, template.country_id.map(|value| value.to_string()), template.rate_basis_points, template.effective_at, template.is_active as i64, template.version],
             )
             .map_err(|_| AuthError::Database)?;
+        let action = match (prior_active, template.is_active) {
+            (None, _) => "create",
+            (Some(0), true) => "enable",
+            (Some(1), false) => "disable",
+            _ => "edit",
+        };
+        transaction.execute(
+            "INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES (?1, ?2, 'tax_template', ?3, ?4, ?5, ?6)",
+            params![Uuid::new_v4().to_string(), actor_id.to_string(), template.id.to_string(), action, payload, unix_seconds(now)],
+        ).map_err(|_| AuthError::Database)?;
         insert_local_sync_outbox(&transaction, "tax_template", template.id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
+    }
+
+    pub fn list_tax_templates(&self, now: SystemTime) -> Result<Vec<TaxTemplateInput>, AuthError> {
+        self.require_master_data_mutation(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection.prepare(
+            "SELECT id, business_code, name, country_id, rate_basis_points, effective_at, is_active, version FROM local_tax_templates WHERE deleted_at IS NULL ORDER BY name"
+        ).map_err(|_| AuthError::Database)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i32>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, bool>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            })
+            .map_err(|_| AuthError::Database)?;
+        rows.map(|row| {
+            let (
+                id,
+                business_code,
+                name,
+                country_id,
+                rate_basis_points,
+                effective_at,
+                is_active,
+                version,
+            ) = row.map_err(|_| AuthError::Database)?;
+            Ok(TaxTemplateInput {
+                id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
+                business_code,
+                name,
+                country_id: country_id
+                    .map(|value| Uuid::parse_str(&value).map_err(|_| AuthError::Database))
+                    .transpose()?,
+                rate_basis_points,
+                effective_at,
+                is_active,
+                version,
+            })
+        })
+        .collect()
     }
 
     pub fn save_exchange_rate(
@@ -5471,6 +5544,14 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn list_tax_templates(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::TaxTemplateInput>, CommandError> {
+        auth.list_tax_templates(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn save_exchange_rate(
         auth: State<'_, LocalAuthService>,
         rate: super::ExchangeRateInput,
@@ -5614,12 +5695,16 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             include_str!("../migrations/0031_procurement_workflow_states.sql"),
         ),
         (
-            "0032_unit_master_data_audit",
-            include_str!("../migrations/0032_unit_master_data_audit.sql"),
+            "0040_unit_master_data_audit",
+            include_str!("../migrations/0040_unit_master_data_audit.sql"),
         ),
         (
-            "0033_organization_master_data_audit",
-            include_str!("../migrations/0033_organization_master_data_audit.sql"),
+            "0041_organization_master_data_audit",
+            include_str!("../migrations/0041_organization_master_data_audit.sql"),
+        ),
+        (
+            "0042_tax_template_audit",
+            include_str!("../migrations/0042_tax_template_audit.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -7673,7 +7758,7 @@ mod tests {
         connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, previous_json, next_json, created_at) VALUES ('old', 'actor', 'country', 'country-id', 'create', NULL, '{}', 1)", []).unwrap();
         connection
             .execute_batch(include_str!(
-                "../migrations/0032_unit_master_data_audit.sql"
+                "../migrations/0040_unit_master_data_audit.sql"
             ))
             .unwrap();
         let old: (String, String) = connection
@@ -7696,13 +7781,13 @@ mod tests {
             .unwrap();
         connection
             .execute_batch(include_str!(
-                "../migrations/0032_unit_master_data_audit.sql"
+                "../migrations/0040_unit_master_data_audit.sql"
             ))
             .unwrap();
         connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('unit-old', 'actor', 'unit', 'unit-id', 'create', '{}', 1)", []).unwrap();
         connection
             .execute_batch(include_str!(
-                "../migrations/0033_organization_master_data_audit.sql"
+                "../migrations/0041_organization_master_data_audit.sql"
             ))
             .unwrap();
         assert_eq!(
@@ -7718,6 +7803,34 @@ mod tests {
         connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('department-new', 'actor', 'department', 'department-id', 'create', '{}', 2)", []).unwrap();
         connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('team-new', 'actor', 'team', 'team-id', 'create', '{}', 3)", []).unwrap();
         assert!(connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('bad', 'actor', 'other', 'x', 'create', '{}', 4)", []).is_err());
+    }
+
+    #[test]
+    fn tax_audit_migration_preserves_organization_entries() {
+        let connection = Connection::open_in_memory().unwrap();
+        for sql in [
+            include_str!("../migrations/0027_master_data_audit.sql"),
+            include_str!("../migrations/0040_unit_master_data_audit.sql"),
+            include_str!("../migrations/0041_organization_master_data_audit.sql"),
+        ] {
+            connection.execute_batch(sql).unwrap();
+        }
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('team-old', 'actor', 'team', 'team-id', 'create', '{}', 1)", []).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0042_tax_template_audit.sql"))
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT entity_type FROM local_master_data_audit_entries WHERE id = 'team-old'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "team"
+        );
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('tax-new', 'actor', 'tax_template', 'tax-id', 'create', '{}', 2)", []).unwrap();
+        assert!(connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('bad', 'actor', 'other', 'x', 'create', '{}', 3)", []).is_err());
     }
 
     #[test]
@@ -9421,6 +9534,109 @@ mod tests {
             "tax_template",
             "exchange_rate",
         ])));
+    }
+
+    #[test]
+    fn tax_template_maintenance_is_authorized_audited_and_transactional() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let tax_id = Uuid::new_v4();
+        let country_id = Uuid::new_v4();
+        let template =
+            |name: &str, active: bool, country_id: Option<Uuid>, version: i64| TaxTemplateInput {
+                id: tax_id,
+                business_code: "FIXTURE-TAX".into(),
+                name: name.into(),
+                country_id,
+                rate_basis_points: 1800,
+                effective_at: "2026-10-15".into(),
+                is_active: active,
+                version,
+            };
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(service.list_tax_templates(now), Err(AuthError::Forbidden));
+        assert_eq!(
+            service.save_tax_template(template("Tax", true, None, 1), now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: Uuid::new_v4(),
+                    username: "administrator".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_tax_template(template("Tax", true, Some(country_id), 1), now),
+            Err(AuthError::InvalidInput)
+        );
+        assert!(service.pending_sync_events(100, now).unwrap().is_empty());
+        service
+            .save_tax_template(template("Tax", true, None, 1), now)
+            .unwrap();
+        service
+            .save_tax_template(template("Tax revised", true, None, 2), now)
+            .unwrap();
+        service
+            .save_tax_template(template("Tax revised", false, None, 3), now)
+            .unwrap();
+        assert_eq!(
+            service.list_tax_templates(now).unwrap(),
+            vec![template("Tax revised", false, None, 3)]
+        );
+        assert_eq!(
+            service.save_tax_template(
+                TaxTemplateInput {
+                    business_code: "DIFFERENT".into(),
+                    ..template("Tax revised", false, None, 4)
+                },
+                now
+            ),
+            Err(AuthError::ImmutableBusinessCode)
+        );
+        let connection = service.connection.lock().unwrap();
+        let actions: Vec<String> = connection.prepare("SELECT action FROM local_master_data_audit_entries WHERE entity_type = 'tax_template' AND entity_id = ?1 ORDER BY rowid").unwrap()
+            .query_map([tax_id.to_string()], |row| row.get(0)).unwrap().map(|row| row.unwrap()).collect();
+        assert_eq!(actions, vec!["create", "edit", "disable"]);
+        drop(connection);
+        assert_eq!(
+            service
+                .pending_sync_events(100, now)
+                .unwrap()
+                .iter()
+                .filter(|event| event.entity_type == "tax_template")
+                .count(),
+            3
+        );
     }
 
     #[test]

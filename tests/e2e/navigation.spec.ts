@@ -524,6 +524,38 @@ test('administrator can create, edit and disable a unit offline', async ({
   await expect(browserErrors).toEqual([])
 })
 
+test('administrator can create, rename and disable a tax template offline', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await expect(page.getByRole('button', { name: '新增税模板' })).toBeDisabled()
+  await page.getByLabel('税模板代码').fill('fixture-tax')
+  await page.getByLabel('税模板名称', { exact: true }).fill('Fixture tax')
+  await page.getByLabel('税率（基点）', { exact: true }).fill('1800')
+  await page.getByLabel('税模板生效日期').fill('2026-10-15')
+  await page.getByRole('button', { name: '新增税模板' }).click()
+  await expect(page.getByLabel('编辑税模板名称-fixture-tax')).toHaveValue(
+    'Fixture tax',
+  )
+  await page.getByLabel('编辑税模板名称-fixture-tax').fill('Revised tax')
+  await page.getByRole('button', { name: '保存名称' }).click()
+  await expect(page.getByLabel('编辑税模板名称-fixture-tax')).toHaveValue(
+    'Revised tax',
+  )
+  await page
+    .getByLabel('税模板维护')
+    .getByRole('button', { name: /停\s*用/ })
+    .click()
+  await expect(
+    page.getByLabel('税模板维护').getByRole('button', { name: /启\s*用/ }),
+  ).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
 test('administrator creates a department and team with an explicit parent', async ({
   page,
 }) => {
@@ -614,6 +646,7 @@ test('desktop project-default page uses the Tauri command adapter', async ({
               return Promise.resolve(projects)
             if (command === 'list_reference_master_data')
               return Promise.resolve([])
+            if (command === 'list_tax_templates') return Promise.resolve([])
             if (command === 'save_project_defaults') return Promise.resolve()
             return Promise.reject(new Error('unexpected command'))
           },

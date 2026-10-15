@@ -106,6 +106,7 @@ fn main() {
             commands::save_reference_master_data,
             commands::list_reference_master_data,
             commands::save_tax_template,
+            commands::list_tax_templates,
             commands::save_exchange_rate
         ])
         .run(tauri::generate_context!())
