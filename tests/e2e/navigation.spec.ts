@@ -542,9 +542,17 @@ test('administrator can create, rename and disable a tax template offline', asyn
     'Fixture tax',
   )
   await page.getByLabel('编辑税模板名称-fixture-tax').fill('Revised tax')
-  await page.getByRole('button', { name: '保存名称' }).click()
+  await page.getByLabel('编辑税率（基点）-fixture-tax').fill('1900')
+  await page.getByLabel('编辑税模板生效日期-fixture-tax').fill('2026-11-01')
+  await page.getByRole('button', { name: '保存修改' }).click()
   await expect(page.getByLabel('编辑税模板名称-fixture-tax')).toHaveValue(
     'Revised tax',
+  )
+  await expect(page.getByLabel('编辑税率（基点）-fixture-tax')).toHaveValue(
+    '1900',
+  )
+  await expect(page.getByLabel('编辑税模板生效日期-fixture-tax')).toHaveValue(
+    '2026-11-01',
   )
   await page
     .getByLabel('税模板维护')

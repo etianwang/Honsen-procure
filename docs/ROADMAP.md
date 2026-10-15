@@ -30,7 +30,9 @@ The follow-on T04 tax/exchange server sync validation checkpoint passed schema/p
 
 Project-default Push now also has schema, role and project-identity checks with isolated PostgreSQL replay/Pull/conflict evidence. This closes only a transport validation gap; T04 deployment and milestone acceptance remain open.
 
-The T04 local tax-template maintenance checkpoint adds a trusted read path, administrator create/rename/enable/disable and transactional audit/outbox. Its audit migrations were renumbered 0040–0042 to avoid the separate stage-5 branch's 0032–0036 before integration. Isolated Rust/DOM/PostgreSQL gates passed; tax rate/date editing, deployed data, native roles and M0/M1 remain open.
+The T04 local tax-template maintenance checkpoint adds a trusted read path, administrator create/rename/enable/disable and transactional audit/outbox. Its audit migrations were renumbered 0040–0042 to avoid the separate stage-5 branch's 0032–0036 before integration. Isolated Rust/DOM/PostgreSQL gates passed; later rate/date editing is recorded below, while deployed data, native roles and M0/M1 remain open.
+
+Tax-template rate and effective-date revision is now connected to the same trusted save command and covered by DOM interaction. Project-default tax selection, deployment data, native roles and milestone acceptance remain open.
 
 The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 
