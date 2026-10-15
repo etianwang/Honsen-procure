@@ -16,6 +16,7 @@ class FixtureStore implements SyncStore {
   pushed = 0
   bound = true
   projectInUse = false
+  compatibleTax = false
   order: Record<string, unknown> | null = {
     applicantId: engineer.id,
     projectId,
@@ -47,6 +48,10 @@ class FixtureStore implements SyncStore {
 
   async hasProjectBusinessUse() {
     return this.projectInUse
+  }
+
+  async isCompatibleProjectTax() {
+    return this.compatibleTax
   }
 
   async getEntityPayload(entityType: string) {
@@ -474,7 +479,23 @@ describe('SyncService', () => {
     expect(
       bad.results.every((result) => result.status === 'validation_error'),
     ).toBe(true)
-    expect(store.pushed).toBe(2)
+    const withTax = {
+      ...camel,
+      eventId: randomUUID(),
+      payload: {
+        ...camel.payload,
+        defaultTaxTemplateId: randomUUID(),
+      },
+    }
+    expect((await push(['administrator'], [withTax])).results[0]?.status).toBe(
+      'validation_error',
+    )
+    store.compatibleTax = true
+    expect(
+      (await push(['administrator'], [{ ...withTax, eventId: randomUUID() }]))
+        .results[0]?.status,
+    ).toBe('accepted')
+    expect(store.pushed).toBe(3)
   })
 
   it('rejects changing a used project country without mutation', async () => {

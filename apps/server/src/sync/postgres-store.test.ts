@@ -185,6 +185,177 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(stored.rows[0]?.payload_json.name).toBe('Field team')
   })
 
+  it('rejects incompatible project-default tax references in the sync path', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const [
+      projectId,
+      countryId,
+      otherCountryId,
+      taxId,
+      otherTaxId,
+      globalTaxId,
+      inactiveTaxId,
+    ] = Array.from({ length: 7 }, () => randomUUID())
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const tax = (id: string, country: string | null, active: boolean) => ({
+      eventId: randomUUID(),
+      entityType: 'tax_template',
+      entityId: id,
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        business_code: `TAX-${id}`,
+        name: 'Fixture tax',
+        country_id: country,
+        rate_basis_points: 1800,
+        effective_at: '2026-10-15',
+        is_active: active,
+        version: 1,
+      },
+    })
+    const setup = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          eventId: randomUUID(),
+          entityType: 'project',
+          entityId: projectId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            kind: 'project',
+            business_code: `PROJECT-${projectId}`,
+            name: 'Fixture project',
+            country_id: countryId,
+            site: 'Fixture site',
+            department_name: 'Fixture department',
+            default_currency: 'XOF',
+            default_language_pair: 'zh_fr',
+            is_active: true,
+            version: 1,
+          },
+        },
+        tax(taxId, countryId, true),
+        tax(otherTaxId, otherCountryId, true),
+        tax(globalTaxId, null, true),
+        tax(inactiveTaxId, countryId, false),
+      ],
+    })
+    expect(setup.results.every((result) => result.status === 'accepted')).toBe(
+      true,
+    )
+    const defaults = (id: string, baseVersion: number) => ({
+      eventId: randomUUID(),
+      entityType: 'project_defaults',
+      entityId: projectId,
+      operation: 'upsert',
+      baseVersion,
+      payload: {
+        project_id: projectId,
+        department_title: 'Fixture department',
+        company_address: 'Fixture address',
+        company_contact: 'Fixture contact',
+        default_currency: 'XOF',
+        default_language_pair: 'zh_fr',
+        default_tax_template_id: id,
+      },
+    })
+    const request = { deviceId: randomUUID(), events: [defaults(taxId, 0)] }
+    const first = await service.push(actor, request)
+    expect(first.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(first)
+    const rejected = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        defaults(otherTaxId, 1),
+        defaults(randomUUID(), 1),
+        defaults(inactiveTaxId, 1),
+      ],
+    })
+    expect(rejected.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+      'validation_error',
+    ])
+    const global = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [defaults(globalTaxId, 1)],
+    })
+    expect(global.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 2,
+    })
+    const retained = await pool!.query<{
+      payload_json: { default_tax_template_id: string }
+    }>(
+      "SELECT payload_json FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+      [projectId],
+    )
+    expect(retained.rows[0]?.payload_json.default_tax_template_id).toBe(
+      globalTaxId,
+    )
+  })
+
+  it('checks a preexisting REST project and tax template when sync entities are absent', async () => {
+    const [countryId, projectId, taxId] = Array.from({ length: 3 }, () =>
+      randomUUID(),
+    )
+    const store = new PostgresSyncStore(pool!)
+    try {
+      await pool!.query(
+        "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'fixture country', 'UTC')",
+        [countryId, `SYNC-C-${countryId}`],
+      )
+      await pool!.query(
+        "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'fixture project', 'fixture site', 'fixture department', 'XOF', 'zh_fr')",
+        [projectId, countryId, `SYNC-P-${projectId}`],
+      )
+      await pool!.query(
+        "INSERT INTO tax_templates (id, business_code, name, country_id, rate_basis_points, effective_at) VALUES ($1, $2, 'fixture tax', $3, 1800, '2026-10-15')",
+        [taxId, `SYNC-T-${taxId}`, countryId],
+      )
+      expect(await store.isCompatibleProjectTax(projectId, taxId)).toBe(true)
+      await pool!.query(
+        'UPDATE tax_templates SET is_active = FALSE WHERE id = $1',
+        [taxId],
+      )
+      expect(await store.isCompatibleProjectTax(projectId, taxId)).toBe(false)
+      await pool!.query(
+        'UPDATE tax_templates SET is_active = TRUE WHERE id = $1',
+        [taxId],
+      )
+      await pool!.query(
+        "INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by) VALUES ('tax_template', $1, 1, TRUE, '{}', $2)",
+        [taxId, actorId],
+      )
+      expect(await store.isCompatibleProjectTax(projectId, taxId)).toBe(false)
+      await pool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
+      )
+      await pool!.query(
+        "INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by) VALUES ('project', $1, 1, TRUE, '{}', $2)",
+        [projectId, actorId],
+      )
+      expect(await store.isCompatibleProjectTax(projectId, taxId)).toBe(false)
+    } finally {
+      await pool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+        [taxId],
+      )
+      await pool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'project' AND entity_id = $1",
+        [projectId],
+      )
+      await pool!.query('DELETE FROM tax_templates WHERE id = $1', [taxId])
+      await pool!.query('DELETE FROM projects WHERE id = $1', [projectId])
+      await pool!.query('DELETE FROM countries WHERE id = $1', [countryId])
+    }
+  })
+
   it('persists validated project defaults with replay and conflict retention', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const entityId = randomUUID()

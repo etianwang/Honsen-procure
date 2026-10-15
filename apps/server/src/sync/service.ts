@@ -106,11 +106,20 @@ export class SyncService {
     }
     if (event.entityType === 'project_defaults') {
       const payload = referencePayload(event.payload)
-      return (
+      if (!(
         event.operation === 'upsert' &&
         actor.roles.some((role) => masterDataRoles.includes(role)) &&
         payload.projectId === event.entityId &&
         projectDefaultsSchema.safeParse(payload).success
+      ))
+        return false
+      return (
+        payload.defaultTaxTemplateId === null ||
+        (typeof payload.defaultTaxTemplateId === 'string' &&
+          (await this.store.isCompatibleProjectTax(
+            event.entityId,
+            payload.defaultTaxTemplateId,
+          )))
       )
     }
     if (actor.roles.some((role) => procurementRoles.includes(role))) return true

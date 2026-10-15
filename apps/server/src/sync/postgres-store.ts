@@ -244,6 +244,61 @@ export class PostgresSyncStore implements SyncStore {
     return result.rowCount === 1
   }
 
+  async isCompatibleProjectTax(
+    projectId: string,
+    taxTemplateId: string,
+  ): Promise<boolean> {
+    const project = await this.pool.query<{
+      is_deleted: boolean
+      payload_json: Record<string, unknown>
+    }>(
+      "SELECT is_deleted, payload_json FROM sync_entities WHERE entity_type = 'project' AND entity_id = $1",
+      [projectId],
+    )
+    if (project.rows[0]?.is_deleted) return false
+    const projectPayload = project.rows[0]?.payload_json
+    const countryId = projectPayload
+      ? (projectPayload.countryId ?? projectPayload.country_id)
+      : (
+          await this.pool.query<{ country_id: string }>(
+            'SELECT country_id::text AS country_id FROM projects WHERE id = $1 AND deleted_at IS NULL',
+            [projectId],
+          )
+        ).rows[0]?.country_id
+    if (typeof countryId !== 'string') return false
+    const tax = await this.pool.query<{
+      is_deleted: boolean
+      payload_json: Record<string, unknown>
+    }>(
+      "SELECT is_deleted, payload_json FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+      [taxTemplateId],
+    )
+    if (tax.rows[0]?.is_deleted) return false
+    const taxPayload = tax.rows[0]?.payload_json
+    if (taxPayload) {
+      const active = taxPayload.isActive ?? taxPayload.is_active
+      const taxCountry =
+        taxPayload.countryId !== undefined
+          ? taxPayload.countryId
+          : taxPayload.country_id
+      return (
+        active === true && (taxCountry === null || taxCountry === countryId)
+      )
+    }
+    const stored = await this.pool.query<{
+      country_id: string | null
+      is_active: boolean
+    }>(
+      'SELECT country_id::text AS country_id, is_active FROM tax_templates WHERE id = $1 AND deleted_at IS NULL',
+      [taxTemplateId],
+    )
+    const row = stored.rows[0]
+    return (
+      row?.is_active === true &&
+      (row.country_id === null || row.country_id === countryId)
+    )
+  }
+
   async getEntityPayload(
     entityType: string,
     entityId: string,

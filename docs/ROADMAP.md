@@ -38,6 +38,8 @@ The T04 exchange-rate history checkpoint adds administrator manual-rate entry wi
 
 Project defaults now select active global or same-country tax templates; Rust and PostgreSQL master-data writes reject incompatible templates without replacing a saved default. Generic sync compatibility/projection and deployed/native evidence remain open, so milestone status is unchanged.
 
+Generic Push now applies the same project/default-tax compatibility rule, including preexisting REST data and sync tombstones; isolated PostgreSQL replay and rejection tests passed. Server business-table projection, atomic cross-entity conflict handling, deployed/native evidence and milestone acceptance remain open.
+
 The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 
 | Milestone | Acceptance      | Contributing tasks (reverse mapping is in BUILD-TASKS) | Outstanding acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |

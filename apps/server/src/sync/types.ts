@@ -28,6 +28,10 @@ export type SyncStore = {
     teamId?: string,
   ): Promise<boolean>
   hasProjectBusinessUse(projectId: string): Promise<boolean>
+  isCompatibleProjectTax(
+    projectId: string,
+    taxTemplateId: string,
+  ): Promise<boolean>
   getEntityPayload(
     entityType: string,
     entityId: string,
