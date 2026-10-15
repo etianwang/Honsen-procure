@@ -200,6 +200,17 @@ export class PostgresSyncStore implements SyncStore {
           serverVersion: currentVersion,
         }
       }
+      if (
+        input.event.entityType === 'purchase_order' &&
+        !(await validParentWithExistingRfqs(client, input.event))
+      ) {
+        await client.query('ROLLBACK')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: currentVersion,
+        }
+      }
 
       const serverVersion = currentVersion + 1
       const deleted = input.event.operation === 'soft_delete'
@@ -1350,6 +1361,37 @@ async function validRfqParent(
       'completed',
       'completed_with_conditions',
     ].includes(String(order.workflowStatus))
+  )
+}
+
+async function validParentWithExistingRfqs(
+  client: PoolClient,
+  event: SyncEvent,
+): Promise<boolean> {
+  // The parent row lock in pushEvent serializes this with RFQ parent validation.
+  const rfq = await client.query<{ project_id: string }>(
+    `SELECT payload_json->>'projectId' AS project_id FROM sync_entities
+     WHERE entity_type = 'rfq' AND is_deleted = FALSE
+       AND payload_json->>'sourceOrderId' = $1 LIMIT 1`,
+    [event.entityId],
+  )
+  if (!rfq.rows[0]) return true
+  const parent = event.payload
+  return (
+    event.operation === 'upsert' &&
+    parent.parentOrderId == null &&
+    parent.projectId === rfq.rows[0].project_id &&
+    (parent.procurementMode == null ||
+      parent.procurementMode === 'honsen_self_purchase') &&
+    [
+      'confirmed',
+      'approved',
+      'executing',
+      'receiving',
+      'completed',
+      'completed_with_conditions',
+      'cancelled',
+    ].includes(String(parent.workflowStatus))
   )
 }
 

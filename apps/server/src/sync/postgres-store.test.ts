@@ -141,6 +141,51 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       (await push(randomUUID(), 1, { ...payload, status: 'closed' })).results[0]
         ?.status,
     ).toBe('conflict')
+    for (const invalidParent of [
+      { procurementMode: 'owner_self_purchase', workflowStatus: 'approved' },
+      { procurementMode: 'honsen_self_purchase', workflowStatus: 'draft' },
+      {
+        procurementMode: 'honsen_self_purchase',
+        workflowStatus: 'approved',
+        projectId: randomUUID(),
+      },
+    ]) {
+      const changedParent = await store.pushEvent({
+        event: {
+          eventId: randomUUID(),
+          entityType: 'purchase_order',
+          entityId: orderId,
+          operation: 'upsert',
+          baseVersion: 1,
+          payload: { projectId, ...invalidParent },
+        },
+        installationId: deviceId,
+        actorId,
+      })
+      expect(changedParent.status).toBe('validation_error')
+      expect(
+        await store.getEntityPayload('purchase_order', orderId),
+      ).toMatchObject({
+        procurementMode: 'honsen_self_purchase',
+        workflowStatus: 'approved',
+      })
+    }
+    expect(
+      (
+        await store.pushEvent({
+          event: {
+            eventId: randomUUID(),
+            entityType: 'purchase_order',
+            entityId: orderId,
+            operation: 'soft_delete',
+            baseVersion: 1,
+            payload: {},
+          },
+          installationId: deviceId,
+          actorId,
+        })
+      ).status,
+    ).toBe('validation_error')
     const pulled = await service.pull(actor, { cursor: '0', limit: 500 })
     const rfqs = pulled.changes.filter((change) => change.entityId === rfqId)
     expect(rfqs.map((change) => change.payload.status)).toEqual([
