@@ -106,6 +106,25 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       formalSnapshotJson: JSON.stringify(snapshot),
     }
     const store = new PostgresSyncStore(pool!)
+    async function seedApproved(
+      orderId: string,
+      approvedPayload: Record<string, unknown> = snapshot,
+    ) {
+      expect(
+        await store.pushEvent({
+          event: {
+            eventId: randomUUID(),
+            entityType: 'purchase_order',
+            entityId: orderId,
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: approvedPayload,
+          },
+          installationId,
+          actorId,
+        }),
+      ).toMatchObject({ status: 'accepted', serverVersion: 1 })
+    }
     const cursor = (
       await pool!.query<{ sequence: string }>(
         'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
@@ -118,17 +137,19 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
         entityType: 'purchase_order' as const,
         entityId: firstId,
         operation: 'upsert' as const,
-        baseVersion: 0,
+        baseVersion: 1,
         payload,
       },
       installationId,
       actorId,
     }
+    await seedApproved(firstId)
     expect(await store.pushEvent(first)).toMatchObject({ status: 'accepted' })
     const duplicate = {
       ...first,
       event: { ...first.event, eventId: randomUUID(), entityId: randomUUID() },
     }
+    await seedApproved(duplicate.event.entityId)
     expect(await store.pushEvent(duplicate)).toMatchObject({
       status: 'conflict',
     })
@@ -143,30 +164,30 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       `SELECT 1 FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1`,
       [duplicate.event.entityId],
     )
-    expect(duplicateStored.rowCount).toBe(0)
+    expect(duplicateStored.rowCount).toBe(1)
     expect(await store.pushEvent(first)).toMatchObject({
       status: 'accepted',
-      serverVersion: 1,
+      serverVersion: 2,
     })
     const receiving = {
       ...first,
       event: {
         ...first.event,
         eventId: randomUUID(),
-        baseVersion: 1,
+        baseVersion: 2,
         payload: { ...payload, workflowStatus: 'receiving' },
       },
     }
     expect(await store.pushEvent(receiving)).toMatchObject({
       status: 'accepted',
-      serverVersion: 2,
+      serverVersion: 3,
     })
     const changedSnapshot = {
       ...receiving,
       event: {
         ...receiving.event,
         eventId: randomUUID(),
-        baseVersion: 2,
+        baseVersion: 3,
         payload: {
           ...receiving.event.payload,
           formalSnapshotJson: JSON.stringify({
@@ -178,7 +199,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
     }
     expect(await store.pushEvent(changedSnapshot)).toMatchObject({
       status: 'conflict',
-      serverVersion: 2,
+      serverVersion: 3,
     })
     const retained = await pool!.query<{ payload_json: typeof payload }>(
       `SELECT payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1`,
@@ -198,6 +219,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       formalSnapshotJson: JSON.stringify(badSnapshot),
     }
     const badId = randomUUID()
+    await seedApproved(badId, badSnapshot)
     expect(
       await store.pushEvent({
         ...first,
@@ -223,13 +245,15 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       ownerConvertedReferenceUnitMinor: '0',
       ownerFinalUnitPriceMinor: '20',
     }
+    const zeroRateId = randomUUID()
+    await seedApproved(zeroRateId, { ...snapshot, lines: [zeroRateLine] })
     expect(
       await store.pushEvent({
         ...first,
         event: {
           ...first.event,
           eventId: randomUUID(),
-          entityId: randomUUID(),
+          entityId: zeroRateId,
           payload: {
             ...badPayload,
             lines: [zeroRateLine],
@@ -250,6 +274,10 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       [secondProjectId, countryId, secondProjectCode],
     )
     const reusedSequenceId = randomUUID()
+    await seedApproved(reusedSequenceId, {
+      ...snapshot,
+      projectId: secondProjectId,
+    })
     expect(
       await store.pushEvent({
         ...first,
@@ -292,8 +320,9 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
         .filter((change) => change.entityId === firstId)
         .map((change) => [change.version, change.payload.workflowStatus]),
     ).toEqual([
-      [1, 'formally_issued'],
-      [2, 'receiving'],
+      [1, 'approved'],
+      [2, 'formally_issued'],
+      [3, 'receiving'],
     ])
 
     const retryId = randomUUID()
@@ -314,6 +343,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
         payload: retryPayload,
       },
     }
+    await seedApproved(retryId, { ...snapshot, lines: [retryLine] })
     expect(
       (
         await new SyncService(store).push(
@@ -347,7 +377,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
          (SELECT COUNT(*) FROM sync_events WHERE event_id = $2) AS event`,
       [retryId, retryEvent.event.eventId],
     )
-    expect(failed.rows[0]).toEqual({ registry: '0', entity: '0', event: '0' })
+    expect(failed.rows[0]).toEqual({ registry: '0', entity: '1', event: '0' })
     expect(
       (
         await new SyncService(store).push(
@@ -355,7 +385,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
           { deviceId: installationId, events: [retryEvent.event] },
         )
       ).results[0],
-    ).toMatchObject({ status: 'accepted', serverVersion: 1 })
+    ).toMatchObject({ status: 'accepted', serverVersion: 2 })
 
     const convertedLine = {
       ...line,
@@ -376,13 +406,18 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       ownerConvertedReferenceUnitMinor: '0',
       ownerFinalUnitPriceMinor: '20',
     }
+    const crossZeroId = randomUUID()
+    await seedApproved(crossZeroId, {
+      ...convertedSnapshot,
+      lines: [crossZeroLine],
+    })
     expect(
       await store.pushEvent({
         ...first,
         event: {
           ...first.event,
           eventId: randomUUID(),
-          entityId: randomUUID(),
+          entityId: crossZeroId,
           payload: {
             ...payload,
             primaryCurrency: 'USD',
@@ -398,6 +433,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       }),
     ).toMatchObject({ status: 'validation_error' })
     const convertedId = randomUUID()
+    await seedApproved(convertedId, convertedSnapshot)
     expect(
       await store.pushEvent({
         ...first,
@@ -415,15 +451,18 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
           },
         },
       }),
-    ).toMatchObject({ status: 'accepted', serverVersion: 1 })
+    ).toMatchObject({ status: 'accepted', serverVersion: 2 })
     const convertedPulled = await store.pullChanges({
       actor: { id: actorId, roles: ['purchaser'] },
       cursor: pulled.nextCursor,
       limit: 20,
     })
     expect(
-      convertedPulled.changes.find((change) => change.entityId === convertedId)
-        ?.payload,
+      convertedPulled.changes.find(
+        (change) =>
+          change.entityId === convertedId &&
+          change.payload.workflowStatus === 'formally_issued',
+      )?.payload,
     ).toMatchObject({
       primaryCurrency: 'USD',
       formalDocumentNo: `${countryCode}-${projectCode}-20261015-OPA-${shortCode(installationId)}-3`,
@@ -434,5 +473,5 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
         },
       ],
     })
-  })
+  }, 30_000)
 })

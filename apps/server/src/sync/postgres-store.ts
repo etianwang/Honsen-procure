@@ -5,6 +5,7 @@ import {
   taxTemplateSchema,
 } from '@honsen/shared'
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
+import { isDeepStrictEqual } from 'node:util'
 import type { Pool, PoolClient } from 'pg'
 import type { SyncStore } from './types.js'
 import { formalShortCode, parseFormalIssue } from './formal-issue.js'
@@ -555,16 +556,49 @@ export class PostgresSyncStore implements SyncStore {
         ? (current ?? { version: '0', payload_json: {} })
         : 'validation_error'
     if (prior) {
-      return prior.document_type === formal.documentType &&
+      if (!(
+        prior.document_type === formal.documentType &&
         prior.formal_document_no === formal.documentNo &&
         prior.formal_installation_id === formal.installationId &&
         prior.formal_sequence === formal.sequence &&
         prior.matches_snapshot
-        ? null
-        : (current ?? { version: '0', payload_json: {} })
+      ))
+        return current ?? { version: '0', payload_json: {} }
+      if (
+        !current ||
+        !validFormalTransition(
+          current.payload_json.workflowStatus,
+          input.event.payload.workflowStatus,
+        ) ||
+        !isDeepStrictEqual(input.event.payload, {
+          ...current.payload_json,
+          workflowStatus: input.event.payload.workflowStatus,
+        })
+      )
+        return current ?? { version: '0', payload_json: {} }
+      return null
     }
-    if (current && current.payload_json.formalDocumentNo != null) return current
+    if (!current || current.payload_json.formalDocumentNo != null)
+      return current ?? 'validation_error'
     if (input.event.payload.workflowStatus !== 'formally_issued')
+      return 'validation_error'
+    if (!isDeepStrictEqual(current.payload_json, formal.snapshot))
+      return current
+    if (
+      !['approved', 'confirmed'].includes(
+        String(current.payload_json.workflowStatus),
+      ) ||
+      !isDeepStrictEqual(input.event.payload, {
+        ...formal.snapshot,
+        workflowStatus: 'formally_issued',
+        documentType: formal.documentType,
+        formalDocumentNo: formal.documentNo,
+        formalInstallationId: formal.installationId,
+        formalSequence: formal.sequence,
+        formallyIssuedAt: input.event.payload.formallyIssuedAt,
+        formalSnapshotJson: input.event.payload.formalSnapshotJson,
+      })
+    )
       return 'validation_error'
     const codes = await client.query<{
       country_code: string
@@ -1550,4 +1584,16 @@ function canonicalProjectDefaultsPayload(
   })
   if (!parsed.success || parsed.data.projectId !== event.entityId) return null
   return parsed.data
+}
+
+function validFormalTransition(before: unknown, after: unknown): boolean {
+  if (before === 'formally_issued') return after === 'receiving'
+  if (before === 'receiving')
+    return [
+      'receiving',
+      'completed',
+      'completed_with_conditions',
+      'cancelled',
+    ].includes(String(after))
+  return false
 }

@@ -60,6 +60,9 @@ export function parseFormalIssue(
     !/^[1-9]\d*$/.test(formalSequence) ||
     BigInt(formalSequence) > 9223372036854775807n ||
     typeof formalSnapshotJson !== 'string' ||
+    typeof payload.formallyIssuedAt !== 'number' ||
+    !Number.isSafeInteger(payload.formallyIssuedAt) ||
+    payload.formallyIssuedAt <= 0 ||
     !parsedCountryId.success ||
     !parsedProjectId.success ||
     typeof orderDate !== 'string' ||

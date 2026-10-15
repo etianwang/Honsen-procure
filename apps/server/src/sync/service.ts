@@ -145,7 +145,27 @@ export class SyncService {
       return false
     }
     if (event.entityType === 'purchase_order') {
-      return stringField(event.payload, 'applicantId') === actor.id
+      return (
+        stringField(event.payload, 'applicantId') === actor.id &&
+        ![
+          'approved',
+          'confirmed',
+          'formally_issued',
+          'receiving',
+          'completed',
+          'completed_with_conditions',
+          'cancelled',
+        ].includes(String(event.payload.workflowStatus)) &&
+        event.payload.formalDocumentNo == null &&
+        event.payload.formalInstallationId == null &&
+        event.payload.formalSequence == null &&
+        event.payload.formalSnapshotJson == null &&
+        event.payload.documentType == null &&
+        event.payload.formallyIssuedAt == null &&
+        event.payload.confirmedBy == null &&
+        event.payload.confirmedAt == null &&
+        event.payload.selfApproved !== true
+      )
     }
     if (event.entityType === 'order_comment') {
       if (
