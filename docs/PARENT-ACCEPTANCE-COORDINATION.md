@@ -23,6 +23,7 @@ T06 + T07 ──> T08 formal execution/snapshots ──> T09 receipt/payment ─
 - T08-D's local OPA/HPA/SPO namespace is a prerequisite for T10's formal-number collision and snapshot tests. The server registers but never renumbers local documents.
 - T09-C is jointly accepted only after T11 owns actual file ingestion/compression/upload/archival. T09 owns receipt-to-attachment metadata and receipt-domain checks. This boundary is proposed in `BUILD-TASKS.md` and still requires approval before either task claims the other's criterion.
 - T10-F cannot close until T04–T09 original acceptance gates close. T10-B/C/D/E can nevertheless be prepared and tested against implemented interfaces without weakening those prerequisites.
+- **Approved internal interface record (2026-10-15):** T09 may create local, append-only `procurement_expenditure` mutations and their transactional SQLite outbox records. The event is retained pending sync; it is not shown as synchronized without a server acknowledgment. T10 owns the shared sync entity schema, PostgreSQL projection/Pull and multi-device proof. This uses the already confirmed PRD/SPECS/DECISIONS domain name and does not authorize a ledger, reimbursement, advance-settlement, owner-mode payment, or server-side contract change in T09's branch.
 
 ## Remaining parent acceptance checklist
 
@@ -63,7 +64,7 @@ T06 + T07 ──> T08 formal execution/snapshots ──> T09 receipt/payment ─
 | Dev A | `codex/t04-parent-acceptance` | T04-B/C acceptance preparation and remaining cross-client master-data proof; do not deploy | `apps/server/src/master-data/**`, relevant sync tests, T04 docs | Focused PostgreSQL + Rust/DOM evidence, no external deployment claim |
 | Dev B | `codex/t08-formal-execution` | T08-B OPA-3 design/test implementation; T08-C only if it does not overlap receipts/payments | order/shared formal contracts, desktop formal issue flow/tests | Formal local number/snapshot behavior with migration and regular DOM proof |
 | Dev C | `codex/t09-receipt-payment` | T09-A/B payment/receipt/closed-retention; document only the T11 boundary | receipt/payment services, components/tests, T09 docs | Transaction/role/retention tests plus regular DOM proof; no file-ingestion claim |
-| Dev D | `codex/t10-runtime-sync` | Starts after a free slot: T10-B/C/D runtime orchestration; consume, do not redefine, formal/receipt contracts | desktop sync runtime/UI/tests, server sync tests | Failure-injection and DOM proof; no prerequisite closure claim |
+| Dev D | `codex/t10-runtime-sync` | Starts after a free slot: T10-B/C/D runtime orchestration plus the shared `procurement_expenditure` sync contract/projection; consume, do not redefine, formal contracts | desktop sync runtime/UI/tests, server sync tests | Failure-injection and DOM proof; no prerequisite closure claim |
 | QA | `codex/parent-acceptance-qa` | Starts after a free slot: validate each handoff and report/return failures | test artifacts and this table only through primary-agent requests | Reproducible pass/fail report and retest result |
 
 ## QA handoff ledger
