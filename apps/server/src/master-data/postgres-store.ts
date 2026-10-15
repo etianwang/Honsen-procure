@@ -17,6 +17,16 @@ export class PostgresMasterDataStore implements MasterDataStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      if (defaults.defaultTaxTemplateId !== null) {
+        const compatible = await client.query(
+          `SELECT 1 FROM projects p JOIN tax_templates t ON t.id = $2
+           WHERE p.id = $1 AND p.deleted_at IS NULL AND t.is_active = TRUE
+             AND t.deleted_at IS NULL AND (t.country_id IS NULL OR t.country_id = p.country_id)`,
+          [defaults.projectId, defaults.defaultTaxTemplateId],
+        )
+        if (compatible.rowCount !== 1)
+          throw new MasterDataError('INVALID_DEFAULTS')
+      }
       await client.query(
         `INSERT INTO project_print_defaults
            (project_id, department_title, company_address, company_contact, default_currency, default_language_pair, default_tax_template_id)

@@ -1447,6 +1447,16 @@ impl LocalAuthService {
         let payload = serde_json::to_string(&defaults).map_err(|_| AuthError::InvalidInput)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        if let Some(tax_id) = defaults.default_tax_template_id {
+            let compatible = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_projects p JOIN local_tax_templates t ON t.id = ?2 WHERE p.id = ?1 AND p.deleted_at IS NULL AND t.is_active = 1 AND t.deleted_at IS NULL AND (t.country_id IS NULL OR t.country_id = p.country_id))",
+                params![defaults.project_id.to_string(), tax_id.to_string()],
+                |row| row.get::<_, bool>(0),
+            ).map_err(|_| AuthError::Database)?;
+            if !compatible {
+                return Err(AuthError::InvalidInput);
+            }
+        }
         transaction
             .execute(
                 "INSERT INTO local_project_print_defaults (project_id, department_title, company_address, company_contact, default_currency, default_language_pair, default_tax_template_id, version, updated_at)
@@ -9569,6 +9579,86 @@ mod tests {
                 now,
             )
             .unwrap();
+        let defaults_with_tax = ProjectDefaultsInput {
+            project_id,
+            department_title: "fixture department".into(),
+            company_address: "fixture address".into(),
+            company_contact: Some("fixture contact".into()),
+            default_currency: "XOF".into(),
+            default_language_pair: "zh_fr".into(),
+            default_tax_template_id: Some(tax_id),
+        };
+        service
+            .save_project_defaults(defaults_with_tax.clone(), now)
+            .unwrap();
+        let other_country_id = Uuid::new_v4();
+        service
+            .save_reference_master_data(
+                ReferenceMasterDataInput::Country {
+                    id: other_country_id,
+                    business_code: "CM".into(),
+                    name: "other country".into(),
+                    time_zone: "Africa/Douala".into(),
+                    is_active: true,
+                    version: 1,
+                },
+                now,
+            )
+            .unwrap();
+        let other_tax_id = Uuid::new_v4();
+        service
+            .save_tax_template(
+                TaxTemplateInput {
+                    id: other_tax_id,
+                    business_code: "CM-TAX".into(),
+                    name: "other tax".into(),
+                    country_id: Some(other_country_id),
+                    rate_basis_points: 1000,
+                    effective_at: "2026-10-10".into(),
+                    is_active: true,
+                    version: 1,
+                },
+                now,
+            )
+            .unwrap();
+        let before_rejected_default = service.pending_sync_events(100, now).unwrap().len();
+        assert_eq!(
+            service.save_project_defaults(
+                ProjectDefaultsInput {
+                    default_tax_template_id: Some(other_tax_id),
+                    ..defaults_with_tax.clone()
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service.pending_sync_events(100, now).unwrap().len(),
+            before_rejected_default
+        );
+        assert_eq!(
+            service.list_project_defaults(now).unwrap()[0].default_tax_template_id,
+            Some(tax_id)
+        );
+        service
+            .save_tax_template(
+                TaxTemplateInput {
+                    id: tax_id,
+                    business_code: "FIXTURE-TAX".into(),
+                    name: "fixture tax".into(),
+                    country_id: None,
+                    rate_basis_points: 1234,
+                    effective_at: "2026-10-10".into(),
+                    is_active: false,
+                    version: 2,
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_project_defaults(defaults_with_tax, now),
+            Err(AuthError::InvalidInput)
+        );
         assert_eq!(
             service.save_tax_template(
                 TaxTemplateInput {

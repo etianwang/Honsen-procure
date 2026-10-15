@@ -1,12 +1,19 @@
 import { Alert, Button, Card, Input, Select, Space, Typography } from 'antd'
 import type { ProjectDefaults } from '@honsen/shared'
 import { useState } from 'react'
-import type { MasterDataApi, ProjectDefaultsView } from '../lib/master-data-api'
+import type {
+  MasterDataApi,
+  ProjectDefaultsView,
+  ReferenceMasterDataView,
+  TaxTemplateView,
+} from '../lib/master-data-api'
 
 type ProjectDefaultsEditorProps = {
   api: MasterDataApi
   projects: ProjectDefaultsView[]
   canEdit: boolean
+  taxTemplates: TaxTemplateView[]
+  referenceData: ReferenceMasterDataView[]
 }
 
 function initialDraft(project: ProjectDefaultsView): ProjectDefaults {
@@ -25,6 +32,8 @@ export function ProjectDefaultsEditor({
   api,
   projects,
   canEdit,
+  taxTemplates,
+  referenceData,
 }: ProjectDefaultsEditorProps) {
   const [projectId, setProjectId] = useState(projects[0]?.projectId ?? '')
   const project = projects.find((item) => item.projectId === projectId)
@@ -42,6 +51,36 @@ export function ProjectDefaultsEditor({
     draft.companyAddress,
     draft.companyContact,
   ].some((value) => value.trim() === '')
+  const projectCountryId = referenceData.find(
+    (item) => item.kind === 'project' && item.id === projectId,
+  )
+  const countryId =
+    projectCountryId?.kind === 'project' ? projectCountryId.country_id : null
+  const eligibleTaxTemplates = taxTemplates.filter(
+    (item) =>
+      item.isActive &&
+      (item.countryId === null || item.countryId === countryId),
+  )
+  const selectedTax = taxTemplates.find(
+    (item) => item.id === draft.defaultTaxTemplateId,
+  )
+  const taxOptions = [
+    { value: '', label: '不使用默认税模板' },
+    ...eligibleTaxTemplates.map((item) => ({
+      value: item.id,
+      label: item.name,
+    })),
+    ...(selectedTax &&
+    !eligibleTaxTemplates.some((item) => item.id === selectedTax.id)
+      ? [
+          {
+            value: selectedTax.id,
+            label: `${selectedTax.name}（当前不可用）`,
+            disabled: true,
+          },
+        ]
+      : []),
+  ]
 
   async function save(): Promise<void> {
     if (!draft) return
@@ -164,14 +203,16 @@ export function ProjectDefaultsEditor({
             { value: 'zh_en', label: '中文 + 英文' },
           ]}
         />
-        <label htmlFor="project-tax-template">默认税模板 ID（可选）</label>
-        <Input
+        <label htmlFor="project-tax-template">默认税模板</label>
+        <Select
           id="project-tax-template"
+          aria-label="默认税模板"
           value={draft.defaultTaxTemplateId ?? ''}
-          onChange={(event) =>
+          options={taxOptions}
+          onChange={(value: string) =>
             setDraft({
               ...draft,
-              defaultTaxTemplateId: event.target.value.trim() || null,
+              defaultTaxTemplateId: value || null,
             })
           }
           disabled={!canEdit}

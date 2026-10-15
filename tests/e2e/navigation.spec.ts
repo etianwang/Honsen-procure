@@ -468,7 +468,9 @@ test('administrator changes project defaults and sees the selected project value
 
   await page.goto('/?test=master-data')
   await expect(page.getByText('Bethel2工地')).toBeVisible()
-  await expect(page.getByText('科特迪瓦 TVA 18%')).toBeVisible()
+  await expect(
+    page.getByLabel('项目默认值').getByText('科特迪瓦 TVA 18%'),
+  ).toBeVisible()
 
   await page.getByLabel('选择项目').click()
   await page.getByText('Minrex数据中心', { exact: true }).last().click()
@@ -484,6 +486,31 @@ test('administrator changes project defaults and sees the selected project value
   await page.getByRole('button', { name: '保存项目默认值' }).click()
   await expect(page.getByText('项目默认值已保存')).toBeVisible()
   await expect(browserErrors).toEqual([])
+})
+
+test('project defaults offer only an eligible tax template for the selected country', async ({
+  page,
+}) => {
+  await page.goto('/?test=master-data')
+  await page.getByRole('combobox', { name: '默认税模板' }).click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('科特迪瓦 TVA 18%', { exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('选择项目').click()
+  await page.getByText('Minrex数据中心', { exact: true }).last().click()
+  await page.getByRole('combobox', { name: '默认税模板' }).click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('科特迪瓦 TVA 18%', { exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('不使用默认税模板', { exact: true }),
+  ).toBeVisible()
 })
 
 test('administrator master-data fixture adds a country', async ({ page }) => {
@@ -541,6 +568,13 @@ test('administrator can create, rename and disable a tax template offline', asyn
   await expect(page.getByLabel('编辑税模板名称-fixture-tax')).toHaveValue(
     'Fixture tax',
   )
+  await page.getByRole('combobox', { name: '默认税模板' }).click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('Fixture tax', { exact: true }),
+  ).toBeVisible()
+  await page.keyboard.press('Escape')
   await page.getByLabel('编辑税模板名称-fixture-tax').fill('Revised tax')
   await page.getByLabel('编辑税率（基点）-fixture-tax').fill('1900')
   await page.getByLabel('编辑税模板生效日期-fixture-tax').fill('2026-11-01')
@@ -630,7 +664,7 @@ test('administrator master-data fixture creates a project and a site', async ({
   await page.getByRole('tab', { name: '项目', exact: true }).click()
   await page.getByLabel('项目代码').fill('SN-P1')
   await page.getByLabel('项目名称', { exact: true }).fill('塞内加尔项目')
-  await page.getByLabel('项目国家').click()
+  await page.getByLabel('项目国家', { exact: true }).click()
   await page.getByText('科特迪瓦', { exact: true }).last().click()
   await page.getByLabel('项目默认站点').fill('达喀尔')
   await page.getByLabel('项目部门').fill('项目部')

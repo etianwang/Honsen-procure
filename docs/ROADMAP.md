@@ -36,6 +36,8 @@ Tax-template rate and effective-date revision is now connected to the same trust
 
 The T04 exchange-rate history checkpoint adds administrator manual-rate entry with a reason, trusted append-only listing and transactional audit/outbox. Rust, DOM and isolated PostgreSQL regressions passed. Authorized rate sources and deployment data, native acceptance and M0/M1 remain open.
 
+Project defaults now select active global or same-country tax templates; Rust and PostgreSQL master-data writes reject incompatible templates without replacing a saved default. Generic sync compatibility/projection and deployed/native evidence remain open, so milestone status is unchanged.
+
 The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 
 | Milestone | Acceptance      | Contributing tasks (reverse mapping is in BUILD-TASKS) | Outstanding acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |

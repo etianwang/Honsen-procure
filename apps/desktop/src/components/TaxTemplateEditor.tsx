@@ -13,11 +13,13 @@ export function TaxTemplateEditor({
   templates,
   countries,
   canEdit,
+  onSaved,
 }: {
   api: MasterDataApi
   templates: TaxTemplateView[]
   countries: Country[]
   canEdit: boolean
+  onSaved?: (template: TaxTemplateView) => void
 }) {
   const [items, setItems] = useState(templates)
   const [code, setCode] = useState('')
@@ -38,6 +40,7 @@ export function TaxTemplateEditor({
           ? current.map((item) => (item.id === template.id ? template : item))
           : [...current, template],
       )
+      onSaved?.(template)
       setNames((current) => {
         const next = { ...current }
         delete next[template.id]

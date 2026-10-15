@@ -62,6 +62,15 @@ export function MasterDataPage({ role }: { role: UserRole }) {
         templates={taxTemplates}
         countries={referenceData.filter((item) => item.kind === 'country')}
         canEdit={canEdit}
+        onSaved={(template) =>
+          setTaxTemplates((current) =>
+            current?.some((item) => item.id === template.id)
+              ? current.map((item) =>
+                  item.id === template.id ? template : item,
+                )
+              : [...(current ?? []), template],
+          )
+        }
       />
       <ExchangeRateEditor
         api={tauriMasterDataApi}
@@ -71,6 +80,8 @@ export function MasterDataPage({ role }: { role: UserRole }) {
       <ProjectDefaultsEditor
         api={tauriMasterDataApi}
         projects={projects}
+        referenceData={referenceData}
+        taxTemplates={taxTemplates}
         canEdit={canEdit}
       />
     </>
