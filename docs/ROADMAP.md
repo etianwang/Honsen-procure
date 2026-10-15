@@ -157,6 +157,8 @@ The T10-B desktop runtime checkpoint starts Push→Pull only after successful on
 
 The 2026-10-15 T10-B multi-account containment slice adds trusted owner stamping and owner-filtered Push/ack/status while preserving unowned legacy outbox rows in quarantine. Until per-account Pull state exists, a multi-account installation stops HTTPS Pull with an actionable, non-retrying account-boundary status instead of risking cursor loss. Local Rust, disposable PostgreSQL workspace and Playwright DOM gates passed; Fixer P1 `T10-SEC-001`, server account binding, legacy recovery, per-account Pull and native two-client evidence remain open. T10 and M3 remain unchecked.
 
+The subsequent T10-B trusted-command guard requires a successful online account login in the current process before Push, Pull or cloud authorization refresh can use a cached token. Offline login, failed login, account switch and local lock fail closed while offline operations retain their outbox. Rust and DOM development gates passed; this does not replace server revocation, multi-account Pull, true two-client HTTP/native evidence or the open P1. T10 and M3 remain unchecked.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

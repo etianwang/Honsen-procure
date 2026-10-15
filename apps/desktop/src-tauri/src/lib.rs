@@ -1020,6 +1020,7 @@ pub struct LocalAuthService {
     connection: Mutex<Connection>,
     media_directory: PathBuf,
     captcha: Mutex<Option<LocalCaptcha>>,
+    online_session_account: Mutex<Option<Uuid>>,
     credential_vault: Box<dyn CredentialVault>,
 }
 
@@ -1156,6 +1157,7 @@ impl LocalAuthService {
             connection: Mutex::new(connection),
             media_directory,
             captcha: Mutex::new(None),
+            online_session_account: Mutex::new(None),
             credential_vault,
         })
     }
@@ -1271,6 +1273,10 @@ impl LocalAuthService {
         cloud_captcha_answer: &str,
         now: SystemTime,
     ) -> Result<AuthenticatedSession, AuthError> {
+        *self
+            .online_session_account
+            .lock()
+            .map_err(|_| AuthError::Database)? = None;
         self.consume_captcha(local_captcha_id, local_captcha_answer, now)?;
         if !valid_required_text(username, 128)
             || password.is_empty()
@@ -1324,11 +1330,16 @@ impl LocalAuthService {
             now,
         )?;
         self.cache_sync_access_token(login.user.id, &login.access_token)?;
+        let mut online_session = self
+            .online_session_account
+            .lock()
+            .map_err(|_| AuthError::Database)?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
             .execute("DELETE FROM local_session", [])
             .map_err(|_| AuthError::Database)?;
         connection.execute("INSERT INTO local_session (user_id, started_at, last_active_at) VALUES (?1, ?2, ?2)", params![login.user.id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        *online_session = Some(login.user.id);
         Ok(AuthenticatedSession {
             user_id: login.user.id,
             username: login.user.username,
@@ -1345,6 +1356,11 @@ impl LocalAuthService {
         captcha_answer: u8,
         now: SystemTime,
     ) -> Result<AuthenticatedSession, AuthError> {
+        let mut online_session = self
+            .online_session_account
+            .lock()
+            .map_err(|_| AuthError::Database)?;
+        *online_session = None;
         self.consume_captcha(captcha_id, captcha_answer, now)?;
 
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
@@ -4620,10 +4636,37 @@ impl LocalAuthService {
         Ok(())
     }
 
-    pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
-        self.require_catalog_read(now)?;
-        self.refresh_authorization_https(now).await?;
+    fn require_online_sync_session(&self, now: SystemTime) -> Result<Uuid, AuthError> {
         let account_id = self.active_session_user_id()?;
+        if *self
+            .online_session_account
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            != Some(account_id)
+        {
+            return Err(AuthError::NoActiveSession);
+        }
+        let enabled: i64 = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT enabled FROM local_accounts WHERE id = ?1",
+                [account_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if enabled == 0 || self.credential_vault.load_sync_token(account_id)?.is_none() {
+            return Err(AuthError::NoActiveSession);
+        }
+        self.require_catalog_read(now)?;
+        Ok(account_id)
+    }
+
+    pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
+        let account_id = self.require_online_sync_session(now)?;
+        self.refresh_authorization_https(now).await?;
+        self.require_online_sync_session(now)?;
         let events = self.pending_sync_events(100, now)?;
         self.ensure_active_sync_account(account_id)?;
         if events.is_empty() {
@@ -4662,6 +4705,9 @@ impl LocalAuthService {
         {
             return Err(AuthError::Database);
         }
+        if self.require_online_sync_session(now)? != account_id {
+            return Err(AuthError::SyncAccountBoundary);
+        }
         let response = reqwest::Client::builder()
             .https_only(true)
             .timeout(Duration::from_secs(20))
@@ -4683,6 +4729,9 @@ impl LocalAuthService {
             .json::<SyncPushResponse>()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
+        if self.require_online_sync_session(now)? != account_id {
+            return Err(AuthError::SyncAccountBoundary);
+        }
         let accepted_count = acknowledgements
             .results
             .iter()
@@ -4697,10 +4746,10 @@ impl LocalAuthService {
     }
 
     pub async fn pull_sync_https(&self, now: SystemTime) -> Result<SyncPullView, AuthError> {
-        self.require_catalog_read(now)?;
+        let account_id = self.require_online_sync_session(now)?;
         self.ensure_pull_account_boundary(now)?;
         self.refresh_authorization_https(now).await?;
-        let account_id = self.active_session_user_id()?;
+        self.require_online_sync_session(now)?;
         let token = self
             .credential_vault
             .load_sync_token(account_id)?
@@ -4724,7 +4773,9 @@ impl LocalAuthService {
             .map_err(|_| AuthError::SyncTransport)?;
         let mut applied_count = 0;
         loop {
-            self.ensure_active_sync_account(account_id)?;
+            if self.require_online_sync_session(now)? != account_id {
+                return Err(AuthError::SyncAccountBoundary);
+            }
             let response = client
                 .get(endpoint.clone())
                 .bearer_auth(&token)
@@ -4742,6 +4793,9 @@ impl LocalAuthService {
                 .json::<SyncPullPageInput>()
                 .await
                 .map_err(|_| AuthError::SyncTransport)?;
+            if self.require_online_sync_session(now)? != account_id {
+                return Err(AuthError::SyncAccountBoundary);
+            }
             let has_more = pull_page_has_more(&cursor, &page)?;
             let next_cursor = page.next_cursor.clone();
             applied_count += page.changes.len();
@@ -4915,8 +4969,7 @@ impl LocalAuthService {
     }
 
     pub async fn refresh_authorization_https(&self, now: SystemTime) -> Result<(), AuthError> {
-        self.require_catalog_read(now)?;
-        let account_id = self.active_session_user_id()?;
+        let account_id = self.require_online_sync_session(now)?;
         let token = self
             .credential_vault
             .load_sync_token(account_id)?
@@ -5151,6 +5204,10 @@ impl LocalAuthService {
     }
 
     pub fn lock(&self) -> Result<(), AuthError> {
+        *self
+            .online_session_account
+            .lock()
+            .map_err(|_| AuthError::Database)? = None;
         self.connection
             .lock()
             .map_err(|_| AuthError::Database)?
@@ -7679,6 +7736,202 @@ fn unix_seconds(value: SystemTime) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_token_cannot_push_or_pull_after_offline_login() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let engineer = account();
+        service
+            .cache_verified_account(engineer.clone(), "correct-password", now)
+            .unwrap();
+        service
+            .cache_sync_access_token(engineer.id, &"x".repeat(32))
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &engineer.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+
+        assert_eq!(
+            tauri::async_runtime::block_on(service.push_pending_https(now)),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            tauri::async_runtime::block_on(service.pull_sync_https(now)),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(service.sync_status(now).unwrap().pending_count, 0);
+    }
+
+    #[test]
+    fn online_sync_permission_is_account_bound_and_does_not_discard_offline_outbox() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let first = account();
+        service
+            .cache_verified_account(first.clone(), "correct-password", now)
+            .unwrap();
+        service
+            .cache_sync_access_token(first.id, &"x".repeat(32))
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &first.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let transaction = connection.transaction().unwrap();
+            insert_local_sync_outbox(&transaction, "material", Uuid::new_v4(), "{}", now).unwrap();
+            transaction.commit().unwrap();
+        }
+        assert_eq!(service.pending_sync_events(100, now).unwrap().len(), 1);
+        assert_eq!(
+            service.require_online_sync_session(now),
+            Err(AuthError::NoActiveSession)
+        );
+
+        // This is the state established only by a successful cloud login in production.
+        *service.online_session_account.lock().unwrap() = Some(first.id);
+        assert_eq!(service.require_online_sync_session(now), Ok(first.id));
+        let second = CachedAccount {
+            id: Uuid::new_v4(),
+            username: "engineer-b".into(),
+            ..account()
+        };
+        service
+            .cache_verified_account(second.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &second.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.require_online_sync_session(now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert!(service.pending_sync_events(100, now).unwrap().is_empty());
+        service.lock().unwrap();
+        assert_eq!(
+            service.require_online_sync_session(now),
+            Err(AuthError::NoActiveSession)
+        );
+        let owner_count: i64 = service.connection.lock().unwrap().query_row(
+            "SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL",
+            [first.id.to_string()], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(owner_count, 1);
+    }
+
+    #[test]
+    fn online_sync_permission_rejects_disabled_and_expired_local_sessions() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let engineer = account();
+        service
+            .cache_verified_account(engineer.clone(), "correct-password", now)
+            .unwrap();
+        service
+            .cache_sync_access_token(engineer.id, &"x".repeat(32))
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &engineer.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        *service.online_session_account.lock().unwrap() = Some(engineer.id);
+        assert_eq!(service.require_online_sync_session(now), Ok(engineer.id));
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_accounts SET enabled = 0 WHERE id = ?1",
+                [engineer.id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            service.require_online_sync_session(now),
+            Err(AuthError::NoActiveSession)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_accounts SET enabled = 1 WHERE id = ?1",
+                [engineer.id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            service.require_online_sync_session(now + IDLE_LOCK_WINDOW + Duration::from_secs(1)),
+            Err(AuthError::NoActiveSession)
+        );
+    }
+
+    #[test]
+    fn failed_login_attempt_invalidates_prior_online_sync_permission() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let engineer = account();
+        service
+            .cache_verified_account(engineer.clone(), "correct-password", now)
+            .unwrap();
+        service
+            .cache_sync_access_token(engineer.id, &"x".repeat(32))
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &engineer.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        *service.online_session_account.lock().unwrap() = Some(engineer.id);
+        assert_eq!(service.require_online_sync_session(now), Ok(engineer.id));
+        assert_eq!(
+            tauri::async_runtime::block_on(service.online_login(
+                "engineer",
+                "wrong-password",
+                Uuid::new_v4(),
+                0,
+                Uuid::new_v4(),
+                "0",
+                now
+            )),
+            Err(AuthError::InvalidCredentials)
+        );
+        assert_eq!(
+            service.require_online_sync_session(now),
+            Err(AuthError::NoActiveSession)
+        );
+    }
 
     #[test]
     fn sync_status_counts_all_pending_and_conflicts_without_exposing_payloads() {
