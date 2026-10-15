@@ -10668,6 +10668,90 @@ mod tests {
                 .unwrap(),
             "a".repeat(64)
         );
+        let newer_remote_voucher = serde_json::json!({
+            "id": remote_voucher_id, "ownerType": "procurement_expenditure",
+            "ownerId": original_id, "orderId": order_id, "projectId": project_id,
+            "originalName": "other-device.pdf", "contentType": "application/pdf",
+            "byteLength": 4, "checksum": "c".repeat(64),
+            "uploaderId": purchaser_id, "createdAt": 123,
+        });
+        let newer_remote_voucher_page = SyncPullPageInput {
+            changes: vec![SyncPullChangeInput {
+                cursor: "13".into(),
+                entity_type: "attachment".into(),
+                entity_id: remote_voucher_id,
+                operation: "upsert".into(),
+                version: 3,
+                payload: newer_remote_voucher.clone(),
+                changed_at: "2026-10-11T00:05:00Z".into(),
+            }],
+            next_cursor: "13".into(),
+        };
+        assert_eq!(
+            service.apply_sync_pull_page(newer_remote_voucher_page.clone(), now),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "12"
+        );
+        let newer_conflict = service
+            .list_sync_conflicts(now)
+            .unwrap()
+            .into_iter()
+            .find(|conflict| conflict.entity_type == "attachment" && conflict.server_version == 3)
+            .unwrap();
+        assert_eq!(newer_conflict.entity_id, remote_voucher_id);
+        assert_eq!(
+            service.resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: newer_conflict.id,
+                    resolution: "keep_local".into(),
+                    reason: "each newer remote checksum must retain an independent audit decision"
+                        .into(),
+                },
+                now,
+            ),
+            Ok(())
+        );
+        service
+            .apply_sync_pull_page(newer_remote_voucher_page, now)
+            .unwrap();
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "13"
+        );
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT checksum FROM local_attachments WHERE id = ?1",
+                    [remote_voucher_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "a".repeat(64)
+        );
         service.lock().unwrap();
         let captcha = service.issue_captcha(now).unwrap();
         service
