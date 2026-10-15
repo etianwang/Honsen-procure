@@ -1,5 +1,92 @@
 import { expect, test } from '@playwright/test'
 
+test('switching accounts never renders the previous account authorization scope', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    let activeAccount = ''
+    const accountA = '00000000-0000-4000-8000-0000000000a1'
+    const accountB = '00000000-0000-4000-8000-0000000000b1'
+    const scopeA = {
+      countryId: '00000000-0000-4000-8000-000000000001',
+      projectId: '00000000-0000-4000-8000-0000000000a2',
+      projectName: '仅 A 可见的项目',
+      site: 'A 工地',
+      departmentId: '00000000-0000-4000-8000-000000000003',
+      departmentName: '采购部',
+      teamId: '00000000-0000-4000-8000-000000000004',
+      teamName: '一班',
+      currency: 'XOF',
+      primaryCurrency: 'XOF',
+      languagePair: 'zh_fr',
+    }
+    Object.assign(window, {
+      __TAURI_INTERNALS__: {},
+      __TAURI__: {
+        core: {
+          invoke(command: string, args?: { request?: { username?: string } }) {
+            if (command === 'issue_local_captcha')
+              return Promise.resolve({
+                id: crypto.randomUUID(),
+                question: '1 + 1 = ?',
+              })
+            if (command === 'issue_cloud_captcha')
+              return Promise.reject({ code: 'sync_transport_error' })
+            if (command === 'offline_login') {
+              activeAccount =
+                args?.request?.username === 'account-b' ? accountB : accountA
+              return Promise.resolve({
+                user_id: activeAccount,
+                username: args?.request?.username,
+                roles: ['engineer'],
+                requires_password_change: false,
+              })
+            }
+            if (command === 'list_authorization_contexts')
+              return activeAccount === accountA
+                ? Promise.resolve([scopeA])
+                : new Promise(() => {})
+            if (command === 'get_authorization_context')
+              return activeAccount === accountA
+                ? Promise.resolve(scopeA)
+                : new Promise(() => {})
+            if (command === 'sync_status')
+              return Promise.resolve({
+                pendingCount: 0,
+                conflictCount: 0,
+                quarantinedCount: 0,
+                lastSuccessAt: null,
+              })
+            if (command === 'lock_session') return Promise.resolve()
+            return Promise.reject(new Error(`unexpected ${command}`))
+          },
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  for (const username of ['account-a', 'account-b']) {
+    await page.getByRole('button', { name: '获取验证码' }).click()
+    await page.getByLabel('账号').fill(username)
+    await page.getByLabel('密码').fill('fixture-password')
+    await page.getByLabel(/本地验证码/u).fill('2')
+    await page.getByRole('button', { name: '离线登录' }).click()
+    if (username === 'account-a') {
+      await expect(page.getByLabel('当前授权范围')).toContainText(
+        '仅 A 可见的项目',
+      )
+      await page.getByRole('button', { name: '锁定' }).click()
+      await expect(
+        page.getByRole('heading', { name: '登录 HONSEN Procure' }),
+      ).toBeVisible()
+    }
+  }
+  await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()
+  await expect(page.getByLabel('当前授权范围')).toHaveCount(0)
+  await expect(page.getByText('仅 A 可见的项目')).toHaveCount(0)
+})
+
 test('authenticated online login pushes before pull and displays pending until acknowledgement', async ({
   page,
 }) => {

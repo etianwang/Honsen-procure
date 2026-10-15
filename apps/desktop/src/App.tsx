@@ -417,7 +417,11 @@ function App() {
                       }
                     }
                   ).__TAURI__?.core?.invoke
-                  void invoke?.('lock_session').finally(() => setSession(null))
+                  void invoke?.('lock_session').finally(() => {
+                    setAuthorizationContexts([])
+                    setAuthorizationContext(null)
+                    setSession(null)
+                  })
                 }
               : undefined
           }
@@ -506,6 +510,8 @@ function App() {
       ) : (
         <LoginPage
           onLogin={(authenticated, mode) => {
+            setAuthorizationContexts([])
+            setAuthorizationContext(null)
             setSyncState({
               kind: mode === 'online' ? 'syncing' : 'offline-pending',
             })
