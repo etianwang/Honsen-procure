@@ -1,7 +1,9 @@
 import {
+  exchangeRateSchema,
   referenceMasterDataSchema,
   syncPullQuerySchema,
   syncPushRequestSchema,
+  taxTemplateSchema,
   type SyncEvent,
   type SyncEventResult,
   type SyncPullResponse,
@@ -84,6 +86,23 @@ export class SyncService {
         }).success
       )
     }
+    if (
+      event.entityType === 'tax_template' ||
+      event.entityType === 'exchange_rate'
+    ) {
+      const schema =
+        event.entityType === 'tax_template'
+          ? taxTemplateSchema
+          : exchangeRateSchema
+      return (
+        event.operation === 'upsert' &&
+        actor.roles.some((role) => masterDataRoles.includes(role)) &&
+        schema.safeParse({
+          ...referencePayload(event.payload),
+          id: event.entityId,
+        }).success
+      )
+    }
     if (actor.roles.some((role) => procurementRoles.includes(role))) return true
     if (!actor.roles.includes('engineer')) return false
     if (
@@ -156,7 +175,8 @@ function referencePayload(
     ...payload,
     businessCode: payload.businessCode ?? payload.business_code,
     timeZone: payload.timeZone ?? payload.time_zone,
-    countryId: payload.countryId ?? payload.country_id,
+    countryId:
+      payload.countryId !== undefined ? payload.countryId : payload.country_id,
     departmentName: payload.departmentName ?? payload.department_name,
     departmentId: payload.departmentId ?? payload.department_id,
     defaultCurrency: payload.defaultCurrency ?? payload.default_currency,
@@ -164,6 +184,11 @@ function referencePayload(
       payload.defaultLanguagePair ?? payload.default_language_pair,
     projectId: payload.projectId ?? payload.project_id,
     isActive: payload.isActive ?? payload.is_active,
+    rateBasisPoints: payload.rateBasisPoints ?? payload.rate_basis_points,
+    effectiveAt: payload.effectiveAt ?? payload.effective_at,
+    fromCurrency: payload.fromCurrency ?? payload.from_currency,
+    toCurrency: payload.toCurrency ?? payload.to_currency,
+    rateDecimal: payload.rateDecimal ?? payload.rate_decimal,
   }
 }
 

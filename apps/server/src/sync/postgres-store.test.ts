@@ -185,6 +185,89 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(stored.rows[0]?.payload_json.name).toBe('Field team')
   })
 
+  it('persists validated tax and exchange-rate events without losing conflicts', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    const taxId = randomUUID()
+    const rateId = randomUUID()
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const events = [
+      {
+        eventId: randomUUID(),
+        entityType: 'tax_template',
+        entityId: taxId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          businessCode: `FIXTURE-${taxId}`,
+          name: 'Fixture tax',
+          countryId: null,
+          rateBasisPoints: 1800,
+          effectiveAt: '2026-10-15',
+          isActive: true,
+          version: 1,
+        },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'exchange_rate',
+        entityId: rateId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          fromCurrency: 'XOF',
+          toCurrency: 'EUR',
+          rateDecimal: '0.00152449',
+          effectiveAt: '2026-10-15',
+          source: 'manual',
+          reason: 'Fixture rate',
+          version: 1,
+        },
+      },
+    ]
+    const request = { deviceId: randomUUID(), events }
+    const first = await service.push(actor, request)
+    expect(first.results.map((result) => result.status)).toEqual([
+      'accepted',
+      'accepted',
+    ])
+    expect(await service.push(actor, request)).toEqual(first)
+    const pulled = await service.pull(
+      { id: actorId, roles: ['engineer'] },
+      { cursor, limit: 500 },
+    )
+    expect(
+      pulled.changes
+        .filter((change) =>
+          new Set<string>([taxId, rateId]).has(change.entityId),
+        )
+        .map((change) => change.entityId),
+    ).toEqual([taxId, rateId])
+    const conflict = await service.push(actor, {
+      deviceId: request.deviceId,
+      events: [
+        {
+          ...events[0]!,
+          eventId: randomUUID(),
+          payload: { ...events[0]!.payload, name: 'Divergent tax' },
+        },
+      ],
+    })
+    expect(conflict.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 1,
+    })
+    const stored = await pool!.query<{ payload_json: { name: string } }>(
+      "SELECT payload_json FROM sync_entities WHERE entity_type = 'tax_template' AND entity_id = $1",
+      [taxId],
+    )
+    expect(stored.rows[0]?.payload_json.name).toBe('Fixture tax')
+  })
+
   it('pulls supplier and price changes only from an engineer’s bound countries', async () => {
     const store = new PostgresSyncStore(pool!)
     const [countryA, countryB, projectA, projectB] = Array.from(

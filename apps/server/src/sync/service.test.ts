@@ -303,6 +303,108 @@ describe('SyncService', () => {
     expect(store.pushed).toBe(3)
   })
 
+  it('validates tax and exchange-rate outbox records before persistence', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const tax = {
+      eventId: randomUUID(),
+      entityType: 'tax_template',
+      entityId: randomUUID(),
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        business_code: 'FIXTURE-TAX',
+        name: 'Fixture tax',
+        country_id: null,
+        rate_basis_points: 1800,
+        effective_at: '2026-10-15',
+        is_active: true,
+        version: 1,
+      },
+    }
+    const rate = {
+      eventId: randomUUID(),
+      entityType: 'exchange_rate',
+      entityId: randomUUID(),
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        from_currency: 'XOF',
+        to_currency: 'EUR',
+        rate_decimal: '0.00152449',
+        effective_at: '2026-10-15',
+        source: 'manual',
+        reason: 'Fixture rate',
+        version: 1,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [tax, rate] }
+    const denied = await service.push(engineer, request)
+    expect(denied.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+    ])
+    expect(store.pushed).toBe(0)
+    const accepted = await service.push(
+      { id: engineer.id, roles: ['super_administrator'] },
+      request,
+    )
+    expect(accepted.results.map((result) => result.status)).toEqual([
+      'accepted',
+      'accepted',
+    ])
+    const camelCaseNullCountry = await service.push(
+      { id: engineer.id, roles: ['administrator'] },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            ...tax,
+            eventId: randomUUID(),
+            payload: {
+              businessCode: 'FIXTURE-TAX-2',
+              name: 'Fixture tax 2',
+              countryId: null,
+              rateBasisPoints: 0,
+              effectiveAt: '2026-10-15',
+              isActive: true,
+              version: 1,
+            },
+          },
+        ],
+      },
+    )
+    expect(camelCaseNullCountry.results[0]?.status).toBe('accepted')
+    const invalid = await service.push(
+      { id: engineer.id, roles: ['administrator'] },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            ...tax,
+            eventId: randomUUID(),
+            payload: { ...tax.payload, rate_basis_points: -1 },
+          },
+          {
+            ...rate,
+            eventId: randomUUID(),
+            payload: { ...rate.payload, reason: null },
+          },
+          {
+            ...rate,
+            eventId: randomUUID(),
+            payload: { ...rate.payload, rate_decimal: 'NaN' },
+          },
+          { ...tax, eventId: randomUUID(), operation: 'soft_delete' },
+        ],
+      },
+    )
+    expect(
+      invalid.results.every((result) => result.status === 'validation_error'),
+    ).toBe(true)
+    expect(store.pushed).toBe(3)
+  })
+
   it('rejects changing a used project country without mutation', async () => {
     const store = new FixtureStore()
     store.projectInUse = true

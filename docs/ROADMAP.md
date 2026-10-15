@@ -26,6 +26,8 @@ The supplier/material-price Pull repair now withholds cross-country changes from
 
 The 2026-10-15 T04 local organization editor checkpoint and server organization-sync validation checkpoint passed synthetic Rust/DOM and isolated PostgreSQL tests. They do not establish deployed T04 records, complete cloud business-table projection, native multi-client acceptance or M0/M1/M3 completion.
 
+The follow-on T04 tax/exchange server sync validation checkpoint passed schema/permission failure tests and isolated PostgreSQL idempotency/Pull/conflict tests. Tax/rate maintenance UI, deployed data and native cross-device acceptance remain open; milestone statuses do not change.
+
 The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 
 | Milestone | Acceptance      | Contributing tasks (reverse mapping is in BUILD-TASKS) | Outstanding acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
