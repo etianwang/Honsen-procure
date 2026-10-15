@@ -441,6 +441,9 @@ export class PostgresSyncStore implements SyncStore {
         ],
       )
       await client.query(
+        'LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE',
+      )
+      await client.query(
         `INSERT INTO server_change_log
            (entity_type, entity_id, operation, version, payload_json, actor_id)
          VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -973,6 +976,9 @@ export class PostgresSyncStore implements SyncStore {
         [input.event.entityId, businessVersion, payload, actorId],
       )
       await client.query(
+        'LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE',
+      )
+      await client.query(
         `INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id)
          VALUES ('project_defaults', $1, 'upsert', $2, $3, $4)`,
         [input.event.entityId, businessVersion, payload, actorId],
@@ -1028,6 +1034,9 @@ export class PostgresSyncStore implements SyncStore {
       `INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
        VALUES ('exchange_rate', $1, 1, FALSE, $2, $3)`,
       [input.event.entityId, payload, actorId],
+    )
+    await client.query(
+      'LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE',
     )
     await client.query(
       `INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id)
@@ -1091,6 +1100,9 @@ export class PostgresSyncStore implements SyncStore {
            is_deleted = FALSE, payload_json = EXCLUDED.payload_json,
            updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
         [input.event.entityId, businessVersion, payload, actorId],
+      )
+      await client.query(
+        'LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE',
       )
       await client.query(
         `INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id)

@@ -149,6 +149,8 @@ The project-default Push slice now projects validated defaults into PostgreSQL `
 
 The project-default REST-to-Pull reliability slice now publishes each authorized online save transactionally with its business row and audit; it also prevents that REST log sequence from overtaking an earlier uncommitted log writer. A clean second client can obtain the new version by cursor Pull without provoking a Push conflict. Isolated PostgreSQL coverage includes repeated saves, late publication failure rollback/retry, stale Push retention, legacy divergence and concurrent log ordering; full workspace, Rust and Playwright DOM gates passed. The pre-existing Push-vs-Push cursor race, other REST master-data types, actual deployment, native two-client/role acceptance and T04/T10 parent gates remain open. Milestone checkboxes are unchanged.
 
+The follow-on T10 Push cursor-order reliability slice serializes each Push change-log sequence allocation through commit, including conflict reconciliation. A test-first isolated PostgreSQL two-writer race now proves cursor Pull cannot skip an earlier uncommitted Push; failure rollback, retry and replay are covered. The full isolated workspace, Rust, Playwright DOM and package gates passed. This does not close T10-A–F, native two-client acceptance, other REST-originated publication or any milestone; their existing dependencies and checkboxes remain unchanged.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

@@ -83,6 +83,201 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(conflicts.rowCount).toBe(1)
   })
 
+  it('does not skip a pending Push when another Push commits first', async () => {
+    const [firstId, secondId] = [randomUUID(), randomUUID()]
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    let signalCommit!: () => void
+    let releaseCommit!: () => void
+    const commitReached = new Promise<void>((resolve) => {
+      signalCommit = resolve
+    })
+    const canCommit = new Promise<void>((resolve) => {
+      releaseCommit = resolve
+    })
+    const pausedPool = {
+      async connect() {
+        const client = await pool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            if (sql === 'COMMIT') {
+              signalCommit()
+              await canCommit
+            }
+            return client.query(sql, values)
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    const firstEvent = {
+      eventId: randomUUID(),
+      entityType: 'material' as const,
+      entityId: firstId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: { nameZh: 'Earlier fixture' },
+    }
+    const secondEvent = {
+      ...firstEvent,
+      eventId: randomUUID(),
+      entityId: secondId,
+      payload: { nameZh: 'Later fixture' },
+    }
+    const first = new PostgresSyncStore(pausedPool).pushEvent({
+      event: firstEvent,
+      installationId: randomUUID(),
+      actorId,
+    })
+    let second: Promise<unknown> | undefined
+    try {
+      await commitReached
+      second = new PostgresSyncStore(pool!).pushEvent({
+        event: secondEvent,
+        installationId: randomUUID(),
+        actorId,
+      })
+      let waitingForEarlierPush = false
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const lock = await pool!.query<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM pg_locks
+             WHERE relation = 'server_change_log'::regclass
+               AND mode = 'ShareRowExclusiveLock' AND NOT granted
+           ) AS waiting`,
+        )
+        waitingForEarlierPush = lock.rows[0]?.waiting ?? false
+        if (waitingForEarlierPush) break
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      expect(waitingForEarlierPush).toBe(true)
+      const store = new PostgresSyncStore(pool!)
+      const beforeCommit = await store.pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor,
+        limit: 500,
+      })
+      const affectedIds = new Set<string>([firstId, secondId])
+      expect(
+        beforeCommit.changes.filter((change) =>
+          affectedIds.has(change.entityId),
+        ),
+      ).toEqual([])
+      releaseCommit()
+      expect(await first).toMatchObject({
+        status: 'accepted',
+        serverVersion: 1,
+      })
+      expect(await second).toMatchObject({
+        status: 'accepted',
+        serverVersion: 1,
+      })
+      const afterCommit = await store.pullChanges({
+        actor: { id: actorId, roles: ['engineer'] },
+        cursor: beforeCommit.nextCursor,
+        limit: 500,
+      })
+      expect(
+        afterCommit.changes
+          .filter((change) => affectedIds.has(change.entityId))
+          .map((change) => change.entityId),
+      ).toEqual([firstId, secondId])
+      expect(
+        await store.pushEvent({
+          event: firstEvent,
+          installationId: randomUUID(),
+          actorId,
+        }),
+      ).toMatchObject({ status: 'accepted', serverVersion: 1 })
+      expect(
+        (
+          await store.pullChanges({
+            actor: { id: actorId, roles: ['engineer'] },
+            cursor: afterCommit.nextCursor,
+            limit: 500,
+          })
+        ).changes.filter((change) => affectedIds.has(change.entityId)),
+      ).toEqual([])
+    } finally {
+      releaseCommit()
+      await Promise.allSettled([first, second])
+    }
+  })
+
+  it('rolls back a projected Push when change-log publication fails, then retries', async () => {
+    const unitId = randomUUID()
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'unit' as const,
+      entityId: unitId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `UNIT-${unitId}`,
+        name: 'Fixture unit',
+        is_active: true,
+      },
+    }
+    const input = { event, installationId: randomUUID(), actorId }
+    const failingPool = {
+      async connect() {
+        const client = await pool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            if (sql.includes('INSERT INTO server_change_log'))
+              throw new Error('injected change-log failure')
+            return client.query(sql, values)
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    await expect(
+      new PostgresSyncStore(failingPool).pushEvent(input),
+    ).rejects.toThrow('injected change-log failure')
+    const empty = await pool!.query(
+      `SELECT
+         (SELECT COUNT(*) FROM units WHERE id = $1) AS business,
+         (SELECT COUNT(*) FROM audit_entries WHERE entity_type = 'unit' AND entity_id = $1) AS audit,
+         (SELECT COUNT(*) FROM sync_entities WHERE entity_type = 'unit' AND entity_id = $1) AS synced,
+         (SELECT COUNT(*) FROM sync_events WHERE event_id = $2) AS event,
+         (SELECT COUNT(*) FROM server_change_log WHERE entity_type = 'unit' AND entity_id = $1) AS changes`,
+      [unitId, event.eventId],
+    )
+    expect(empty.rows[0]).toEqual({
+      business: '0',
+      audit: '0',
+      synced: '0',
+      event: '0',
+      changes: '0',
+    })
+    const store = new PostgresSyncStore(pool!)
+    expect(await store.pushEvent(input)).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    const pulled = await store.pullChanges({
+      actor: { id: actorId, roles: ['engineer'] },
+      cursor,
+      limit: 500,
+    })
+    expect(
+      pulled.changes.filter((change) => change.entityId === unitId),
+    ).toMatchObject([{ entityType: 'unit', version: 1 }])
+  })
+
   it('durably synchronizes validated department, team and unit outbox events', async () => {
     const store = new PostgresSyncStore(pool!)
     const service = new SyncService(store)
