@@ -487,6 +487,7 @@ pub struct RfqView {
     pub supplier_id: Uuid,
     pub display_no: String,
     pub currency: String,
+    pub status: String,
     pub item_count: i64,
 }
 
@@ -3477,14 +3478,7 @@ impl LocalAuthService {
             ).map_err(|_| AuthError::Database)?;
         }
         append_order_audit(&transaction, input.source_order_id, actor_id, "rfq_created", None, None, Some(&serde_json::json!({ "rfqId": input.id, "supplierId": input.supplier_id, "currency": input.currency }).to_string()), now)?;
-        let project_id: String = transaction
-            .query_row(
-                "SELECT project_id FROM local_purchase_orders WHERE id = ?1",
-                [input.source_order_id.to_string()],
-                |row| row.get(0),
-            )
-            .map_err(|_| AuthError::Database)?;
-        let rfq_payload = serde_json::json!({ "id": input.id, "sourceOrderId": input.source_order_id, "supplierId": input.supplier_id, "projectId": project_id, "displayNo": input.display_no, "currency": input.currency }).to_string();
+        let rfq_payload = rfq_sync_payload(&transaction, input.id)?;
         insert_local_sync_outbox(&transaction, "rfq", input.id, &rfq_payload, now)?;
         let source_payload = order_sync_payload(&transaction, input.source_order_id)?;
         insert_local_sync_outbox(
@@ -3501,8 +3495,113 @@ impl LocalAuthService {
             supplier_id: input.supplier_id,
             display_no: input.display_no,
             currency: input.currency,
+            status: "draft".into(),
             item_count: source_items.len() as i64,
         })
+    }
+
+    pub fn list_rfqs(
+        &self,
+        source_order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Vec<RfqView>, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        self.require_active_scope_for_order(source_order_id, now)?;
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection.prepare(
+            "SELECT r.id, r.supplier_id, r.display_no, r.currency, r.status, (SELECT COUNT(*) FROM local_rfq_items i WHERE i.rfq_id = r.id) FROM local_rfqs r JOIN local_purchase_orders o ON o.id = r.source_order_id JOIN local_authorization_snapshots a ON a.account_id = ?2 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?3 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE r.source_order_id = ?1 AND o.parent_order_id IS NULL AND o.deleted_at IS NULL ORDER BY r.created_at, r.id"
+        ).map_err(|_| AuthError::Database)?;
+        statement
+            .query_map(
+                params![
+                    source_order_id.to_string(),
+                    account_id.to_string(),
+                    unix_seconds(now)
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .map_err(|_| AuthError::Database)?
+            .map(|row| {
+                let (id, supplier_id, display_no, currency, status, item_count) =
+                    row.map_err(|_| AuthError::Database)?;
+                Ok(RfqView {
+                    id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
+                    source_order_id,
+                    supplier_id: Uuid::parse_str(&supplier_id).map_err(|_| AuthError::Database)?,
+                    display_no,
+                    currency,
+                    status,
+                    item_count,
+                })
+            })
+            .collect()
+    }
+
+    pub fn send_rfq(&self, rfq_id: Uuid, now: SystemTime) -> Result<(), AuthError> {
+        self.transition_rfq(rfq_id, "draft", "sent", "rfq_sent", now)
+    }
+
+    pub fn close_rfq(&self, rfq_id: Uuid, now: SystemTime) -> Result<(), AuthError> {
+        self.transition_rfq(rfq_id, "sent", "closed", "rfq_closed", now)
+    }
+
+    fn transition_rfq(
+        &self,
+        rfq_id: Uuid,
+        expected: &str,
+        next: &str,
+        action: &str,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        let source_order_id = {
+            let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            let source_id: String = connection.query_row(
+                "SELECT r.source_order_id FROM local_rfqs r JOIN local_purchase_orders o ON o.id = r.source_order_id WHERE r.id = ?1 AND o.parent_order_id IS NULL AND o.deleted_at IS NULL AND o.procurement_mode IS NOT 'owner_self_purchase'",
+                [rfq_id.to_string()], |row| row.get(0),
+            ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::InvalidInput)?;
+            Uuid::parse_str(&source_id).map_err(|_| AuthError::Database)?
+        };
+        self.require_active_scope_for_order(source_order_id, now)?;
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let changed = transaction.execute(
+            "UPDATE local_rfqs SET status = ?2, updated_at = ?3 WHERE id = ?1 AND status = ?4 AND EXISTS (SELECT 1 FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?5 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?3 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.id = local_rfqs.source_order_id AND o.deleted_at IS NULL AND o.parent_order_id IS NULL AND o.procurement_mode IS NOT 'owner_self_purchase' AND (?4 != 'draft' OR o.workflow_status IN ('confirmed', 'approved')))",
+            params![rfq_id.to_string(), next, unix_seconds(now), expected, actor_id.to_string()],
+        ).map_err(|_| AuthError::Database)?;
+        if changed != 1 {
+            return Err(AuthError::InvalidInput);
+        }
+        let previous = serde_json::json!({ "rfqId": rfq_id, "status": expected }).to_string();
+        let next_snapshot = serde_json::json!({ "rfqId": rfq_id, "status": next }).to_string();
+        append_order_audit(
+            &transaction,
+            source_order_id,
+            actor_id,
+            action,
+            None,
+            Some(&previous),
+            Some(&next_snapshot),
+            now,
+        )?;
+        let payload = rfq_sync_payload(&transaction, rfq_id)?;
+        insert_local_sync_outbox(&transaction, "rfq", rfq_id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)
     }
 
     pub fn record_receipt(
@@ -4652,7 +4751,7 @@ impl LocalAuthService {
         }
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, event_id LIMIT ?1")
+            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, rowid LIMIT ?1")
             .map_err(|_| AuthError::Database)?
             .query_map([limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -4720,7 +4819,7 @@ impl LocalAuthService {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String)> = transaction.query_row(
-                "SELECT event_id, base_version, payload_json FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, event_id LIMIT 1",
+                "SELECT event_id, base_version, payload_json FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, rowid LIMIT 1",
                 params![change.entity_type, change.entity_id.to_string()],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             ).optional().map_err(|_| AuthError::Database)?;
@@ -5505,6 +5604,26 @@ pub mod commands {
         input: super::CreateRfqInput,
     ) -> Result<super::RfqView, CommandError> {
         auth.create_rfq(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_rfqs(
+        auth: State<'_, LocalAuthService>,
+        source_order_id: Uuid,
+    ) -> Result<Vec<super::RfqView>, CommandError> {
+        auth.list_rfqs(source_order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn send_rfq(auth: State<'_, LocalAuthService>, rfq_id: Uuid) -> Result<(), CommandError> {
+        auth.send_rfq(rfq_id, SystemTime::now()).map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn close_rfq(auth: State<'_, LocalAuthService>, rfq_id: Uuid) -> Result<(), CommandError> {
+        auth.close_rfq(rfq_id, SystemTime::now())
             .map_err(Into::into)
     }
 
@@ -7347,6 +7466,36 @@ fn api_endpoint_from(value: &str, path: &str) -> Result<reqwest::Url, AuthError>
         endpoint.path().trim_end_matches('/')
     ));
     Ok(endpoint)
+}
+
+fn rfq_sync_payload(transaction: &Transaction<'_>, rfq_id: Uuid) -> Result<String, AuthError> {
+    let (source_id, supplier_id, supplier_snapshot, display_no, currency, status, project_id):
+        (String, String, String, String, String, String, String) = transaction.query_row(
+            "SELECT r.source_order_id, r.supplier_id, r.supplier_snapshot_json, r.display_no, r.currency, r.status, o.project_id FROM local_rfqs r JOIN local_purchase_orders o ON o.id = r.source_order_id WHERE r.id = ?1",
+            [rfq_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+        ).map_err(|_| AuthError::Database)?;
+    let items = transaction.prepare(
+        "SELECT source_item_id, material_snapshot_json, quantity_decimal, unit, sort_order FROM local_rfq_items WHERE rfq_id = ?1 ORDER BY sort_order, id"
+    ).map_err(|_| AuthError::Database)?
+        .query_map([rfq_id.to_string()], |row| {
+            Ok(serde_json::json!({
+                "sourceItemId": row.get::<_, String>(0)?,
+                "materialSnapshot": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(1)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                "quantity": row.get::<_, String>(2)?,
+                "unit": row.get::<_, String>(3)?,
+                "sortOrder": row.get::<_, i64>(4)?,
+            }))
+        }).map_err(|_| AuthError::Database)?
+        .collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)?;
+    let supplier_snapshot: serde_json::Value =
+        serde_json::from_str(&supplier_snapshot).map_err(|_| AuthError::Database)?;
+    Ok(serde_json::json!({
+        "id": rfq_id, "sourceOrderId": source_id, "supplierId": supplier_id,
+        "supplierSnapshot": supplier_snapshot, "projectId": project_id,
+        "displayNo": display_no, "currency": currency, "status": status, "items": items,
+    })
+    .to_string())
 }
 
 fn insert_local_sync_outbox(
@@ -11142,6 +11291,194 @@ mod tests {
             .unwrap();
         assert_eq!(rfq_item_count, 1);
         drop(connection);
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.list_rfqs(requisition_id, now),
+            Err(AuthError::Forbidden)
+        );
+        assert_eq!(service.send_rfq(rfq.id, now), Err(AuthError::Forbidden));
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "approver",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.list_rfqs(requisition_id, now).unwrap()[0].status,
+            "draft"
+        );
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE local_purchase_orders SET workflow_status = 'executing' WHERE id = ?1",
+                    [requisition_id.to_string()],
+                )
+                .unwrap();
+        }
+        assert_eq!(service.send_rfq(rfq.id, now), Err(AuthError::InvalidInput));
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE local_purchase_orders SET workflow_status = 'confirmed' WHERE id = ?1",
+                    [requisition_id.to_string()],
+                )
+                .unwrap();
+        }
+        {
+            let connection = service.connection.lock().unwrap();
+            connection.execute_batch("CREATE TEMP TRIGGER reject_rfq_outbox BEFORE INSERT ON local_sync_outbox WHEN NEW.entity_type = 'rfq' BEGIN SELECT RAISE(FAIL, 'injected outbox failure'); END;").unwrap();
+        }
+        assert_eq!(service.send_rfq(rfq.id, now), Err(AuthError::Database));
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute_batch("DROP TRIGGER reject_rfq_outbox;")
+                .unwrap();
+            let status: String = connection
+                .query_row(
+                    "SELECT status FROM local_rfqs WHERE id = ?1",
+                    [rfq.id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let sent_audits: i64 = connection.query_row("SELECT COUNT(*) FROM local_order_audit_entries WHERE order_id = ?1 AND action = 'rfq_sent'", [requisition_id.to_string()], |row| row.get(0)).unwrap();
+            assert_eq!(status, "draft");
+            assert_eq!(sent_audits, 0);
+        }
+        service.send_rfq(rfq.id, now).unwrap();
+        assert_eq!(
+            service.list_rfqs(requisition_id, now).unwrap()[0].status,
+            "sent"
+        );
+        assert_eq!(service.send_rfq(rfq.id, now), Err(AuthError::InvalidInput));
+        service.close_rfq(rfq.id, now).unwrap();
+        assert_eq!(
+            service.list_rfqs(requisition_id, now).unwrap()[0].status,
+            "closed"
+        );
+        assert_eq!(service.close_rfq(rfq.id, now), Err(AuthError::InvalidInput));
+        {
+            let connection = service.connection.lock().unwrap();
+            let (snapshot, count): (String, i64) = connection.query_row(
+                "SELECT supplier_snapshot_json, (SELECT COUNT(*) FROM local_rfq_items WHERE rfq_id = ?1) FROM local_rfqs WHERE id = ?1",
+                [rfq.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert!(snapshot.contains("name"));
+            assert_eq!(count, 1);
+            let outbox_count: i64 = connection.query_row(
+                "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'rfq' AND entity_id = ?1",
+                [rfq.id.to_string()], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(outbox_count, 3);
+            let payloads = connection.prepare(
+                "SELECT payload_json FROM local_sync_outbox WHERE entity_type = 'rfq' AND entity_id = ?1 ORDER BY created_at, rowid",
+            ).unwrap().query_map([rfq.id.to_string()], |row| row.get::<_, String>(0)).unwrap()
+                .collect::<Result<Vec<_>, _>>().unwrap()
+                .into_iter().map(|payload| serde_json::from_str::<serde_json::Value>(&payload).unwrap()).collect::<Vec<_>>();
+            assert_eq!(
+                payloads
+                    .iter()
+                    .map(|payload| payload["status"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                vec!["draft", "sent", "closed"]
+            );
+            assert!(payloads.iter().all(|payload| payload["supplierSnapshot"]
+                == payloads[0]["supplierSnapshot"]
+                && payload["items"] == payloads[0]["items"]));
+            let rowids = connection.prepare("SELECT rowid FROM local_sync_outbox WHERE entity_type = 'rfq' AND entity_id = ?1 ORDER BY rowid")
+                .unwrap().query_map([rfq.id.to_string()], |row| row.get::<_, i64>(0)).unwrap()
+                .collect::<Result<Vec<_>, _>>().unwrap();
+            for (index, rowid) in rowids.into_iter().enumerate() {
+                connection
+                    .execute(
+                        "UPDATE local_sync_outbox SET event_id = ?1 WHERE rowid = ?2",
+                        params![
+                            format!("00000000-0000-4000-8000-00000000000{}", 3 - index),
+                            rowid
+                        ],
+                    )
+                    .unwrap();
+            }
+        }
+        let pending_rfq = service
+            .pending_sync_events(100, now)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.entity_type == "rfq" && event.entity_id == rfq.id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pending_rfq
+                .iter()
+                .map(|event| event.base_version)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            pending_rfq
+                .iter()
+                .map(
+                    |event| serde_json::from_str::<serde_json::Value>(&event.payload_json).unwrap()
+                        ["status"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                )
+                .collect::<Vec<_>>(),
+            vec!["draft", "sent", "closed"]
+        );
+        let second_rfq = service
+            .create_rfq(
+                CreateRfqInput {
+                    id: Uuid::new_v4(),
+                    source_order_id: requisition_id,
+                    supplier_id: supplier.id,
+                    display_no: "CI-FIXTURE-20261010-RFQ-0002".into(),
+                    currency: "XOF".into(),
+                },
+                now,
+            )
+            .unwrap();
+        service.send_rfq(second_rfq.id, now).unwrap();
+        let sent_audits = {
+            let connection = service.connection.lock().unwrap();
+            let mut statement = connection.prepare(
+                "SELECT next_json FROM local_order_audit_entries WHERE order_id = ?1 AND action = 'rfq_sent'"
+            ).unwrap();
+            statement
+                .query_map([requisition_id.to_string()], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(sent_audits.len(), 2);
+        assert!(
+            sent_audits
+                .iter()
+                .any(|value| value.contains(&rfq.id.to_string()))
+        );
+        assert!(
+            sent_audits
+                .iter()
+                .any(|value| value.contains(&second_rfq.id.to_string()))
+        );
         {
             let connection = service.connection.lock().unwrap();
             let (status, delivery_address, snapshot, freight, item_currency): (String, String, String, String, String) = connection.query_row(
