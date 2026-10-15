@@ -124,6 +124,14 @@ describe.skipIf(!testPool)('PostgresMasterDataStore project tax scope', () => {
       )
       expect(audits.rows[0]?.count).toBe('1')
     } finally {
+      await testPool!.query(
+        "DELETE FROM server_change_log WHERE entity_type = 'project_defaults' AND entity_id = $1",
+        [projectId],
+      )
+      await testPool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+        [projectId],
+      )
       await testPool!.query('DELETE FROM audit_entries WHERE actor_id = $1', [
         actorId,
       ])
@@ -140,6 +148,99 @@ describe.skipIf(!testPool)('PostgresMasterDataStore project tax scope', () => {
         'DELETE FROM countries WHERE id = ANY($1::uuid[])',
         [[countryId, otherCountryId]],
       )
+      await testPool!.query('DELETE FROM users WHERE id = $1', [actorId])
+    }
+  })
+
+  it('rolls back business, audit and sync rows when change-log publication fails', async () => {
+    const [actorId, countryId, projectId] = Array.from({ length: 3 }, () =>
+      randomUUID(),
+    )
+    await testPool!.query(
+      "INSERT INTO users (id, business_code, username, password_hash, ui_locale, is_enabled) VALUES ($1, $2, $3, 'fixture', 'zh-CN', TRUE)",
+      [actorId, `DEFAULT-A-${actorId}`, `default-${actorId}`],
+    )
+    await testPool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'Fixture country', 'UTC')",
+      [countryId, `DEFAULT-C-${countryId}`],
+    )
+    await testPool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'Fixture project', 'Fixture site', 'Fixture department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `DEFAULT-P-${projectId}`],
+    )
+    const defaults = {
+      projectId,
+      departmentTitle: 'Procurement',
+      companyAddress: 'Fixture address',
+      companyContact: null,
+      defaultCurrency: 'XOF' as const,
+      defaultLanguagePair: 'zh_fr' as const,
+      defaultTaxTemplateId: null,
+    }
+    const failingPool = {
+      async connect() {
+        const client = await testPool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            if (sql.includes('INSERT INTO server_change_log'))
+              throw new Error('injected change-log failure')
+            return client.query(sql, values)
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    try {
+      await expect(
+        new PostgresMasterDataStore(failingPool).saveProjectDefaults(
+          defaults,
+          actorId,
+        ),
+      ).rejects.toThrow('injected change-log failure')
+      const empty = await testPool!.query(
+        `SELECT
+           (SELECT COUNT(*) FROM project_print_defaults WHERE project_id = $1) AS business,
+           (SELECT COUNT(*) FROM audit_entries WHERE entity_type = 'project_print_defaults' AND entity_id = $1) AS audit,
+           (SELECT COUNT(*) FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1) AS synced,
+           (SELECT COUNT(*) FROM server_change_log WHERE entity_type = 'project_defaults' AND entity_id = $1) AS changes`,
+        [projectId],
+      )
+      expect(empty.rows[0]).toEqual({
+        business: '0',
+        audit: '0',
+        synced: '0',
+        changes: '0',
+      })
+      await new PostgresMasterDataStore(testPool!).saveProjectDefaults(
+        defaults,
+        actorId,
+      )
+      const restored = await testPool!.query<{ version: string }>(
+        'SELECT version FROM project_print_defaults WHERE project_id = $1',
+        [projectId],
+      )
+      expect(restored.rows[0]?.version).toBe('1')
+    } finally {
+      await testPool!.query(
+        "DELETE FROM server_change_log WHERE entity_type = 'project_defaults' AND entity_id = $1",
+        [projectId],
+      )
+      await testPool!.query(
+        "DELETE FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+        [projectId],
+      )
+      await testPool!.query(
+        "DELETE FROM audit_entries WHERE entity_type = 'project_print_defaults' AND entity_id = $1",
+        [projectId],
+      )
+      await testPool!.query(
+        'DELETE FROM project_print_defaults WHERE project_id = $1',
+        [projectId],
+      )
+      await testPool!.query('DELETE FROM projects WHERE id = $1', [projectId])
+      await testPool!.query('DELETE FROM countries WHERE id = $1', [countryId])
       await testPool!.query('DELETE FROM users WHERE id = $1', [actorId])
     }
   })

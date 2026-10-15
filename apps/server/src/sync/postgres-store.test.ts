@@ -1730,6 +1730,223 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     ).toMatchObject({ company_address: 'Resolved address', version: '3' })
   })
 
+  it('publishes each REST project-default save for incremental Pull and rolls back failed saves', async () => {
+    const [projectId, countryId] = [randomUUID(), randomUUID()]
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'Fixture country', 'UTC')",
+      [countryId, `DEFAULT-C-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'Fixture project', 'Fixture site', 'Fixture department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `DEFAULT-P-${projectId}`],
+    )
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    const defaults = {
+      projectId,
+      departmentTitle: 'Procurement',
+      companyAddress: 'First address',
+      companyContact: null,
+      defaultCurrency: 'XOF' as const,
+      defaultLanguagePair: 'zh_fr' as const,
+      defaultTaxTemplateId: null,
+    }
+    const rest = new PostgresMasterDataStore(pool!)
+    const sync = new SyncService(new PostgresSyncStore(pool!))
+    const engineer = { id: actorId, roles: ['engineer' as const] }
+    await rest.saveProjectDefaults(defaults, actorId)
+    const first = await sync.pull(engineer, { cursor, limit: 500 })
+    expect(
+      first.changes.filter((change) => change.entityId === projectId),
+    ).toMatchObject([
+      {
+        entityType: 'project_defaults',
+        operation: 'upsert',
+        version: 1,
+        payload: defaults,
+      },
+    ])
+    const revised = { ...defaults, companyAddress: 'Revised address' }
+    await rest.saveProjectDefaults(revised, actorId)
+    const second = await sync.pull(engineer, {
+      cursor: first.nextCursor,
+      limit: 500,
+    })
+    expect(
+      second.changes.filter((change) => change.entityId === projectId),
+    ).toMatchObject([
+      {
+        entityType: 'project_defaults',
+        operation: 'upsert',
+        version: 2,
+        payload: revised,
+      },
+    ])
+    const stale = {
+      eventId: randomUUID(),
+      entityType: 'project_defaults',
+      entityId: projectId,
+      operation: 'upsert',
+      baseVersion: 1,
+      payload: { ...defaults, companyAddress: 'Offline address' },
+    }
+    expect(
+      (
+        await sync.push(
+          { id: actorId, roles: ['administrator'] },
+          { deviceId: randomUUID(), events: [stale] },
+        )
+      ).results[0],
+    ).toMatchObject({ status: 'conflict', serverVersion: 2 })
+    await expect(
+      rest.saveProjectDefaults(revised, randomUUID()),
+    ).rejects.toThrow()
+    expect(
+      (
+        await sync.pull(engineer, { cursor: second.nextCursor, limit: 500 })
+      ).changes.filter((change) => change.entityId === projectId),
+    ).toEqual([])
+    const business = await pool!.query<{
+      company_address: string
+      version: string
+    }>(
+      'SELECT company_address, version FROM project_print_defaults WHERE project_id = $1',
+      [projectId],
+    )
+    expect(business.rows[0]).toEqual({
+      company_address: 'Revised address',
+      version: '2',
+    })
+    const synced = await pool!.query<{
+      version: string
+      payload_json: typeof defaults
+    }>(
+      "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+      [projectId],
+    )
+    expect(synced.rows[0]).toMatchObject({
+      version: '2',
+      payload_json: revised,
+    })
+    const audits = await pool!.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM audit_entries WHERE entity_type = 'project_print_defaults' AND entity_id = $1 AND action = 'upsert'",
+      [projectId],
+    )
+    expect(audits.rows[0]?.count).toBe('2')
+    await rest.saveProjectDefaults(revised, actorId)
+    expect(
+      (
+        await sync.pull(engineer, { cursor: second.nextCursor, limit: 500 })
+      ).changes.filter((change) => change.entityId === projectId),
+    ).toMatchObject([{ version: 3, payload: revised }])
+  })
+
+  it('does not let a REST change overtake an uncommitted change-log sequence', async () => {
+    const [projectId, countryId, materialId] = Array.from({ length: 3 }, () =>
+      randomUUID(),
+    )
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'Fixture country', 'UTC')",
+      [countryId, `DEFAULT-C-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'Fixture project', 'Fixture site', 'Fixture department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `DEFAULT-P-${projectId}`],
+    )
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    const client = await pool!.connect()
+    let signalPublication!: () => void
+    const publicationReached = new Promise<void>((resolve) => {
+      signalPublication = resolve
+    })
+    const observedPool = {
+      async connect() {
+        const writer = await pool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            if (
+              sql.includes('LOCK TABLE server_change_log') ||
+              sql.includes('INSERT INTO server_change_log')
+            )
+              signalPublication()
+            return writer.query(sql, values)
+          },
+          release() {
+            writer.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    let committed = false
+    let save: Promise<unknown> | undefined
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        "INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id) VALUES ('material', $1, 'upsert', 1, $2, $3)",
+        [materialId, { nameZh: 'Earlier fixture' }, actorId],
+      )
+      save = new PostgresMasterDataStore(observedPool).saveProjectDefaults(
+        {
+          projectId,
+          departmentTitle: 'Procurement',
+          companyAddress: 'Later fixture',
+          companyContact: null,
+          defaultCurrency: 'XOF',
+          defaultLanguagePair: 'zh_fr',
+          defaultTaxTemplateId: null,
+        },
+        actorId,
+      )
+      await publicationReached
+      let waitingForEarlierWriter = false
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const lock = await pool!.query<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM pg_locks
+             WHERE relation = 'server_change_log'::regclass
+               AND mode = 'ShareRowExclusiveLock' AND NOT granted
+           ) AS waiting`,
+        )
+        waitingForEarlierWriter = lock.rows[0]?.waiting ?? false
+        if (waitingForEarlierWriter) break
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      expect(waitingForEarlierWriter).toBe(true)
+      const sync = new SyncService(new PostgresSyncStore(pool!))
+      const engineer = { id: actorId, roles: ['engineer' as const] }
+      const affectedIds = new Set<string>([materialId, projectId])
+      const beforeCommit = await sync.pull(engineer, { cursor, limit: 500 })
+      expect(
+        beforeCommit.changes.filter((change) =>
+          affectedIds.has(change.entityId),
+        ),
+      ).toEqual([])
+      await client.query('COMMIT')
+      committed = true
+      await save
+      const pulled = await sync.pull(engineer, {
+        cursor: beforeCommit.nextCursor,
+        limit: 500,
+      })
+      expect(
+        pulled.changes
+          .filter((change) => affectedIds.has(change.entityId))
+          .map((change) => change.entityId),
+      ).toEqual([materialId, projectId])
+    } finally {
+      if (!committed) await client.query('ROLLBACK')
+      client.release()
+      await save?.catch(() => undefined)
+    }
+  })
+
   it('reconciles equal-version legacy sync defaults without overwriting divergent REST data', async () => {
     const [projectId, countryId] = [randomUUID(), randomUUID()]
     await pool!.query(
@@ -1751,8 +1968,8 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     }
     await new PostgresMasterDataStore(pool!).saveProjectDefaults(rest, actorId)
     await pool!.query(
-      "INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by) VALUES ('project_defaults', $1, 1, FALSE, $2, $3)",
-      [projectId, { ...rest, companyAddress: 'Legacy sync-only' }, actorId],
+      "UPDATE sync_entities SET payload_json = $2 WHERE entity_type = 'project_defaults' AND entity_id = $1",
+      [projectId, { ...rest, companyAddress: 'Legacy sync-only' }],
     )
     const event = {
       eventId: randomUUID(),

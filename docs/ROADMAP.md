@@ -147,6 +147,8 @@ The exchange-rate Push slice now projects immutable rate history into PostgreSQL
 
 The project-default Push slice now projects validated defaults into PostgreSQL `project_print_defaults` atomically with audit/sync, including optional contact and a prior-schema-preserving nullable-column migration. It checks current project/tax business state, retains and publishes REST values on stale or legacy-version conflicts, and permits a resolved retry. Disposable PostgreSQL, Rust, focused DOM and workspace gates passed; proactive REST-originated Pull, authorized deployment, native two-client/role acceptance and T04/T10 parent gates remain open. Milestone checkboxes are unchanged.
 
+The project-default REST-to-Pull reliability slice now publishes each authorized online save transactionally with its business row and audit; it also prevents that REST log sequence from overtaking an earlier uncommitted log writer. A clean second client can obtain the new version by cursor Pull without provoking a Push conflict. Isolated PostgreSQL coverage includes repeated saves, late publication failure rollback/retry, stale Push retention, legacy divergence and concurrent log ordering; full workspace, Rust and Playwright DOM gates passed. The pre-existing Push-vs-Push cursor race, other REST master-data types, actual deployment, native two-client/role acceptance and T04/T10 parent gates remain open. Milestone checkboxes are unchanged.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

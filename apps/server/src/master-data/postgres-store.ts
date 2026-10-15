@@ -17,6 +17,22 @@ export class PostgresMasterDataStore implements MasterDataStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `project_defaults:${defaults.projectId}`,
+      ])
+      const synced = await client.query<{ version: string }>(
+        "SELECT version FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1 FOR UPDATE",
+        [defaults.projectId],
+      )
+      const business = await client.query<{ version: string }>(
+        'SELECT version FROM project_print_defaults WHERE project_id = $1 FOR UPDATE',
+        [defaults.projectId],
+      )
+      const version =
+        Math.max(
+          Number(synced.rows[0]?.version ?? 0),
+          Number(business.rows[0]?.version ?? 0),
+        ) + 1
       if (defaults.defaultTaxTemplateId !== null) {
         const compatible = await client.query(
           `SELECT 1 FROM projects p JOIN tax_templates t ON t.id = $2
@@ -29,8 +45,8 @@ export class PostgresMasterDataStore implements MasterDataStore {
       }
       await client.query(
         `INSERT INTO project_print_defaults
-           (project_id, department_title, company_address, company_contact, default_currency, default_language_pair, default_tax_template_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (project_id, department_title, company_address, company_contact, default_currency, default_language_pair, default_tax_template_id, version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (project_id) DO UPDATE SET
            department_title = EXCLUDED.department_title,
            company_address = EXCLUDED.company_address,
@@ -38,7 +54,7 @@ export class PostgresMasterDataStore implements MasterDataStore {
            default_currency = EXCLUDED.default_currency,
            default_language_pair = EXCLUDED.default_language_pair,
            default_tax_template_id = EXCLUDED.default_tax_template_id,
-           version = project_print_defaults.version + 1,
+           version = EXCLUDED.version,
            updated_at = NOW(),
            deleted_at = NULL`,
         [
@@ -49,12 +65,32 @@ export class PostgresMasterDataStore implements MasterDataStore {
           defaults.defaultCurrency,
           defaults.defaultLanguagePair,
           defaults.defaultTaxTemplateId,
+          version,
         ],
       )
       await client.query(
         `INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action)
          VALUES (gen_random_uuid(), $1, 'project_print_defaults', $2, 'upsert')`,
         [actorId, defaults.projectId],
+      )
+      await client.query(
+        `INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
+         VALUES ('project_defaults', $1, $2, FALSE, $3, $4)
+         ON CONFLICT (entity_type, entity_id) DO UPDATE SET
+           version = EXCLUDED.version, is_deleted = FALSE,
+           payload_json = EXCLUDED.payload_json, updated_by = EXCLUDED.updated_by,
+           updated_at = NOW()`,
+        [defaults.projectId, version, defaults, actorId],
+      )
+      // A cursor must not pass a sequence allocated by an uncommitted writer.
+      await client.query(
+        'LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE',
+      )
+      await client.query(
+        `INSERT INTO server_change_log
+           (entity_type, entity_id, operation, version, payload_json, actor_id)
+         VALUES ('project_defaults', $1, 'upsert', $2, $3, $4)`,
+        [defaults.projectId, version, defaults, actorId],
       )
       await client.query('COMMIT')
       return defaults
