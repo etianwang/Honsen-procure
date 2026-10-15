@@ -531,4 +531,50 @@ describe('SyncService', () => {
     expect(response.results[0]).toMatchObject({ status: 'validation_error' })
     expect(store.pushed).toBe(0)
   })
+
+  it('authorizes validated site Push only for a master-data role', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'site' as const,
+      entityId: randomUUID(),
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: 'SITE-1',
+        project_id: projectId,
+        name: 'Fixture site',
+        is_active: true,
+      },
+    }
+    const push = (roles: ('administrator' | 'engineer')[], events: unknown[]) =>
+      service.push(
+        { id: engineer.id, roles },
+        { deviceId: randomUUID(), events },
+      )
+    expect((await push(['engineer'], [event])).results[0]?.status).toBe(
+      'validation_error',
+    )
+    const rejected = await push(
+      ['administrator'],
+      [
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, project_id: '' },
+        },
+        { ...event, eventId: randomUUID(), operation: 'soft_delete' },
+      ],
+    )
+    expect(rejected.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+    ])
+    expect(store.pushed).toBe(0)
+    expect((await push(['administrator'], [event])).results[0]?.status).toBe(
+      'accepted',
+    )
+    expect(store.pushed).toBe(1)
+  })
 })

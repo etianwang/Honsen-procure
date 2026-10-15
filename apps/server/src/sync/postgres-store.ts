@@ -106,6 +106,21 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      if (input.event.entityType === 'site') {
+        const projected = await this.projectSite(
+          client,
+          input.event,
+          input.actorId,
+        )
+        if (!projected) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+      }
       await client.query(
         `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
@@ -162,7 +177,7 @@ export class PostgresSyncStore implements SyncStore {
     } catch (error) {
       await client.query('ROLLBACK')
       if (
-        ['country', 'project'].includes(input.event.entityType) &&
+        ['country', 'project', 'site'].includes(input.event.entityType) &&
         typeof error === 'object' &&
         error !== null &&
         'code' in error &&
@@ -296,6 +311,45 @@ export class PostgresSyncStore implements SyncStore {
     )
     await client.query(
       "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'project', $2, 'upsert')",
+      [actorId, event.entityId],
+    )
+    return true
+  }
+
+  private async projectSite(
+    client: PoolClient,
+    event: SyncEvent,
+    actorId: string,
+  ): Promise<boolean> {
+    if (event.operation !== 'upsert') return false
+    const payload = event.payload
+    const businessCode = payload.businessCode ?? payload.business_code
+    const projectId = payload.projectId ?? payload.project_id
+    const name = payload.name
+    const isActive = payload.isActive ?? payload.is_active
+    if (
+      typeof businessCode !== 'string' ||
+      typeof projectId !== 'string' ||
+      typeof name !== 'string' ||
+      typeof isActive !== 'boolean'
+    )
+      return false
+    const previous = await client.query<{ business_code: string }>(
+      'SELECT business_code FROM sites WHERE id = $1 FOR UPDATE',
+      [event.entityId],
+    )
+    if (previous.rows[0] && previous.rows[0].business_code !== businessCode)
+      return false
+    await client.query(
+      `INSERT INTO sites (id, project_id, business_code, name, is_active)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET project_id = EXCLUDED.project_id,
+         name = EXCLUDED.name, is_active = EXCLUDED.is_active,
+         version = sites.version + 1, updated_at = NOW(), deleted_at = NULL`,
+      [event.entityId, projectId, businessCode, name, isActive],
+    )
+    await client.query(
+      "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'site', $2, 'upsert')",
       [actorId, event.entityId],
     )
     return true

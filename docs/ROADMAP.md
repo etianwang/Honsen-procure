@@ -133,6 +133,8 @@ The next isolated T04 local slice adds department/team administrator workflows, 
 
 The 2026-10-15 country and project Push slices now project validated master records into their PostgreSQL business tables atomically with sync and audit. Disposable PostgreSQL tests cover replay, missing-country retry, immutable codes and referenced-project country-change refusal. They do not close the remaining master-data projections, authorized deployment records, native desktop acceptance, T04/T10 or M0/M1/M3.
 
+The site Push slice now also projects into the PostgreSQL `sites` business table, with missing-project retry, replay, code-collision and conflict checks. Full isolated workspace tests and the existing site-creation Playwright DOM gate passed on 2026-10-15. Organization/unit/tax/rate/default projection, deployment and native acceptance remain open; milestone checkboxes are unchanged.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

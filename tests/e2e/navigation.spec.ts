@@ -660,6 +660,10 @@ test('administrator creates a department and team with an explicit parent', asyn
 test('administrator master-data fixture creates a project and a site', async ({
   page,
 }) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
   await page.goto('/?test=master-data')
   await page.getByRole('tab', { name: '项目', exact: true }).click()
   await page.getByLabel('项目代码').fill('SN-P1')
@@ -682,6 +686,7 @@ test('administrator master-data fixture creates a project and a site', async ({
   await expect(page.getByLabel('编辑站点名称-SN-P1-DAK')).toHaveValue(
     '达喀尔现场',
   )
+  expect(browserErrors).toEqual([])
 })
 
 test('desktop project-default page uses the Tauri command adapter', async ({

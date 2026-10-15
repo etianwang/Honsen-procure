@@ -476,6 +476,167 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     })
   })
 
+  it('projects sites atomically and retries after a missing project arrives', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const [countryId, projectId, siteId, duplicateId] = Array.from(
+      { length: 4 },
+      () => randomUUID(),
+    )
+    const site = {
+      eventId: randomUUID(),
+      entityType: 'site' as const,
+      entityId: siteId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `SITE-${siteId}`,
+        project_id: projectId,
+        name: 'Fixture site',
+        is_active: true,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [site] }
+    expect((await service.push(actor, request)).results[0]?.status).toBe(
+      'validation_error',
+    )
+    expect(
+      (await pool!.query('SELECT 1 FROM sites WHERE id = $1', [siteId]))
+        .rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          "SELECT 1 FROM sync_entities WHERE entity_type = 'site' AND entity_id = $1",
+          [siteId],
+        )
+      ).rowCount,
+    ).toBe(0)
+    const setup = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        { ...site, eventId: randomUUID() },
+        {
+          eventId: randomUUID(),
+          entityType: 'country',
+          entityId: countryId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            business_code: `COUNTRY-${countryId}`,
+            name: 'Fixture country',
+            time_zone: 'UTC',
+            is_active: true,
+          },
+        },
+        {
+          eventId: randomUUID(),
+          entityType: 'project',
+          entityId: projectId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            business_code: `PROJECT-${projectId}`,
+            country_id: countryId,
+            name: 'Fixture project',
+            site: 'Fixture site',
+            department_name: 'Fixture department',
+            default_currency: 'XOF',
+            default_language_pair: 'zh_fr',
+            is_active: true,
+          },
+        },
+      ],
+    })
+    expect(setup.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+      'accepted',
+    ])
+    const accepted = await service.push(actor, request)
+    expect(accepted.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(accepted)
+    const collision = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...site,
+          eventId: randomUUID(),
+          entityId: duplicateId,
+        },
+      ],
+    })
+    expect(collision.results[0]?.status).toBe('validation_error')
+    const rejectedCode = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...site,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...site.payload, business_code: `OTHER-${siteId}` },
+        },
+      ],
+    })
+    expect(rejectedCode.results[0]?.status).toBe('validation_error')
+    const revised = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...site,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...site.payload, name: 'Revised site' },
+        },
+      ],
+    })
+    expect(revised.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 2,
+    })
+    const stale = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...site,
+          eventId: randomUUID(),
+          entityId: siteId,
+          payload: { ...site.payload, name: 'Stale site' },
+        },
+      ],
+    })
+    expect(stale.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 2,
+    })
+    const stored = await pool!.query<{
+      project_id: string
+      business_code: string
+      name: string
+      version: string
+    }>(
+      'SELECT project_id::text AS project_id, business_code, name, version FROM sites WHERE id = $1',
+      [siteId],
+    )
+    expect(stored.rows[0]).toMatchObject({
+      project_id: projectId,
+      business_code: `SITE-${siteId}`,
+      name: 'Revised site',
+      version: '2',
+    })
+    expect(
+      (
+        await pool!.query(
+          "SELECT COUNT(*)::text AS count FROM audit_entries WHERE entity_type = 'site' AND entity_id = $1",
+          [siteId],
+        )
+      ).rows[0]?.count,
+    ).toBe('2')
+  })
+
   it('rejects incompatible project-default tax references in the sync path', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const [
