@@ -3,6 +3,7 @@ import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
 import { PostgresSyncStore } from './postgres-store.js'
+import { SyncService } from './service.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null
@@ -78,6 +79,110 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       [conflict.eventId],
     )
     expect(conflicts.rowCount).toBe(1)
+  })
+
+  it('durably synchronizes validated department, team and unit outbox events', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const service = new SyncService(store)
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    const [departmentId, teamId, unitId] = Array.from({ length: 3 }, () =>
+      randomUUID(),
+    )
+    const entityIds = new Set<string>([departmentId, teamId, unitId])
+    const events = [
+      {
+        eventId: randomUUID(),
+        entityType: 'department',
+        entityId: departmentId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'department',
+          business_code: `FIXTURE-${departmentId}`,
+          name: 'Procurement',
+          is_active: true,
+          version: 1,
+        },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'team',
+        entityId: teamId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'team',
+          department_id: departmentId,
+          business_code: `FIXTURE-${teamId}`,
+          name: 'Field team',
+          is_active: true,
+          version: 1,
+        },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'unit',
+        entityId: unitId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'unit',
+          business_code: `FIXTURE-${unitId}`,
+          name: 'Each',
+          is_active: true,
+          version: 1,
+        },
+      },
+    ]
+    const request = { deviceId: randomUUID(), events }
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const first = await service.push(actor, request)
+    expect(first.results.map((result) => result.status)).toEqual([
+      'accepted',
+      'accepted',
+      'accepted',
+    ])
+    expect(await service.push(actor, request)).toEqual(first)
+
+    const pulled = await service.pull(
+      { id: actorId, roles: ['engineer'] },
+      { cursor, limit: 500 },
+    )
+    expect(
+      pulled.changes
+        .filter((change) => entityIds.has(change.entityId))
+        .map((change) => change.entityId),
+    ).toEqual([departmentId, teamId, unitId])
+    const repeated = await service.pull(
+      { id: actorId, roles: ['engineer'] },
+      { cursor: pulled.nextCursor, limit: 500 },
+    )
+    expect(
+      repeated.changes.filter((change) => entityIds.has(change.entityId)),
+    ).toEqual([])
+    const conflict = await service.push(actor, {
+      deviceId: request.deviceId,
+      events: [
+        {
+          ...events[1],
+          eventId: randomUUID(),
+          payload: { ...events[1]!.payload, name: 'Divergent team' },
+        },
+      ],
+    })
+    expect(conflict.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 1,
+    })
+    const stored = await pool!.query<{ payload_json: { name: string } }>(
+      "SELECT payload_json FROM sync_entities WHERE entity_type = 'team' AND entity_id = $1",
+      [teamId],
+    )
+    expect(stored.rows[0]?.payload_json.name).toBe('Field team')
   })
 
   it('pulls supplier and price changes only from an engineer’s bound countries', async () => {

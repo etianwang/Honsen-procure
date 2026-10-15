@@ -11,7 +11,19 @@ import type { Role } from '@honsen/shared'
 import type { SyncActor, SyncStore } from './types.js'
 
 const procurementRoles: Role[] = ['purchaser', 'administrator']
-const referenceMasterDataTypes = ['country', 'project', 'site'] as const
+const masterDataRoles: Role[] = [
+  'super_administrator',
+  'administrator',
+  'purchaser',
+]
+const referenceMasterDataTypes = [
+  'country',
+  'project',
+  'site',
+  'department',
+  'team',
+  'unit',
+] as const
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
@@ -64,7 +76,7 @@ export class SyncService {
       }
       return (
         event.operation === 'upsert' &&
-        actor.roles.some((role) => procurementRoles.includes(role)) &&
+        actor.roles.some((role) => masterDataRoles.includes(role)) &&
         referenceMasterDataSchema.safeParse({
           ...referencePayload(event.payload),
           kind: event.entityType,
@@ -146,6 +158,7 @@ function referencePayload(
     timeZone: payload.timeZone ?? payload.time_zone,
     countryId: payload.countryId ?? payload.country_id,
     departmentName: payload.departmentName ?? payload.department_name,
+    departmentId: payload.departmentId ?? payload.department_id,
     defaultCurrency: payload.defaultCurrency ?? payload.default_currency,
     defaultLanguagePair:
       payload.defaultLanguagePair ?? payload.default_language_pair,

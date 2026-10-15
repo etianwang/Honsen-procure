@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { SyncService } from './service.js'
 import type { SyncStore } from './types.js'
@@ -203,6 +204,103 @@ describe('SyncService', () => {
     )
     expect(response.results[0]).toMatchObject({ status: 'accepted' })
     expect(store.pushed).toBe(1)
+  })
+
+  it('validates organization outbox payloads and permits the master-data roles only', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const departmentId = randomUUID()
+    const events = [
+      {
+        eventId: randomUUID(),
+        entityType: 'department',
+        entityId: departmentId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'department',
+          business_code: 'fixture-proc',
+          name: 'Procurement',
+          is_active: true,
+          version: 1,
+        },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'team',
+        entityId: randomUUID(),
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'team',
+          department_id: departmentId,
+          business_code: 'fixture-team',
+          name: 'Field team',
+          is_active: true,
+          version: 1,
+        },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'unit',
+        entityId: randomUUID(),
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'unit',
+          business_code: 'fixture-ea',
+          name: 'Each',
+          is_active: true,
+          version: 1,
+        },
+      },
+    ]
+    const request = { deviceId: randomUUID(), events }
+    const denied = await service.push(engineer, request)
+    expect(denied.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+      'validation_error',
+    ])
+    expect(store.pushed).toBe(0)
+    const accepted = await service.push(
+      { id: engineer.id, roles: ['super_administrator'] },
+      request,
+    )
+    expect(accepted.results.map((result) => result.status)).toEqual([
+      'accepted',
+      'accepted',
+      'accepted',
+    ])
+    expect(store.pushed).toBe(3)
+    const invalid = await service.push(
+      { id: engineer.id, roles: ['administrator'] },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            ...events[0],
+            eventId: randomUUID(),
+            payload: { ...events[0]!.payload, name: '' },
+          },
+          {
+            ...events[1],
+            eventId: randomUUID(),
+            payload: { ...events[1]!.payload, department_id: 'not-a-uuid' },
+          },
+          {
+            ...events[2],
+            eventId: randomUUID(),
+            payload: { ...events[2]!.payload, business_code: 'bad code' },
+          },
+          { ...events[2], eventId: randomUUID(), operation: 'soft_delete' },
+        ],
+      },
+    )
+    expect(
+      invalid.results.every((result) => result.status === 'validation_error'),
+    ).toBe(true)
+    expect(store.pushed).toBe(3)
   })
 
   it('rejects changing a used project country without mutation', async () => {
