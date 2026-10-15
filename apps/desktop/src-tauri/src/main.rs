@@ -70,6 +70,7 @@ fn main() {
             commands::set_procurement_mode,
             commands::issue_owner_formal_order,
             commands::record_receipt,
+            commands::record_procurement_expenditure,
             commands::save_supplier_child_terms,
             commands::send_supplier_order,
             commands::issue_local_captcha,

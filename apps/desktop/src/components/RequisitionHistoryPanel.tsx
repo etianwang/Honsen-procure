@@ -228,7 +228,10 @@ export function RequisitionHistoryPanel({
         <Alert type="error" title="撤回失败：当前状态或授权不允许撤回。" />
       ) : null}
       {issueError ? (
-        <Alert type="error" title="正式下达失败：请检查审批状态、授权和冻结报价。" />
+        <Alert
+          type="error"
+          title="正式下达失败：请检查审批状态、授权和冻结报价。"
+        />
       ) : null}
       {detailLoading ? <p role="status">正在读取详情…</p> : null}
       {detail ? (
@@ -259,7 +262,9 @@ export function RequisitionHistoryPanel({
             {detail.projectName} · {detail.site} · {detail.workflowStatus} ·{' '}
             {detail.procurementMode ?? '历史模式未记录'}
           </p>
-          {detail.formalDocumentNo ? <p>正式编号：{detail.formalDocumentNo}</p> : null}
+          {detail.formalDocumentNo ? (
+            <p>正式编号：{detail.formalDocumentNo}</p>
+          ) : null}
           <p>
             申请日期：{detail.orderDate} · 交货地址：{detail.deliveryAddress}
           </p>

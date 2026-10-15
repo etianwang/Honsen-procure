@@ -1358,7 +1358,10 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
         core: {
           invoke(
             command: string,
-            args?: { orderId?: string; input?: { orderId: string } },
+            args?: {
+              orderId?: string
+              input?: { orderId: string; amountMinor?: string }
+            },
           ) {
             if (command === 'list_confirmed_procurement_orders')
               return Promise.resolve(
@@ -1403,6 +1406,16 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
                 receivedItemCount: 1,
               })
             }
+            if (command === 'record_procurement_expenditure') {
+              if (args?.input?.orderId !== orderId)
+                return Promise.reject(new Error('wrong order'))
+              Object.assign(window, { __paymentAmount: args.input.amountMinor })
+              return Promise.resolve({
+                id: crypto.randomUUID(),
+                orderId,
+                voucherWarning: true,
+              })
+            }
             return Promise.reject(new Error(`unexpected command: ${command}`))
           },
         },
@@ -1415,6 +1428,17 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   await expect(page.getByRole('button', { name: '开始市场直采' })).toBeVisible()
   await page.getByRole('button', { name: '开始市场直采' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('采购执行中')
+  await page.getByLabel('付款收款人').fill('fixture cash seller')
+  await page.getByLabel('实际付款金额').fill('1200')
+  await page.getByRole('button', { name: '登记付款' }).click()
+  await expect(
+    page.getByText('付款已登记；尚未附凭证，请后续补充。'),
+  ).toBeVisible()
+  await expect(
+    page.evaluate(
+      () => (window as Window & { __paymentAmount?: string }).__paymentAmount,
+    ),
+  ).resolves.toBe('1200')
   await page.getByLabel('market cement 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('收货中')
@@ -1950,9 +1974,11 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     'formally_issued',
   )
-  await expect(page.evaluate(() => (window as Window & { issuedOrderId?: string }).issuedOrderId)).resolves.toBe(
-    '00000000-0000-4000-8000-000000000009',
-  )
+  await expect(
+    page.evaluate(
+      () => (window as Window & { issuedOrderId?: string }).issuedOrderId,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000009')
   const originalDraftNo = await page.locator('.page-heading p').textContent()
   page.once('dialog', (dialog) => void dialog.dismiss())
   await page.getByRole('button', { name: '复制为新草稿' }).click()
