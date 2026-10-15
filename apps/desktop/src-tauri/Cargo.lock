@@ -1286,6 +1286,10 @@ version = "0.0.0-development"
 dependencies = [
  "argon2",
  "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "http-body",
+ "http-body-util",
  "image",
  "keyring",
  "rand_core 0.6.4",

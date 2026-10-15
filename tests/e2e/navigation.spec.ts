@@ -1457,8 +1457,23 @@ test('receiver records partial delivery and closes a supplier order with conditi
   })
   await page.addInitScript(() => {
     let attachmentSyncAttempts = 0
+    const transferListeners: Array<
+      (event: { payload: Record<string, unknown> }) => void
+    > = []
     Object.assign(window, {
       __TAURI__: {
+        event: {
+          listen(
+            _event: string,
+            listener: (event: { payload: Record<string, unknown> }) => void,
+          ) {
+            transferListeners.push(listener)
+            return Promise.resolve(() => {
+              const index = transferListeners.indexOf(listener)
+              if (index >= 0) transferListeners.splice(index, 1)
+            })
+          },
+        },
         core: {
           invoke(
             command: string,
@@ -1511,12 +1526,26 @@ test('receiver records partial delivery and closes a supplier order with conditi
             }
             if (command === 'push_pending_sync') {
               attachmentSyncAttempts += 1
+              if (attachmentSyncAttempts === 2) {
+                for (const listener of transferListeners)
+                  listener({
+                    payload: {
+                      attachmentId: '00000000-0000-4000-8000-000000000604',
+                      direction: 'upload',
+                      transferredBytes: 4,
+                      totalBytes: 4,
+                      state: 'completed',
+                    },
+                  })
+              }
               Object.assign(window, {
                 __attachmentSyncAttempts: attachmentSyncAttempts,
               })
               return Promise.resolve({
                 pendingAttachmentCount: attachmentSyncAttempts === 1 ? 1 : 0,
                 attachmentSyncFailed: attachmentSyncAttempts === 1,
+                attachmentTransferCount: attachmentSyncAttempts === 1 ? 0 : 1,
+                attachmentTransferBytes: attachmentSyncAttempts === 1 ? 0 : 4,
               })
             }
             return Promise.reject(new Error(`unexpected command: ${command}`))
@@ -1537,7 +1566,8 @@ test('receiver records partial delivery and closes a supplier order with conditi
     page.getByText('附件同步失败，仍有 1 个待同步文件；可在联网后重试。'),
   ).toBeVisible()
   await page.getByRole('button', { name: '同步待传附件' }).click()
-  await expect(page.getByText('附件已同步到云端。')).toBeVisible()
+  await expect(page.getByText('已同步 1 个附件（4 B）。')).toBeVisible()
+  await expect(page.getByRole('status')).toHaveText('附件上传完成：4 B。')
   await expect(page.getByText('delivery.jpg · 已同步')).toBeVisible()
   await expect(
     page.evaluate(

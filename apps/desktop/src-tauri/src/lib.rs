@@ -3,13 +3,17 @@ use std::{
     fs,
     io::{Cursor, Read, Write},
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use bytes::Bytes;
+use futures_util::StreamExt;
+use http_body::Frame;
+use http_body_util::StreamBody;
 use image::{
     DynamicImage, ImageEncoder, ImageFormat, ImageReader,
     codecs::{
@@ -810,6 +814,8 @@ pub struct SyncPushView {
     pub pending_count: usize,
     pub pending_attachment_count: usize,
     pub attachment_sync_failed: bool,
+    pub attachment_transfer_count: usize,
+    pub attachment_transfer_bytes: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -819,6 +825,45 @@ pub struct SyncPullView {
     pub next_cursor: String,
     pub pending_attachment_count: usize,
     pub attachment_sync_failed: bool,
+    pub attachment_transfer_count: usize,
+    pub attachment_transfer_bytes: u64,
+}
+
+#[derive(Default)]
+struct AttachmentTransferSummary {
+    count: usize,
+    bytes: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentTransferProgress {
+    pub attachment_id: String,
+    pub direction: String,
+    pub transferred_bytes: u64,
+    pub total_bytes: u64,
+    pub state: String,
+}
+
+type AttachmentTransferReporter = Arc<dyn Fn(AttachmentTransferProgress) + Send + Sync>;
+
+fn report_attachment_transfer(
+    reporter: &Option<AttachmentTransferReporter>,
+    attachment_id: &str,
+    direction: &str,
+    transferred_bytes: u64,
+    total_bytes: u64,
+    state: &str,
+) {
+    if let Some(reporter) = reporter {
+        reporter(AttachmentTransferProgress {
+            attachment_id: attachment_id.into(),
+            direction: direction.into(),
+            transferred_bytes,
+            total_bytes,
+            state: state.into(),
+        });
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -3932,10 +3977,11 @@ impl LocalAuthService {
         result
     }
 
-    pub async fn upload_pending_attachments_https(
+    async fn upload_pending_attachments_https_with_progress(
         &self,
         now: SystemTime,
-    ) -> Result<usize, AuthError> {
+        reporter: Option<AttachmentTransferReporter>,
+    ) -> Result<AttachmentTransferSummary, AuthError> {
         self.require_catalog_read(now)?;
         self.refresh_authorization_https(now).await?;
         let account_id = self.active_session_user_id()?;
@@ -3958,7 +4004,7 @@ impl LocalAuthService {
             .timeout(Duration::from_secs(600))
             .build()
             .map_err(|_| AuthError::SyncTransport)?;
-        let mut uploaded = 0;
+        let mut transferred = AttachmentTransferSummary::default();
         for (
             id,
             owner_type,
@@ -3981,6 +4027,8 @@ impl LocalAuthService {
             {
                 return Err(AuthError::InvalidInput);
             }
+            let transferred_bytes = bytes.len() as u64;
+            report_attachment_transfer(&reporter, &id, "upload", 0, transferred_bytes, "preparing");
             let intent = client
                 .post(attachment_endpoint("intents")?)
                 .bearer_auth(&token)
@@ -4007,10 +4055,32 @@ impl LocalAuthService {
             if !intent.uploaded {
                 let url =
                     signed_attachment_url(intent.url.as_deref().ok_or(AuthError::SyncTransport)?)?;
+                let body_bytes = Arc::new(bytes);
+                let body_id = id.clone();
+                let body_reporter = reporter.clone();
+                let body_total = transferred_bytes;
+                let body = reqwest::Body::wrap(StreamBody::new(
+                    futures_util::stream::iter((0..body_bytes.len()).step_by(65_536)).map(
+                        move |start| {
+                            let end = (start + 65_536).min(body_bytes.len());
+                            report_attachment_transfer(
+                                &body_reporter,
+                                &body_id,
+                                "upload",
+                                end as u64,
+                                body_total,
+                                "transferring",
+                            );
+                            Ok::<Frame<Bytes>, std::convert::Infallible>(Frame::data(
+                                Bytes::copy_from_slice(&body_bytes[start..end]),
+                            ))
+                        },
+                    ),
+                ));
                 let response = client
                     .put(url)
                     .header(reqwest::header::CONTENT_TYPE, content_type)
-                    .body(bytes)
+                    .body(body)
                     .send()
                     .await
                     .map_err(|_| AuthError::SyncTransport)?;
@@ -4028,17 +4098,30 @@ impl LocalAuthService {
                 }
             }
             self.connection.lock().map_err(|_| AuthError::Database)?
-                .execute("UPDATE local_attachments SET upload_state = 'uploaded' WHERE id = ?1 AND upload_state = 'pending_upload'", [id])
+                .execute("UPDATE local_attachments SET upload_state = 'uploaded' WHERE id = ?1 AND upload_state = 'pending_upload'", [&id])
                 .map_err(|_| AuthError::Database)?;
-            uploaded += 1;
+            transferred.count += 1;
+            transferred.bytes = transferred
+                .bytes
+                .checked_add(transferred_bytes)
+                .ok_or(AuthError::InvalidInput)?;
+            report_attachment_transfer(
+                &reporter,
+                &id,
+                "upload",
+                transferred_bytes,
+                transferred_bytes,
+                "completed",
+            );
         }
-        Ok(uploaded)
+        Ok(transferred)
     }
 
-    pub async fn download_pending_attachments_https(
+    async fn download_pending_attachments_https_with_progress(
         &self,
         now: SystemTime,
-    ) -> Result<usize, AuthError> {
+        reporter: Option<AttachmentTransferReporter>,
+    ) -> Result<AttachmentTransferSummary, AuthError> {
         self.require_catalog_read(now)?;
         self.refresh_authorization_https(now).await?;
         let account_id = self.active_session_user_id()?;
@@ -4057,8 +4140,9 @@ impl LocalAuthService {
             .timeout(Duration::from_secs(600))
             .build()
             .map_err(|_| AuthError::SyncTransport)?;
-        let mut downloaded = 0;
+        let mut transferred = AttachmentTransferSummary::default();
         for (id, order_id, byte_length, checksum) in pending {
+            let total_bytes = u64::try_from(byte_length).map_err(|_| AuthError::InvalidInput)?;
             self.require_active_scope_for_order(
                 Uuid::parse_str(&order_id).map_err(|_| AuthError::Database)?,
                 now,
@@ -4096,6 +4180,7 @@ impl LocalAuthService {
                 return Err(AuthError::SyncTransport);
             }
             let mut bytes = Vec::with_capacity(byte_length as usize);
+            report_attachment_transfer(&reporter, &id, "download", 0, total_bytes, "preparing");
             while let Some(chunk) = response
                 .chunk()
                 .await
@@ -4109,11 +4194,31 @@ impl LocalAuthService {
                     return Err(AuthError::InvalidInput);
                 }
                 bytes.extend_from_slice(&chunk);
+                report_attachment_transfer(
+                    &reporter,
+                    &id,
+                    "download",
+                    bytes.len() as u64,
+                    total_bytes,
+                    "transferring",
+                );
             }
             self.persist_downloaded_attachment_bytes(&id, byte_length, &checksum, &bytes)?;
-            downloaded += 1;
+            transferred.count += 1;
+            transferred.bytes = transferred
+                .bytes
+                .checked_add(bytes.len() as u64)
+                .ok_or(AuthError::InvalidInput)?;
+            report_attachment_transfer(
+                &reporter,
+                &id,
+                "download",
+                bytes.len() as u64,
+                total_bytes,
+                "completed",
+            );
         }
-        Ok(downloaded)
+        Ok(transferred)
     }
 
     fn persist_downloaded_attachment_bytes(
@@ -5453,16 +5558,30 @@ impl LocalAuthService {
     }
 
     pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
+        self.push_pending_https_with_progress(now, None).await
+    }
+
+    async fn push_pending_https_with_progress(
+        &self,
+        now: SystemTime,
+        reporter: Option<AttachmentTransferReporter>,
+    ) -> Result<SyncPushView, AuthError> {
         self.require_catalog_read(now)?;
         self.refresh_authorization_https(now).await?;
         let events = self.pending_sync_events(100, now)?;
         if events.is_empty() {
-            let attachment_sync_failed = self.upload_pending_attachments_https(now).await.is_err();
+            let transfer = self
+                .upload_pending_attachments_https_with_progress(now, reporter.clone())
+                .await;
+            let attachment_sync_failed = transfer.is_err();
+            let transfer = transfer.unwrap_or_default();
             return Ok(SyncPushView {
                 accepted_count: 0,
                 pending_count: 0,
                 pending_attachment_count: self.pending_attachment_count("pending_upload")?,
                 attachment_sync_failed,
+                attachment_transfer_count: transfer.count,
+                attachment_transfer_bytes: transfer.bytes,
             });
         }
         let account_id = self.active_session_user_id()?;
@@ -5522,16 +5641,30 @@ impl LocalAuthService {
             .filter(|result| result.status == "accepted")
             .count();
         self.apply_sync_acknowledgements(acknowledgements.results, now)?;
-        let attachment_sync_failed = self.upload_pending_attachments_https(now).await.is_err();
+        let transfer = self
+            .upload_pending_attachments_https_with_progress(now, reporter)
+            .await;
+        let attachment_sync_failed = transfer.is_err();
+        let transfer = transfer.unwrap_or_default();
         Ok(SyncPushView {
             accepted_count,
             pending_count: self.pending_sync_events(100, now)?.len(),
             pending_attachment_count: self.pending_attachment_count("pending_upload")?,
             attachment_sync_failed,
+            attachment_transfer_count: transfer.count,
+            attachment_transfer_bytes: transfer.bytes,
         })
     }
 
     pub async fn pull_sync_https(&self, now: SystemTime) -> Result<SyncPullView, AuthError> {
+        self.pull_sync_https_with_progress(now, None).await
+    }
+
+    async fn pull_sync_https_with_progress(
+        &self,
+        now: SystemTime,
+        reporter: Option<AttachmentTransferReporter>,
+    ) -> Result<SyncPullView, AuthError> {
         self.require_catalog_read(now)?;
         self.refresh_authorization_https(now).await?;
         let account_id = self.active_session_user_id()?;
@@ -5583,12 +5716,18 @@ impl LocalAuthService {
                 break;
             }
         }
-        let attachment_sync_failed = self.download_pending_attachments_https(now).await.is_err();
+        let transfer = self
+            .download_pending_attachments_https_with_progress(now, reporter)
+            .await;
+        let attachment_sync_failed = transfer.is_err();
+        let transfer = transfer.unwrap_or_default();
         Ok(SyncPullView {
             applied_count,
             next_cursor: cursor,
             pending_attachment_count: self.pending_attachment_count("pending_download")?,
             attachment_sync_failed,
+            attachment_transfer_count: transfer.count,
+            attachment_transfer_bytes: transfer.bytes,
         })
     }
 
@@ -6009,10 +6148,13 @@ impl LocalAuthService {
 }
 
 pub mod commands {
-    use super::{AuthError, AuthenticatedSession, CaptchaChallenge, LocalAuthService};
+    use super::{
+        AttachmentTransferReporter, AuthError, AuthenticatedSession, CaptchaChallenge,
+        LocalAuthService,
+    };
     use serde::{Deserialize, Serialize};
-    use std::time::SystemTime;
-    use tauri::State;
+    use std::{sync::Arc, time::SystemTime};
+    use tauri::{AppHandle, Emitter, State};
     use uuid::Uuid;
 
     #[derive(Deserialize)]
@@ -6116,18 +6258,26 @@ pub mod commands {
 
     #[tauri::command]
     pub async fn push_pending_sync(
+        app: AppHandle,
         auth: State<'_, LocalAuthService>,
     ) -> Result<super::SyncPushView, CommandError> {
-        auth.push_pending_https(SystemTime::now())
+        let reporter: AttachmentTransferReporter = Arc::new(move |progress| {
+            let _ = app.emit("attachment-transfer-progress", progress);
+        });
+        auth.push_pending_https_with_progress(SystemTime::now(), Some(reporter))
             .await
             .map_err(Into::into)
     }
 
     #[tauri::command]
     pub async fn pull_sync(
+        app: AppHandle,
         auth: State<'_, LocalAuthService>,
     ) -> Result<super::SyncPullView, CommandError> {
-        auth.pull_sync_https(SystemTime::now())
+        let reporter: AttachmentTransferReporter = Arc::new(move |progress| {
+            let _ = app.emit("attachment-transfer-progress", progress);
+        });
+        auth.pull_sync_https_with_progress(SystemTime::now(), Some(reporter))
             .await
             .map_err(Into::into)
     }
@@ -9220,6 +9370,44 @@ mod tests {
             sync_endpoint_from("https://user:secret@sync.example.test", "push").unwrap_err(),
             AuthError::SyncTransport,
         );
+    }
+
+    #[test]
+    fn sync_views_serialize_completed_attachment_byte_totals() {
+        let push = SyncPushView {
+            accepted_count: 0,
+            pending_count: 0,
+            pending_attachment_count: 0,
+            attachment_sync_failed: false,
+            attachment_transfer_count: 1,
+            attachment_transfer_bytes: 1_536,
+        };
+        let pull = SyncPullView {
+            applied_count: 0,
+            next_cursor: "1".into(),
+            pending_attachment_count: 0,
+            attachment_sync_failed: false,
+            attachment_transfer_count: 1,
+            attachment_transfer_bytes: 1_536,
+        };
+        for value in [
+            serde_json::to_value(push).unwrap(),
+            serde_json::to_value(pull).unwrap(),
+        ] {
+            assert_eq!(value["attachmentTransferCount"], 1);
+            assert_eq!(value["attachmentTransferBytes"], 1_536);
+        }
+        let progress = serde_json::to_value(AttachmentTransferProgress {
+            attachment_id: "attachment-1".into(),
+            direction: "upload".into(),
+            transferred_bytes: 1_024,
+            total_bytes: 1_536,
+            state: "transferring".into(),
+        })
+        .unwrap();
+        assert_eq!(progress["attachmentId"], "attachment-1");
+        assert_eq!(progress["transferredBytes"], 1_024);
+        assert_eq!(progress["totalBytes"], 1_536);
     }
 
     #[test]

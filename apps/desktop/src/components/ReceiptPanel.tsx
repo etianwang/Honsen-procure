@@ -1,9 +1,12 @@
 import { Alert, Button, Card, Input } from 'antd'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   attachmentSyncStatusMessage,
+  attachmentTransferProgressMessage,
+  listenForAttachmentTransferProgress,
   type ReceiptApi,
   type ReceiptAttachmentView,
+  type AttachmentTransferProgress,
 } from '../lib/receipt-api'
 
 type ReceiptLine = {
@@ -46,6 +49,19 @@ export function ReceiptPanel({
   const [receiptId, setReceiptId] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<ReceiptAttachmentView[]>([])
   const [syncingAttachments, setSyncingAttachments] = useState(false)
+  const [transferProgress, setTransferProgress] =
+    useState<AttachmentTransferProgress | null>(null)
+
+  useEffect(() => {
+    return listenForAttachmentTransferProgress((progress) => {
+      if (
+        attachments.some(
+          (attachment) => attachment.id === progress.attachmentId,
+        )
+      )
+        setTransferProgress(progress)
+    })
+  }, [attachments])
 
   async function record() {
     const items = lines
@@ -101,6 +117,7 @@ export function ReceiptPanel({
   async function syncAttachments() {
     if (!receiptId || syncingAttachments) return
     setSyncingAttachments(true)
+    setTransferProgress(null)
     try {
       const result = await api.syncPendingAttachments()
       setAttachments(await api.listReceiptAttachments(receiptId))
@@ -172,6 +189,20 @@ export function ReceiptPanel({
           >
             同步待传附件
           </Button>
+          {transferProgress ? (
+            <div aria-label="附件传输进度">
+              <progress
+                max={transferProgress.totalBytes || 1}
+                value={Math.min(
+                  transferProgress.transferredBytes,
+                  transferProgress.totalBytes || 1,
+                )}
+              />
+              <span role="status" aria-live="polite">
+                {attachmentTransferProgressMessage(transferProgress)}
+              </span>
+            </div>
+          ) : null}
           <ul>
             {attachments.map((attachment) => (
               <li key={attachment.id}>

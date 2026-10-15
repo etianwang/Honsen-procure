@@ -18,7 +18,12 @@ const fallbackApi: ReceiptApi = {
     return []
   },
   async syncPendingAttachments() {
-    return { pendingAttachmentCount: 0, attachmentSyncFailed: false }
+    return {
+      pendingAttachmentCount: 0,
+      attachmentSyncFailed: false,
+      attachmentTransferCount: 0,
+      attachmentTransferBytes: 0,
+    }
   },
 }
 
