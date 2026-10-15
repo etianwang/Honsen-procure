@@ -59,22 +59,22 @@ T06 + T07 ──> T08 formal execution/snapshots ──> T09 receipt/payment ─
 
 ## Work ownership and handoff queue
 
-| Owner | Isolated branch/worktree | Scope now | May change | Handoff definition |
-| --- | --- | --- | --- | --- |
-| Dev A | `codex/t04-parent-acceptance` | T04-B/C acceptance preparation and remaining cross-client master-data proof; do not deploy | `apps/server/src/master-data/**`, relevant sync tests, T04 docs | Focused PostgreSQL + Rust/DOM evidence, no external deployment claim |
-| Dev B | `codex/t08-formal-execution` | T08-B OPA-3 design/test implementation; T08-C only if it does not overlap receipts/payments | order/shared formal contracts, desktop formal issue flow/tests | Formal local number/snapshot behavior with migration and regular DOM proof |
-| Dev C | `codex/t09-receipt-payment` | T09-A/B payment/receipt/closed-retention; document only the T11 boundary | receipt/payment services, components/tests, T09 docs | Transaction/role/retention tests plus regular DOM proof; no file-ingestion claim |
-| Dev D | `codex/t10-runtime-sync` | Starts after a free slot: T10-B/C/D runtime orchestration plus the shared `procurement_expenditure` sync contract/projection; consume, do not redefine, formal contracts | desktop sync runtime/UI/tests, server sync tests | Failure-injection and DOM proof; no prerequisite closure claim |
-| QA | `codex/parent-acceptance-qa` | Starts after a free slot: validate each handoff and report/return failures | test artifacts and this table only through primary-agent requests | Reproducible pass/fail report and retest result |
+| Owner | Isolated branch/worktree      | Scope now                                                                                                                                                                | May change                                                        | Handoff definition                                                               |
+| ----- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Dev A | `codex/t04-parent-acceptance` | T04-B/C acceptance preparation and remaining cross-client master-data proof; do not deploy                                                                               | `apps/server/src/master-data/**`, relevant sync tests, T04 docs   | Focused PostgreSQL + Rust/DOM evidence, no external deployment claim             |
+| Dev B | `codex/t08-formal-execution`  | T08-B OPA-3 design/test implementation; T08-C only if it does not overlap receipts/payments                                                                              | order/shared formal contracts, desktop formal issue flow/tests    | Formal local number/snapshot behavior with migration and regular DOM proof       |
+| Dev C | `codex/t09-receipt-payment`   | T09-A/B payment/receipt/closed-retention; document only the T11 boundary                                                                                                 | receipt/payment services, components/tests, T09 docs              | Transaction/role/retention tests plus regular DOM proof; no file-ingestion claim |
+| Dev D | `codex/t10-runtime-sync`      | Starts after a free slot: T10-B/C/D runtime orchestration plus the shared `procurement_expenditure` sync contract/projection; consume, do not redefine, formal contracts | desktop sync runtime/UI/tests, server sync tests                  | Failure-injection and DOM proof; no prerequisite closure claim                   |
+| QA    | `codex/parent-acceptance-qa`  | Starts after a free slot: validate each handoff and report/return failures                                                                                               | test artifacts and this table only through primary-agent requests | Reproducible pass/fail report and retest result                                  |
 
 ## QA handoff ledger
 
-| Package | Commit | QA status | Reproduction / command | Failure and responsible owner | Retest |
-| --- | --- | --- | --- | --- | --- |
-| T04 acceptance prep | — | QUEUED | — | — | — |
-| T08 formal execution | — | QUEUED | — | — | — |
-| T09 receipt/payment | — | QUEUED | — | — | — |
-| T10 runtime sync | — | BLOCKED ON FREE SLOT / interfaces | — | — | — |
+| Package              | Commit | QA status                         | Reproduction / command | Failure and responsible owner | Retest |
+| -------------------- | ------ | --------------------------------- | ---------------------- | ----------------------------- | ------ |
+| T04 acceptance prep  | —      | QUEUED                            | —                      | —                             | —      |
+| T08 formal execution | —      | QUEUED                            | —                      | —                             | —      |
+| T09 receipt/payment  | —      | QUEUED                            | —                      | —                             | —      |
+| T10 runtime sync     | —      | BLOCKED ON FREE SLOT / interfaces | —                      | —                             | —      |
 
 ## External authorization queue
 
