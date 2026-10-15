@@ -163,6 +163,8 @@ The T04 unit REST-to-Pull reliability slice now makes an authorized online unit 
 
 The T10-B desktop runtime checkpoint starts Push→Pull only after successful online account authentication, retains local entry on sync transport failure, and displays pending/retrying/synced state according to the trusted Push acknowledgement. Bounded retries, browser connectivity events and lock cleanup have unit and DOM evidence; the full isolated PostgreSQL workspace suite also passed. This is partial runtime progress: no native two-device/reconnect evidence, complete conflict-aware scheduling, post-mutation trigger, WebSocket lifecycle or parent T10 acceptance. M3 remains unchecked.
 
+The 2026-10-15 T10-B multi-account containment slice adds trusted owner stamping and owner-filtered Push/ack/status while preserving unowned legacy outbox rows in quarantine. Until per-account Pull state exists, a multi-account installation stops HTTPS Pull with an actionable, non-retrying account-boundary status instead of risking cursor loss. Local Rust, disposable PostgreSQL workspace and Playwright DOM gates passed; Fixer P1 `T10-SEC-001`, server account binding, legacy recovery, per-account Pull and native two-client evidence remain open. T10 and M3 remain unchecked.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

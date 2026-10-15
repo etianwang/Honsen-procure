@@ -56,6 +56,13 @@ test('authenticated online login pushes before pull and displays pending until a
             }
             if (command === 'pull_sync')
               return Promise.resolve({ appliedCount: 0, nextCursor: '1' })
+            if (command === 'sync_status')
+              return Promise.resolve({
+                pendingCount: pushes === 1 ? 1 : 0,
+                conflictCount: 0,
+                quarantinedCount: 0,
+                lastSuccessAt: 100,
+              })
             if (command === 'list_authorization_contexts')
               return Promise.resolve(authorized ? [context] : [])
             if (command === 'get_authorization_context')
@@ -130,6 +137,13 @@ test('offline login never pushes and lock stops later reconnect work', async ({
                 roles: ['engineer'],
                 requires_password_change: false,
               })
+            if (command === 'sync_status')
+              return Promise.resolve({
+                pendingCount: 2,
+                conflictCount: 1,
+                quarantinedCount: 1,
+                lastSuccessAt: 100,
+              })
             if (command === 'list_authorization_contexts')
               return Promise.resolve([])
             if (command === 'get_authorization_context')
@@ -149,6 +163,15 @@ test('offline login never pushes and lock stops later reconnect work', async ({
   await page.getByRole('button', { name: '离线登录' }).click()
   await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
     '离线本地数据',
+  )
+  await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
+    '待同步 2',
+  )
+  await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
+    '未解决冲突 1',
+  )
+  await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
+    '待归属旧事件 1',
   )
   await page.getByRole('button', { name: '锁定' }).click()
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
@@ -207,4 +230,73 @@ test('failed CAPTCHA login never starts a sync cycle', async ({ page }) => {
   )
   expect(commands).not.toContain('push_pending_sync')
   expect(browserErrors).toEqual([])
+})
+
+test('cross-account Pull boundary is actionable and does not loop on reconnect', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const commands: string[] = []
+    Object.assign(window, {
+      __syncCommands: commands,
+      __TAURI_INTERNALS__: {},
+      __TAURI__: {
+        core: {
+          invoke(command: string) {
+            commands.push(command)
+            if (
+              command === 'issue_local_captcha' ||
+              command === 'issue_cloud_captcha'
+            )
+              return Promise.resolve({
+                id: crypto.randomUUID(),
+                question: '1 + 1 = ?',
+              })
+            if (command === 'online_login')
+              return Promise.resolve({
+                user_id: crypto.randomUUID(),
+                username: 'test-en',
+                roles: ['engineer'],
+                requires_password_change: false,
+              })
+            if (command === 'push_pending_sync')
+              return Promise.resolve({ acceptedCount: 0, pendingCount: 0 })
+            if (command === 'pull_sync')
+              return Promise.reject({ code: 'sync_account_boundary' })
+            if (command === 'sync_status')
+              return Promise.resolve({
+                pendingCount: 0,
+                conflictCount: 0,
+                quarantinedCount: 1,
+                lastSuccessAt: null,
+              })
+            if (command === 'list_authorization_contexts')
+              return Promise.resolve([])
+            if (command === 'get_authorization_context')
+              return Promise.reject({ code: 'forbidden' })
+            return Promise.reject(new Error(`unexpected ${command}`))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByLabel('账号').fill('test-en')
+  await page.getByLabel('密码').fill('test-password')
+  await page.getByLabel(/本地验证码/).fill('2')
+  await page.getByLabel(/云端验证码/).fill('2')
+  await page.getByRole('button', { name: '在线登录' }).click()
+  await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
+    '多账号拉取已暂停',
+  )
+  await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
+    '待归属旧事件 1',
+  )
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await page.waitForTimeout(100)
+  const commands = await page.evaluate(
+    () => (window as Window & { __syncCommands: string[] }).__syncCommands,
+  )
+  expect(commands.filter((command) => command === 'pull_sync')).toHaveLength(1)
 })

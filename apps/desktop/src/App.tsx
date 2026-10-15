@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
-import { startSyncLifecycle, type SyncState } from './lib/sync-lifecycle'
+import {
+  readSyncStatus,
+  startSyncLifecycle,
+  type SyncState,
+} from './lib/sync-lifecycle'
 import { ConfigProvider } from 'antd'
 import { calculateDraftTotals } from '@honsen/shared'
 import {
@@ -206,6 +210,34 @@ function App() {
     return startSyncLifecycle(invoke, setSyncState, window)
   }, [session?.user_id, session?.onlineAuthenticated])
   useEffect(() => {
+    if (!session || session.onlineAuthenticated) return
+    const invoke = (
+      window as Window & {
+        __TAURI__?: {
+          core?: { invoke?: (command: string) => Promise<unknown> }
+        }
+      }
+    ).__TAURI__?.core?.invoke
+    if (!invoke) return
+    let active = true
+    const refresh = async () => {
+      try {
+        const status = await readSyncStatus(invoke)
+        if (active) setSyncState({ kind: 'offline-pending', ...status })
+      } catch {
+        if (active) setSyncState({ kind: 'offline-pending' })
+      }
+    }
+    void refresh()
+    const timer = setInterval(() => {
+      void refresh()
+    }, 5_000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [session])
+  useEffect(() => {
     if (!session) {
       setAuthorizationContext(null)
       return
@@ -382,11 +414,7 @@ function App() {
               : undefined
           }
           onSelectAuthorizationContext={selectAuthorizationContext}
-          syncState={
-            session?.onlineAuthenticated
-              ? syncState
-              : { kind: 'offline-pending' }
-          }
+          syncState={syncState}
           onLock={
             session
               ? () => {

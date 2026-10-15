@@ -630,6 +630,15 @@ pub struct SyncPullView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncStatusView {
+    pub pending_count: i64,
+    pub conflict_count: i64,
+    pub quarantined_count: i64,
+    pub last_success_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncConflictView {
     pub id: Uuid,
     pub entity_type: String,
@@ -960,6 +969,8 @@ pub enum AuthError {
     ImmutableBusinessCode,
     #[error("synchronization transport error")]
     SyncTransport,
+    #[error("synchronization account boundary requires recovery")]
+    SyncAccountBoundary,
 }
 
 #[derive(Debug)]
@@ -4781,6 +4792,24 @@ impl LocalAuthService {
             .collect()
     }
 
+    pub fn sync_status(&self, now: SystemTime) -> Result<SyncStatusView, AuthError> {
+        self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), CASE WHEN (SELECT COUNT(*) FROM local_accounts) = 1 THEN (SELECT last_success_at FROM local_sync_state WHERE singleton = 1) ELSE NULL END",
+                [account_id.to_string()],
+                |row| Ok(SyncStatusView {
+                    pending_count: row.get(0)?,
+                    conflict_count: row.get(1)?,
+                    quarantined_count: row.get(2)?,
+                    last_success_at: row.get(3)?,
+                }),
+            )
+            .map_err(|_| AuthError::Database)
+    }
+
     pub fn pending_sync_events(
         &self,
         limit: usize,
@@ -4790,11 +4819,12 @@ impl LocalAuthService {
         if limit == 0 || limit > 100 {
             return Err(AuthError::InvalidInput);
         }
+        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, rowid LIMIT ?1")
+            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, rowid LIMIT ?2")
             .map_err(|_| AuthError::Database)?
-            .query_map([limit as i64], |row| Ok(SyncOutboxEventView {
+            .query_map(params![account_id.to_string(), limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
                 entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, operation: row.get(3)?, base_version: row.get(4)?, payload_json: row.get(5)?
             }))
@@ -4809,8 +4839,19 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        self.apply_sync_acknowledgements_for_account(acknowledgements, now, account_id)
+    }
+
+    fn apply_sync_acknowledgements_for_account(
+        &self,
+        acknowledgements: Vec<SyncAcknowledgementInput>,
+        now: SystemTime,
+        account_id: Uuid,
+    ) -> Result<(), AuthError> {
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        require_transaction_account(&transaction, account_id)?;
         for acknowledgement in acknowledgements {
             if acknowledgement.status != "accepted"
                 || acknowledgement.server_version.unwrap_or(-1) < 1
@@ -4818,8 +4859,8 @@ impl LocalAuthService {
                 continue;
             }
             let entity: Option<(String, String)> = transaction.query_row(
-                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL",
-                [acknowledgement.event_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
+                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND owner_account_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL",
+                params![acknowledgement.event_id.to_string(), account_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional().map_err(|_| AuthError::Database)?;
             if let Some((entity_type, entity_id)) = entity {
                 transaction.execute("UPDATE local_sync_outbox SET acknowledged_at = ?2, last_error = NULL WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
@@ -4835,6 +4876,16 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         self.require_catalog_read(now)?;
+        let account_id = self.active_session_user_id()?;
+        self.apply_sync_pull_page_for_account(page, now, account_id)
+    }
+
+    fn apply_sync_pull_page_for_account(
+        &self,
+        page: SyncPullPageInput,
+        now: SystemTime,
+        account_id: Uuid,
+    ) -> Result<(), AuthError> {
         if page.changes.len() > 500 || !valid_sync_cursor(&page.next_cursor) {
             return Err(AuthError::InvalidInput);
         }
@@ -4856,6 +4907,7 @@ impl LocalAuthService {
         }
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        require_transaction_account(&transaction, account_id)?;
         for change in &page.changes {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
@@ -4929,7 +4981,7 @@ impl LocalAuthService {
         transaction.execute("UPDATE local_sync_outbox SET superseded_at = ?2, last_error = 'resolved_by_administrator' WHERE event_id = ?1", params![row.2, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
         transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![row.0, row.1, row.3]).map_err(|_| AuthError::Database)?;
         if input.resolution == "keep_local" {
-            transaction.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, ?2, ?3, 'upsert', ?4, ?5, ?6)", params![Uuid::new_v4().to_string(), row.0, entity_id.to_string(), row.3, row.4, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+            transaction.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, ?2, ?3, 'upsert', ?4, ?5, ?6, ?7)", params![Uuid::new_v4().to_string(), row.0, entity_id.to_string(), row.3, row.4, unix_seconds(now), actor_id.to_string()]).map_err(|_| AuthError::Database)?;
         } else {
             let payload = serde_json::from_str(&row.5).map_err(|_| AuthError::Database)?;
             let change = SyncPullChangeInput {
@@ -4965,21 +5017,48 @@ impl LocalAuthService {
         Ok(())
     }
 
+    fn ensure_pull_account_boundary(&self, now: SystemTime) -> Result<(), AuthError> {
+        self.require_catalog_read(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM local_accounts", [], |row| row.get(0))
+            .map_err(|_| AuthError::Database)?;
+        if account_count > 1 {
+            return Err(AuthError::SyncAccountBoundary);
+        }
+        Ok(())
+    }
+
+    fn ensure_active_sync_account(&self, expected: Uuid) -> Result<(), AuthError> {
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let active: Option<String> = connection
+            .query_row("SELECT user_id FROM local_session", [], |row| row.get(0))
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        let expected_string = expected.to_string();
+        if active.as_deref() != Some(expected_string.as_str()) {
+            return Err(AuthError::SyncAccountBoundary);
+        }
+        Ok(())
+    }
+
     pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
         self.require_catalog_read(now)?;
         self.refresh_authorization_https(now).await?;
+        let account_id = self.active_session_user_id()?;
         let events = self.pending_sync_events(100, now)?;
+        self.ensure_active_sync_account(account_id)?;
         if events.is_empty() {
             return Ok(SyncPushView {
                 accepted_count: 0,
                 pending_count: 0,
             });
         }
-        let account_id = self.active_session_user_id()?;
         let token = self
             .credential_vault
             .load_sync_token(account_id)?
             .ok_or(AuthError::NoActiveSession)?;
+        self.ensure_active_sync_account(account_id)?;
         let installation_id: String = self
             .connection
             .lock()
@@ -5031,7 +5110,8 @@ impl LocalAuthService {
             .iter()
             .filter(|result| result.status == "accepted")
             .count();
-        self.apply_sync_acknowledgements(acknowledgements.results, now)?;
+        self.apply_sync_acknowledgements_for_account(acknowledgements.results, now, account_id)?;
+        self.ensure_active_sync_account(account_id)?;
         Ok(SyncPushView {
             accepted_count,
             pending_count: self.pending_sync_events(100, now)?.len(),
@@ -5040,6 +5120,7 @@ impl LocalAuthService {
 
     pub async fn pull_sync_https(&self, now: SystemTime) -> Result<SyncPullView, AuthError> {
         self.require_catalog_read(now)?;
+        self.ensure_pull_account_boundary(now)?;
         self.refresh_authorization_https(now).await?;
         let account_id = self.active_session_user_id()?;
         let token = self
@@ -5056,6 +5137,7 @@ impl LocalAuthService {
                 |row| row.get(0),
             )
             .map_err(|_| AuthError::Database)?;
+        self.ensure_active_sync_account(account_id)?;
         let endpoint = sync_pull_endpoint()?;
         let client = reqwest::Client::builder()
             .https_only(true)
@@ -5064,6 +5146,7 @@ impl LocalAuthService {
             .map_err(|_| AuthError::SyncTransport)?;
         let mut applied_count = 0;
         loop {
+            self.ensure_active_sync_account(account_id)?;
             let response = client
                 .get(endpoint.clone())
                 .bearer_auth(&token)
@@ -5084,7 +5167,7 @@ impl LocalAuthService {
             let has_more = pull_page_has_more(&cursor, &page)?;
             let next_cursor = page.next_cursor.clone();
             applied_count += page.changes.len();
-            self.apply_sync_pull_page(page, now)?;
+            self.apply_sync_pull_page_for_account(page, now, account_id)?;
             cursor = next_cursor;
             if !has_more {
                 break;
@@ -5544,6 +5627,7 @@ pub mod commands {
                 AuthError::ImmutableBusinessCode => "immutable_business_code",
                 AuthError::PasswordHashing | AuthError::SecureStorage => "credential_storage_error",
                 AuthError::SyncTransport => "sync_transport_error",
+                AuthError::SyncAccountBoundary => "sync_account_boundary",
             };
             Self { code }
         }
@@ -5621,6 +5705,13 @@ pub mod commands {
         auth.pull_sync_https(SystemTime::now())
             .await
             .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn sync_status(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<super::SyncStatusView, CommandError> {
+        auth.sync_status(SystemTime::now()).map_err(Into::into)
     }
 
     #[tauri::command]
@@ -6252,6 +6343,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0045_procurement_expenditures",
             include_str!("../migrations/0045_procurement_expenditures.sql"),
+        ),
+        (
+            "0044_sync_outbox_account_boundary",
+            include_str!("../migrations/0044_sync_outbox_account_boundary.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -7807,6 +7902,21 @@ fn rfq_sync_payload(transaction: &Transaction<'_>, rfq_id: Uuid) -> Result<Strin
     .to_string())
 }
 
+fn require_transaction_account(
+    transaction: &Transaction<'_>,
+    expected: Uuid,
+) -> Result<(), AuthError> {
+    let active: Option<String> = transaction
+        .query_row("SELECT user_id FROM local_session", [], |row| row.get(0))
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    let expected_string = expected.to_string();
+    if active.as_deref() != Some(expected_string.as_str()) {
+        return Err(AuthError::SyncAccountBoundary);
+    }
+    Ok(())
+}
+
 fn insert_local_sync_outbox(
     transaction: &Transaction<'_>,
     entity_type: &str,
@@ -7825,17 +7935,20 @@ fn insert_local_sync_outbox(
         .unwrap_or(0);
     let pending_count: i64 = transaction
         .query_row(
-            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL",
+            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL",
             params![entity_type, entity_id.to_string()],
             |row| row.get(0),
         )
         .map_err(|_| AuthError::Database)?;
-    transaction
+    let inserted = transaction
         .execute(
-            "INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, ?2, ?3, 'upsert', ?4, ?5, ?6)",
+            "INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) SELECT ?1, ?2, ?3, 'upsert', ?4, ?5, ?6, user_id FROM local_session",
             params![Uuid::new_v4().to_string(), entity_type, entity_id.to_string(), server_version + pending_count, payload, unix_seconds(now)],
         )
         .map_err(|_| AuthError::Database)?;
+    if inserted != 1 {
+        return Err(AuthError::NoActiveSession);
+    }
     Ok(())
 }
 
@@ -8380,6 +8493,219 @@ fn unix_seconds(value: SystemTime) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_status_counts_all_pending_and_conflicts_without_exposing_payloads() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        assert_eq!(service.sync_status(now), Err(AuthError::NoActiveSession));
+        let engineer = account();
+        service
+            .cache_verified_account(engineer.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(service.sync_status(now).unwrap().pending_count, 0);
+        {
+            let connection = service.connection.lock().unwrap();
+            for index in 0..101 {
+                connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'material', ?2, 'upsert', 0, '{\"secret\":true}', ?3, ?4)", params![Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), index, engineer.id.to_string()]).unwrap();
+            }
+            connection.execute("INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) SELECT ?1, event_id, entity_type, entity_id, 0, 1, payload_json, '{\"secret\":true}', 'upsert', 1 FROM local_sync_outbox LIMIT 1", [Uuid::new_v4().to_string()]).unwrap();
+        }
+        let status = service.sync_status(now).unwrap();
+        assert_eq!(status.pending_count, 101);
+        assert_eq!(status.conflict_count, 1);
+        assert_eq!(status.quarantined_count, 0);
+        assert_eq!(status.last_success_at, None);
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("pendingCount"));
+        assert!(!json.contains("secret"));
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![],
+                    next_cursor: "0".into(),
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.sync_status(now).unwrap().last_success_at,
+            Some(unix_seconds(now))
+        );
+        service.lock().unwrap();
+        assert_eq!(service.sync_status(now), Err(AuthError::NoActiveSession));
+    }
+
+    #[test]
+    fn sync_outbox_never_reassigns_legacy_or_sends_another_accounts_event() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let first = account();
+        service
+            .cache_verified_account(first.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &first.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let tx = connection.transaction().unwrap();
+            insert_local_sync_outbox(&tx, "material", Uuid::new_v4(), "{}", now).unwrap();
+            tx.commit().unwrap();
+        }
+        let first_event = service.pending_sync_events(100, now).unwrap()[0].event_id;
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![],
+                    next_cursor: "0".into(),
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.sync_status(now).unwrap().last_success_at,
+            Some(unix_seconds(now))
+        );
+        service.lock().unwrap();
+        let second = CachedAccount {
+            id: Uuid::new_v4(),
+            username: "engineer-b".into(),
+            ..account()
+        };
+        service
+            .cache_verified_account(second.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &second.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let tx = connection.transaction().unwrap();
+            insert_local_sync_outbox(&tx, "material", Uuid::new_v4(), "{}", now).unwrap();
+            tx.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, 'material', ?2, 'upsert', 0, '{}', 1)", params![Uuid::new_v4().to_string(), Uuid::new_v4().to_string()]).unwrap();
+            let conflicted_legacy_id = Uuid::new_v4().to_string();
+            let conflicted_entity_id = Uuid::new_v4().to_string();
+            tx.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, acknowledged_at) VALUES (?1, 'material', ?2, 'upsert', 0, '{}', 1, 2)", params![conflicted_legacy_id, conflicted_entity_id]).unwrap();
+            tx.execute("INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) VALUES (?1, ?2, 'material', ?3, 0, 1, '{}', '{}', 'upsert', 2)", params![Uuid::new_v4().to_string(), conflicted_legacy_id, conflicted_entity_id]).unwrap();
+            tx.commit().unwrap();
+        }
+        let second_events = service.pending_sync_events(100, now).unwrap();
+        assert_eq!(second_events.len(), 1);
+        assert_ne!(second_events[0].event_id, first_event);
+        assert_eq!(service.sync_status(now).unwrap().quarantined_count, 2);
+        assert_eq!(service.sync_status(now).unwrap().last_success_at, None);
+        assert_eq!(
+            service.apply_sync_pull_page_for_account(
+                SyncPullPageInput {
+                    changes: vec![],
+                    next_cursor: "77".into()
+                },
+                now,
+                first.id
+            ),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        assert_eq!(
+            service.apply_sync_acknowledgements_for_account(
+                vec![SyncAcknowledgementInput {
+                    event_id: first_event,
+                    status: "accepted".into(),
+                    server_version: Some(1)
+                }],
+                now,
+                first.id
+            ),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        service
+            .apply_sync_acknowledgements(
+                vec![SyncAcknowledgementInput {
+                    event_id: first_event,
+                    status: "accepted".into(),
+                    server_version: Some(1),
+                }],
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let cursor: String = connection
+            .query_row("SELECT last_pull_cursor FROM local_sync_state", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cursor, "0");
+        let acknowledged: Option<i64> = connection
+            .query_row(
+                "SELECT acknowledged_at FROM local_sync_outbox WHERE event_id = ?1",
+                [first_event.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(acknowledged, None);
+        drop(connection);
+        service
+            .apply_sync_acknowledgements(
+                vec![SyncAcknowledgementInput {
+                    event_id: second_events[0].event_id,
+                    status: "accepted".into(),
+                    server_version: Some(1),
+                }],
+                now,
+            )
+            .unwrap();
+        assert_eq!(service.sync_status(now).unwrap().pending_count, 0);
+        assert_eq!(service.sync_status(now).unwrap().quarantined_count, 2);
+        assert_eq!(
+            service.ensure_pull_account_boundary(now),
+            Err(AuthError::SyncAccountBoundary)
+        );
+    }
+
+    #[test]
+    fn account_boundary_migration_preserves_legacy_outbox_without_attribution() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("PRAGMA foreign_keys = ON; CREATE TABLE local_accounts (id TEXT PRIMARY KEY); CREATE TABLE local_sync_outbox (event_id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, operation TEXT NOT NULL, base_version INTEGER NOT NULL, payload_json TEXT NOT NULL, created_at INTEGER NOT NULL, acknowledged_at INTEGER, superseded_at INTEGER);").unwrap();
+        let event_id = Uuid::new_v4().to_string();
+        connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, 'material', ?2, 'upsert', 0, '{\"legacy\":true}', 1)", params![event_id, Uuid::new_v4().to_string()]).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0044_sync_outbox_account_boundary.sql"
+            ))
+            .unwrap();
+        let row: (String, Option<String>) = connection
+            .query_row(
+                "SELECT payload_json, owner_account_id FROM local_sync_outbox WHERE event_id = ?1",
+                [&event_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("{\"legacy\":true}".into(), None));
+    }
 
     fn account() -> CachedAccount {
         CachedAccount {

@@ -162,12 +162,27 @@ export function AppShell({
                 : syncState?.kind === 'synced'
                   ? '上次同步成功；新操作可能待同步'
                   : syncState?.kind === 'pending'
-                    ? `待同步 ${syncState.pendingCount}`
+                    ? `待同步 ${syncState.pendingCount ?? '未知'}`
                     : syncState?.kind === 'retrying'
                       ? '连接失败，等待重试；本地数据待同步'
                       : syncState?.kind === 'auth-required'
                         ? '登录已失效，请重新在线登录'
-                        : '离线本地数据'}
+                        : syncState?.kind === 'account-boundary'
+                          ? '多账号拉取已暂停，需先完成账号隔离恢复'
+                          : '离线本地数据'}
+              {syncState?.kind !== 'pending' &&
+              syncState?.pendingCount !== undefined
+                ? ` · 待同步 ${syncState.pendingCount}`
+                : ''}
+              {syncState?.conflictCount
+                ? ` · 未解决冲突 ${syncState.conflictCount}`
+                : ''}
+              {syncState?.quarantinedCount
+                ? ` · 待归属旧事件 ${syncState.quarantinedCount}`
+                : ''}
+              {syncState?.lastSuccessAt != null
+                ? ` · 上次拉取成功 ${new Date(syncState.lastSuccessAt * 1000).toLocaleString()}`
+                : ''}
             </span>
             <span className="avatar">张</span>
             <span>{roleLabel[role]}</span>
