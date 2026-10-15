@@ -1049,6 +1049,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
   })
   await page.addInitScript(() => {
     let allocated = false
+    const rfqs: Array<Record<string, unknown>> = []
     const parent = {
       id: '00000000-0000-4000-8000-000000000801',
       displayNo: 'CI-FIXTURE-20261012-INT-0001',
@@ -1072,6 +1073,8 @@ test('purchaser reaches execution from the regular application and completes RFQ
             command: string,
             args?: {
               input?: Record<string, unknown>
+              rfqId?: string
+              sourceOrderId?: string
               allocations?: Array<Record<string, unknown>>
             },
           ) {
@@ -1095,6 +1098,12 @@ test('purchaser reaches execution from the regular application and completes RFQ
                       ]
                     : [],
                 },
+                {
+                  ...parent,
+                  id: '00000000-0000-4000-8000-000000000806',
+                  displayNo: 'CI-FIXTURE-20261012-INT-0002',
+                  children: [],
+                },
               ])
             if (command === 'list_suppliers')
               return Promise.resolve([
@@ -1117,8 +1126,21 @@ test('purchaser reaches execution from the regular application and completes RFQ
                   version: 1,
                 },
               ])
-            if (command === 'create_rfq')
-              return Promise.resolve({ ...args?.input, itemCount: 1 })
+            if (command === 'list_rfqs')
+              return Promise.resolve(
+                rfqs.filter((rfq) => rfq.sourceOrderId === args?.sourceOrderId),
+              )
+            if (command === 'create_rfq') {
+              const rfq = { ...args?.input, itemCount: 1, status: 'draft' }
+              rfqs.push(rfq)
+              return Promise.resolve(rfq)
+            }
+            if (command === 'send_rfq' || command === 'close_rfq') {
+              const rfq = rfqs.find((value) => value.id === args?.rfqId)
+              if (!rfq) return Promise.reject(new Error('RFQ not found'))
+              rfq.status = command === 'send_rfq' ? 'sent' : 'closed'
+              return Promise.resolve()
+            }
             if (command === 'allocate_supplier_child_orders') {
               allocated = true
               return Promise.resolve([
@@ -1161,6 +1183,8 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await page.getByLabel('询价单编号').fill('CI-FIXTURE-20261012-RFQ-0001')
   await page.getByRole('button', { name: '创建询价单' }).click()
   await expect(page.getByText(/已创建，包含 1 条无价格明细/)).toBeVisible()
+  await page.getByRole('button', { name: '发送询价单' }).click()
+  await expect(page.getByText('状态：已发送', { exact: true })).toBeVisible()
   await page.getByLabel('regular flow cable 供应商').click()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
@@ -1169,8 +1193,15 @@ test('purchaser reaches execution from the regular application and completes RFQ
     .fill('CI-FIXTURE-20261012-SUP-0001')
   await page.getByRole('button', { name: '创建供应商子单' }).click()
   await expect(page.getByText('供应商子单条款')).toBeVisible()
+  await expect(page.getByText('状态：已发送', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '关闭询价单' }).click()
+  await expect(page.getByText('状态：已关闭')).toBeVisible()
   await page.getByRole('button', { name: '保存子单条款' }).click()
   await expect(page.getByText('子单条款已保存，含税总额 2950。')).toBeVisible()
+  await page
+    .getByRole('button', { name: 'CI-FIXTURE-20261012-INT-0002' })
+    .click()
+  await expect(page.getByText('CI-FIXTURE-20261012-RFQ-0001')).toHaveCount(0)
   await expect(browserErrors).toEqual([])
 })
 
@@ -1217,6 +1248,7 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
                     ],
               )
             if (command === 'list_suppliers') return Promise.resolve([])
+            if (command === 'list_rfqs') return Promise.resolve([])
             if (command === 'start_honsen_market_execution') {
               if (args?.orderId !== orderId)
                 return Promise.reject(new Error('wrong order'))
@@ -1264,14 +1296,18 @@ test('purchaser creates a price-free RFQ through the Tauri boundary', async ({
     if (message.type() === 'error') browserErrors.push(message.text())
   })
   await page.addInitScript(() => {
+    const rfqs: Array<Record<string, unknown>> = []
     Object.assign(window, {
       __TAURI__: {
         core: {
           invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command === 'list_rfqs') return Promise.resolve(rfqs)
             if (command !== 'create_rfq')
               return Promise.reject(new Error(`unexpected command: ${command}`))
             Object.assign(window, { __rfqInput: args?.input })
-            return Promise.resolve({ ...args?.input, itemCount: 2 })
+            const rfq = { ...args?.input, itemCount: 2, status: 'draft' }
+            rfqs.push(rfq)
+            return Promise.resolve(rfq)
           },
         },
       },
