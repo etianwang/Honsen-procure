@@ -185,6 +185,116 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(stored.rows[0]?.payload_json.name).toBe('Field team')
   })
 
+  it('projects country Push into the business table atomically and preserves immutable codes', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const countryId = randomUUID()
+    const duplicateCodeId = randomUUID()
+    const request = {
+      deviceId: randomUUID(),
+      events: [
+        {
+          eventId: randomUUID(),
+          entityType: 'country',
+          entityId: countryId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            business_code: `SYNC-C-${countryId}`,
+            name: 'Fixture country',
+            time_zone: 'UTC',
+            is_active: true,
+            version: 1,
+          },
+        },
+      ],
+    }
+    const first = await service.push(actor, request)
+    expect(first.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(first)
+    const row = await pool!.query<{
+      name: string
+      business_code: string
+      version: string
+    }>('SELECT name, business_code, version FROM countries WHERE id = $1', [
+      countryId,
+    ])
+    expect(row.rows[0]).toMatchObject({
+      name: 'Fixture country',
+      business_code: `SYNC-C-${countryId}`,
+      version: '1',
+    })
+    const changed = await service.push(actor, {
+      deviceId: request.deviceId,
+      events: [
+        {
+          ...request.events[0]!,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: {
+            ...request.events[0]!.payload,
+            name: 'Revised country',
+            version: 2,
+          },
+        },
+      ],
+    })
+    expect(changed.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 2,
+    })
+    const rejected = await service.push(actor, {
+      deviceId: request.deviceId,
+      events: [
+        {
+          ...request.events[0]!,
+          eventId: randomUUID(),
+          baseVersion: 2,
+          payload: {
+            ...request.events[0]!.payload,
+            business_code: `OTHER-${countryId}`,
+            version: 3,
+          },
+        },
+        {
+          ...request.events[0]!,
+          eventId: randomUUID(),
+          entityId: duplicateCodeId,
+          payload: { ...request.events[0]!.payload, version: 1 },
+        },
+      ],
+    })
+    expect(rejected.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+    ])
+    const stored = await pool!.query<{
+      name: string
+      business_code: string
+      version: string
+    }>('SELECT name, business_code, version FROM countries WHERE id = $1', [
+      countryId,
+    ])
+    expect(stored.rows[0]).toMatchObject({
+      name: 'Revised country',
+      business_code: `SYNC-C-${countryId}`,
+      version: '2',
+    })
+    const rejectedEntity = await pool!.query(
+      "SELECT 1 FROM sync_entities WHERE entity_type = 'country' AND entity_id = $1",
+      [duplicateCodeId],
+    )
+    expect(rejectedEntity.rowCount).toBe(0)
+    const audits = await pool!.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM audit_entries WHERE entity_type = 'country' AND entity_id = $1",
+      [countryId],
+    )
+    expect(audits.rows[0]?.count).toBe('2')
+  })
+
   it('rejects incompatible project-default tax references in the sync path', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const [

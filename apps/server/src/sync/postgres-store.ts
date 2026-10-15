@@ -76,6 +76,21 @@ export class PostgresSyncStore implements SyncStore {
 
       const serverVersion = currentVersion + 1
       const deleted = input.event.operation === 'soft_delete'
+      if (input.event.entityType === 'country') {
+        const projected = await this.projectCountry(
+          client,
+          input.event,
+          input.actorId,
+        )
+        if (!projected) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+      }
       await client.query(
         `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
@@ -131,10 +146,62 @@ export class PostgresSyncStore implements SyncStore {
       }
     } catch (error) {
       await client.query('ROLLBACK')
+      if (
+        input.event.entityType === 'country' &&
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        ['23503', '23505', '23514'].includes(String(error.code))
+      ) {
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+        }
+      }
       throw error
     } finally {
       client.release()
     }
+  }
+
+  private async projectCountry(
+    client: PoolClient,
+    event: SyncEvent,
+    actorId: string,
+  ): Promise<boolean> {
+    if (event.operation !== 'upsert') return false
+    const payload = event.payload
+    const businessCode = payload.businessCode ?? payload.business_code
+    const name = payload.name
+    const timeZone = payload.timeZone ?? payload.time_zone
+    const isActive = payload.isActive ?? payload.is_active
+    if (
+      typeof businessCode !== 'string' ||
+      typeof name !== 'string' ||
+      typeof timeZone !== 'string' ||
+      typeof isActive !== 'boolean'
+    )
+      return false
+    const previous = await client.query<{ business_code: string }>(
+      'SELECT business_code FROM countries WHERE id = $1 FOR UPDATE',
+      [event.entityId],
+    )
+    if (previous.rows[0] && previous.rows[0].business_code !== businessCode)
+      return false
+    await client.query(
+      `INSERT INTO countries (id, business_code, name, time_zone, is_active)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, time_zone = EXCLUDED.time_zone,
+         is_active = EXCLUDED.is_active, version = countries.version + 1,
+         updated_at = NOW(), deleted_at = NULL`,
+      [event.entityId, businessCode, name, timeZone, isActive],
+    )
+    await client.query(
+      "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'country', $2, 'upsert')",
+      [actorId, event.entityId],
+    )
+    return true
   }
 
   async pullChanges(input: {
