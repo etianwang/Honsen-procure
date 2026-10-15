@@ -5956,6 +5956,11 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
                     apply_project_defaults_seed_compat(connection, migration.0, &checksum)?;
                     continue;
                 }
+                if migration.0 == "0046_sync_outbox_account_boundary"
+                    && alias_old_account_boundary_migration(connection, &checksum)?
+                {
+                    continue;
+                }
                 let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
                 transaction
                     .execute_batch(migration.1)
@@ -5971,6 +5976,87 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         }
     }
     Ok(())
+}
+
+fn alias_old_account_boundary_migration(
+    connection: &mut Connection,
+    current_checksum: &str,
+) -> Result<bool, AuthError> {
+    // This is the exact SHA-256 of the unreleased 0044 SQL from commit 026880d.
+    const OLD_CHECKSUM: &str = "adb4b767ecb5232eb87c2f1bc4e8e2bfab9bd4866c362e82d3650451da4e03c6";
+    let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+    let old_checksum: Option<String> = transaction
+        .query_row(
+            "SELECT checksum FROM local_schema_migrations WHERE version = '0044_sync_outbox_account_boundary'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    let Some(old_checksum) = old_checksum else {
+        return Ok(false);
+    };
+    if old_checksum != OLD_CHECKSUM {
+        return Err(AuthError::Database);
+    }
+    let column: Option<(String, i64, Option<String>, i64)> = transaction
+        .query_row(
+            "SELECT type, \"notnull\", dflt_value, pk FROM pragma_table_info('local_sync_outbox') WHERE name = 'owner_account_id'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    if column != Some(("TEXT".into(), 0, None, 0)) {
+        return Err(AuthError::Database);
+    }
+    let foreign_key_count: i64 = transaction
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_list('local_sync_outbox') WHERE \"table\" = 'local_accounts' AND \"from\" = 'owner_account_id' AND \"to\" = 'id'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| AuthError::Database)?;
+    if foreign_key_count != 1 {
+        return Err(AuthError::Database);
+    }
+    let index: Option<(i64, String, i64)> = transaction
+        .query_row(
+            "SELECT \"unique\", origin, partial FROM pragma_index_list('local_sync_outbox') WHERE name = 'local_sync_outbox_owner_pending_idx'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    if index != Some((0, "c".into(), 0)) {
+        return Err(AuthError::Database);
+    }
+    let columns: Vec<String> = transaction
+        .prepare("SELECT name FROM pragma_index_info('local_sync_outbox_owner_pending_idx') ORDER BY seqno")
+        .map_err(|_| AuthError::Database)?
+        .query_map([], |row| row.get(0))
+        .map_err(|_| AuthError::Database)?
+        .collect::<Result<_, _>>()
+        .map_err(|_| AuthError::Database)?;
+    if columns
+        != [
+            "owner_account_id",
+            "acknowledged_at",
+            "superseded_at",
+            "created_at",
+            "event_id",
+        ]
+    {
+        return Err(AuthError::Database);
+    }
+    transaction
+        .execute(
+            "INSERT INTO local_schema_migrations (version, checksum, applied_at) VALUES ('0046_sync_outbox_account_boundary', ?1, ?2)",
+            params![current_checksum, unix_seconds(SystemTime::now())],
+        )
+        .map_err(|_| AuthError::Database)?;
+    transaction.commit().map_err(|_| AuthError::Database)?;
+    Ok(true)
 }
 
 fn apply_currency_expansion(
@@ -8613,6 +8699,63 @@ mod tests {
             )
             .unwrap();
         assert_eq!(row, ("{\"legacy\":true}".into(), None));
+    }
+
+    #[test]
+    fn old_account_boundary_migration_alias_preserves_outbox_and_both_markers() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let event_id = Uuid::new_v4().to_string();
+        let mut connection = service.connection.lock().unwrap();
+        connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, 'material', ?2, 'upsert', 0, '{\"legacy\":true}', 1)", params![event_id, Uuid::new_v4().to_string()]).unwrap();
+        connection.execute("UPDATE local_schema_migrations SET version = '0044_sync_outbox_account_boundary' WHERE version = '0046_sync_outbox_account_boundary'", []).unwrap();
+        migrate(&mut connection).unwrap();
+        let markers: Vec<String> = connection.prepare("SELECT version FROM local_schema_migrations WHERE version IN ('0044_sync_outbox_account_boundary', '0046_sync_outbox_account_boundary') ORDER BY version").unwrap().query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+        assert_eq!(
+            markers,
+            [
+                "0044_sync_outbox_account_boundary",
+                "0046_sync_outbox_account_boundary"
+            ]
+        );
+        let row: (String, Option<String>) = connection
+            .query_row(
+                "SELECT payload_json, owner_account_id FROM local_sync_outbox WHERE event_id = ?1",
+                [event_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("{\"legacy\":true}".into(), None));
+        migrate(&mut connection).unwrap();
+    }
+
+    #[test]
+    fn old_account_boundary_alias_rejects_bad_checksum_or_schema() {
+        for damage in ["checksum", "index", "column"] {
+            let service = LocalAuthService::open_in_memory().unwrap();
+            let mut connection = service.connection.lock().unwrap();
+            connection.execute("UPDATE local_schema_migrations SET version = '0044_sync_outbox_account_boundary' WHERE version = '0046_sync_outbox_account_boundary'", []).unwrap();
+            match damage {
+                "checksum" => {
+                    connection.execute("UPDATE local_schema_migrations SET checksum = 'wrong' WHERE version = '0044_sync_outbox_account_boundary'", []).unwrap();
+                }
+                "index" => {
+                    connection
+                        .execute_batch("DROP INDEX local_sync_outbox_owner_pending_idx")
+                        .unwrap();
+                }
+                "column" => {
+                    connection.execute_batch("DROP INDEX local_sync_outbox_owner_pending_idx; ALTER TABLE local_sync_outbox DROP COLUMN owner_account_id").unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                migrate(&mut connection),
+                Err(AuthError::Database),
+                "{damage}"
+            );
+            let alias_count: i64 = connection.query_row("SELECT COUNT(*) FROM local_schema_migrations WHERE version = '0046_sync_outbox_account_boundary'", [], |row| row.get(0)).unwrap();
+            assert_eq!(alias_count, 0, "{damage}");
+        }
     }
 
     fn account() -> CachedAccount {

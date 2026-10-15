@@ -163,6 +163,8 @@ The next T10-SEC-001 desktop checkpoint gives each account an independent durabl
 
 The desktop read-surface audit found trusted historical/execution/catalog reads guarded by active-account scope as specified, but exposed stale A authorization options in the renderer immediately after B login while B's refresh was pending. A test-first account-switch DOM slice clears those options on lock and login; it is development evidence only. Conflict-resolution requeue provenance, server origin binding, legacy recovery and true two-account HTTP/native acceptance remain open. P1, T10 and M3 remain unchecked.
 
+An unreleased-profile migration compatibility repair now recognizes the exact old account-owner `0044` marker, validates its schema and records equivalent `0046` without repeating `ALTER TABLE` or attributing legacy rows. It is source-branch evidence only; the integrated formal `0044`/expenditure `0045` migration order still needs a dedicated test before T10-SEC-001 acceptance. P1, T10 and M3 remain unchecked.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
