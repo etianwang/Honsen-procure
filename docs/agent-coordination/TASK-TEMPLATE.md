@@ -14,6 +14,8 @@ test_log: PENDING
 qa_result: PENDING
 repair_round: 0
 acceptance_evidence: PENDING
+state_history:
+  - TODO
 ---
 
 # TASK-XXX

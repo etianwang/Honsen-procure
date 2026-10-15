@@ -12,6 +12,8 @@
 
 运行：`node .agents/workflows/multi-agent-workflow/scripts/validate-workflow.mjs --ownership`。
 
+对已提交且处于 `READY_FOR_QA` 的可信任务记录，可由协调者运行 `node .agents/workflows/multi-agent-workflow/scripts/run-qa.mjs <任务记录>` 自动执行其声明的测试命令、保存日志并写回 QA 结果；失败后的“退回原 Owner”和修复仍由协调者根据持久记录分配，避免跨会话控制权假设。
+
 ## Builder / Fixer 启动命令
 
 以下命令只建立隔离环境；实际主会话以 `$multi-agent-workflow` 读取任务记录后选择相应角色，不假设存在未声明的 Codex CLI 参数。

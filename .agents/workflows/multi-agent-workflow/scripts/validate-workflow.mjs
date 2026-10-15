@@ -79,6 +79,9 @@ function frontMatter(text) {
 export function validateCheckpointRecord(text) {
   const errors = []
   for (const field of [
+    'Timestamp:',
+    'Session / role:',
+    'Execution mode:',
     'Current goal:',
     'Completed task IDs and commits:',
     'Running task IDs / owners:',
@@ -86,8 +89,15 @@ export function validateCheckpointRecord(text) {
     'Open defects:',
     'External blockers:',
     'Next safe action:',
-  ])
-    if (!text.includes(field)) errors.push(`Checkpoint missing ${field}`)
+  ]) {
+    const match = text.match(
+      new RegExp(
+        `^- ${field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*(.+)$`,
+        'm',
+      ),
+    )
+    if (!match || !match[1].trim()) errors.push(`Checkpoint missing ${field}`)
+  }
   return errors
 }
 
@@ -130,7 +140,7 @@ export async function validateWorkflow(root = process.cwd()) {
   return errors
 }
 
-export async function validateTaskRecord(taskPath, previousState) {
+export async function validateTaskRecord(taskPath) {
   const errors = []
   const values = frontMatter(await readFile(taskPath, 'utf8'))
   if (!values) return ['Task record requires YAML frontmatter']
@@ -148,16 +158,46 @@ export async function validateTaskRecord(taskPath, previousState) {
     'qa_result',
     'repair_round',
     'acceptance_evidence',
+    'state_history',
   ]) {
     if (values[field] === undefined || values[field] === '')
       errors.push(`Task record missing ${field}`)
   }
   if (!transitions.has(values.state) && values.state !== 'ACCEPTED')
     errors.push(`Unknown task state: ${values.state}`)
-  if (previousState && !transitions.get(previousState)?.has(values.state))
-    errors.push(`Illegal state transition: ${previousState} -> ${values.state}`)
+  if (!Array.isArray(values.state_history) || values.state_history.length === 0)
+    errors.push('Task record requires non-empty state_history')
+  else {
+    if (values.state_history[0] !== 'TODO')
+      errors.push('State history must start at TODO')
+    if (values.state_history.at(-1) !== values.state)
+      errors.push('Task state must equal the final state_history entry')
+    for (let index = 1; index < values.state_history.length; index += 1) {
+      const previous = values.state_history[index - 1]
+      const next = values.state_history[index]
+      if (!transitions.get(previous)?.has(next))
+        errors.push(`Illegal state history transition: ${previous} -> ${next}`)
+    }
+  }
   if (values.commit && !/^(?:[0-9a-f]{40}|PENDING)$/i.test(values.commit))
     errors.push('Commit must be a 40-character SHA or PENDING')
+  if (
+    [
+      'READY_FOR_QA',
+      'QA_RUNNING',
+      'QA_PASSED',
+      'QA_FAILED',
+      'RETURNED_TO_OWNER',
+      'FIXING',
+      'READY_FOR_INTEGRATION',
+      'INTEGRATED',
+      'ACCEPTED',
+    ].includes(values.state) &&
+    !/^[0-9a-f]{40}$/i.test(values.commit ?? '')
+  )
+    errors.push(
+      `Task in ${values.state} requires a 40-character commit SHA before QA`,
+    )
   if (!Array.isArray(values.owned_files) || values.owned_files.length === 0)
     errors.push('Task record requires at least one owned_files entry')
   if (
@@ -209,10 +249,7 @@ async function main() {
   let errors = await validateWorkflow(root)
   if (option('--task'))
     errors = errors.concat(
-      await validateTaskRecord(
-        resolve(root, option('--task')),
-        option('--previous'),
-      ),
+      await validateTaskRecord(resolve(root, option('--task'))),
     )
   if (args.includes('--ownership'))
     errors = errors.concat(
