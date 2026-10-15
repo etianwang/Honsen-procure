@@ -295,6 +295,187 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(audits.rows[0]?.count).toBe('2')
   })
 
+  it('projects dependent projects and rejects missing countries or changed used-project country', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const [countryId, otherCountryId, projectId, orphanProjectId, orderId] =
+      Array.from({ length: 5 }, () => randomUUID())
+    const missingCountryId = randomUUID()
+    const country = (id: string) => ({
+      eventId: randomUUID(),
+      entityType: 'country',
+      entityId: id,
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        business_code: `SYNC-C-${id}`,
+        name: 'Fixture country',
+        time_zone: 'UTC',
+        is_active: true,
+        version: 1,
+      },
+    })
+    const setup = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [country(countryId), country(otherCountryId)],
+    })
+    expect(setup.results.map((result) => result.status)).toEqual([
+      'accepted',
+      'accepted',
+    ])
+    const project = {
+      eventId: randomUUID(),
+      entityType: 'project' as const,
+      entityId: projectId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: `SYNC-P-${projectId}`,
+        name: 'Fixture project',
+        country_id: countryId,
+        site: 'Fixture site',
+        department_name: 'Fixture department',
+        default_currency: 'XOF',
+        default_language_pair: 'zh_fr',
+        is_active: true,
+        version: 1,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [project] }
+    const first = await service.push(actor, request)
+    expect(first.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(first)
+    const projected = await pool!.query<{
+      country_id: string
+      name: string
+      version: string
+    }>(
+      'SELECT country_id::text AS country_id, name, version FROM projects WHERE id = $1',
+      [projectId],
+    )
+    expect(projected.rows[0]).toMatchObject({
+      country_id: countryId,
+      name: 'Fixture project',
+      version: '1',
+    })
+    const orphanEvent = {
+      ...project,
+      eventId: randomUUID(),
+      entityId: orphanProjectId,
+      payload: {
+        ...project.payload,
+        business_code: `SYNC-P-${orphanProjectId}`,
+        country_id: missingCountryId,
+      },
+    }
+    const missing = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [orphanEvent],
+    })
+    expect(missing.results[0]?.status).toBe('validation_error')
+    const noOrphan = await pool!.query('SELECT 1 FROM projects WHERE id = $1', [
+      orphanProjectId,
+    ])
+    expect(noOrphan.rowCount).toBe(0)
+    expect(
+      (
+        await service.push(actor, {
+          deviceId: randomUUID(),
+          events: [country(missingCountryId)],
+        })
+      ).results[0]?.status,
+    ).toBe('accepted')
+    const recovered = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [orphanEvent],
+    })
+    expect(recovered.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    const revised = await service.push(actor, {
+      deviceId: request.deviceId,
+      events: [
+        {
+          ...project,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: { ...project.payload, name: 'Revised project', version: 2 },
+        },
+      ],
+    })
+    expect(revised.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 2,
+    })
+    await pool!.query(
+      "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('purchase_order', $1, 1, $2, $3)",
+      [orderId, { projectId }, actorId],
+    )
+    const changedCountry = await service.push(actor, {
+      deviceId: request.deviceId,
+      events: [
+        {
+          ...project,
+          eventId: randomUUID(),
+          baseVersion: 2,
+          payload: {
+            ...project.payload,
+            country_id: otherCountryId,
+            version: 3,
+          },
+        },
+      ],
+    })
+    expect(changedCountry.results[0]?.status).toBe('validation_error')
+    const directStore = new PostgresSyncStore(pool!)
+    const directChange = await directStore.pushEvent({
+      event: {
+        ...project,
+        eventId: randomUUID(),
+        baseVersion: 2,
+        payload: { ...project.payload, country_id: otherCountryId, version: 3 },
+      },
+      installationId: randomUUID(),
+      actorId,
+    })
+    expect(directChange.status).toBe('validation_error')
+    const changedCode = await service.push(actor, {
+      deviceId: request.deviceId,
+      events: [
+        {
+          ...project,
+          eventId: randomUUID(),
+          baseVersion: 2,
+          payload: {
+            ...project.payload,
+            business_code: `OTHER-${projectId}`,
+            version: 3,
+          },
+        },
+      ],
+    })
+    expect(changedCode.results[0]?.status).toBe('validation_error')
+    const retained = await pool!.query<{
+      country_id: string
+      business_code: string
+      name: string
+      version: string
+    }>(
+      'SELECT country_id::text AS country_id, business_code, name, version FROM projects WHERE id = $1',
+      [projectId],
+    )
+    expect(retained.rows[0]).toMatchObject({
+      country_id: countryId,
+      business_code: `SYNC-P-${projectId}`,
+      name: 'Revised project',
+      version: '2',
+    })
+  })
+
   it('rejects incompatible project-default tax references in the sync path', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const [
@@ -326,6 +507,20 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     const setup = await service.push(actor, {
       deviceId: randomUUID(),
       events: [
+        {
+          eventId: randomUUID(),
+          entityType: 'country',
+          entityId: countryId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            business_code: `COUNTRY-${countryId}`,
+            name: 'Fixture country',
+            time_zone: 'UTC',
+            is_active: true,
+            version: 1,
+          },
+        },
         {
           eventId: randomUUID(),
           entityType: 'project',

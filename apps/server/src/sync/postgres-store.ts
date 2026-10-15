@@ -91,6 +91,21 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      if (input.event.entityType === 'project') {
+        const projected = await this.projectProject(
+          client,
+          input.event,
+          input.actorId,
+        )
+        if (!projected) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+      }
       await client.query(
         `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
@@ -147,7 +162,7 @@ export class PostgresSyncStore implements SyncStore {
     } catch (error) {
       await client.query('ROLLBACK')
       if (
-        input.event.entityType === 'country' &&
+        ['country', 'project'].includes(input.event.entityType) &&
         typeof error === 'object' &&
         error !== null &&
         'code' in error &&
@@ -199,6 +214,88 @@ export class PostgresSyncStore implements SyncStore {
     )
     await client.query(
       "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'country', $2, 'upsert')",
+      [actorId, event.entityId],
+    )
+    return true
+  }
+
+  private async projectProject(
+    client: PoolClient,
+    event: SyncEvent,
+    actorId: string,
+  ): Promise<boolean> {
+    if (event.operation !== 'upsert') return false
+    const payload = event.payload
+    const businessCode = payload.businessCode ?? payload.business_code
+    const countryId = payload.countryId ?? payload.country_id
+    const name = payload.name
+    const site = payload.site
+    const departmentName = payload.departmentName ?? payload.department_name
+    const defaultCurrency = payload.defaultCurrency ?? payload.default_currency
+    const defaultLanguagePair =
+      payload.defaultLanguagePair ?? payload.default_language_pair
+    const isActive = payload.isActive ?? payload.is_active
+    if (
+      typeof businessCode !== 'string' ||
+      typeof countryId !== 'string' ||
+      typeof name !== 'string' ||
+      typeof site !== 'string' ||
+      typeof departmentName !== 'string' ||
+      typeof defaultCurrency !== 'string' ||
+      typeof defaultLanguagePair !== 'string' ||
+      typeof isActive !== 'boolean'
+    )
+      return false
+    const prior = await client.query<{
+      business_code: string
+      country_id: string
+    }>(
+      'SELECT business_code, country_id::text AS country_id FROM projects WHERE id = $1 FOR UPDATE',
+      [event.entityId],
+    )
+    if (
+      prior.rows[0]?.business_code !== undefined &&
+      prior.rows[0].business_code !== businessCode
+    )
+      return false
+    if (
+      prior.rows[0]?.country_id !== undefined &&
+      prior.rows[0].country_id !== countryId
+    ) {
+      const used = await client.query(
+        `SELECT 1 FROM sync_entities WHERE entity_type = 'purchase_order'
+         AND is_deleted = FALSE AND
+           (payload_json->>'projectId' = $1 OR payload_json->>'project_id' = $1) LIMIT 1`,
+        [event.entityId],
+      )
+      if (used.rowCount !== 0) return false
+    }
+    await client.query(
+      `INSERT INTO projects
+         (id, country_id, business_code, name, site, department_name,
+          default_currency, default_language_pair, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (id) DO UPDATE SET country_id = EXCLUDED.country_id,
+         name = EXCLUDED.name, site = EXCLUDED.site,
+         department_name = EXCLUDED.department_name,
+         default_currency = EXCLUDED.default_currency,
+         default_language_pair = EXCLUDED.default_language_pair,
+         is_active = EXCLUDED.is_active, version = projects.version + 1,
+         updated_at = NOW(), deleted_at = NULL`,
+      [
+        event.entityId,
+        countryId,
+        businessCode,
+        name,
+        site,
+        departmentName,
+        defaultCurrency,
+        defaultLanguagePair,
+        isActive,
+      ],
+    )
+    await client.query(
+      "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action) VALUES (gen_random_uuid(), $1, 'project', $2, 'upsert')",
       [actorId, event.entityId],
     )
     return true

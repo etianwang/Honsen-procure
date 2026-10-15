@@ -131,6 +131,8 @@ The 2026-10-15 T04 isolated local unit-management slice subsequently added trust
 
 The next isolated T04 local slice adds department/team administrator workflows, active-parent validation and preserved audit history. Its Rust, disposable PostgreSQL and Playwright gates pass, but remote projection and actual deployment/desktop acceptance remain open. This does not alter the T04 dependency or milestone checkboxes.
 
+The 2026-10-15 country and project Push slices now project validated master records into their PostgreSQL business tables atomically with sync and audit. Disposable PostgreSQL tests cover replay, missing-country retry, immutable codes and referenced-project country-change refusal. They do not close the remaining master-data projections, authorized deployment records, native desktop acceptance, T04/T10 or M0/M1/M3.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
