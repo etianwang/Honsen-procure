@@ -202,6 +202,80 @@ describe.skipIf(!pool)('AttachmentService with isolated PostgreSQL', () => {
     expect(Number(rows.rows[0]?.count)).toBe(10)
   })
 
+  it('lets a second scoped client recover one attachment change after failed completion and repeated Pull', async () => {
+    await pool!.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [otherId, projectId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+      [otherId, projectId, departmentId, teamId],
+    )
+    const id = randomUUID()
+    const input = {
+      id,
+      ownerType: 'receipt' as const,
+      ownerId: receiptId,
+      orderId,
+      projectId,
+      originalName: 'second-client.pdf',
+      contentType: 'application/pdf',
+      byteLength: 4,
+      checksum: 'a'.repeat(64),
+      createdAt: 126,
+    }
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    const firstClient = new PostgresSyncStore(pool!)
+    const secondClient = new PostgresSyncStore(pool!)
+    const pullSecond = (at: string) =>
+      secondClient.pullChanges({ actor: outsider, cursor: at, limit: 20 })
+
+    objectPresent = false
+    await service.createIntent(actor, input)
+    await expect(service.complete(actor, id)).rejects.toMatchObject({
+      code: 'NOT_UPLOADED',
+    })
+    expect((await pullSecond(cursor)).changes).toEqual([])
+
+    objectPresent = true
+    expect(await service.complete(actor, id)).toEqual({ uploaded: true })
+    expect(await service.complete(actor, id)).toEqual({ uploaded: true })
+    const firstPage = await firstClient.pullChanges({
+      actor,
+      cursor,
+      limit: 20,
+    })
+    const secondPage = await pullSecond(cursor)
+    expect(secondPage).toEqual(firstPage)
+    expect(secondPage.changes).toHaveLength(1)
+    expect(secondPage.changes[0]).toMatchObject({
+      entityType: 'attachment',
+      entityId: id,
+      version: 1,
+      payload: { ownerId: receiptId, checksum: input.checksum },
+    })
+    expect(await pullSecond(cursor)).toEqual(secondPage)
+    expect(await pullSecond(secondPage.nextCursor)).toEqual({
+      changes: [],
+      nextCursor: secondPage.nextCursor,
+    })
+    expect(await service.download(outsider, id)).toMatchObject({
+      url: expect.stringContaining(id),
+    })
+    await pool!.query(
+      'UPDATE user_project_bindings SET deleted_at = NOW() WHERE user_id = $1 AND project_id = $2',
+      [otherId, projectId],
+    )
+    expect((await pullSecond(cursor)).changes).toEqual([])
+    await expect(service.download(outsider, id)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    })
+  })
+
   it.skipIf(!realCosEnabled)(
     'uses server-issued COS URLs to transfer, verify and retrieve one isolated attachment',
     async () => {
