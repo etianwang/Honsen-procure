@@ -4814,7 +4814,7 @@ impl LocalAuthService {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
             .query_row(
-                "SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), CASE WHEN (SELECT COUNT(*) FROM local_accounts) = 1 THEN (SELECT last_success_at FROM local_sync_state WHERE singleton = 1) ELSE NULL END",
+                "SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1)",
                 [account_id.to_string()],
                 |row| Ok(SyncStatusView {
                     pending_count: row.get(0)?,
@@ -4924,15 +4924,26 @@ impl LocalAuthService {
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         require_transaction_account(&transaction, account_id)?;
+        let account_id_text = account_id.to_string();
+        let account_cursor: String = transaction.query_row(
+            "SELECT COALESCE((SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1), '0')",
+            [&account_id_text], |row| row.get(0),
+        ).map_err(|_| AuthError::Database)?;
+        if parse_sync_cursor(&page.next_cursor)? < parse_sync_cursor(&account_cursor)? {
+            return Err(AuthError::InvalidInput);
+        }
         for change in &page.changes {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
-            let pending: Option<(String, i64, String)> = transaction.query_row(
-                "SELECT event_id, base_version, payload_json FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, rowid LIMIT 1",
-                params![change.entity_type, change.entity_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            let pending: Option<(String, i64, String, Option<String>)> = transaction.query_row(
+                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
+                params![change.entity_type, change.entity_id.to_string(), account_id_text],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).optional().map_err(|_| AuthError::Database)?;
-            if let Some((event_id, base_version, local_payload)) = pending {
+            if let Some((event_id, base_version, local_payload, owner)) = pending {
+                if owner.as_deref() != Some(account_id_text.as_str()) {
+                    return Err(AuthError::SyncAccountBoundary);
+                }
                 let conflict_exists: bool = transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM local_sync_conflicts WHERE event_id = ?1 AND server_version = ?2)",
                     params![event_id, change.version], |row| row.get(0),
@@ -4960,8 +4971,8 @@ impl LocalAuthService {
         project_staged_rfqs(&transaction, now)?;
         project_staged_order_comments(&transaction)?;
         transaction.execute(
-            "UPDATE local_sync_state SET last_pull_cursor = ?1, last_success_at = ?2 WHERE singleton = 1",
-            params![page.next_cursor, unix_seconds(now)],
+            "INSERT INTO local_sync_account_pull_state (account_id, last_pull_cursor, last_success_at) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET last_pull_cursor = excluded.last_pull_cursor, last_success_at = excluded.last_success_at",
+            params![account_id_text, page.next_cursor, unix_seconds(now)],
         ).map_err(|_| AuthError::Database)?;
         transaction.commit().map_err(|_| AuthError::Database)
     }
@@ -5033,16 +5044,12 @@ impl LocalAuthService {
         Ok(())
     }
 
-    fn ensure_pull_account_boundary(&self, now: SystemTime) -> Result<(), AuthError> {
-        self.require_catalog_read(now)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        let account_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM local_accounts", [], |row| row.get(0))
-            .map_err(|_| AuthError::Database)?;
-        if account_count > 1 {
-            return Err(AuthError::SyncAccountBoundary);
-        }
-        Ok(())
+    fn pull_cursor_for_account(&self, account_id: Uuid) -> Result<String, AuthError> {
+        self.connection.lock().map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT COALESCE((SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1), '0')",
+                [account_id.to_string()], |row| row.get(0),
+            ).map_err(|_| AuthError::Database)
     }
 
     fn ensure_active_sync_account(&self, expected: Uuid) -> Result<(), AuthError> {
@@ -5169,23 +5176,13 @@ impl LocalAuthService {
 
     pub async fn pull_sync_https(&self, now: SystemTime) -> Result<SyncPullView, AuthError> {
         let account_id = self.require_online_sync_session(now)?;
-        self.ensure_pull_account_boundary(now)?;
         self.refresh_authorization_https(now).await?;
         self.require_online_sync_session(now)?;
         let token = self
             .credential_vault
             .load_sync_token(account_id)?
             .ok_or(AuthError::NoActiveSession)?;
-        let mut cursor: String = self
-            .connection
-            .lock()
-            .map_err(|_| AuthError::Database)?
-            .query_row(
-                "SELECT last_pull_cursor FROM local_sync_state WHERE singleton = 1",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| AuthError::Database)?;
+        let mut cursor = self.pull_cursor_for_account(account_id)?;
         self.ensure_active_sync_account(account_id)?;
         let endpoint = sync_pull_endpoint()?;
         let client = reqwest::Client::builder()
@@ -6404,6 +6401,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0046_sync_outbox_account_boundary",
             include_str!("../migrations/0046_sync_outbox_account_boundary.sql"),
+        ),
+        (
+            "0047_sync_account_pull_state",
+            include_str!("../migrations/0047_sync_account_pull_state.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -8552,6 +8553,475 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pull_cursor_and_success_are_isolated_per_cached_account() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let later = now + Duration::from_secs(1);
+        let first = account();
+        service
+            .cache_verified_account(first.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &first.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let first_entity = Uuid::new_v4();
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "9".into(),
+                        entity_type: "fixture_unknown".into(),
+                        entity_id: first_entity,
+                        operation: "upsert".into(),
+                        version: 1,
+                        payload: serde_json::json!({"owner":"a"}),
+                        changed_at: "2026-10-15T00:00:00Z".into(),
+                    }],
+                    next_cursor: "9".into(),
+                },
+                now,
+            )
+            .unwrap();
+
+        let second = CachedAccount {
+            id: Uuid::new_v4(),
+            username: "engineer-b".into(),
+            ..account()
+        };
+        service
+            .cache_verified_account(second.clone(), "correct-password", now)
+            .unwrap();
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(later).unwrap();
+        service
+            .offline_login(
+                &second.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                later,
+            )
+            .unwrap();
+        let second_cursor: String = service.connection.lock().unwrap().query_row(
+            "SELECT COALESCE((SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1), '0')",
+            [second.id.to_string()], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(second_cursor, "0");
+        assert_eq!(service.sync_status(later).unwrap().last_success_at, None);
+        let second_entity = Uuid::new_v4();
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![SyncPullChangeInput {
+                        cursor: "3".into(),
+                        entity_type: "fixture_unknown".into(),
+                        entity_id: second_entity,
+                        operation: "upsert".into(),
+                        version: 1,
+                        payload: serde_json::json!({"owner":"b"}),
+                        changed_at: "2026-10-15T00:00:01Z".into(),
+                    }],
+                    next_cursor: "3".into(),
+                },
+                later,
+            )
+            .unwrap();
+        assert_eq!(
+            service.sync_status(later).unwrap().last_success_at,
+            Some(unix_seconds(later))
+        );
+        let connection = service.connection.lock().unwrap();
+        let state: Vec<(String, String, i64)> = connection.prepare("SELECT account_id, last_pull_cursor, last_success_at FROM local_sync_account_pull_state ORDER BY account_id").unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap().map(Result::unwrap).collect();
+        assert_eq!(state.len(), 2);
+        assert!(state.contains(&(first.id.to_string(), "9".into(), unix_seconds(now))));
+        assert!(state.contains(&(second.id.to_string(), "3".into(), unix_seconds(later))));
+        let staged: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_remote_entities WHERE entity_id IN (?1, ?2)",
+                params![first_entity.to_string(), second_entity.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(staged, 2);
+        drop(connection);
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(later).unwrap();
+        service
+            .offline_login(
+                &first.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                later,
+            )
+            .unwrap();
+        assert_eq!(
+            service.sync_status(later).unwrap().last_success_at,
+            Some(unix_seconds(now))
+        );
+        assert_eq!(service.pull_cursor_for_account(first.id).unwrap(), "9");
+    }
+
+    #[test]
+    fn pull_account_state_migration_preserves_unattributed_legacy_cursor() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("PRAGMA foreign_keys = ON; CREATE TABLE local_accounts (id TEXT PRIMARY KEY); CREATE TABLE local_sync_state (singleton INTEGER PRIMARY KEY, last_pull_cursor TEXT NOT NULL, last_success_at INTEGER); INSERT INTO local_sync_state VALUES (1, '88', 1234);").unwrap();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        connection
+            .execute(
+                "INSERT INTO local_accounts (id) VALUES (?1)",
+                [first.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO local_accounts (id) VALUES (?1)",
+                [second.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0047_sync_account_pull_state.sql"
+            ))
+            .unwrap();
+        let old: (String, i64) = connection
+            .query_row(
+                "SELECT last_pull_cursor, last_success_at FROM local_sync_state",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(old, ("88".into(), 1234));
+        let account_rows: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_account_pull_state",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(account_rows, 0);
+    }
+
+    #[test]
+    fn pull_failure_replay_and_restart_preserve_each_accounts_committed_cursor() {
+        let path =
+            std::env::temp_dir().join(format!("pull-account-state-{}.sqlite", Uuid::new_v4()));
+        let now = SystemTime::now();
+        let first = account();
+        let second = CachedAccount {
+            id: Uuid::new_v4(),
+            username: "engineer-b".into(),
+            ..account()
+        };
+        let second_entity = Uuid::new_v4();
+        {
+            let service = LocalAuthService::open(
+                Connection::open(&path).unwrap(),
+                Box::new(MemoryCredentialVault::new()),
+                path.with_extension("media"),
+            )
+            .unwrap();
+            for engineer in [&first, &second] {
+                service
+                    .cache_verified_account(engineer.clone(), "correct-password", now)
+                    .unwrap();
+            }
+            let captcha = service.issue_captcha(now).unwrap();
+            service
+                .offline_login(
+                    &first.username,
+                    "correct-password",
+                    captcha.id,
+                    answer(&captcha.question),
+                    now,
+                )
+                .unwrap();
+            service
+                .apply_sync_pull_page(
+                    SyncPullPageInput {
+                        changes: vec![SyncPullChangeInput {
+                            cursor: "8".into(),
+                            entity_type: "fixture_unknown".into(),
+                            entity_id: Uuid::new_v4(),
+                            operation: "upsert".into(),
+                            version: 1,
+                            payload: serde_json::json!({"owner":"a"}),
+                            changed_at: "2026-10-15T00:00:00Z".into(),
+                        }],
+                        next_cursor: "8".into(),
+                    },
+                    now,
+                )
+                .unwrap();
+            service.lock().unwrap();
+            let captcha = service.issue_captcha(now).unwrap();
+            service
+                .offline_login(
+                    &second.username,
+                    "correct-password",
+                    captcha.id,
+                    answer(&captcha.question),
+                    now,
+                )
+                .unwrap();
+            assert_eq!(service.pull_cursor_for_account(second.id).unwrap(), "0");
+            let broken = SyncPullPageInput {
+                changes: vec![SyncPullChangeInput {
+                    cursor: "3".into(),
+                    entity_type: "material".into(),
+                    entity_id: second_entity,
+                    operation: "upsert".into(),
+                    version: 1,
+                    payload: serde_json::json!({}),
+                    changed_at: "2026-10-15T00:00:00Z".into(),
+                }],
+                next_cursor: "3".into(),
+            };
+            assert!(service.apply_sync_pull_page(broken, now).is_err());
+            assert_eq!(service.pull_cursor_for_account(second.id).unwrap(), "0");
+            let staged: i64 = service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_remote_entities WHERE entity_id = ?1",
+                    [second_entity.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(staged, 0);
+            let page = SyncPullPageInput {
+                changes: vec![SyncPullChangeInput {
+                    cursor: "3".into(),
+                    entity_type: "fixture_unknown".into(),
+                    entity_id: second_entity,
+                    operation: "upsert".into(),
+                    version: 1,
+                    payload: serde_json::json!({"owner":"b"}),
+                    changed_at: "2026-10-15T00:00:00Z".into(),
+                }],
+                next_cursor: "3".into(),
+            };
+            service.apply_sync_pull_page(page.clone(), now).unwrap();
+            service.apply_sync_pull_page(page, now).unwrap();
+            assert_eq!(service.pull_cursor_for_account(second.id).unwrap(), "3");
+            assert_eq!(
+                service.apply_sync_pull_page(
+                    SyncPullPageInput {
+                        changes: vec![],
+                        next_cursor: "2".into()
+                    },
+                    now
+                ),
+                Err(AuthError::InvalidInput)
+            );
+            let staged: i64 = service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_remote_entities WHERE entity_id = ?1",
+                    [second_entity.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(staged, 1);
+        }
+        {
+            let service = LocalAuthService::open(
+                Connection::open(&path).unwrap(),
+                Box::new(MemoryCredentialVault::new()),
+                path.with_extension("media"),
+            )
+            .unwrap();
+            service
+                .cache_verified_account(second.clone(), "correct-password", now)
+                .unwrap();
+            let captcha = service.issue_captcha(now).unwrap();
+            service
+                .offline_login(
+                    &second.username,
+                    "correct-password",
+                    captcha.id,
+                    answer(&captcha.question),
+                    now,
+                )
+                .unwrap();
+            assert_eq!(service.pull_cursor_for_account(second.id).unwrap(), "3");
+            assert_eq!(
+                service.sync_status(now).unwrap().last_success_at,
+                Some(unix_seconds(now))
+            );
+            assert_eq!(service.pull_cursor_for_account(first.id).unwrap(), "8");
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn another_accounts_dirty_entity_blocks_pull_without_advancing_cursor() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let first = account();
+        let second = CachedAccount {
+            id: Uuid::new_v4(),
+            username: "engineer-b".into(),
+            ..account()
+        };
+        for engineer in [&first, &second] {
+            service
+                .cache_verified_account(engineer.clone(), "correct-password", now)
+                .unwrap();
+        }
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &first.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let entity_id = Uuid::new_v4();
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let transaction = connection.transaction().unwrap();
+            insert_local_sync_outbox(&transaction, "fixture_unknown", entity_id, "{}", now)
+                .unwrap();
+            transaction.commit().unwrap();
+        }
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &second.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let page = SyncPullPageInput {
+            changes: vec![SyncPullChangeInput {
+                cursor: "3".into(),
+                entity_type: "fixture_unknown".into(),
+                entity_id,
+                operation: "upsert".into(),
+                version: 1,
+                payload: serde_json::json!({"owner":"b"}),
+                changed_at: "2026-10-15T00:00:00Z".into(),
+            }],
+            next_cursor: "3".into(),
+        };
+        assert_eq!(
+            service.apply_sync_pull_page(page.clone(), now),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        assert_eq!(service.pull_cursor_for_account(second.id).unwrap(), "0");
+        assert_eq!(service.sync_status(now).unwrap().last_success_at, None);
+        let connection = service.connection.lock().unwrap();
+        let preserved: i64 = connection.query_row("SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1 AND owner_account_id = ?2 AND acknowledged_at IS NULL", params![entity_id.to_string(), first.id.to_string()], |row| row.get(0)).unwrap();
+        assert_eq!(preserved, 1);
+        let staged: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_remote_entities WHERE entity_id = ?1",
+                [entity_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(staged, 0);
+        connection
+            .execute(
+                "UPDATE local_sync_outbox SET acknowledged_at = 1 WHERE entity_id = ?1",
+                [entity_id.to_string()],
+            )
+            .unwrap();
+        connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, 'fixture_unknown', ?2, 'upsert', 0, '{}', 2)", params![Uuid::new_v4().to_string(), entity_id.to_string()]).unwrap();
+        drop(connection);
+        assert_eq!(
+            service.apply_sync_pull_page(page, now),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        assert_eq!(service.pull_cursor_for_account(second.id).unwrap(), "0");
+    }
+
+    #[test]
+    fn replay_after_cursor_reset_does_not_duplicate_catalog_projection() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let engineer = account();
+        service
+            .cache_verified_account(engineer.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &engineer.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let entity_id = Uuid::new_v4();
+        let material = MaterialInput {
+            id: entity_id,
+            sku: None,
+            category_id: None,
+            name_zh: "replayed fixture".into(),
+            name_fr: None,
+            aliases: vec![],
+            brand: None,
+            model: "fixture".into(),
+            specification: "fixture".into(),
+            unit: "pcs".into(),
+            notes: None,
+            is_active: true,
+            version: 1,
+        };
+        let page = SyncPullPageInput {
+            changes: vec![SyncPullChangeInput {
+                cursor: "5".into(),
+                entity_type: "material".into(),
+                entity_id,
+                operation: "upsert".into(),
+                version: 1,
+                payload: serde_json::to_value(material).unwrap(),
+                changed_at: "2026-10-15T00:00:00Z".into(),
+            }],
+            next_cursor: "5".into(),
+        };
+        service.apply_sync_pull_page(page.clone(), now).unwrap();
+        service.apply_sync_pull_page(page, now).unwrap();
+        assert_eq!(service.pull_cursor_for_account(engineer.id).unwrap(), "5");
+        let connection = service.connection.lock().unwrap();
+        let projected: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_materials WHERE id = ?1",
+                [entity_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(projected, 1);
+        let staged: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_remote_entities WHERE entity_id = ?1",
+                [entity_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(staged, 1);
+    }
+
+    #[test]
     fn cached_token_cannot_push_or_pull_after_offline_login() {
         let service = LocalAuthService::open_in_memory().unwrap();
         let now = SystemTime::now();
@@ -8907,9 +9377,11 @@ mod tests {
             .unwrap();
         let connection = service.connection.lock().unwrap();
         let cursor: String = connection
-            .query_row("SELECT last_pull_cursor FROM local_sync_state", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1",
+                [first.id.to_string()],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(cursor, "0");
         let acknowledged: Option<i64> = connection
@@ -8933,10 +9405,7 @@ mod tests {
             .unwrap();
         assert_eq!(service.sync_status(now).unwrap().pending_count, 0);
         assert_eq!(service.sync_status(now).unwrap().quarantined_count, 2);
-        assert_eq!(
-            service.ensure_pull_account_boundary(now),
-            Err(AuthError::SyncAccountBoundary)
-        );
+        assert_eq!(service.pull_cursor_for_account(second.id).unwrap(), "0");
     }
 
     #[test]
@@ -9491,9 +9960,11 @@ mod tests {
         {
             let connection = service.connection.lock().unwrap();
             let cursor: String = connection
-                .query_row("SELECT last_pull_cursor FROM local_sync_state", [], |row| {
-                    row.get(0)
-                })
+                .query_row(
+                    "SELECT last_pull_cursor FROM local_sync_account_pull_state",
+                    [],
+                    |row| row.get(0),
+                )
                 .unwrap();
             assert_eq!(cursor, "3");
             let remote_count: i64 = connection
@@ -9565,9 +10036,11 @@ mod tests {
             .unwrap();
         assert_eq!(conflicts, 1);
         let cursor: String = connection
-            .query_row("SELECT last_pull_cursor FROM local_sync_state", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT last_pull_cursor FROM local_sync_account_pull_state",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(cursor, "4");
         let local_name: String = connection

@@ -167,6 +167,8 @@ The 2026-10-15 T10-B multi-account containment slice adds trusted owner stamping
 
 The subsequent T10-B trusted-command guard requires a successful online account login in the current process before Push, Pull or cloud authorization refresh can use a cached token. Offline login, failed login, account switch and local lock fail closed while offline operations retain their outbox. Rust and DOM development gates passed; this does not replace server revocation, multi-account Pull, true two-client HTTP/native evidence or the open P1. T10 and M3 remain unchecked.
 
+The next T10-SEC-001 desktop checkpoint gives each account an independent durable Pull cursor and last-success timestamp using additive SQLite migration 0047. Existing installation-wide cursor data is retained without guessed attribution; account cursors replay from zero. A/B, rollback/restart, catalog replay and foreign/legacy pending-event fail-closed cases have local Rust evidence. The server owner-binding and real two-account HTTP/native gates, legacy recovery policy and shared local projection visibility review remain open; P1, T10 and M3 remain unchecked.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
