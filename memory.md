@@ -2,6 +2,8 @@
 
 **Last updated:** 2026-10-15
 
+- **T04-001 QA return repair — 2026-10-15:** On `codex/t04-parent-acceptance`, test-only checkpoint `9b3f7c1` repairs a PostgreSQL race fixture that waited for a REST write while Push held the same tax-template advisory lock. The production lock remains unchanged; a separate real PostgreSQL `pg_blocking_pids` assertion proves REST waits behind that lock. Exact disposable WSL2 PostgreSQL project `honsen_t04_lock_repair_20261015` passed Windows `SELECT 1` preflight, focused sync 36/36 and workspace desktop 2/server 78/shared 16 without PostgreSQL skips; focused tax-editor Playwright DOM 1/1, lint/typecheck/build, changed-file Prettier and diff check passed. The project was removed with scoped `down --volumes` and its keepalive ended. Fixer-owned formatting commit `d49a2cc` was integrated as `319996e`; full `npm run format:check` now passes. **BLOCKER:** independent Fixer QA of this returned defect is pending; T04 parent acceptance remains open. **DEFERRED:** authorized formal master-data deployment and remaining T04 acceptance. **WARNING:** DOM is not native Tauri evidence; no production code was changed. No push, merge, deployment or E2E-data change.
+
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
 ## Current authoritative status — 2026-10-14
