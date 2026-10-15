@@ -419,3 +419,18 @@ Build shared contracts and exact money/quantity helpers only:
 3. Add unit tests for XOF/CNY/USD/EUR formatting, quantity parsing and half-up rounding.
 4. Add a development-only currency preview used by a Playwright DOM click/select test.
 5. Before marking T01 done, run every quality gate and record exact commands/results in this file.
+
+## CURRENT SESSION HANDOFF — Fixer pause 2026-10-15
+
+- **Pause requested by user:** all active development/QA agents were interrupted before further testing, repair, integration or merge. No worktree, E2E data, database, Builder branch, production system or existing uncommitted artifact was deleted, reset, cleaned or overwritten.
+- **Primary checkpoint:** `codex/parent-acceptance-coordination` at `5ff79d0` records the multi-agent coordination and the confirmed QA defect. The later Fixer handoff/bug-queue checkpoint is `268d580`; its files are intentionally not merged into any Builder branch. The coordination worktree is clean.
+- **Builder delivery checkpoints, unintegrated:** T04 `a82050d`; T08 `6a006ed`; T09 `cbc129a`. Dev D's T10 worktree remains at `49a0b66` without a delivery. No delivery has been merged or accepted.
+- **QA evidence so far:** independent QA reproduced T04 regression `T04-001`. Against `a82050d`, isolated PostgreSQL `src/master-data/postgres-store.test.ts` passed 9/9, but related `src/sync/postgres-store.test.ts` failed 34/35: `retains a concurrent REST tax-template creation instead of overwriting it` timed out at line 3264. The observed lock-order cycle is REST `saveTaxTemplate` waiting on `pg_advisory_xact_lock(tax_template:<id>)` held by the sync race transaction which invokes REST. Log: `C:\Users\THISPC~1\AppData\Local\Temp\honsen-qa-a-sync-regression-rerun.log`. Dev A received a queued repair request, but it was not started before pause.
+- **Environment evidence:** Windows PowerShell has no `docker` executable. Dev A earlier observed `Wsl/Service/E_UNEXPECTED`; this is retained as `ENV-001`, but it did not prevent the independent QA reproduction above. Do not call a PostgreSQL gate passed merely because an agent reports static checks.
+- **Worktree state at pause:** primary `E:\Project\Honsen materials` remains at `74365f0` with only preserved untracked `.honsen-e2e/` and `apps/desktop/src-tauri/.honsen-native-e2e/`. All isolated worktrees were clean when inspected; the QA worktree is detached at `cbc129a` after sequential testing. Do not assume Markdown changes are shared; coordinate via explicit commits/SHA.
+- **BLOCKER:** T04-001 prevents accepting or integrating `a82050d` until Dev A fixes and independent QA reruns both focused PostgreSQL suites.
+- **BLOCKER:** Parent T04/T08/T09/T10 remain unaccepted; all original business, native desktop, offline/reconnect, multi-device and full quality gates remain mandatory.
+- **DEFERRED:** T08 server formal-registration contract (`INT-001`) and T09 procurement-expenditure shared Sync/PostgreSQL/Pull contract (`INT-002`) belong to T10; do not patch them in their Builder branches.
+- **DEFERRED:** T09-C real attachment ingestion/compression/archival remains the approved T09/T11 boundary; no metadata-only result closes it.
+- **WARNING:** Docker availability differs between Windows PowerShell and the configured WSL test environment. Before resuming API QA, verify WSL/Docker health non-destructively and use only the disposable Compose database.
+- **Safe resume order:** (1) activate Dev A on T04-001 and obtain a repair commit; (2) independent QA repro/retest the repair and related PostgreSQL regression; (3) complete preserved QA of T08 `6a006ed` and T09 `cbc129a`; (4) run relevant integration-worktree regressions before accepting any slice; (5) resume D only after recording its separate delivery SHA.
