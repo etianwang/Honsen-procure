@@ -143,6 +143,8 @@ The unit Push slice now projects validated unit changes into PostgreSQL `units` 
 
 The tax-template Push slice now projects validated tax templates into PostgreSQL `tax_templates` with audit/sync in one transaction. Isolated PostgreSQL tests cover country dependencies, replay, rollback, REST-edit and concurrent-create conflicts, change-log reconciliation and a resolved retry; the existing tax-editor DOM gate passed. Proactive REST-to-Pull publication, exchange-rate/project-default business projection, deployment records and native multi-client evidence remain open. T04/T10 and milestone checkboxes remain unchanged.
 
+The exchange-rate Push slice now projects immutable rate history into PostgreSQL `exchange_rates` atomically with audit/sync. A discovered REST row wins same-ID conflicts, and accepted/discovered change-log payloads carry the complete camelCase fields required by Rust Pull. Disposable PostgreSQL tests cover replay, independent batch acceptance, audit rollback and concurrent REST insertion; existing Rust master-data Pull and exchange-rate DOM gates passed. Proactive REST-to-Pull publication, legacy sync-only repair, project-default business projection, deployment and native multi-client evidence remain open; T04/T10 and milestones stay unchecked.
+
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

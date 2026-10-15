@@ -1556,6 +1556,397 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(stored.rows[0]?.payload_json.name).toBe('Fixture tax')
   })
 
+  it('projects a validated exchange-rate Push into immutable business history and audit once', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const rateId = randomUUID()
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'exchange_rate' as const,
+      entityId: rateId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        from_currency: 'CNY',
+        to_currency: 'XOF',
+        rate_decimal: '76.50000000',
+        effective_at: '2026-10-15',
+        source: 'manual',
+        reason: '  Fixture approval  ',
+      },
+    }
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const request = { deviceId: randomUUID(), events: [event] }
+    const first = await service.push(actor, request)
+    expect(first.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(first)
+    const business = await pool!.query<{
+      from_currency: string
+      to_currency: string
+      rate_decimal: string
+      source: string
+      reason: string
+      created_by: string
+    }>(
+      'SELECT from_currency, to_currency, rate_decimal, source, reason, created_by::text AS created_by FROM exchange_rates WHERE id = $1',
+      [rateId],
+    )
+    expect(business.rows[0]).toMatchObject({
+      from_currency: 'CNY',
+      to_currency: 'XOF',
+      rate_decimal: '76.50000000',
+      source: 'manual',
+      reason: 'Fixture approval',
+      created_by: actorId,
+    })
+    const audit = await pool!.query<{ reason: string }>(
+      "SELECT reason FROM audit_entries WHERE entity_type = 'exchange_rate' AND entity_id = $1",
+      [rateId],
+    )
+    expect(audit.rows).toEqual([{ reason: 'Fixture approval' }])
+    const synced = await pool!.query<{ payload_json: Record<string, unknown> }>(
+      "SELECT payload_json FROM sync_entities WHERE entity_type = 'exchange_rate' AND entity_id = $1",
+      [rateId],
+    )
+    expect(synced.rows[0]?.payload_json).toEqual({
+      id: rateId,
+      fromCurrency: 'CNY',
+      toCurrency: 'XOF',
+      rateDecimal: '76.50000000',
+      effectiveAt: '2026-10-15',
+      source: 'manual',
+      reason: 'Fixture approval',
+      version: 1,
+    })
+    const pulled = await service.pull(
+      { id: actorId, roles: ['engineer'] },
+      { cursor, limit: 500 },
+    )
+    expect(
+      pulled.changes.find((change) => change.entityId === rateId)?.payload,
+    ).toEqual(synced.rows[0]?.payload_json)
+  })
+
+  it('conflicts with a preexisting REST exchange rate without replacing its history', async () => {
+    const rateId = randomUUID()
+    const master = new PostgresMasterDataStore(pool!)
+    await master.saveExchangeRate(
+      {
+        id: rateId,
+        fromCurrency: 'USD',
+        toCurrency: 'XOF',
+        rateDecimal: '610.25',
+        effectiveAt: '2026-10-15',
+        source: 'manual',
+        reason: 'REST source',
+      },
+      actorId,
+    )
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const eventId = randomUUID()
+    const result = await service.push(
+      { id: actorId, roles: ['administrator'] },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            eventId,
+            entityType: 'exchange_rate',
+            entityId: rateId,
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: {
+              from_currency: 'USD',
+              to_currency: 'XOF',
+              rate_decimal: '600.00',
+              effective_at: '2026-10-15',
+              source: 'manual',
+              reason: 'Offline source',
+            },
+          },
+        ],
+      },
+    )
+    expect(result.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 1,
+    })
+    const business = await pool!.query<{
+      rate_decimal: string
+      reason: string
+    }>('SELECT rate_decimal, reason FROM exchange_rates WHERE id = $1', [
+      rateId,
+    ])
+    expect(business.rows).toEqual([
+      { rate_decimal: '610.25', reason: 'REST source' },
+    ])
+    const conflict = await pool!.query<{
+      server_payload_json: { rateDecimal: string; reason: string }
+    }>('SELECT server_payload_json FROM sync_conflicts WHERE event_id = $1', [
+      eventId,
+    ])
+    expect(conflict.rows[0]?.server_payload_json).toEqual({
+      id: rateId,
+      version: 1,
+      fromCurrency: 'USD',
+      toCurrency: 'XOF',
+      rateDecimal: '610.25',
+      effectiveAt: '2026-10-15',
+      source: 'manual',
+      reason: 'REST source',
+    })
+    const synced = await pool!.query<{
+      version: string
+      payload_json: { rateDecimal: string }
+    }>(
+      "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'exchange_rate' AND entity_id = $1",
+      [rateId],
+    )
+    expect(synced.rows[0]).toMatchObject({
+      version: '1',
+      payload_json: { id: rateId, version: 1, rateDecimal: '610.25' },
+    })
+    const published = await pool!.query<{
+      version: string
+      payload_json: Record<string, unknown>
+    }>(
+      "SELECT version, payload_json FROM server_change_log WHERE entity_type = 'exchange_rate' AND entity_id = $1",
+      [rateId],
+    )
+    expect(published.rows[0]).toMatchObject({
+      version: '1',
+      payload_json: { id: rateId, version: 1, rateDecimal: '610.25' },
+    })
+  })
+
+  it('rejects a second event for an immutable exchange-rate ID while accepting an independent rate', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const [rateId, otherId] = [randomUUID(), randomUUID()]
+    const original = {
+      eventId: randomUUID(),
+      entityType: 'exchange_rate' as const,
+      entityId: rateId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        fromCurrency: 'EUR',
+        toCurrency: 'XOF',
+        rateDecimal: '655.5',
+        effectiveAt: '2026-10-15',
+        source: 'manual',
+        reason: 'Original approval',
+      },
+    }
+    expect(
+      (
+        await service.push(actor, {
+          deviceId: randomUUID(),
+          events: [original],
+        })
+      ).results[0]?.status,
+    ).toBe('accepted')
+    const batch = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...original,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: {
+            ...original.payload,
+            rateDecimal: '650',
+            reason: 'Changed',
+          },
+        },
+        { ...original, eventId: randomUUID(), entityId: otherId },
+      ],
+    })
+    expect(batch.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+    ])
+    const business = await pool!.query<{
+      rate_decimal: string
+      reason: string
+    }>('SELECT rate_decimal, reason FROM exchange_rates WHERE id = $1', [
+      rateId,
+    ])
+    expect(business.rows).toEqual([
+      { rate_decimal: '655.5', reason: 'Original approval' },
+    ])
+    const synced = await pool!.query<{ version: string }>(
+      "SELECT version FROM sync_entities WHERE entity_type = 'exchange_rate' AND entity_id = $1",
+      [rateId],
+    )
+    expect(synced.rows).toEqual([{ version: '1' }])
+    const audit = await pool!.query(
+      "SELECT 1 FROM audit_entries WHERE entity_type = 'exchange_rate' AND entity_id = $1",
+      [rateId],
+    )
+    expect(audit.rowCount).toBe(1)
+    expect(
+      (
+        await pool!.query('SELECT 1 FROM exchange_rates WHERE id = $1', [
+          otherId,
+        ])
+      ).rowCount,
+    ).toBe(1)
+  })
+
+  it('rolls back exchange-rate business history when its audit insert fails', async () => {
+    const rateId = randomUUID()
+    const eventId = randomUUID()
+    const failingPool = {
+      async connect() {
+        const client = await pool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            if (
+              sql.startsWith('INSERT INTO audit_entries') &&
+              sql.includes("'exchange_rate'")
+            )
+              throw new Error('fixture audit outage')
+            return client.query(sql, values)
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    const service = new SyncService(new PostgresSyncStore(failingPool))
+    await expect(
+      service.push(
+        { id: actorId, roles: ['administrator'] },
+        {
+          deviceId: randomUUID(),
+          events: [
+            {
+              eventId,
+              entityType: 'exchange_rate',
+              entityId: rateId,
+              operation: 'upsert',
+              baseVersion: 0,
+              payload: {
+                from_currency: 'USD',
+                to_currency: 'XOF',
+                rate_decimal: '600',
+                effective_at: '2026-10-15',
+                source: 'manual',
+                reason: 'Fixture',
+              },
+            },
+          ],
+        },
+      ),
+    ).rejects.toThrow('fixture audit outage')
+    for (const [table, clause] of [
+      ['exchange_rates', 'id = $1'],
+      ['sync_entities', "entity_type = 'exchange_rate' AND entity_id = $1"],
+      ['sync_events', 'event_id = $1'],
+      ['server_change_log', "entity_type = 'exchange_rate' AND entity_id = $1"],
+      ['audit_entries', "entity_type = 'exchange_rate' AND entity_id = $1"],
+    ]) {
+      const id = table === 'sync_events' ? eventId : rateId
+      expect(
+        (await pool!.query(`SELECT 1 FROM ${table} WHERE ${clause}`, [id]))
+          .rowCount,
+      ).toBe(0)
+    }
+  })
+
+  it('retains a concurrent REST exchange-rate creation instead of replacing it', async () => {
+    const rateId = randomUUID()
+    const master = new PostgresMasterDataStore(pool!)
+    let inserted = false
+    const racingPool = {
+      async connect() {
+        const client = await pool!.connect()
+        return {
+          async query(sql: string, values?: unknown[]) {
+            const result = await client.query(sql, values)
+            if (
+              !inserted &&
+              sql.startsWith(
+                'SELECT 1 FROM exchange_rates WHERE id = $1 FOR UPDATE',
+              ) &&
+              values?.[0] === rateId
+            ) {
+              inserted = true
+              await master.saveExchangeRate(
+                {
+                  id: rateId,
+                  fromCurrency: 'CNY',
+                  toCurrency: 'XOF',
+                  rateDecimal: '77',
+                  effectiveAt: '2026-10-15',
+                  source: 'manual',
+                  reason: 'REST winner',
+                },
+                actorId,
+              )
+            }
+            return result
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+    } as unknown as Pool
+    const service = new SyncService(new PostgresSyncStore(racingPool))
+    const result = await service.push(
+      { id: actorId, roles: ['administrator'] },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            eventId: randomUUID(),
+            entityType: 'exchange_rate',
+            entityId: rateId,
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: {
+              from_currency: 'CNY',
+              to_currency: 'XOF',
+              rate_decimal: '76',
+              effective_at: '2026-10-15',
+              source: 'manual',
+              reason: 'Offline loser',
+            },
+          },
+        ],
+      },
+    )
+    expect(inserted).toBe(true)
+    expect(result.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 1,
+    })
+    const business = await pool!.query<{
+      rate_decimal: string
+      reason: string
+    }>('SELECT rate_decimal, reason FROM exchange_rates WHERE id = $1', [
+      rateId,
+    ])
+    expect(business.rows).toEqual([
+      { rate_decimal: '77', reason: 'REST winner' },
+    ])
+    const synced = await pool!.query<{ payload_json: { rateDecimal: string } }>(
+      "SELECT payload_json FROM sync_entities WHERE entity_type = 'exchange_rate' AND entity_id = $1",
+      [rateId],
+    )
+    expect(synced.rows[0]?.payload_json.rateDecimal).toBe('77')
+  })
+
   it('projects tax-template Push into the business row and audit only once', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const taxId = randomUUID()

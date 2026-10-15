@@ -1,4 +1,8 @@
-import { referenceMasterDataSchema, taxTemplateSchema } from '@honsen/shared'
+import {
+  exchangeRateSchema,
+  referenceMasterDataSchema,
+  taxTemplateSchema,
+} from '@honsen/shared'
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
 import type { Pool, PoolClient } from 'pg'
 import type { SyncStore } from './types.js'
@@ -64,6 +68,20 @@ export class PostgresSyncStore implements SyncStore {
       )
       const current = entity.rows[0]
       const currentVersion = current ? Number(current.version) : 0
+      if (input.event.entityType === 'exchange_rate' && currentVersion === 0) {
+        const business = await client.query(
+          'SELECT 1 FROM exchange_rates WHERE id = $1 FOR UPDATE',
+          [input.event.entityId],
+        )
+        if (business.rowCount === 1) {
+          const result = await this.recordExchangeRateBusinessConflict(
+            client,
+            input,
+          )
+          await client.query('COMMIT')
+          return result
+        }
+      }
       if (input.event.entityType === 'unit') {
         const business = await client.query<{
           business_code: string
@@ -144,6 +162,18 @@ export class PostgresSyncStore implements SyncStore {
           ? canonicalTaxTemplatePayload(input.event)
           : null
       if (input.event.entityType === 'tax_template' && !taxPayload) {
+        await client.query('ROLLBACK')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+        }
+      }
+      const ratePayload =
+        input.event.entityType === 'exchange_rate'
+          ? canonicalExchangeRatePayload(input.event)
+          : null
+      if (input.event.entityType === 'exchange_rate' && !ratePayload) {
         await client.query('ROLLBACK')
         return {
           eventId: input.event.eventId,
@@ -266,6 +296,30 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      if (input.event.entityType === 'exchange_rate') {
+        const projected = await this.projectExchangeRate(
+          client,
+          { ...input.event, payload: ratePayload! },
+          input.actorId,
+          currentVersion,
+        )
+        if (projected === 'conflict') {
+          const result = await this.recordExchangeRateBusinessConflict(
+            client,
+            input,
+          )
+          await client.query('COMMIT')
+          return result
+        }
+        if (projected === 'validation_error') {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+      }
       await client.query(
         `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
@@ -281,7 +335,7 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           serverVersion,
           deleted,
-          taxPayload ?? unitPayload ?? input.event.payload,
+          ratePayload ?? taxPayload ?? unitPayload ?? input.event.payload,
           input.actorId,
         ],
       )
@@ -309,7 +363,7 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           input.event.operation,
           serverVersion,
-          taxPayload ?? unitPayload ?? input.event.payload,
+          ratePayload ?? taxPayload ?? unitPayload ?? input.event.payload,
           input.actorId,
         ],
       )
@@ -330,6 +384,7 @@ export class PostgresSyncStore implements SyncStore {
           'team',
           'unit',
           'tax_template',
+          'exchange_rate',
         ].includes(input.event.entityType) &&
         typeof error === 'object' &&
         error !== null &&
@@ -692,6 +747,97 @@ export class PostgresSyncStore implements SyncStore {
     return 'accepted'
   }
 
+  private async projectExchangeRate(
+    client: PoolClient,
+    event: SyncEvent,
+    actorId: string,
+    currentVersion: number,
+  ): Promise<'accepted' | 'conflict' | 'validation_error'> {
+    if (event.operation !== 'upsert' || currentVersion !== 0)
+      return 'validation_error'
+    const payload = event.payload
+    const fromCurrency = payload.fromCurrency ?? payload.from_currency
+    const toCurrency = payload.toCurrency ?? payload.to_currency
+    const rateDecimal = payload.rateDecimal ?? payload.rate_decimal
+    const effectiveAt = payload.effectiveAt ?? payload.effective_at
+    const written = await client.query(
+      `INSERT INTO exchange_rates
+         (id, from_currency, to_currency, rate_decimal, effective_at, source, reason, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        event.entityId,
+        fromCurrency,
+        toCurrency,
+        rateDecimal,
+        effectiveAt,
+        payload.source,
+        payload.reason,
+        actorId,
+      ],
+    )
+    if (written.rowCount !== 1) return 'conflict'
+    await client.query(
+      "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action, reason) VALUES (gen_random_uuid(), $1, 'exchange_rate', $2, 'create', $3)",
+      [actorId, event.entityId, payload.reason],
+    )
+    return 'accepted'
+  }
+
+  private async recordExchangeRateBusinessConflict(
+    client: PoolClient,
+    input: { event: SyncEvent; installationId: string; actorId: string },
+  ): Promise<SyncEventResult> {
+    const business = await client.query<{
+      from_currency: string
+      to_currency: string
+      rate_decimal: string
+      effective_at: string
+      source: string
+      reason: string | null
+      created_by: string | null
+    }>(
+      'SELECT from_currency, to_currency, rate_decimal, effective_at::text AS effective_at, source, reason, created_by::text AS created_by FROM exchange_rates WHERE id = $1 FOR UPDATE',
+      [input.event.entityId],
+    )
+    const row = business.rows[0]
+    if (!row)
+      throw new Error('exchange rate disappeared during conflict detection')
+    const payload = {
+      id: input.event.entityId,
+      fromCurrency: row.from_currency,
+      toCurrency: row.to_currency,
+      rateDecimal: row.rate_decimal,
+      effectiveAt: row.effective_at,
+      source: row.source,
+      reason: row.reason,
+      version: 1,
+    }
+    const actorId = row.created_by ?? input.actorId
+    await client.query(
+      `INSERT INTO sync_entities (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
+       VALUES ('exchange_rate', $1, 1, FALSE, $2, $3)`,
+      [input.event.entityId, payload, actorId],
+    )
+    await client.query(
+      `INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id)
+       VALUES ('exchange_rate', $1, 'upsert', 1, $2, $3)`,
+      [input.event.entityId, payload, actorId],
+    )
+    const result: SyncEventResult = {
+      eventId: input.event.eventId,
+      status: 'conflict',
+      serverVersion: 1,
+    }
+    await this.recordConflict(
+      client,
+      input,
+      { version: '1', payload_json: payload },
+      result,
+    )
+    return result
+  }
+
   private async recordTaxBusinessConflict(
     client: PoolClient,
     input: { event: SyncEvent; installationId: string; actorId: string },
@@ -1045,4 +1191,21 @@ function canonicalTaxTemplatePayload(
     ...('isActive' in payload ? { isActive: value.isActive } : {}),
     ...('is_active' in payload ? { is_active: value.isActive } : {}),
   }
+}
+
+function canonicalExchangeRatePayload(
+  event: SyncEvent,
+): Record<string, unknown> | null {
+  const payload = event.payload
+  const parsed = exchangeRateSchema.safeParse({
+    id: event.entityId,
+    fromCurrency: payload.fromCurrency ?? payload.from_currency,
+    toCurrency: payload.toCurrency ?? payload.to_currency,
+    rateDecimal: payload.rateDecimal ?? payload.rate_decimal,
+    effectiveAt: payload.effectiveAt ?? payload.effective_at,
+    source: payload.source,
+    reason: payload.reason,
+  })
+  if (!parsed.success) return null
+  return { ...parsed.data, version: 1 }
 }
