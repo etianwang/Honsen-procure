@@ -1,0 +1,22 @@
+# Repository-local example. Copy values into a project policy when needed.
+workflow_version: 1
+coordination_dir: docs/agent-coordination
+task_directory: tasks
+branch_prefix: codex/
+builder_role: builder
+fixer_role: fixer
+coordinator_role: orchestrator
+execution_mode: concurrent-when-supported
+required_task_fields:
+  - task_id
+  - state
+  - owner
+  - worktree
+  - branch
+  - commit
+  - owned_files
+  - test_commands
+  - test_log
+  - qa_result
+  - repair_round
+  - acceptance_evidence
