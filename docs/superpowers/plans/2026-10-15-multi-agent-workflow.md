@@ -73,4 +73,4 @@
 
 - [x] Simulate normal delivery, QA failure/return and recovery through automated test records.
 - [x] Run focused tests and repository quality checks appropriate to documentation/Node changes.
-- [ ] Commit only workflow documentation, validator and tests on the dedicated branch.
+- [x] Commit only workflow documentation, validator and tests on the dedicated branch.
