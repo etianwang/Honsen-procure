@@ -1797,6 +1797,7 @@ test('authenticated desktop switches between cached authorization scopes', async
             args?: {
               selection?: { projectId: string }
               filter?: { query?: string }
+              orderId?: string
             },
           ) {
             if (command === 'issue_local_captcha')
@@ -1836,7 +1837,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                           projectName: '项目乙',
                           site: '乙工地',
                           workflowStatus: historicalStatus,
-                          procurementMode: 'honsen_self_purchase',
+                          procurementMode: 'owner_self_purchase',
                           primaryCurrency: 'XOF',
                           totalMinor: '1200',
                           updatedAt: 1,
@@ -1853,7 +1854,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                 projectId: '00000000-0000-4000-8000-000000000005',
                 site: '乙工地',
                 workflowStatus: historicalStatus,
-                procurementMode: 'honsen_self_purchase',
+                procurementMode: 'owner_self_purchase',
                 orderDate: '2026-10-13',
                 deliveryAddress: '乙工地',
                 expectedDeliveryDate: null,
@@ -1897,6 +1898,14 @@ test('authenticated desktop switches between cached authorization scopes', async
               historicalStatus = 'confirmed'
               return Promise.resolve()
             }
+            if (command === 'issue_owner_formal_order') {
+              Object.assign(window, { issuedOrderId: args?.orderId })
+              historicalStatus = 'formally_issued'
+              return Promise.resolve({
+                documentType: 'OPA',
+                formalDocumentNo: 'TEST-OPA-20261013-OPA-ABCDEFGH-1',
+              })
+            }
             if (command === 'withdraw_requisition') {
               historicalStatus = 'draft'
               return Promise.resolve()
@@ -1936,6 +1945,13 @@ test('authenticated desktop switches between cached authorization scopes', async
   await page.getByRole('button', { name: '确认订单' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     'confirmed',
+  )
+  await page.getByRole('button', { name: '正式下达业主申请' }).click()
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    'formally_issued',
+  )
+  await expect(page.evaluate(() => (window as Window & { issuedOrderId?: string }).issuedOrderId)).resolves.toBe(
+    '00000000-0000-4000-8000-000000000009',
   )
   const originalDraftNo = await page.locator('.page-heading p').textContent()
   page.once('dialog', (dialog) => void dialog.dismiss())

@@ -80,6 +80,14 @@ const previewRequisitionApi: RequisitionApi = {
           : '1250',
     }))
   },
+  async issueOwnerFormalOrder(orderId) {
+    return {
+      documentType: 'OPA',
+      formalDocumentNo: `PREVIEW-OPA-${orderId}`,
+      formalInstallationId: crypto.randomUUID(),
+      formalSequence: 1,
+    }
+  },
   async submitRequisitionDraft() {},
   async withdrawRequisition() {},
 }

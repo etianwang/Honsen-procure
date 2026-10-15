@@ -432,6 +432,7 @@ pub struct RequisitionAttachmentView {
 pub struct RequisitionDetailView {
     pub id: Uuid,
     pub display_no: String,
+    pub formal_document_no: Option<String>,
     pub applicant_id: Uuid,
     pub project_name: String,
     pub project_id: Uuid,
@@ -525,6 +526,15 @@ pub struct OwnerLinePricingView {
     pub converted_reference_unit_minor: String,
     pub markup_minor: String,
     pub final_unit_price_minor: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormalIssueView {
+    pub document_type: String,
+    pub formal_document_no: String,
+    pub formal_installation_id: Uuid,
+    pub formal_sequence: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -2437,10 +2447,10 @@ impl LocalAuthService {
     ) -> Result<RequisitionDetailView, AuthError> {
         let audits = self.list_order_audits(order_id, now)?;
         let connection = self.historical_order_connection(order_id, now)?;
-        let (display_no, applicant_id, project_name, project_id, site, workflow_status, procurement_mode, order_date, delivery_address, expected_delivery_date, notes, primary_currency, total_minor) = connection.query_row(
-            "SELECT o.display_no, o.applicant_id, p.name, o.project_id, o.site, o.workflow_status, o.procurement_mode, o.order_date, o.delivery_address, o.expected_delivery_date, o.notes, o.primary_currency, o.total_minor FROM local_purchase_orders o JOIN local_projects p ON p.id = o.project_id WHERE o.id = ?1 AND o.parent_order_id IS NULL AND o.deleted_at IS NULL",
+        let (display_no, formal_document_no, applicant_id, project_name, project_id, site, workflow_status, procurement_mode, order_date, delivery_address, expected_delivery_date, notes, primary_currency, total_minor) = connection.query_row(
+            "SELECT o.display_no, o.formal_document_no, o.applicant_id, p.name, o.project_id, o.site, o.workflow_status, o.procurement_mode, o.order_date, o.delivery_address, o.expected_delivery_date, o.notes, o.primary_currency, o.total_minor FROM local_purchase_orders o JOIN local_projects p ON p.id = o.project_id WHERE o.id = ?1 AND o.parent_order_id IS NULL AND o.deleted_at IS NULL",
             [order_id.to_string()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, Option<String>>(10)?, row.get::<_, String>(11)?, row.get::<_, i64>(12)?)),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, String>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, String>(8)?, row.get::<_, String>(9)?, row.get::<_, Option<String>>(10)?, row.get::<_, Option<String>>(11)?, row.get::<_, String>(12)?, row.get::<_, i64>(13)?)),
         ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::Forbidden)?;
         let lines = connection.prepare(
             "SELECT material_snapshot_json, quantity_decimal, unit, currency, unit_price_minor, line_total_minor FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id"
@@ -2466,6 +2476,7 @@ impl LocalAuthService {
         Ok(RequisitionDetailView {
             id: order_id,
             display_no,
+            formal_document_no,
             applicant_id: Uuid::parse_str(&applicant_id).map_err(|_| AuthError::Database)?,
             project_name,
             project_id: Uuid::parse_str(&project_id).map_err(|_| AuthError::Database)?,
@@ -2748,6 +2759,108 @@ impl LocalAuthService {
         )?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(views)
+    }
+
+    pub fn issue_owner_formal_order(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<FormalIssueView, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        self.require_active_scope_for_order(order_id, now)?;
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let (country_code, project_code, order_date, primary_currency, status, mode, issued): (
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<i64>,
+        ) = transaction
+            .query_row(
+                "SELECT c.business_code, p.business_code, o.order_date, o.primary_currency, o.workflow_status, o.procurement_mode, o.formally_issued_at FROM local_purchase_orders o JOIN local_countries c ON c.id = o.country_id JOIN local_projects p ON p.id = o.project_id WHERE o.id = ?1 AND o.parent_order_id IS NULL AND o.deleted_at IS NULL",
+                [order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .ok_or(AuthError::Forbidden)?;
+        if mode.as_deref() != Some("owner_self_purchase")
+            || !matches!(status.as_str(), "confirmed" | "approved")
+            || issued.is_some()
+        {
+            return Err(AuthError::Forbidden);
+        }
+        let valid_line_count: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1 AND owner_quote_source IS NOT NULL AND owner_source_unit_price_minor IS NOT NULL AND owner_locked_exchange_rate_decimal IS NOT NULL AND owner_converted_reference_unit_minor IS NOT NULL AND owner_markup_json IS NOT NULL AND owner_final_unit_price_minor IS NOT NULL AND ((currency = ?2 AND owner_locked_exchange_rate_decimal = '1') OR (currency <> ?2 AND EXISTS (SELECT 1 FROM local_exchange_rates r WHERE r.from_currency = local_purchase_order_items.currency AND r.to_currency = ?2 AND r.rate_decimal = local_purchase_order_items.owner_locked_exchange_rate_decimal AND r.effective_at <= ?3 AND r.deleted_at IS NULL)))",
+            params![order_id.to_string(), primary_currency, order_date],
+            |row| row.get(0),
+        ).map_err(|_| AuthError::Database)?;
+        let line_count: i64 = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if line_count == 0 || valid_line_count != line_count {
+            return Err(AuthError::InvalidInput);
+        }
+        let (installation_id, persisted_short_code, sequence): (String, String, i64) = transaction.query_row(
+            "SELECT installation_id, installation_short_code, next_formal_sequence FROM local_sync_state WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).map_err(|_| AuthError::Database)?;
+        let installation_uuid =
+            Uuid::parse_str(&installation_id).map_err(|_| AuthError::Database)?;
+        let short_code = if persisted_short_code.is_empty() {
+            installation_short_code(installation_uuid)
+        } else {
+            persisted_short_code
+        };
+        let date = order_date.replace('-', "");
+        if date.len() != 8 || !date.chars().all(|character| character.is_ascii_digit()) {
+            return Err(AuthError::InvalidInput);
+        }
+        let formal_document_no =
+            format!("{country_code}-{project_code}-{date}-OPA-{short_code}-{sequence}");
+        let snapshot = order_sync_payload(&transaction, order_id)?;
+        let issued_at = unix_seconds(now);
+        transaction.execute(
+            "UPDATE local_sync_state SET installation_short_code = ?1, next_formal_sequence = ?2 WHERE singleton = 1",
+            params![short_code, sequence + 1],
+        ).map_err(|_| AuthError::Database)?;
+        let changed = transaction.execute(
+            "UPDATE local_purchase_orders SET document_type = 'OPA', formal_document_no = ?2, formal_installation_id = ?3, formal_sequence = ?4, formally_issued_at = ?5, formal_snapshot_json = ?6, workflow_status = 'formally_issued', version = version + 1, updated_at = ?5 WHERE id = ?1 AND formally_issued_at IS NULL",
+            params![order_id.to_string(), formal_document_no, installation_id, sequence, issued_at, snapshot],
+        ).map_err(|_| AuthError::Database)?;
+        if changed != 1 {
+            return Err(AuthError::Forbidden);
+        }
+        append_order_audit(
+            &transaction,
+            order_id,
+            actor_id,
+            "formally_issued",
+            None,
+            Some(&status),
+            Some("formally_issued"),
+            now,
+        )?;
+        let payload = order_sync_payload(&transaction, order_id)?;
+        insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(FormalIssueView {
+            document_type: "OPA".into(),
+            formal_document_no,
+            formal_installation_id: installation_uuid,
+            formal_sequence: sequence,
+        })
     }
 
     pub fn set_procurement_mode(
@@ -5247,6 +5360,15 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn issue_owner_formal_order(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<super::FormalIssueView, CommandError> {
+        auth.issue_owner_formal_order(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn record_receipt(
         auth: State<'_, LocalAuthService>,
         input: super::RecordReceiptInput,
@@ -5780,6 +5902,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0043_exchange_rate_audit",
             include_str!("../migrations/0043_exchange_rate_audit.sql"),
+        ),
+        (
+            "0044_local_formal_issue",
+            include_str!("../migrations/0044_local_formal_issue.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -7042,10 +7168,21 @@ fn insert_local_sync_outbox(
     Ok(())
 }
 
+fn installation_short_code(installation_id: Uuid) -> String {
+    const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let mut value = installation_id.as_u128();
+    let mut output = [b'0'; 8];
+    for character in output.iter_mut().rev() {
+        *character = CROCKFORD[(value & 31) as usize];
+        value >>= 5;
+    }
+    String::from_utf8(output.to_vec()).expect("Crockford Base32 alphabet is UTF-8")
+}
+
 fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<String, AuthError> {
     let header = transaction
         .query_row(
-            "SELECT parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at, procurement_mode FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at, procurement_mode, document_type, formal_document_no, formal_installation_id, formal_sequence, formally_issued_at, formal_snapshot_json FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
             [order_id.to_string()],
             |row| Ok(serde_json::json!({
                 "parentOrderId": row.get::<_, Option<String>>(0)?,
@@ -7083,6 +7220,12 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
                 "selfApproved": row.get::<_, i64>(32)? != 0,
                 "supplierTermsCompletedAt": row.get::<_, Option<i64>>(33)?,
                 "procurementMode": row.get::<_, Option<String>>(34)?,
+                "documentType": row.get::<_, Option<String>>(35)?,
+                "formalDocumentNo": row.get::<_, Option<String>>(36)?,
+                "formalInstallationId": row.get::<_, Option<String>>(37)?,
+                "formalSequence": row.get::<_, Option<i64>>(38)?.map(|value| value.to_string()),
+                "formallyIssuedAt": row.get::<_, Option<i64>>(39)?,
+                "formalSnapshotJson": row.get::<_, Option<String>>(40)?,
             })),
         )
         .map_err(|_| AuthError::Database)?;
@@ -8843,6 +8986,75 @@ mod tests {
             ),
             Err(AuthError::InvalidInput)
         );
+        let issued = service.issue_owner_formal_order(order_id, now).unwrap();
+        assert_eq!(issued.document_type, "OPA");
+        assert!(issued.formal_document_no.contains("-OPA-"));
+        let connection = service.connection.lock().unwrap();
+        let issued_snapshot: (String, String, String, i64) = connection.query_row(
+            "SELECT workflow_status, formal_document_no, formal_snapshot_json, (SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1) FROM local_purchase_orders WHERE id = ?1",
+            [order_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(issued_snapshot.0, "formally_issued");
+        assert_eq!(issued_snapshot.1, issued.formal_document_no);
+        assert!(issued_snapshot.2.contains("ownerFinalUnitPriceMinor"));
+        assert!(issued_snapshot.3 > 0);
+        connection
+            .execute(
+                "UPDATE local_material_prices SET unit_price_minor = 1 WHERE id = ?1",
+                [price_id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE local_exchange_rates SET rate_decimal = '1' WHERE from_currency = 'CNY' AND to_currency = 'XOF'",
+                [],
+            )
+            .unwrap();
+        let frozen_snapshot: String = connection
+            .query_row(
+                "SELECT formal_snapshot_json FROM local_purchase_orders WHERE id = ?1",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(frozen_snapshot, issued_snapshot.2);
+        connection
+            .execute(
+                "UPDATE local_material_prices SET unit_price_minor = 1234 WHERE id = ?1",
+                [price_id.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE local_exchange_rates SET rate_decimal = '76.5' WHERE from_currency = 'CNY' AND to_currency = 'XOF'",
+                [],
+            )
+            .unwrap();
+        assert!(connection.execute("UPDATE local_purchase_orders SET formal_document_no = 'rewritten' WHERE id = ?1", [order_id.to_string()]).is_err());
+        assert!(connection.execute("UPDATE local_purchase_order_items SET owner_final_unit_price_minor = 1 WHERE id = ?1", [catalog_item_id.to_string()]).is_err());
+        drop(connection);
+        let missing_rate_order_id = Uuid::new_v4();
+        let missing_rate_item_id = Uuid::new_v4();
+        let connection = service.connection.lock().unwrap();
+        connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, procurement_mode, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'OP-MISSING-RATE', ?2, ?3, 'site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'pending_confirmation', 'confirmed', 'owner_self_purchase', 'normal', '2026-10-12', 'address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![missing_rate_order_id.to_string(), country_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), purchaser_id.to_string()]).unwrap();
+        connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, owner_quote_source, owner_source_unit_price_minor, owner_converted_reference_unit_minor, owner_markup_json, owner_final_unit_price_minor, created_at, updated_at) VALUES (?1, ?2, ?3, '{\"nameZh\":\"owner material\"}', 'XOF', '1', 'pcs', 0, 0, 0, 'manual_reference', 100, 100, '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', 100, 0, 0)", params![missing_rate_item_id.to_string(), missing_rate_order_id.to_string(), material_id.to_string()]).unwrap();
+        let outbox_before_missing_rate: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1",
+                [missing_rate_order_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(connection);
+        assert_eq!(
+            service.issue_owner_formal_order(missing_rate_order_id, now),
+            Err(AuthError::InvalidInput)
+        );
+        let connection = service.connection.lock().unwrap();
+        let missing_rate_result: (Option<String>, i64) = connection.query_row("SELECT formal_document_no, (SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1) FROM local_purchase_orders WHERE id = ?1", [missing_rate_order_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(missing_rate_result, (None, outbox_before_missing_rate));
+        drop(connection);
         let engineer_id = Uuid::new_v4();
         let draft_order_id = Uuid::new_v4();
         let draft_item_id = Uuid::new_v4();
@@ -11547,7 +11759,7 @@ mod tests {
         let migrated_order: (Option<String>, String, String, i64, String) = connection
             .query_row(
                 "SELECT procurement_mode, status, workflow_status, total_minor, display_no FROM local_purchase_orders WHERE id = ?1",
-                [order_id],
+                [&order_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .unwrap();
@@ -11555,6 +11767,22 @@ mod tests {
             migrated_order,
             (None, "draft".into(), "draft".into(), 0, "MIG-ORDER".into())
         );
+        let formal_columns: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('local_purchase_orders') WHERE name IN ('document_type', 'formal_document_no', 'formal_installation_id', 'formal_sequence', 'formally_issued_at', 'formal_snapshot_json')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(formal_columns, 6);
+        let formal_legacy: (String, Option<String>, Option<String>) = connection
+            .query_row(
+                "SELECT display_no, formal_document_no, formal_snapshot_json FROM local_purchase_orders WHERE id = ?1",
+                [&order_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(formal_legacy, ("MIG-ORDER".into(), None, None));
     }
 
     #[test]

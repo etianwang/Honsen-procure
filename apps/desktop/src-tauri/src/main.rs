@@ -68,6 +68,7 @@ fn main() {
             commands::create_rfq,
             commands::save_owner_purchase_pricing,
             commands::set_procurement_mode,
+            commands::issue_owner_formal_order,
             commands::record_receipt,
             commands::save_supplier_child_terms,
             commands::send_supplier_order,
