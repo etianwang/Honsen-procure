@@ -8,6 +8,7 @@ import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
 import { isDeepStrictEqual } from 'node:util'
 import type { Pool, PoolClient } from 'pg'
 import type { SyncStore } from './types.js'
+import { formalShortCode, parseFormalIssue } from './formal-issue.js'
 
 const globallyVisibleEntityTypes = [
   'country',
@@ -209,6 +210,27 @@ export class PostgresSyncStore implements SyncStore {
           eventId: input.event.eventId,
           status: 'validation_error',
           serverVersion: currentVersion,
+        }
+      }
+      if (input.event.entityType === 'purchase_order') {
+        const formal = await this.registerFormalIssue(client, input, current)
+        if (formal === 'validation_error') {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+        if (formal !== null) {
+          const result = {
+            eventId: input.event.eventId,
+            status: 'conflict' as const,
+            serverVersion: currentVersion,
+          }
+          await this.recordConflict(client, input, formal, result)
+          await client.query('COMMIT')
+          return result
         }
       }
 
@@ -520,6 +542,95 @@ export class PostgresSyncStore implements SyncStore {
     } finally {
       client.release()
     }
+  }
+
+  private async registerFormalIssue(
+    client: PoolClient,
+    input: { event: SyncEvent; installationId: string; actorId: string },
+    current: StoredEntity | undefined,
+  ): Promise<StoredEntity | 'validation_error' | null> {
+    const formal = parseFormalIssue(input.event.payload)
+    const existing = await client.query<{
+      document_type: string
+      formal_document_no: string
+      formal_installation_id: string
+      formal_sequence: string
+      matches_snapshot: boolean
+    }>(
+      `SELECT document_type, formal_document_no,
+         formal_installation_id::text AS formal_installation_id,
+         formal_sequence::text AS formal_sequence,
+         formal_snapshot_json = $2::jsonb AS matches_snapshot
+       FROM formal_issue_registry WHERE order_id = $1 FOR UPDATE`,
+      [
+        input.event.entityId,
+        formal && formal !== 'invalid' ? formal.snapshot : {},
+      ],
+    )
+    const prior = existing.rows[0]
+    if (formal === 'invalid')
+      return prior
+        ? (current ?? { version: '0', payload_json: {} })
+        : 'validation_error'
+    if (formal === null)
+      return prior ? (current ?? { version: '0', payload_json: {} }) : null
+    if (input.event.operation !== 'upsert')
+      return prior
+        ? (current ?? { version: '0', payload_json: {} })
+        : 'validation_error'
+    if (prior) {
+      return prior.document_type === formal.documentType &&
+        prior.formal_document_no === formal.documentNo &&
+        prior.formal_installation_id === formal.installationId &&
+        prior.formal_sequence === formal.sequence &&
+        prior.matches_snapshot
+        ? null
+        : (current ?? { version: '0', payload_json: {} })
+    }
+    if (current && current.payload_json.formalDocumentNo != null) return current
+    if (input.event.payload.workflowStatus !== 'formally_issued')
+      return 'validation_error'
+    const codes = await client.query<{
+      country_code: string
+      project_code: string
+    }>(
+      `SELECT c.business_code AS country_code, p.business_code AS project_code
+       FROM projects p JOIN countries c ON c.id = p.country_id
+       WHERE p.id = $1 AND c.id = $2`,
+      [formal.projectId, formal.countryId],
+    )
+    const code = codes.rows[0]
+    if (
+      !code ||
+      formal.documentNo !==
+        `${code.country_code}-${code.project_code}-${formal.orderDate.replaceAll('-', '')}-OPA-${formalShortCode(formal.installationId)}-${formal.sequence}`
+    )
+      return 'validation_error'
+    const inserted = await client.query(
+      `INSERT INTO formal_issue_registry
+         (order_id, document_type, formal_document_no, formal_installation_id,
+          formal_sequence, formal_snapshot_json)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT DO NOTHING RETURNING order_id`,
+      [
+        input.event.entityId,
+        formal.documentType,
+        formal.documentNo,
+        formal.installationId,
+        formal.sequence,
+        formal.snapshot,
+      ],
+    )
+    if (inserted.rowCount === 1) return null
+    const winner = await client.query<StoredEntity>(
+      `SELECT e.version, e.payload_json FROM formal_issue_registry r
+       JOIN sync_entities e ON e.entity_type = 'purchase_order' AND e.entity_id = r.order_id
+       WHERE r.formal_document_no = $1 OR
+         (r.formal_installation_id = $2 AND r.formal_sequence = $3)
+       LIMIT 1`,
+      [formal.documentNo, formal.installationId, formal.sequence],
+    )
+    return winner.rows[0] ?? { version: '0', payload_json: {} }
   }
 
   private async projectCountry(
