@@ -185,6 +185,68 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(stored.rows[0]?.payload_json.name).toBe('Field team')
   })
 
+  it('persists validated project defaults with replay and conflict retention', async () => {
+    const service = new SyncService(new PostgresSyncStore(pool!))
+    const entityId = randomUUID()
+    const cursor = (
+      await pool!.query<{ sequence: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
+      )
+    ).rows[0]!.sequence
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'project_defaults',
+      entityId,
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        projectId: entityId,
+        departmentTitle: 'Procurement',
+        companyAddress: 'Fixture address',
+        companyContact: 'Fixture contact',
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        defaultTaxTemplateId: null,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [event] }
+    const actor = { id: actorId, roles: ['administrator' as const] }
+    const first = await service.push(actor, request)
+    expect(first.results[0]).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await service.push(actor, request)).toEqual(first)
+    const pulled = await service.pull(
+      { id: actorId, roles: ['engineer'] },
+      { cursor, limit: 500 },
+    )
+    expect(
+      pulled.changes.filter((change) => change.entityId === entityId),
+    ).toHaveLength(1)
+    const conflict = await service.push(actor, {
+      deviceId: request.deviceId,
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, companyAddress: 'Changed address' },
+        },
+      ],
+    })
+    expect(conflict.results[0]).toMatchObject({
+      status: 'conflict',
+      serverVersion: 1,
+    })
+    const stored = await pool!.query<{
+      payload_json: { companyAddress: string }
+    }>(
+      "SELECT payload_json FROM sync_entities WHERE entity_type = 'project_defaults' AND entity_id = $1",
+      [entityId],
+    )
+    expect(stored.rows[0]?.payload_json.companyAddress).toBe('Fixture address')
+  })
+
   it('persists validated tax and exchange-rate events without losing conflicts', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const cursor = (

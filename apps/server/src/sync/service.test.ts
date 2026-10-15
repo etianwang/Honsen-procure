@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { SyncEvent } from '@honsen/shared'
 import { describe, expect, it } from 'vitest'
 import { SyncService } from './service.js'
 import type { SyncStore } from './types.js'
@@ -403,6 +404,77 @@ describe('SyncService', () => {
       invalid.results.every((result) => result.status === 'validation_error'),
     ).toBe(true)
     expect(store.pushed).toBe(3)
+  })
+
+  it('requires a valid project-default payload bound to its entity ID', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const event: SyncEvent = {
+      eventId: randomUUID(),
+      entityType: 'project_defaults',
+      entityId: projectId,
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        project_id: projectId,
+        department_title: 'Procurement',
+        company_address: 'Fixture address',
+        company_contact: 'Fixture contact',
+        default_currency: 'XOF',
+        default_language_pair: 'zh_fr',
+        default_tax_template_id: null,
+      },
+    }
+    const push = (
+      roles: ('engineer' | 'administrator' | 'super_administrator')[],
+      events: (typeof event)[],
+    ) =>
+      service.push(
+        { id: engineer.id, roles },
+        { deviceId: randomUUID(), events },
+      )
+    expect((await push(['engineer'], [event])).results[0]?.status).toBe(
+      'validation_error',
+    )
+    expect((await push(['administrator'], [event])).results[0]?.status).toBe(
+      'accepted',
+    )
+    const camel = {
+      ...event,
+      eventId: randomUUID(),
+      payload: {
+        projectId,
+        departmentTitle: 'Procurement',
+        companyAddress: 'Fixture address',
+        companyContact: 'Fixture contact',
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        defaultTaxTemplateId: null,
+      },
+    }
+    expect(
+      (await push(['super_administrator'], [camel])).results[0]?.status,
+    ).toBe('accepted')
+    const bad = await push(
+      ['administrator'],
+      [
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, project_id: randomUUID() },
+        },
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, company_address: '' },
+        },
+        { ...event, eventId: randomUUID(), operation: 'soft_delete' },
+      ],
+    )
+    expect(
+      bad.results.every((result) => result.status === 'validation_error'),
+    ).toBe(true)
+    expect(store.pushed).toBe(2)
   })
 
   it('rejects changing a used project country without mutation', async () => {

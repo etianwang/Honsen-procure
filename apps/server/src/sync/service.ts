@@ -1,5 +1,6 @@
 import {
   exchangeRateSchema,
+  projectDefaultsSchema,
   referenceMasterDataSchema,
   syncPullQuerySchema,
   syncPushRequestSchema,
@@ -103,6 +104,15 @@ export class SyncService {
         }).success
       )
     }
+    if (event.entityType === 'project_defaults') {
+      const payload = referencePayload(event.payload)
+      return (
+        event.operation === 'upsert' &&
+        actor.roles.some((role) => masterDataRoles.includes(role)) &&
+        payload.projectId === event.entityId &&
+        projectDefaultsSchema.safeParse(payload).success
+      )
+    }
     if (actor.roles.some((role) => procurementRoles.includes(role))) return true
     if (!actor.roles.includes('engineer')) return false
     if (
@@ -189,6 +199,13 @@ function referencePayload(
     fromCurrency: payload.fromCurrency ?? payload.from_currency,
     toCurrency: payload.toCurrency ?? payload.to_currency,
     rateDecimal: payload.rateDecimal ?? payload.rate_decimal,
+    departmentTitle: payload.departmentTitle ?? payload.department_title,
+    companyAddress: payload.companyAddress ?? payload.company_address,
+    companyContact: payload.companyContact ?? payload.company_contact,
+    defaultTaxTemplateId:
+      payload.defaultTaxTemplateId !== undefined
+        ? payload.defaultTaxTemplateId
+        : payload.default_tax_template_id,
   }
 }
 

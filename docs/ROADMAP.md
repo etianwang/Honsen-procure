@@ -28,6 +28,8 @@ The 2026-10-15 T04 local organization editor checkpoint and server organization-
 
 The follow-on T04 tax/exchange server sync validation checkpoint passed schema/permission failure tests and isolated PostgreSQL idempotency/Pull/conflict tests. Tax/rate maintenance UI, deployed data and native cross-device acceptance remain open; milestone statuses do not change.
 
+Project-default Push now also has schema, role and project-identity checks with isolated PostgreSQL replay/Pull/conflict evidence. This closes only a transport validation gap; T04 deployment and milestone acceptance remain open.
+
 The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 
 | Milestone | Acceptance      | Contributing tasks (reverse mapping is in BUILD-TASKS) | Outstanding acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
