@@ -26,7 +26,9 @@ class AuthFixture implements AuthStore {
   }
 
   async findActiveSession(tokenHash: string) {
-    return this.sessions.includes(tokenHash) ? account : null
+    return this.sessions.includes(tokenHash)
+      ? { ...account, installationId: '00000000-0000-4000-8000-000000000099' }
+      : null
   }
 
   async registerFailedLogin() {}
@@ -39,9 +41,11 @@ class AuthFixture implements AuthStore {
 
 class SyncFixture implements SyncStore {
   pushed = 0
+  lastInstallationId: string | null = null
 
   async pushEvent(input: Parameters<SyncStore['pushEvent']>[0]) {
     this.pushed += 1
+    this.lastInstallationId = input.installationId
     return {
       eventId: input.event.eventId,
       status: 'accepted' as const,
@@ -201,6 +205,9 @@ describe('sync API', () => {
     expect(accepted.statusCode).toBe(200)
     expect(accepted.json().results[0].status).toBe('accepted')
     expect(syncStore.pushed).toBe(1)
+    expect(syncStore.lastInstallationId).toBe(
+      '00000000-0000-4000-8000-000000000099',
+    )
     await app.close()
   })
 })

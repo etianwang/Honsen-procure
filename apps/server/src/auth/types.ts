@@ -11,9 +11,16 @@ export type LoginAccount = {
   requiresPasswordChange: boolean
 }
 
+export type AuthenticatedAccount = LoginAccount & {
+  installationId: string
+}
+
 export type AuthStore = {
   findAccountByUsername(username: string): Promise<LoginAccount | null>
-  findActiveSession(tokenHash: string, now: Date): Promise<LoginAccount | null>
+  findActiveSession(
+    tokenHash: string,
+    now: Date,
+  ): Promise<AuthenticatedAccount | null>
   registerFailedLogin(accountId: string, now: Date): Promise<void>
   registerSuccessfulLogin(accountId: string): Promise<void>
   createSession(input: {

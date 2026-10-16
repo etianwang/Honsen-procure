@@ -7,6 +7,7 @@ import type { SyncStore } from './types.js'
 const engineer = {
   id: '00000000-0000-4000-8000-000000000001',
   roles: ['engineer'] as const,
+  installationId: '00000000-0000-4000-8000-000000000020',
 }
 const projectId = '00000000-0000-4000-8000-000000000002'
 const departmentId = '00000000-0000-4000-8000-000000000011'
@@ -14,6 +15,7 @@ const teamId = '00000000-0000-4000-8000-000000000012'
 
 class FixtureStore implements SyncStore {
   pushed = 0
+  lastPush: Parameters<SyncStore['pushEvent']>[0] | null = null
   bound = true
   projectInUse = false
   compatibleTax = false
@@ -27,6 +29,7 @@ class FixtureStore implements SyncStore {
 
   async pushEvent(input: Parameters<SyncStore['pushEvent']>[0]) {
     this.pushed += 1
+    this.lastPush = input
     return {
       eventId: input.event.eventId,
       status: 'accepted' as const,
@@ -217,6 +220,26 @@ describe('SyncService', () => {
     expect(store.pushed).toBe(1)
   })
 
+  it('binds a pushed event to the authenticated session installation, not the request device', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const trustedInstallationId = '00000000-0000-4000-8000-000000000021'
+
+    await service.push(
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: trustedInstallationId,
+      },
+      {
+        deviceId: '00000000-0000-4000-8000-000000000022',
+        events: [purchaseOrderEvent()],
+      },
+    )
+
+    expect(store.lastPush?.installationId).toBe(trustedInstallationId)
+  })
+
   it('rejects an engineer attempt to write another applicant order without mutation', async () => {
     const store = new FixtureStore()
     const service = new SyncService(store)
@@ -296,7 +319,11 @@ describe('SyncService', () => {
     const store = new FixtureStore()
     const service = new SyncService(store)
     const response = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: engineer.installationId,
+      },
       {
         deviceId: '00000000-0000-4000-8000-000000000005',
         events: [
@@ -319,7 +346,11 @@ describe('SyncService', () => {
     const store = new FixtureStore()
     const service = new SyncService(store)
     const response = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: engineer.installationId,
+      },
       {
         deviceId: '00000000-0000-4000-8000-000000000005',
         events: [
@@ -651,7 +682,11 @@ describe('SyncService', () => {
     store.project = { country_id: '00000000-0000-4000-8000-000000000011' }
     const service = new SyncService(store)
     const response = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: engineer.installationId,
+      },
       {
         deviceId: '00000000-0000-4000-8000-000000000005',
         events: [

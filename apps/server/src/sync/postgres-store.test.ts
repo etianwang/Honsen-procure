@@ -3613,6 +3613,24 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     })
   })
 
+  it('does not return an event result to a different authenticated origin', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const event = { eventId: randomUUID(), entityType: 'material' as const, entityId: randomUUID(), operation: 'upsert' as const, baseVersion: 0, payload: { nameZh: 'private origin' } }
+    const installationId = randomUUID()
+    await expect(store.pushEvent({ event, installationId, actorId })).resolves.toMatchObject({ status: 'accepted' })
+    await expect(store.pushEvent({ event, installationId: randomUUID(), actorId: otherActorId })).resolves.toEqual({ eventId: event.eventId, status: 'validation_error', serverVersion: null })
+  })
+
+  it('fails closed for a quarantined legacy event without rewriting its origin', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const event = { eventId: randomUUID(), entityType: 'material' as const, entityId: randomUUID(), operation: 'upsert' as const, baseVersion: 0, payload: { nameZh: 'legacy origin' } }
+    const installationId = randomUUID()
+    await store.pushEvent({ event, installationId, actorId })
+    await pool!.query(`UPDATE sync_events SET origin_account_id = NULL, origin_installation_id = NULL, origin_status = 'legacy_unverified', origin_attested_at = NULL WHERE event_id = $1`, [event.eventId])
+    await pool!.query(`INSERT INTO sync_origin_quarantine (source_table, source_id, reason) VALUES ('sync_events', $1, 'fixture legacy origin')`, [event.eventId])
+    await expect(store.pushEvent({ event, installationId, actorId })).resolves.toEqual({ eventId: event.eventId, status: 'validation_error', serverVersion: null })
+  })
+
   it('pulls supplier and price changes only from an engineer’s bound countries', async () => {
     const store = new PostgresSyncStore(pool!)
     const [countryA, countryB, projectA, projectB] = Array.from(
