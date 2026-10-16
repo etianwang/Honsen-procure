@@ -1,7 +1,7 @@
 # T01–T10 功能实现独立审计
 
 审计日期：2026-10-16（第一轮检查点）  
-审计对象：`main` (`5139cc8`) 及 `git worktree list` 枚举的全部 25 个 worktree。  
+审计对象：`main` (`5139cc8`) 及 `git worktree list` 枚举的全部 27 个 worktree。  
 性质：只读功能审计；本文件是审计 worktree `codex/t01-t10-feature-audit` 的文档产物，不修改业务代码。
 
 ## 审计口径与证据边界
@@ -59,7 +59,7 @@
 ## 第一轮工作树事实
 
 1. 受审主线为 `main@5139cc8`；当前用户 worktree 在 `codex/t04-unit-management@74365f0`，并有未跟踪 `.honsen-e2e/` 与 `.honsen-native-e2e/`，本审计未触碰。
-2. 已枚举 25 个 worktree。关键候选：`6a006ed`（本地正式签发）、`cbc129a`（本地付款）、`5d93369`（桌面整合）、`e37902f`（formal server）、`514747d`（P1 origin binding）、`077148b`（格式修复）、`70bd54d`（协调检查点）。
+2. 已枚举 27 个 worktree。关键候选：`6a006ed`（本地正式签发）、`cbc129a`（本地付款）、`5d93369`（桌面整合）、`e37902f`（formal server）、`514747d`（P1 origin binding）、`077148b`（格式修复）、`70bd54d`（协调检查点）。
 3. `5d93369` 不是 `70bd54d` 的祖先；`514747d` 也不是。`c82fd62` 试图合并 P1，但其 worktree 留有未解决的 server/doc 冲突；不能称为可执行候选。
 4. 现存 QA 记录明确：`5d93369` 的 Rust 52/52、目标 Playwright 12/12 等局部检查通过，但 `npm run format:check` 因 forensic Markdown 失败；因此整合候选为 **QA_FAILED**，不应纳入已验收功能。
 
