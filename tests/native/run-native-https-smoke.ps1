@@ -6,7 +6,8 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $runId = "native-smoke-$((Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))"
 $qaRoot = Join-Path $repo '.honsen-native-qa'
 $logRoot = Join-Path $repo 'test-results'
-$profile = Join-Path $qaRoot "$runId.test.sqlite"
+$profileA = Join-Path $qaRoot "$runId-account-a.test.sqlite"
+$profileB = Join-Path $qaRoot "$runId-account-b.test.sqlite"
 $result = Join-Path $qaRoot "$runId.test.json"
 $pfx = Join-Path $qaRoot "$runId.pfx"
 $cer = Join-Path $qaRoot "$runId.cer"
@@ -80,14 +81,18 @@ try {
   Push-Location $desktop
   try {
     cargo build --bin honsen-procure-test-profile --bin HonsenProcure
-    $env:HONSEN_PROCURE_TEST_DB_PATH = $profile
+    $env:HONSEN_PROCURE_TEST_DB_PATH = $profileA
     & (Join-Path $desktop 'target\debug\honsen-procure-test-profile.exe') seed
+    $env:HONSEN_PROCURE_TEST_DB_PATH = $profileB
+    & (Join-Path $desktop 'target\debug\honsen-procure-test-profile.exe') seed
+    $env:HONSEN_PROCURE_TEST_DB_PATH = $profileA
     $env:HONSEN_PROCURE_PROFILE = 'test'
     $env:HONSEN_PROCURE_TEST_TLS_CA_PEM = $pem
     $env:HONSEN_SYNC_API_BASE_URL = 'https://localhost:3443'
-    $env:HONSEN_PROCURE_NATIVE_SMOKE = 'online-login'
-    $env:HONSEN_PROCURE_NATIVE_SMOKE_USERNAME = 'engineer-a'
-    $env:HONSEN_PROCURE_NATIVE_SMOKE_PASSWORD = $env:HONSEN_TEST_ENGINEER_A_PASSWORD
+    $env:HONSEN_PROCURE_NATIVE_SMOKE = 'ab-login-switch'
+    $env:HONSEN_PROCURE_NATIVE_AB_SECOND_DB_PATH = $profileB
+    $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD = $env:HONSEN_TEST_ENGINEER_A_PASSWORD
+    $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD = $env:HONSEN_TEST_ENGINEER_B_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
     & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
     if ($LASTEXITCODE -ne 0) { throw "native HonsenProcure.exe smoke failed; inspect $nativeLog" }
@@ -95,10 +100,10 @@ try {
     Pop-Location
   }
   $smoke = Get-Content -Raw $result | ConvertFrom-Json
-  if ($smoke.mode -ne 'online-login' -or $smoke.username -ne 'engineer-a') {
+  if ($smoke.mode -ne 'ab-login-switch' -or $smoke.accountALogin -ne 'PASS' -or $smoke.accountBLogin -ne 'PASS' -or $smoke.accountSwitch -ne 'PASS' -or $smoke.oldTokenRejected -ne 'PASS' -or $smoke.logoutBlocksClient -ne 'PASS') {
     throw "native smoke result is invalid: $result"
   }
-  Write-Output "PASS native HonsenProcure.exe HTTPS online-login smoke: $result"
+  Write-Output "PASS native HonsenProcure.exe HTTPS A/B login-switch smoke: $result"
 } finally {
   if ($server -and !$server.HasExited) {
     Stop-Process -Id $server.Id -Force

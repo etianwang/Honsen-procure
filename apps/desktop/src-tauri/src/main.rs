@@ -1,4 +1,4 @@
-use honsen_materials_desktop_core::{LocalAuthService, commands};
+use honsen_materials_desktop_core::{AuthError, AuthenticatedSession, LocalAuthService, commands};
 use std::{env, fs, path::PathBuf, time::SystemTime};
 use tauri::Manager;
 
@@ -33,10 +33,15 @@ fn profile_path() -> Result<(PathBuf, bool), String> {
 fn main() {
     let (database_path, is_test_profile) =
         profile_path().unwrap_or_else(|message| panic!("{message}"));
-    let native_smoke =
-        env::var("HONSEN_PROCURE_NATIVE_SMOKE").ok().as_deref() == Some("online-login");
-    if native_smoke && !is_test_profile {
+    let native_smoke = env::var("HONSEN_PROCURE_NATIVE_SMOKE").ok();
+    if native_smoke.is_some() && !is_test_profile {
         panic!("native smoke requires HONSEN_PROCURE_PROFILE=test");
+    }
+    if !matches!(
+        native_smoke.as_deref(),
+        None | Some("online-login") | Some("ab-login-switch")
+    ) {
+        panic!("unknown native smoke mode");
     }
     fs::create_dir_all(database_path.parent().expect("database path has a parent"))
         .expect("create local SQLite directory");
@@ -47,8 +52,15 @@ fn main() {
     }
     .expect("open local SQLite database");
 
-    if native_smoke {
-        run_native_online_login_smoke(&auth).expect("run native online login smoke");
+    if let Some(mode) = native_smoke.as_deref() {
+        match mode {
+            "online-login" => {
+                run_native_online_login_smoke(&auth).expect("run native online login smoke")
+            }
+            "ab-login-switch" => run_native_ab_login_switch_smoke(&auth, &database_path)
+                .expect("run native A/B login switch smoke"),
+            _ => unreachable!("validated native smoke mode"),
+        }
         return;
     }
 
@@ -135,20 +147,7 @@ fn run_native_online_login_smoke(auth: &LocalAuthService) -> Result<(), String> 
     let password = required_test_value("HONSEN_PROCURE_NATIVE_SMOKE_PASSWORD")?;
     let result_path = test_result_path()?;
     let now = SystemTime::now();
-    let local_captcha = auth.issue_captcha(now).map_err(|error| error.to_string())?;
-    let cloud_captcha = tauri::async_runtime::block_on(auth.issue_cloud_captcha())
-        .map_err(|error| error.to_string())?;
-    let cloud_answer = arithmetic_answer(&cloud_captcha.question)?.to_string();
-    let session = tauri::async_runtime::block_on(auth.online_login(
-        &username,
-        &password,
-        local_captcha.id,
-        arithmetic_answer(&local_captcha.question)?,
-        cloud_captcha.id,
-        &cloud_answer,
-        now,
-    ))
-    .map_err(|error| error.to_string())?;
+    let session = native_online_login(auth, &username, &password, now)?;
     fs::write(
         result_path,
         serde_json::json!({
@@ -159,6 +158,96 @@ fn run_native_online_login_smoke(auth: &LocalAuthService) -> Result<(), String> 
         .to_string(),
     )
     .map_err(|_| "cannot write native smoke result".to_owned())
+}
+
+fn run_native_ab_login_switch_smoke(
+    account_a: &LocalAuthService,
+    account_a_path: &PathBuf,
+) -> Result<(), String> {
+    let account_b_path = PathBuf::from(required_test_value(
+        "HONSEN_PROCURE_NATIVE_AB_SECOND_DB_PATH",
+    )?);
+    if !account_b_path.is_absolute()
+        || !account_b_path.to_string_lossy().ends_with(".test.sqlite")
+        || account_b_path == *account_a_path
+    {
+        return Err(
+            "native A/B second database must be a distinct absolute .test.sqlite path".into(),
+        );
+    }
+    let account_b = LocalAuthService::open_test_path(
+        account_b_path
+            .to_str()
+            .ok_or_else(|| "native A/B second database path must be UTF-8".to_owned())?,
+    )
+    .map_err(|error| error.to_string())?;
+    let engineer_a_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD")?;
+    let engineer_b_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+
+    let account_a_session =
+        native_online_login(account_a, "engineer-a", &engineer_a_password, now)?;
+    let account_b_session =
+        native_online_login(&account_b, "engineer-b", &engineer_b_password, now)?;
+    let switched_session =
+        native_online_login(&account_b, "engineer-a", &engineer_a_password, now)?;
+    if account_a_session.username != "engineer-a"
+        || account_b_session.username != "engineer-b"
+        || switched_session.username != "engineer-a"
+    {
+        return Err("native A/B login returned an unexpected account".into());
+    }
+    if !matches!(
+        tauri::async_runtime::block_on(account_a.refresh_authorization_https(now)),
+        Err(AuthError::NoActiveSession)
+    ) {
+        return Err(
+            "previous account A token was not rejected after account B switched to A".into(),
+        );
+    }
+    account_b.lock().map_err(|error| error.to_string())?;
+    if !matches!(
+        tauri::async_runtime::block_on(account_b.refresh_authorization_https(now)),
+        Err(AuthError::NoActiveSession)
+    ) {
+        return Err("logged-out account B retained an online session".into());
+    }
+    fs::write(
+        result_path,
+        serde_json::json!({
+            "mode": "ab-login-switch",
+            "accountALogin": "PASS",
+            "accountBLogin": "PASS",
+            "accountSwitch": "PASS",
+            "oldTokenRejected": "PASS",
+            "logoutBlocksClient": "PASS",
+        })
+        .to_string(),
+    )
+    .map_err(|_| "cannot write native A/B smoke result".to_owned())
+}
+
+fn native_online_login(
+    auth: &LocalAuthService,
+    username: &str,
+    password: &str,
+    now: SystemTime,
+) -> Result<AuthenticatedSession, String> {
+    let local_captcha = auth.issue_captcha(now).map_err(|error| error.to_string())?;
+    let cloud_captcha = tauri::async_runtime::block_on(auth.issue_cloud_captcha())
+        .map_err(|error| error.to_string())?;
+    let cloud_answer = arithmetic_answer(&cloud_captcha.question)?.to_string();
+    tauri::async_runtime::block_on(auth.online_login(
+        username,
+        password,
+        local_captcha.id,
+        arithmetic_answer(&local_captcha.question)?,
+        cloud_captcha.id,
+        &cloud_answer,
+        now,
+    ))
+    .map_err(|error| error.to_string())
 }
 
 fn required_test_value(name: &str) -> Result<String, String> {

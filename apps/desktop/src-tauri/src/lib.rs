@@ -1032,20 +1032,20 @@ impl CredentialVault for MemoryCredentialVault {
 }
 
 struct OsCredentialVault {
-    verifier_service: &'static str,
-    sync_service: &'static str,
+    verifier_service: String,
+    sync_service: String,
 }
 
 impl CredentialVault for OsCredentialVault {
     fn save_verifier(&self, account_id: Uuid, verifier: &str) -> Result<(), AuthError> {
-        Entry::new(self.verifier_service, &account_id.to_string())
+        Entry::new(&self.verifier_service, &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?
             .set_password(verifier)
             .map_err(|_| AuthError::SecureStorage)
     }
 
     fn load_verifier(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
-        let entry = Entry::new(self.verifier_service, &account_id.to_string())
+        let entry = Entry::new(&self.verifier_service, &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -1055,14 +1055,14 @@ impl CredentialVault for OsCredentialVault {
     }
 
     fn save_sync_token(&self, account_id: Uuid, token: &str) -> Result<(), AuthError> {
-        Entry::new(self.sync_service, &account_id.to_string())
+        Entry::new(&self.sync_service, &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?
             .set_password(token)
             .map_err(|_| AuthError::SecureStorage)
     }
 
     fn load_sync_token(&self, account_id: Uuid) -> Result<Option<String>, AuthError> {
-        let entry = Entry::new(self.sync_service, &account_id.to_string())
+        let entry = Entry::new(&self.sync_service, &account_id.to_string())
             .map_err(|_| AuthError::SecureStorage)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -1095,6 +1095,14 @@ fn test_profile_accounts() -> [(Uuid, &'static str, Vec<Role>, &'static str); 3]
     ]
 }
 
+fn test_profile_credential_services(path: &Path) -> (String, String) {
+    let profile_hash = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
+    (
+        format!("Honsen Procure test offline verifier {profile_hash}"),
+        format!("Honsen Procure test sync session {profile_hash}"),
+    )
+}
+
 pub struct LocalAuthService {
     connection: Mutex<Connection>,
     media_directory: PathBuf,
@@ -1118,8 +1126,8 @@ impl LocalAuthService {
         Self::open(
             Connection::open(path).map_err(|_| AuthError::Database)?,
             Box::new(OsCredentialVault {
-                verifier_service: "HONSEN Materials offline verifier",
-                sync_service: "HONSEN Procure sync session",
+                verifier_service: "HONSEN Materials offline verifier".into(),
+                sync_service: "HONSEN Procure sync session".into(),
             }),
             Path::new(path).with_extension("media"),
             None,
@@ -1130,11 +1138,12 @@ impl LocalAuthService {
         if !Path::new(path).is_absolute() || !path.ends_with(".test.sqlite") {
             return Err(AuthError::InvalidInput);
         }
+        let (verifier_service, sync_service) = test_profile_credential_services(Path::new(path));
         Self::open(
             Connection::open(path).map_err(|_| AuthError::Database)?,
             Box::new(OsCredentialVault {
-                verifier_service: "Honsen Procure test offline verifier",
-                sync_service: "Honsen Procure test sync session",
+                verifier_service,
+                sync_service,
             }),
             Path::new(path).with_extension("media"),
             test_tls_root_from_path(
@@ -1197,8 +1206,11 @@ impl LocalAuthService {
         if !path.is_absolute() || !path.to_string_lossy().ends_with(".test.sqlite") {
             return Err(AuthError::InvalidInput);
         }
+        let (verifier_service, sync_service) = test_profile_credential_services(path);
         for (id, _, _, _) in test_profile_accounts() {
             for service in [
+                verifier_service.as_str(),
+                sync_service.as_str(),
                 "Honsen Procure test offline verifier",
                 "Honsen Procure test sync session",
             ] {
@@ -9669,6 +9681,14 @@ mod tests {
         assert_eq!(
             test_tls_root_from_path(Some(PathBuf::from("qa-root.pem"))).unwrap_err(),
             AuthError::InvalidInput,
+        );
+    }
+
+    #[test]
+    fn test_profile_credential_services_are_path_scoped() {
+        assert_ne!(
+            test_profile_credential_services(Path::new(r"C:\\qa\\a.test.sqlite")),
+            test_profile_credential_services(Path::new(r"C:\\qa\\b.test.sqlite")),
         );
     }
 
