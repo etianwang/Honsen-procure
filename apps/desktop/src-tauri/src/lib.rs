@@ -1101,6 +1101,7 @@ pub struct LocalAuthService {
     captcha: Mutex<Option<LocalCaptcha>>,
     online_session_account: Mutex<Option<Uuid>>,
     credential_vault: Box<dyn CredentialVault>,
+    test_tls_root: Option<reqwest::Certificate>,
 }
 
 impl LocalAuthService {
@@ -1109,6 +1110,7 @@ impl LocalAuthService {
             Connection::open_in_memory().map_err(|_| AuthError::Database)?,
             Box::new(MemoryCredentialVault::new()),
             std::env::temp_dir().join(format!("honsen-materials-{}", Uuid::new_v4())),
+            None,
         )
     }
 
@@ -1120,6 +1122,7 @@ impl LocalAuthService {
                 sync_service: "HONSEN Procure sync session",
             }),
             Path::new(path).with_extension("media"),
+            None,
         )
     }
 
@@ -1134,6 +1137,9 @@ impl LocalAuthService {
                 sync_service: "Honsen Procure test sync session",
             }),
             Path::new(path).with_extension("media"),
+            test_tls_root_from_path(
+                std::env::var_os("HONSEN_PROCURE_TEST_TLS_CA_PEM").map(PathBuf::from),
+            )?,
         )
     }
 
@@ -1220,6 +1226,7 @@ impl LocalAuthService {
             Connection::open(path).map_err(|_| AuthError::Database)?,
             Box::new(MemoryCredentialVault::new()),
             Path::new(path).with_extension("media"),
+            None,
         )
     }
 
@@ -1227,6 +1234,7 @@ impl LocalAuthService {
         mut connection: Connection,
         credential_vault: Box<dyn CredentialVault>,
         media_directory: PathBuf,
+        test_tls_root: Option<reqwest::Certificate>,
     ) -> Result<Self, AuthError> {
         connection
             .pragma_update(None, "foreign_keys", "ON")
@@ -1238,7 +1246,19 @@ impl LocalAuthService {
             captcha: Mutex::new(None),
             online_session_account: Mutex::new(None),
             credential_vault,
+            test_tls_root,
         })
+    }
+
+    fn https_client(&self) -> Result<reqwest::Client, AuthError> {
+        let builder = reqwest::Client::builder()
+            .https_only(true)
+            .timeout(Duration::from_secs(20));
+        let builder = match &self.test_tls_root {
+            Some(certificate) => builder.add_root_certificate(certificate.clone()),
+            None => builder,
+        };
+        builder.build().map_err(|_| AuthError::SyncTransport)
     }
 
     pub fn cache_verified_account(
@@ -1327,11 +1347,8 @@ impl LocalAuthService {
 
     pub async fn issue_cloud_captcha(&self) -> Result<CloudCaptchaChallenge, AuthError> {
         let endpoint = cloud_auth_endpoint("captcha")?;
-        let response = reqwest::Client::builder()
-            .https_only(true)
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|_| AuthError::SyncTransport)?
+        let response = self
+            .https_client()?
             .get(endpoint)
             .send()
             .await
@@ -1378,7 +1395,7 @@ impl LocalAuthService {
             )
             .map_err(|_| AuthError::Database)?;
         let endpoint = cloud_auth_endpoint("login")?;
-        let response = reqwest::Client::builder().https_only(true).timeout(Duration::from_secs(20)).build().map_err(|_| AuthError::SyncTransport)?
+        let response = self.https_client()?
             .post(endpoint).header("x-installation-id", installation_id)
             .json(&serde_json::json!({"username": username, "password": password, "captchaId": cloud_captcha_id, "captchaAnswer": cloud_captcha_answer}))
             .send().await.map_err(|_| AuthError::SyncTransport)?;
@@ -5137,11 +5154,8 @@ impl LocalAuthService {
         if self.require_online_sync_session(now)? != account_id {
             return Err(AuthError::SyncAccountBoundary);
         }
-        let response = reqwest::Client::builder()
-            .https_only(true)
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|_| AuthError::SyncTransport)?
+        let response = self
+            .https_client()?
             .post(endpoint)
             .bearer_auth(token)
             .json(&serde_json::json!({ "deviceId": installation_id, "events": request_events }))
@@ -5185,11 +5199,7 @@ impl LocalAuthService {
         let mut cursor = self.pull_cursor_for_account(account_id)?;
         self.ensure_active_sync_account(account_id)?;
         let endpoint = sync_pull_endpoint()?;
-        let client = reqwest::Client::builder()
-            .https_only(true)
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|_| AuthError::SyncTransport)?;
+        let client = self.https_client()?;
         let mut applied_count = 0;
         loop {
             if self.require_online_sync_session(now)? != account_id {
@@ -5394,11 +5404,8 @@ impl LocalAuthService {
             .load_sync_token(account_id)?
             .ok_or(AuthError::NoActiveSession)?;
         let endpoint = authorization_context_endpoint()?;
-        let response = reqwest::Client::builder()
-            .https_only(true)
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|_| AuthError::SyncTransport)?
+        let response = self
+            .https_client()?
             .get(endpoint)
             .bearer_auth(token)
             .send()
@@ -5436,11 +5443,8 @@ impl LocalAuthService {
     ) -> Result<Vec<CloudAuthorizationScope>, AuthError> {
         let token = self.authorization_management_token(now)?;
         let endpoint = authorization_binding_endpoint(account_id)?;
-        let response = reqwest::Client::builder()
-            .https_only(true)
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|_| AuthError::SyncTransport)?
+        let response = self
+            .https_client()?
             .get(endpoint)
             .bearer_auth(token)
             .send()
@@ -5470,11 +5474,7 @@ impl LocalAuthService {
     ) -> Result<(), AuthError> {
         let token = self.authorization_management_token(now)?;
         let endpoint = authorization_binding_endpoint(account_id)?;
-        let client = reqwest::Client::builder()
-            .https_only(true)
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|_| AuthError::SyncTransport)?;
+        let client = self.https_client()?;
         let request = if revoke {
             client.delete(endpoint)
         } else {
@@ -5511,11 +5511,8 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<(), AuthError> {
         let token = self.authorization_management_token(now)?;
-        let response = reqwest::Client::builder()
-            .https_only(true)
-            .timeout(Duration::from_secs(20))
-            .build()
-            .map_err(|_| AuthError::SyncTransport)?
+        let response = self
+            .https_client()?
             .patch(authorization_binding_endpoint(account_id)?)
             .bearer_auth(token)
             .json(&replacement)
@@ -7986,6 +7983,21 @@ fn api_endpoint_from(value: &str, path: &str) -> Result<reqwest::Url, AuthError>
     Ok(endpoint)
 }
 
+fn test_tls_root_from_path(
+    path: Option<PathBuf>,
+) -> Result<Option<reqwest::Certificate>, AuthError> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if !path.is_absolute() || path.extension().is_none_or(|extension| extension != "pem") {
+        return Err(AuthError::InvalidInput);
+    }
+    let pem = fs::read(path).map_err(|_| AuthError::InvalidInput)?;
+    reqwest::Certificate::from_pem(&pem)
+        .map(Some)
+        .map_err(|_| AuthError::InvalidInput)
+}
+
 fn rfq_sync_payload(transaction: &Transaction<'_>, rfq_id: Uuid) -> Result<String, AuthError> {
     let (source_id, supplier_id, supplier_snapshot, display_no, currency, status, project_id):
         (String, String, String, String, String, String, String) = transaction.query_row(
@@ -8813,6 +8825,7 @@ mod tests {
                 Connection::open(&path).unwrap(),
                 Box::new(MemoryCredentialVault::new()),
                 path.with_extension("media"),
+                None,
             )
             .unwrap();
             for engineer in [&first, &second] {
@@ -8926,6 +8939,7 @@ mod tests {
                 Connection::open(&path).unwrap(),
                 Box::new(MemoryCredentialVault::new()),
                 path.with_extension("media"),
+                None,
             )
             .unwrap();
             service
@@ -9646,6 +9660,15 @@ mod tests {
         assert_eq!(
             sync_endpoint_from("https://user:secret@sync.example.test", "push").unwrap_err(),
             AuthError::SyncTransport,
+        );
+    }
+
+    #[test]
+    fn test_tls_root_requires_an_absolute_pem() {
+        assert!(test_tls_root_from_path(None).unwrap().is_none());
+        assert_eq!(
+            test_tls_root_from_path(Some(PathBuf::from("qa-root.pem"))).unwrap_err(),
+            AuthError::InvalidInput,
         );
     }
 

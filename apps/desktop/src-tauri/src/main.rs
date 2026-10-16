@@ -1,5 +1,5 @@
 use honsen_materials_desktop_core::{LocalAuthService, commands};
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf, time::SystemTime};
 use tauri::Manager;
 
 fn profile_path() -> Result<(PathBuf, bool), String> {
@@ -33,6 +33,11 @@ fn profile_path() -> Result<(PathBuf, bool), String> {
 fn main() {
     let (database_path, is_test_profile) =
         profile_path().unwrap_or_else(|message| panic!("{message}"));
+    let native_smoke =
+        env::var("HONSEN_PROCURE_NATIVE_SMOKE").ok().as_deref() == Some("online-login");
+    if native_smoke && !is_test_profile {
+        panic!("native smoke requires HONSEN_PROCURE_PROFILE=test");
+    }
     fs::create_dir_all(database_path.parent().expect("database path has a parent"))
         .expect("create local SQLite directory");
     let auth = if is_test_profile {
@@ -41,6 +46,11 @@ fn main() {
         LocalAuthService::open_path(database_path.to_str().expect("UTF-8 database path"))
     }
     .expect("open local SQLite database");
+
+    if native_smoke {
+        run_native_online_login_smoke(&auth).expect("run native online login smoke");
+        return;
+    }
 
     tauri::Builder::default()
         .manage(auth)
@@ -118,4 +128,65 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("run Honsen Procure desktop");
+}
+
+fn run_native_online_login_smoke(auth: &LocalAuthService) -> Result<(), String> {
+    let username = required_test_value("HONSEN_PROCURE_NATIVE_SMOKE_USERNAME")?;
+    let password = required_test_value("HONSEN_PROCURE_NATIVE_SMOKE_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+    let local_captcha = auth.issue_captcha(now).map_err(|error| error.to_string())?;
+    let cloud_captcha = tauri::async_runtime::block_on(auth.issue_cloud_captcha())
+        .map_err(|error| error.to_string())?;
+    let cloud_answer = arithmetic_answer(&cloud_captcha.question)?.to_string();
+    let session = tauri::async_runtime::block_on(auth.online_login(
+        &username,
+        &password,
+        local_captcha.id,
+        arithmetic_answer(&local_captcha.question)?,
+        cloud_captcha.id,
+        &cloud_answer,
+        now,
+    ))
+    .map_err(|error| error.to_string())?;
+    fs::write(
+        result_path,
+        serde_json::json!({
+            "mode": "online-login",
+            "username": session.username,
+            "userId": session.user_id,
+        })
+        .to_string(),
+    )
+    .map_err(|_| "cannot write native smoke result".to_owned())
+}
+
+fn required_test_value(name: &str) -> Result<String, String> {
+    env::var(name).map_err(|_| format!("{name} is required and is not persisted"))
+}
+
+fn test_result_path() -> Result<PathBuf, String> {
+    let path = PathBuf::from(required_test_value(
+        "HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH",
+    )?);
+    if !path.is_absolute() || !path.to_string_lossy().ends_with(".test.json") {
+        return Err("native smoke result path must be absolute and end in .test.json".to_owned());
+    }
+    path.parent()
+        .filter(|parent| parent.is_dir())
+        .ok_or_else(|| "native smoke result directory must exist".to_owned())?;
+    Ok(path)
+}
+
+fn arithmetic_answer(question: &str) -> Result<u8, String> {
+    let parts = question.split_whitespace().collect::<Vec<_>>();
+    match parts.as_slice() {
+        [left, "+", right, "=", "?"] => left
+            .parse::<u8>()
+            .ok()
+            .zip(right.parse::<u8>().ok())
+            .and_then(|(left, right)| left.checked_add(right))
+            .ok_or_else(|| "unexpected CAPTCHA question".to_owned()),
+        _ => Err("unexpected CAPTCHA question".to_owned()),
+    }
 }

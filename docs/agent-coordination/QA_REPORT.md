@@ -22,14 +22,14 @@ docker compose --project-name honsen-qa-b203c70-20261016 --env-file .env.test -f
 
 The PostgreSQL 16 container was healthy before execution. Its only database was the test-only `POSTGRES_TEST_DATABASE`; no production connection string, existing E2E SQLite database, `honsen-dev`, or other Compose project was used.
 
-| Check | Result | Evidence |
-| --- | --- | --- |
-| Full server Vitest suite | PASS — 14 files, 92/92 tests | `test-results/qa-b203c70-server-full-fresh.log` |
-| Builder's combination group | PASS — 6 files, 57/57 tests | `test-results/qa-b203c70-server-combination-57.log` |
-| Migration chain `001`–`006` including both ordered `005` migrations | PASS — `migration-runner.test.ts` validates the migrated foundation and repeatable runner | combination group |
-| Formal registry backfill and rollback | PASS — `formal-issue-migration.test.ts` proves legacy rows are retained and duplicate legacy formal numbers abort under a savepoint without leaving the registry table | combination group |
-| RFQ / formal frozen-state regression | PASS — `postgres-store.test.ts`, `formal-issue.test.ts`, and `formal-issue-hardening.test.ts` | combination group |
-| Cross-account and installation-origin isolation | PASS — store test rejects replay result retrieval from another authenticated account/origin; legacy unattested origin fails closed. Full suite additionally covers binding Push installation to the authenticated session rather than request `deviceId`. | full suite and combination group |
+| Check                                                               | Result                                                                                                                                                                                                                                                    | Evidence                                            |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Full server Vitest suite                                            | PASS — 14 files, 92/92 tests                                                                                                                                                                                                                              | `test-results/qa-b203c70-server-full-fresh.log`     |
+| Builder's combination group                                         | PASS — 6 files, 57/57 tests                                                                                                                                                                                                                               | `test-results/qa-b203c70-server-combination-57.log` |
+| Migration chain `001`–`006` including both ordered `005` migrations | PASS — `migration-runner.test.ts` validates the migrated foundation and repeatable runner                                                                                                                                                                 | combination group                                   |
+| Formal registry backfill and rollback                               | PASS — `formal-issue-migration.test.ts` proves legacy rows are retained and duplicate legacy formal numbers abort under a savepoint without leaving the registry table                                                                                    | combination group                                   |
+| RFQ / formal frozen-state regression                                | PASS — `postgres-store.test.ts`, `formal-issue.test.ts`, and `formal-issue-hardening.test.ts`                                                                                                                                                             | combination group                                   |
+| Cross-account and installation-origin isolation                     | PASS — store test rejects replay result retrieval from another authenticated account/origin; legacy unattested origin fails closed. Full suite additionally covers binding Push installation to the authenticated session rather than request `deviceId`. | full suite and combination group                    |
 
 Official command used for the full suite:
 
@@ -51,20 +51,50 @@ This report accepts only the completed server/migration verification batch. It d
 
 ## Native Tauri / A-B HTTP QA — 2026-10-16
 
-The application source remains byte-identical to `b203c70` (`git diff --quiet b203c70 -- apps packages` returned 0); this QA branch contains only QA records.
+At the time of the original native attempt, application source remained byte-identical to `b203c70` (`git diff --quiet b203c70 -- apps packages` returned 0); the later infrastructure repair below adds only test-profile/test-server plumbing.
 
-| Native acceptance item | Result | Actual evidence |
-| --- | --- | --- |
-| Isolated native test profile | PASS | `honsen-procure-test-profile seed` created only the new `.honsen-native-qa/ab-http.test.sqlite` profile and its synthetic A/B/purchaser accounts. Existing E2E profiles were not opened or cleaned. |
-| Real Tauri host launch | PASS | `npm run desktop:dev --workspace @honsen/desktop` ran `HonsenProcure.exe`; Windows reported title `Honsen Procure — TEST PROFILE`, nonzero main-window handle and `Responding=True`. See `test-results/qa-b203c70-native-host.log`. |
-| Real native window automation | BLOCKED | The Computer Use inventory returned `apps: []` twice although the test-profile process/window was live. No UI field, CAPTCHA, login or mocked browser substitute was used. |
-| A/B online login, logout, switch and session isolation | BLOCKED | Requires a targetable native window and a trusted HTTPS server. |
-| Untrusted `deviceId` origin test | BLOCKED | Native request cannot reach the isolated HTTP-only server. The previous server-only result remains separate evidence and is not counted here. |
-| A/B Push, Pull, conflict query and replay containment | BLOCKED | Same trusted-HTTPS/native-window blockers. |
-| Old-token revocation/switch denial | BLOCKED | Same trusted-HTTPS/native-window blockers. |
-| Offline mutation, reconnect, cursor recovery and retry | BLOCKED | Native UI could not be operated; no simulated Playwright result is substituted. |
-| RFQ/Formal desktop regression | BLOCKED | Normal UI flow cannot be operated; no mock/Playwright result is substituted. |
+| Native acceptance item                                 | Result  | Actual evidence                                                                                                                                                                                                                     |
+| ------------------------------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Isolated native test profile                           | PASS    | `honsen-procure-test-profile seed` created only the new `.honsen-native-qa/ab-http.test.sqlite` profile and its synthetic A/B/purchaser accounts. Existing E2E profiles were not opened or cleaned.                                 |
+| Real Tauri host launch                                 | PASS    | `npm run desktop:dev --workspace @honsen/desktop` ran `HonsenProcure.exe`; Windows reported title `Honsen Procure — TEST PROFILE`, nonzero main-window handle and `Responding=True`. See `test-results/qa-b203c70-native-host.log`. |
+| Real native window automation                          | BLOCKED | The Computer Use inventory returned `apps: []` twice although the test-profile process/window was live. No UI field, CAPTCHA, login or mocked browser substitute was used.                                                          |
+| A/B online login, logout, switch and session isolation | BLOCKED | Requires a targetable native window and a trusted HTTPS server.                                                                                                                                                                     |
+| Untrusted `deviceId` origin test                       | BLOCKED | Native request cannot reach the isolated HTTP-only server. The previous server-only result remains separate evidence and is not counted here.                                                                                       |
+| A/B Push, Pull, conflict query and replay containment  | BLOCKED | Same trusted-HTTPS/native-window blockers.                                                                                                                                                                                          |
+| Old-token revocation/switch denial                     | BLOCKED | Same trusted-HTTPS/native-window blockers.                                                                                                                                                                                          |
+| Offline mutation, reconnect, cursor recovery and retry | BLOCKED | Native UI could not be operated; no simulated Playwright result is substituted.                                                                                                                                                     |
+| RFQ/Formal desktop regression                          | BLOCKED | Normal UI flow cannot be operated; no mock/Playwright result is substituted.                                                                                                                                                        |
 
 The concrete transport blocker is structural, not an assertion failure: desktop `api_endpoint_from` and every cloud client use HTTPS only, while `apps/server/src/index.ts` provides only `http://127.0.0.1:3000`. The QA host has no `mkcert`, Caddy, OpenSSL, pre-trusted localhost/Honsen root certificate, or permitted trusted HTTPS test endpoint. Creating/trusting a root certificate would change host security settings and was not done.
 
 **T10-SEC-001 remains OPEN.** This batch proves the test-profile host can launch, but it provides no native A/B HTTP evidence for the required isolation, replay, revocation or reconnection paths.
+
+## Native HTTPS / controlled-host infrastructure repair — 2026-10-16
+
+The prior native result remains valid for UI automation: Computer Use reported `apps: []` while a real test-profile window was live, so normal native-window driving is still unavailable here. This repair deliberately does not substitute Playwright, a mocked Tauri IPC, or a standalone HTTP client.
+
+| Item                                         | Result  | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Isolated HTTPS endpoint                      | PASS    | `apps/server/src/scripts/native-test-server.ts` starts the real Fastify routes/services against a disposable loopback PostgreSQL database whose name must include `test`. It has no production entry point.                                                                                                                                                                                                                                     |
+| Certificate trust boundary                   | PASS    | `tests/native/run-native-https-smoke.ps1` creates a one-day `localhost`/`127.0.0.1` leaf certificate in CurrentUser\My, exports it only to the ignored QA directory, and injects its PEM only via `HONSEN_PROCURE_TEST_TLS_CA_PEM` and `open_test_path`. No system Root trust, `danger_accept_invalid_certs`, or production-profile override is used. Final run verified no temporary PFX/CER and no matching certificate-store entry remained. |
+| Native controlled harness                    | PASS    | `HONSEN_PROCURE_NATIVE_SMOKE=online-login` is accepted only after the existing test-profile guard has required an absolute `.test.sqlite` database. It invokes the real local CAPTCHA, cloud CAPTCHA, `online_login`, OS test credential vault, SQLite migration/persistence and HTTPS client; it cannot select a production profile.                                                                                                           |
+| Actual HonsenProcure.exe HTTPS + login smoke | PASS    | Command below seeded `native-smoke-20261016172717.test.sqlite`, then the compiled `target/debug/HonsenProcure.exe` authenticated `engineer-a` through `https://localhost:3443`. Result JSON records the expected fixed synthetic user ID and username.                                                                                                                                                                                          |
+| Full native A/B UI matrix                    | BLOCKED | Computer Use still exposes no Windows app target, and this controlled non-UI smoke intentionally covers only transport/login plumbing. It is a harness for the next Fixer batch, not evidence for Push/Pull/replay/revocation/reconnect or RFQ/Formal UI acceptance.                                                                                                                                                                            |
+
+Reproducible command:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1
+```
+
+Final run artifacts (ignored test data/logs):
+
+- `.honsen-native-qa/native-smoke-20261016172717.test.json`
+- `.honsen-native-qa/native-smoke-20261016172717.test.sqlite`
+- `test-results/native-smoke-20261016172717-server.log`
+- `test-results/native-smoke-20261016172717-server-error.log` (0 bytes)
+- `test-results/native-smoke-20261016172717-client.log`
+
+Focused validation: server typecheck PASS; Rust TLS trust-boundary unit test PASS (1/1); full desktop Rust suite PASS (53/53); `cargo check --bin HonsenProcure` PASS. The smoke run itself PASSed. A non-test-profile smoke invocation exited 101 before creating its sentinel directory. The temporary WSL PostgreSQL Compose project was removed with `down --volumes`; no existing E2E profile was opened or removed.
+
+**T10-SEC-001 remains OPEN.** The new evidence closes only the trusted-endpoint/native-login infrastructure blocker. It does not establish A/B Push/Pull conflict/replay, token revocation, reconnect isolation or RFQ/Formal desktop behavior, and does not release P1 or Formal holds.

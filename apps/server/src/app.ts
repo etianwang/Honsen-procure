@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import websocket from '@fastify/websocket'
 import { z } from 'zod'
 import { AuthenticationError, AuthService } from './auth/service.js'
@@ -17,8 +18,8 @@ export function createApp(
   masterData?: MasterDataService,
   sync?: SyncService,
   authorization?: AuthorizationService,
+  app: FastifyInstance = Fastify({ logger: false }),
 ) {
-  const app = Fastify({ logger: false })
   const sockets = new Set<{
     send(data: string): void
     close(code?: number): void
