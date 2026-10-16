@@ -1,7 +1,7 @@
 # T01–T10 功能实现独立审计
 
 审计日期：2026-10-16（第一轮检查点）  
-审计对象：`main` (`5139cc8`) 及 `git worktree list` 枚举的全部 27 个 worktree。  
+审计对象：`main` (`5139cc8`) 及 `git worktree list` 枚举的全部 27 个 worktree。
 性质：只读功能审计；本文件是审计 worktree `codex/t01-t10-feature-audit` 的文档产物，不修改业务代码。
 
 ## 审计口径与证据边界
