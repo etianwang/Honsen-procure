@@ -19,10 +19,10 @@ That worktree was not modified, reset, cleaned, or stashed.
 
 ## `lib.rs` conflict stages
 
-| Stage | Blob SHA | Meaning |
-| --- | --- | --- |
-| base | `687ef442eaeacba8b17b83a3f4be70bfadd2c21a` | Common ancestor content |
-| ours | `d57dd23cb54e1c090878a221018919aa1dd4743d` | RFQ-containing integration line |
+| Stage  | Blob SHA                                   | Meaning                             |
+| ------ | ------------------------------------------ | ----------------------------------- |
+| base   | `687ef442eaeacba8b17b83a3f4be70bfadd2c21a` | Common ancestor content             |
+| ours   | `d57dd23cb54e1c090878a221018919aa1dd4743d` | RFQ-containing integration line     |
 | theirs | `36c0a46f4e0b5075d60ec3bf2ea3939206bbd509` | T10 interim owner-marker alias line |
 
 The overlap has two independent behaviors that must both remain:
