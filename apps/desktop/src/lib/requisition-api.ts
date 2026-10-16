@@ -35,6 +35,7 @@ export type RequisitionHistoryPage = {
 export type RequisitionDetail = {
   id: string
   displayNo: string
+  formalDocumentNo: string | null
   applicantId: string
   projectName: string
   projectId: string
@@ -87,6 +88,13 @@ export type OwnerLinePricingView = {
   finalUnitPriceMinor: string
 }
 
+export type FormalIssueView = {
+  documentType: string
+  formalDocumentNo: string
+  formalInstallationId: string
+  formalSequence: number
+}
+
 export type RequisitionApi = {
   getRequisitionDetail(orderId: string): Promise<RequisitionDetail>
   listRequisitionHistory(
@@ -100,6 +108,7 @@ export type RequisitionApi = {
     lines: OwnerLinePricingInput[]
     revisionReason: string | null
   }): Promise<OwnerLinePricingView[]>
+  issueOwnerFormalOrder(orderId: string): Promise<FormalIssueView>
   submitRequisitionDraft(orderId: string): Promise<void>
   withdrawRequisition(orderId: string): Promise<void>
 }
@@ -132,6 +141,8 @@ export const tauriRequisitionApi: RequisitionApi = {
     tauriInvoke()<OwnerLinePricingView[]>('save_owner_purchase_pricing', {
       input,
     }),
+  issueOwnerFormalOrder: (orderId) =>
+    tauriInvoke()<FormalIssueView>('issue_owner_formal_order', { orderId }),
   submitRequisitionDraft: (orderId) =>
     tauriInvoke()<void>('submit_requisition_draft', { orderId }),
   withdrawRequisition: (orderId) =>

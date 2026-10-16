@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { ProjectDefaultsEditor } from '../components/ProjectDefaultsEditor'
 import { MasterDataManager } from '../components/MasterDataManager'
+import { TaxTemplateEditor } from '../components/TaxTemplateEditor'
+import { ExchangeRateEditor } from '../components/ExchangeRateEditor'
 import type {
   MasterDataApi,
   ProjectDefaultsView,
   ReferenceMasterDataView,
+  TaxTemplateView,
 } from '../lib/master-data-api'
 import type { ProjectDefaults } from '@honsen/shared'
 
@@ -45,10 +48,39 @@ const referenceData: ReferenceMasterDataView[] = [
     is_active: true,
     version: 1,
   },
+  {
+    kind: 'project',
+    id: '43e62f6f-8069-460d-8fa5-16e4d4800cd4',
+    country_id: '10000000-0000-4000-8000-000000000001',
+    business_code: 'CI-P1',
+    name: 'Bethel2办公楼项目',
+    site: 'Bethel2工地',
+    department_name: '科特迪瓦项目部',
+    default_currency: 'XOF',
+    default_language_pair: 'zh_fr',
+    is_active: true,
+    version: 1,
+  },
+]
+
+const taxTemplates = [
+  {
+    id: '8263003d-6a0f-4dd0-b6be-0b725eff684a',
+    businessCode: 'CI-TVA',
+    name: '科特迪瓦 TVA 18%',
+    countryId: '10000000-0000-4000-8000-000000000001',
+    rateBasisPoints: 1800,
+    effectiveAt: '2026-10-01',
+    isActive: true,
+    version: 1,
+  },
 ]
 
 export function MasterDataFixturePage() {
   const [, setLastSaved] = useState<ProjectDefaults | null>(null)
+  const [editableTemplates, setEditableTemplates] = useState<TaxTemplateView[]>(
+    [],
+  )
   const api: MasterDataApi = {
     async listProjectDefaults() {
       return projects
@@ -60,12 +92,42 @@ export function MasterDataFixturePage() {
       return []
     },
     async saveReferenceMasterData() {},
+    async listTaxTemplates() {
+      return []
+    },
+    async saveTaxTemplate() {},
+    async listExchangeRates() {
+      return []
+    },
+    async saveExchangeRate() {},
   }
 
   return (
     <main className="fixture-page">
       <MasterDataManager api={api} records={referenceData} canEdit />
-      <ProjectDefaultsEditor api={api} projects={projects} canEdit />
+      <TaxTemplateEditor
+        api={api}
+        templates={[]}
+        countries={referenceData.filter((item) => item.kind === 'country')}
+        canEdit
+        onSaved={(template) =>
+          setEditableTemplates((current) =>
+            current.some((item) => item.id === template.id)
+              ? current.map((item) =>
+                  item.id === template.id ? template : item,
+                )
+              : [...current, template],
+          )
+        }
+      />
+      <ExchangeRateEditor api={api} rates={[]} canEdit />
+      <ProjectDefaultsEditor
+        api={api}
+        projects={projects}
+        referenceData={referenceData}
+        taxTemplates={[...taxTemplates, ...editableTemplates]}
+        canEdit
+      />
     </main>
   )
 }

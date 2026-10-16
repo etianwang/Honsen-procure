@@ -61,6 +61,10 @@ class SyncFixture implements SyncStore {
     return false
   }
 
+  async isCompatibleProjectTax() {
+    return true
+  }
+
   async getEntityPayload() {
     return null
   }

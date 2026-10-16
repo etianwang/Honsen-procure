@@ -40,6 +40,32 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
       ),
     [items],
   )
+  const units = useMemo(
+    () =>
+      items.filter(
+        (item): item is Extract<ReferenceMasterDataView, { kind: 'unit' }> =>
+          item.kind === 'unit',
+      ),
+    [items],
+  )
+  const departments = useMemo(
+    () =>
+      items.filter(
+        (
+          item,
+        ): item is Extract<ReferenceMasterDataView, { kind: 'department' }> =>
+          item.kind === 'department',
+      ),
+    [items],
+  )
+  const teams = useMemo(
+    () =>
+      items.filter(
+        (item): item is Extract<ReferenceMasterDataView, { kind: 'team' }> =>
+          item.kind === 'team',
+      ),
+    [items],
+  )
 
   async function save(record: ReferenceMasterDataView) {
     try {
@@ -117,9 +143,295 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
               />
             ),
           },
+          {
+            key: 'units',
+            label: '单位',
+            children: (
+              <UnitEditor
+                units={units}
+                canEdit={canEdit}
+                save={save}
+                status={status}
+              />
+            ),
+          },
+          {
+            key: 'departments',
+            label: '部门',
+            children: (
+              <DepartmentEditor
+                departments={departments}
+                canEdit={canEdit}
+                save={save}
+                status={status}
+              />
+            ),
+          },
+          {
+            key: 'teams',
+            label: '团队',
+            children: (
+              <TeamEditor
+                departments={departments}
+                teams={teams}
+                canEdit={canEdit}
+                save={save}
+                status={status}
+              />
+            ),
+          },
         ]}
       />
     </Card>
+  )
+}
+
+function DepartmentEditor({
+  departments,
+  canEdit,
+  save,
+  status,
+}: {
+  departments: Extract<ReferenceMasterDataView, { kind: 'department' }>[]
+  canEdit: boolean
+  save: (item: ReferenceMasterDataView) => Promise<void>
+  status: (item: ReferenceMasterDataView) => ReactNode
+}) {
+  const [code, setCode] = useState('')
+  const [name, setName] = useState('')
+  return (
+    <Space orientation="vertical" style={{ width: '100%' }}>
+      <Space wrap>
+        <Input
+          aria-label="部门代码"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          disabled={!canEdit}
+        />
+        <Input
+          aria-label="部门名称"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          disabled={!canEdit}
+        />
+        <Button
+          disabled={!canEdit || !code.trim() || !name.trim()}
+          onClick={() =>
+            void save({
+              kind: 'department',
+              id: newId(),
+              business_code: code.trim(),
+              name: name.trim(),
+              is_active: true,
+              version: 1,
+            })
+          }
+        >
+          新增部门
+        </Button>
+      </Space>
+      <Table
+        rowKey="id"
+        pagination={false}
+        dataSource={departments}
+        columns={[
+          { title: '代码', dataIndex: 'business_code' },
+          {
+            title: '名称',
+            render: (_, row) => (
+              <Input
+                aria-label={`编辑部门名称-${row.business_code}`}
+                defaultValue={row.name}
+                disabled={!canEdit}
+                onBlur={(event) => {
+                  if (event.target.value !== row.name)
+                    void save({
+                      ...row,
+                      name: event.target.value,
+                      version: row.version + 1,
+                    })
+                }}
+              />
+            ),
+          },
+          { title: '状态', render: (_, row) => status(row) },
+        ]}
+      />
+    </Space>
+  )
+}
+
+function TeamEditor({
+  departments,
+  teams,
+  canEdit,
+  save,
+  status,
+}: {
+  departments: Extract<ReferenceMasterDataView, { kind: 'department' }>[]
+  teams: Extract<ReferenceMasterDataView, { kind: 'team' }>[]
+  canEdit: boolean
+  save: (item: ReferenceMasterDataView) => Promise<void>
+  status: (item: ReferenceMasterDataView) => ReactNode
+}) {
+  const [code, setCode] = useState('')
+  const [name, setName] = useState('')
+  const [departmentId, setDepartmentId] = useState('')
+  return (
+    <Space orientation="vertical" style={{ width: '100%' }}>
+      <Space wrap>
+        <Input
+          aria-label="团队代码"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          disabled={!canEdit}
+        />
+        <Input
+          aria-label="团队名称"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          disabled={!canEdit}
+        />
+        <Select
+          aria-label="团队所属部门"
+          value={departmentId || undefined}
+          onChange={setDepartmentId}
+          options={departments
+            .filter((department) => department.is_active)
+            .map((department) => ({
+              value: department.id,
+              label: department.name,
+            }))}
+          disabled={!canEdit}
+          placeholder="选择部门"
+        />
+        <Button
+          disabled={!canEdit || !code.trim() || !name.trim() || !departmentId}
+          onClick={() =>
+            void save({
+              kind: 'team',
+              id: newId(),
+              department_id: departmentId,
+              business_code: code.trim(),
+              name: name.trim(),
+              is_active: true,
+              version: 1,
+            })
+          }
+        >
+          新增团队
+        </Button>
+      </Space>
+      <Table
+        rowKey="id"
+        pagination={false}
+        dataSource={teams}
+        columns={[
+          { title: '代码', dataIndex: 'business_code' },
+          {
+            title: '名称',
+            render: (_, row) => (
+              <Input
+                aria-label={`编辑团队名称-${row.business_code}`}
+                defaultValue={row.name}
+                disabled={!canEdit}
+                onBlur={(event) => {
+                  if (event.target.value !== row.name)
+                    void save({
+                      ...row,
+                      name: event.target.value,
+                      version: row.version + 1,
+                    })
+                }}
+              />
+            ),
+          },
+          {
+            title: '部门',
+            render: (_, row) =>
+              departments.find(
+                (department) => department.id === row.department_id,
+              )?.name ?? '未知部门',
+          },
+          { title: '状态', render: (_, row) => status(row) },
+        ]}
+      />
+    </Space>
+  )
+}
+
+function UnitEditor({
+  units,
+  canEdit,
+  save,
+  status,
+}: {
+  units: Extract<ReferenceMasterDataView, { kind: 'unit' }>[]
+  canEdit: boolean
+  save: (item: ReferenceMasterDataView) => Promise<void>
+  status: (item: ReferenceMasterDataView) => ReactNode
+}) {
+  const [code, setCode] = useState('')
+  const [name, setName] = useState('')
+  return (
+    <Space orientation="vertical" style={{ width: '100%' }}>
+      <Space wrap>
+        <Input
+          aria-label="单位代码"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          disabled={!canEdit}
+        />
+        <Input
+          aria-label="单位名称"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          disabled={!canEdit}
+        />
+        <Button
+          disabled={!canEdit || !code.trim() || !name.trim()}
+          onClick={() =>
+            void save({
+              kind: 'unit',
+              id: newId(),
+              business_code: code.trim(),
+              name: name.trim(),
+              is_active: true,
+              version: 1,
+            })
+          }
+        >
+          新增单位
+        </Button>
+      </Space>
+      <Table
+        rowKey="id"
+        pagination={false}
+        dataSource={units}
+        columns={[
+          { title: '代码', dataIndex: 'business_code' },
+          {
+            title: '名称',
+            render: (_, row) => (
+              <Input
+                aria-label={`编辑单位名称-${row.business_code}`}
+                defaultValue={row.name}
+                disabled={!canEdit}
+                onBlur={(event) => {
+                  if (event.target.value !== row.name)
+                    void save({
+                      ...row,
+                      name: event.target.value,
+                      version: row.version + 1,
+                    })
+                }}
+              />
+            ),
+          },
+          { title: '状态', render: (_, row) => status(row) },
+        ]}
+      />
+    </Space>
   )
 }
 

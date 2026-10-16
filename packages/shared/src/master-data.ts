@@ -17,7 +17,7 @@ export const projectDefaultsSchema = z.object({
   projectId: uuidSchema,
   departmentTitle: z.string().trim().min(1).max(255),
   companyAddress: z.string().trim().min(1).max(1000),
-  companyContact: z.string().trim().min(1).max(255),
+  companyContact: z.string().trim().max(255).nullable(),
   defaultCurrency: currencySchema,
   defaultLanguagePair: documentLanguagePairSchema,
   defaultTaxTemplateId: uuidSchema.nullable(),
