@@ -98,3 +98,35 @@ Final run artifacts (ignored test data/logs):
 Focused validation: server typecheck PASS; Rust TLS trust-boundary unit test PASS (1/1); full desktop Rust suite PASS (53/53); `cargo check --bin HonsenProcure` PASS. The smoke run itself PASSed. A non-test-profile smoke invocation exited 101 before creating its sentinel directory. The temporary WSL PostgreSQL Compose project was removed with `down --volumes`; no existing E2E profile was opened or removed.
 
 **T10-SEC-001 remains OPEN.** The new evidence closes only the trusted-endpoint/native-login infrastructure blocker. It does not establish A/B Push/Pull conflict/replay, token revocation, reconnect isolation or RFQ/Formal desktop behavior, and does not release P1 or Formal holds.
+
+## Native HTTPS A/B login-switch smoke — 2026-10-16
+
+This narrow follow-up extends the existing test-only controlled host without attempting Computer Use or substituting Playwright, a mock, or an independent HTTP client. The compiled `HonsenProcure.exe` opens two separately seeded absolute `.test.sqlite` profiles (and therefore two independently derived test credential-vault namespaces/installations) and calls the production local CAPTCHA, cloud CAPTCHA, `online_login`, `lock`, secure credential-vault and HTTPS authorization-refresh paths.
+
+| Scenario | Result | Actual assertion |
+| --- | --- | --- |
+| Profile A login as `engineer-a` | PASS | Real local/cloud CAPTCHA and `online_login` completed through the isolated Fastify HTTPS server. |
+| Profile B login as `engineer-b` | PASS | A second independently seeded SQLite profile authenticated with its own installation identity. |
+| B switches to `engineer-a` | PASS | A new server session was created through the production Rust client flow. |
+| A's replaced token | PASS | `refresh_authorization_https` on profile A returned `AuthError::NoActiveSession` after B's A-login revoked the earlier server session. |
+| B logout/session guard | PASS | After `lock`, B's `refresh_authorization_https` returned `AuthError::NoActiveSession`; no protected request was sent with a retained online session. |
+
+The harness first exposed a test-infrastructure isolation defect: the two test SQLite profiles used one OS credential-vault service and the same account ID would overwrite the other profile's test token. Commit `028ed6fbfa9df220010eb0c3271de7e75b7419b9` scopes test credential services to the SHA-256 of the absolute `.test.sqlite` path, while retaining the production service names and clearing the former legacy test names. This is needed for a valid multi-profile assertion; it does not relax TLS, authentication, installation ID, transaction, cursor, approval, soft-delete, or snapshot rules.
+
+Reproducible command:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1
+```
+
+Latest successful run: `native-smoke-20261016173505`.
+
+- Result: `.honsen-native-qa/native-smoke-20261016173505.test.json`
+- Client process log: `test-results/native-smoke-20261016173505-client.log`
+- HTTPS server log: `test-results/native-smoke-20261016173505-server.log`
+- Server error log: `test-results/native-smoke-20261016173505-server-error.log` (0 bytes)
+- Compose logs: `test-results/native-smoke-20261016173505-compose.log` and `test-results/native-smoke-20261016173505-compose-error.log`
+
+Focused checks: `cargo fmt --check` PASS, `cargo test --lib` PASS (54/54), `cargo build --bin HonsenProcure --bin honsen-procure-test-profile` PASS, and the native A/B command above PASS. The temporary Compose project was removed with scoped `down --volumes`; only new ignored QA profiles and their public PEM evidence remain. No production database, existing E2E data, Root trust, global TLS bypass, push, PR, or main merge was used.
+
+**T10-SEC-001 remains OPEN; P1 and Formal holds remain OPEN.** This result is evidence only for A/B authentication/session replacement and local logout isolation. Native `deviceId` source integrity, Push/Pull, conflicts, replay, offline/reconnect/cursor/retry, and RFQ/Formal flows are deliberately not claimed and remain the next matrix batch.
