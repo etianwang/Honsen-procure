@@ -9429,6 +9429,23 @@ mod tests {
         assert_eq!(row, ("{\"legacy\":true}".into(), None));
     }
 
+    #[test]
+    fn interim_owner_marker_alias_preserves_outbox_after_rfq_migration() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let event_id = Uuid::new_v4().to_string();
+        let mut connection = service.connection.lock().unwrap();
+        connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at) VALUES (?1, 'material', ?2, 'upsert', 0, '{\"legacy\":true}', 1)", params![event_id, Uuid::new_v4().to_string()]).unwrap();
+        connection.execute("UPDATE local_schema_migrations SET version = '0044_sync_outbox_account_boundary' WHERE version = '0046_sync_outbox_account_boundary'", []).unwrap();
+
+        migrate(&mut connection).unwrap();
+
+        let markers: Vec<String> = connection.prepare("SELECT version FROM local_schema_migrations WHERE version IN ('0032_rfq_display_numbers', '0044_sync_outbox_account_boundary', '0046_sync_outbox_account_boundary') ORDER BY version").unwrap().query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+        assert_eq!(markers, ["0032_rfq_display_numbers", "0044_sync_outbox_account_boundary", "0046_sync_outbox_account_boundary"]);
+        let row: (String, Option<String>) = connection.query_row("SELECT payload_json, owner_account_id FROM local_sync_outbox WHERE event_id = ?1", [event_id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(row, ("{\"legacy\":true}".into(), None));
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    }
+
     fn account() -> CachedAccount {
         CachedAccount {
             id: Uuid::new_v4(),
