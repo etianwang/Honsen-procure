@@ -31,7 +31,7 @@ export class SyncService {
       results.push(
         await this.store.pushEvent({
           event,
-          installationId: request.deviceId,
+          installationId: actor.installationId,
           actorId: actor.id,
         }),
       )

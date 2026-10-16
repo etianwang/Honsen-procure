@@ -1,5 +1,9 @@
 import { Pool } from 'pg'
-import type { AuthStore, LoginAccount } from '../auth/types.js'
+import type {
+  AuthStore,
+  AuthenticatedAccount,
+  LoginAccount,
+} from '../auth/types.js'
 
 export class PostgresAuthStore implements AuthStore {
   constructor(private readonly pool: Pool) {}
@@ -20,10 +24,21 @@ export class PostgresAuthStore implements AuthStore {
   async findActiveSession(
     tokenHash: string,
     now: Date,
-  ): Promise<LoginAccount | null> {
-    return this.findAccount(
+  ): Promise<AuthenticatedAccount | null> {
+    const result = await this.pool.query<{
+      id: string
+      username: string
+      password_hash: string
+      roles: LoginAccount['roles']
+      ui_locale: LoginAccount['locale']
+      is_enabled: boolean
+      locked_until: Date | null
+      requires_password_change: boolean
+      installation_id: string
+    }>(
       `SELECT u.id, u.username, u.password_hash, u.ui_locale, u.is_enabled,
               u.locked_until, u.requires_password_change,
+              s.installation_id,
               COALESCE(array_agg(ur.role ORDER BY ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
        FROM account_sessions s
        JOIN users u ON u.id = s.user_id
@@ -32,6 +47,20 @@ export class PostgresAuthStore implements AuthStore {
        GROUP BY u.id`,
       [tokenHash, now],
     )
+    const row = result.rows[0]
+    return row
+      ? {
+          id: row.id,
+          username: row.username,
+          passwordHash: row.password_hash,
+          roles: row.roles,
+          locale: row.ui_locale,
+          isEnabled: row.is_enabled,
+          lockedUntil: row.locked_until,
+          requiresPasswordChange: row.requires_password_change,
+          installationId: row.installation_id,
+        }
+      : null
   }
 
   private async findAccount(

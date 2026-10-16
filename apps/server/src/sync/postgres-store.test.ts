@@ -7,6 +7,7 @@ import { PostgresSyncStore } from './postgres-store.js'
 const databaseUrl = process.env.TEST_DATABASE_URL
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null
 const actorId = '00000000-0000-4000-8000-000000000011'
+const otherActorId = '00000000-0000-4000-8000-000000000012'
 
 describe.skipIf(!pool)('PostgresSyncStore', () => {
   beforeAll(async () => {
@@ -18,6 +19,13 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
        ON CONFLICT (id) DO NOTHING`,
       [actorId],
     )
+    await pool!.query(
+      `INSERT INTO users
+         (id, business_code, username, password_hash, ui_locale, is_enabled)
+       VALUES ($1, 'SYNC-OTHER', 'sync-other-user', 'fixture', 'zh-CN', TRUE)
+       ON CONFLICT (id) DO NOTHING`,
+      [otherActorId],
+    )
   })
 
   afterAll(async () => {
@@ -27,6 +35,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
   it('is idempotent and records an optimistic-concurrency conflict without overwriting', async () => {
     const store = new PostgresSyncStore(pool!)
     const entityId = randomUUID()
+    const installationId = randomUUID()
     const firstEvent = {
       eventId: randomUUID(),
       entityType: 'material' as const,
@@ -38,14 +47,14 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
     const accepted = await store.pushEvent({
       event: firstEvent,
-      installationId: randomUUID(),
+      installationId,
       actorId,
     })
     expect(accepted).toMatchObject({ status: 'accepted', serverVersion: 1 })
 
     const replay = await store.pushEvent({
       event: firstEvent,
-      installationId: randomUUID(),
+      installationId,
       actorId,
     })
     expect(replay).toEqual(accepted)
@@ -78,6 +87,83 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       [conflict.eventId],
     )
     expect(conflicts.rowCount).toBe(1)
+  })
+
+  it('does not return an event result to a different authenticated origin', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'material' as const,
+      entityId: randomUUID(),
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: { nameZh: 'private origin' },
+    }
+    const installationId = randomUUID()
+    await expect(
+      store.pushEvent({ event, installationId, actorId }),
+    ).resolves.toMatchObject({ status: 'accepted' })
+
+    await expect(
+      store.pushEvent({
+        event,
+        installationId: randomUUID(),
+        actorId: otherActorId,
+      }),
+    ).resolves.toEqual({
+      eventId: event.eventId,
+      status: 'validation_error',
+      serverVersion: null,
+    })
+  })
+
+  it('fails closed for a quarantined legacy event without rewriting its origin', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'material' as const,
+      entityId: randomUUID(),
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: { nameZh: 'legacy origin' },
+    }
+    const installationId = randomUUID()
+    await store.pushEvent({ event, installationId, actorId })
+    await pool!.query(
+      `UPDATE sync_events
+       SET origin_account_id = NULL, origin_installation_id = NULL,
+           origin_status = 'legacy_unverified', origin_attested_at = NULL
+       WHERE event_id = $1`,
+      [event.eventId],
+    )
+    await pool!.query(
+      `INSERT INTO sync_origin_quarantine (source_table, source_id, reason)
+       VALUES ('sync_events', $1, 'fixture legacy origin')`,
+      [event.eventId],
+    )
+
+    await expect(
+      store.pushEvent({ event, installationId, actorId }),
+    ).resolves.toEqual({
+      eventId: event.eventId,
+      status: 'validation_error',
+      serverVersion: null,
+    })
+    await expect(
+      pool!.query(
+        `SELECT origin_status, origin_account_id, origin_installation_id
+         FROM sync_events WHERE event_id = $1`,
+        [event.eventId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          origin_status: 'legacy_unverified',
+          origin_account_id: null,
+          origin_installation_id: null,
+        },
+      ],
+    })
   })
 
   it('pulls supplier and price changes only from an engineer’s bound countries', async () => {
@@ -142,7 +228,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       })
       expect(result.status).toBe('accepted')
     }
-    const engineer = { id: actorId, roles: ['engineer' as const] }
+    const engineer = {
+      id: actorId,
+      roles: ['engineer' as const],
+      installationId: randomUUID(),
+    }
     const permitted = await store.pullChanges({
       actor: engineer,
       cursor,
@@ -153,7 +243,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       priceA,
     ])
     const purchaser = await store.pullChanges({
-      actor: { id: actorId, roles: ['purchaser'] },
+      actor: {
+        id: actorId,
+        roles: ['purchaser'],
+        installationId: randomUUID(),
+      },
       cursor,
       limit: 20,
     })

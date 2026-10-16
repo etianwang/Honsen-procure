@@ -1,6 +1,6 @@
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
 import type { Pool, PoolClient } from 'pg'
-import type { SyncStore } from './types.js'
+import type { SyncActor, SyncStore } from './types.js'
 
 const globallyVisibleEntityTypes = [
   'country',
@@ -20,6 +20,9 @@ type StoredEvent = {
   event_id: string
   result_status: SyncEventResult['status']
   server_version: string | null
+  origin_account_id: string | null
+  origin_installation_id: string | null
+  origin_status: 'attested' | 'legacy_unverified'
 }
 
 type StoredEntity = {
@@ -45,12 +48,24 @@ export class PostgresSyncStore implements SyncStore {
         `${input.event.entityType}:${input.event.entityId}`,
       ])
       const prior = await client.query<StoredEvent>(
-        `SELECT event_id, result_status, server_version
+        `SELECT event_id, result_status, server_version, origin_account_id,
+                origin_installation_id, origin_status
          FROM sync_events WHERE event_id = $1`,
         [input.event.eventId],
       )
       if (prior.rows[0]) {
         await client.query('COMMIT')
+        if (
+          prior.rows[0].origin_status !== 'attested' ||
+          prior.rows[0].origin_account_id !== input.actorId ||
+          prior.rows[0].origin_installation_id !== input.installationId
+        ) {
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
         return eventResult(prior.rows[0])
       }
 
@@ -97,8 +112,8 @@ export class PostgresSyncStore implements SyncStore {
       )
       await client.query(
         `INSERT INTO sync_events
-           (event_id, installation_id, actor_id, entity_type, entity_id, operation, base_version, result_status, server_version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'accepted', $8)`,
+           (event_id, installation_id, actor_id, origin_account_id, origin_installation_id, origin_status, origin_attested_at, entity_type, entity_id, operation, base_version, result_status, server_version)
+         VALUES ($1, $2, $3, $3, $2, 'attested', NOW(), $4, $5, $6, $7, 'accepted', $8)`,
         [
           input.event.eventId,
           input.installationId,
@@ -138,7 +153,7 @@ export class PostgresSyncStore implements SyncStore {
   }
 
   async pullChanges(input: {
-    actor: { id: string; roles: import('@honsen/shared').Role[] }
+    actor: SyncActor
     cursor: string
     limit: number
   }): Promise<{ changes: SyncChange[]; nextCursor: string }> {
@@ -268,8 +283,8 @@ export class PostgresSyncStore implements SyncStore {
   ): Promise<void> {
     await client.query(
       `INSERT INTO sync_events
-         (event_id, installation_id, actor_id, entity_type, entity_id, operation, base_version, result_status, server_version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'conflict', $8)`,
+         (event_id, installation_id, actor_id, origin_account_id, origin_installation_id, origin_status, origin_attested_at, entity_type, entity_id, operation, base_version, result_status, server_version)
+       VALUES ($1, $2, $3, $3, $2, 'attested', NOW(), $4, $5, $6, $7, 'conflict', $8)`,
       [
         input.event.eventId,
         input.installationId,
@@ -283,8 +298,8 @@ export class PostgresSyncStore implements SyncStore {
     )
     await client.query(
       `INSERT INTO sync_conflicts
-         (event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (event_id, origin_account_id, origin_installation_id, origin_status, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json)
+       VALUES ($1, $8, $9, 'attested', $2, $3, $4, $5, $6, $7)`,
       [
         input.event.eventId,
         input.event.entityType,
@@ -293,6 +308,8 @@ export class PostgresSyncStore implements SyncStore {
         result.serverVersion,
         input.event.payload,
         current?.payload_json ?? {},
+        input.actorId,
+        input.installationId,
       ],
     )
   }

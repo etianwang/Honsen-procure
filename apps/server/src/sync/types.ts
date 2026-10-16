@@ -8,6 +8,7 @@ import type {
 export type SyncActor = {
   id: string
   roles: readonly Role[]
+  installationId: string
 }
 
 export type SyncStore = {
