@@ -10,6 +10,7 @@ import { SyncService } from './service.js'
 const databaseUrl = process.env.TEST_DATABASE_URL
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null
 const actorId = '00000000-0000-4000-8000-000000000011'
+const otherActorId = '00000000-0000-4000-8000-000000000012'
 
 describe.skipIf(!pool)('PostgresSyncStore', () => {
   beforeAll(async () => {
@@ -17,9 +18,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     await pool!.query(
       `INSERT INTO users
          (id, business_code, username, password_hash, ui_locale, is_enabled)
-       VALUES ($1, 'SYNC-TEST', 'sync-test-user', 'fixture', 'zh-CN', TRUE)
+       VALUES
+         ($1, 'SYNC-TEST', 'sync-test-user', 'fixture', 'zh-CN', TRUE),
+         ($2, 'SYNC-TEST-OTHER', 'sync-test-other-user', 'fixture', 'zh-CN', TRUE)
        ON CONFLICT (id) DO NOTHING`,
-      [actorId],
+      [actorId, otherActorId],
     )
   })
 
@@ -76,7 +79,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         },
       ],
     }
-    const actor = { id: actorId, roles: ['purchaser' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['purchaser' as const],
+      installationId: randomUUID(),
+    }
     const bypassedService = await store.pushEvent({
       event: {
         eventId: randomUUID(),
@@ -296,6 +303,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
   it('is idempotent and records an optimistic-concurrency conflict without overwriting', async () => {
     const store = new PostgresSyncStore(pool!)
     const entityId = randomUUID()
+    const installationId = randomUUID()
     const firstEvent = {
       eventId: randomUUID(),
       entityType: 'material' as const,
@@ -307,14 +315,14 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
     const accepted = await store.pushEvent({
       event: firstEvent,
-      installationId: randomUUID(),
+      installationId,
       actorId,
     })
     expect(accepted).toMatchObject({ status: 'accepted', serverVersion: 1 })
 
     const replay = await store.pushEvent({
       event: firstEvent,
-      installationId: randomUUID(),
+      installationId,
       actorId,
     })
     expect(replay).toEqual(accepted)
@@ -351,6 +359,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('does not skip a pending Push when another Push commits first', async () => {
     const [firstId, secondId] = [randomUUID(), randomUUID()]
+    const firstInstallationId = randomUUID()
     const cursor = (
       await pool!.query<{ sequence: string }>(
         'SELECT COALESCE(MAX(sequence), 0)::text AS sequence FROM server_change_log',
@@ -397,7 +406,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     }
     const first = new PostgresSyncStore(pausedPool).pushEvent({
       event: firstEvent,
-      installationId: randomUUID(),
+      installationId: firstInstallationId,
       actorId,
     })
     let second: Promise<unknown> | undefined
@@ -424,7 +433,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       expect(waitingForEarlierPush).toBe(true)
       const store = new PostgresSyncStore(pool!)
       const beforeCommit = await store.pullChanges({
-        actor: { id: actorId, roles: ['engineer'] },
+        actor: {
+          id: actorId,
+          roles: ['engineer'],
+          installationId: randomUUID(),
+        },
         cursor,
         limit: 500,
       })
@@ -444,7 +457,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         serverVersion: 1,
       })
       const afterCommit = await store.pullChanges({
-        actor: { id: actorId, roles: ['engineer'] },
+        actor: {
+          id: actorId,
+          roles: ['engineer'],
+          installationId: randomUUID(),
+        },
         cursor: beforeCommit.nextCursor,
         limit: 500,
       })
@@ -456,14 +473,18 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       expect(
         await store.pushEvent({
           event: firstEvent,
-          installationId: randomUUID(),
+          installationId: firstInstallationId,
           actorId,
         }),
       ).toMatchObject({ status: 'accepted', serverVersion: 1 })
       expect(
         (
           await store.pullChanges({
-            actor: { id: actorId, roles: ['engineer'] },
+            actor: {
+              id: actorId,
+              roles: ['engineer'],
+              installationId: randomUUID(),
+            },
             cursor: afterCommit.nextCursor,
             limit: 500,
           })
@@ -535,7 +556,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       serverVersion: 1,
     })
     const pulled = await store.pullChanges({
-      actor: { id: actorId, roles: ['engineer'] },
+      actor: { id: actorId, roles: ['engineer'], installationId: randomUUID() },
       cursor,
       limit: 500,
     })
@@ -602,7 +623,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       },
     ]
     const request = { deviceId: randomUUID(), events }
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const first = await service.push(actor, request)
     expect(first.results.map((result) => result.status)).toEqual([
       'accepted',
@@ -612,7 +637,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(await service.push(actor, request)).toEqual(first)
 
     const pulled = await service.pull(
-      { id: actorId, roles: ['engineer'] },
+      { id: actorId, roles: ['engineer'], installationId: randomUUID() },
       { cursor, limit: 500 },
     )
     expect(
@@ -621,7 +646,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         .map((change) => change.entityId),
     ).toEqual([departmentId, teamId, unitId])
     const repeated = await service.pull(
-      { id: actorId, roles: ['engineer'] },
+      { id: actorId, roles: ['engineer'], installationId: randomUUID() },
       { cursor: pulled.nextCursor, limit: 500 },
     )
     expect(
@@ -650,7 +675,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('projects unit Push into the business table without partial conflict writes', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const [unitId, duplicateId, independentId] = Array.from({ length: 3 }, () =>
       randomUUID(),
     )
@@ -783,7 +812,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     const master = new PostgresMasterDataStore(pool!)
     const unitId = randomUUID()
     const code = `UNIT-${unitId}`
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const initial = {
       eventId: randomUUID(),
       entityType: 'unit' as const,
@@ -845,7 +878,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     const unitId = randomUUID()
     const code = `UNIT-${unitId}`
     const result = await service.push(
-      { id: actorId, roles: ['administrator'] },
+      { id: actorId, roles: ['administrator'], installationId: randomUUID() },
       {
         deviceId: randomUUID(),
         events: [
@@ -925,7 +958,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('projects department Push atomically and preserves codes on conflicts', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const departmentId = randomUUID()
     const duplicateId = randomUUID()
     const independentId = randomUUID()
@@ -1054,7 +1091,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('projects teams only under active departments and retries dependency failures', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const [departmentId, teamId, duplicateId] = Array.from({ length: 3 }, () =>
       randomUUID(),
     )
@@ -1224,7 +1265,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('projects country Push into the business table atomically and preserves immutable codes', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const countryId = randomUUID()
     const duplicateCodeId = randomUUID()
     const request = {
@@ -1334,7 +1379,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('projects dependent projects and rejects missing countries or changed used-project country', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const [countryId, otherCountryId, projectId, orphanProjectId, orderId] =
       Array.from({ length: 5 }, () => randomUUID())
     const missingCountryId = randomUUID()
@@ -1515,7 +1564,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('projects sites atomically and retries after a missing project arrives', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const [countryId, projectId, siteId, duplicateId] = Array.from(
       { length: 4 },
       () => randomUUID(),
@@ -1685,7 +1738,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       globalTaxId,
       inactiveTaxId,
     ] = Array.from({ length: 7 }, () => randomUUID())
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const tax = (id: string, country: string | null, active: boolean) => ({
       eventId: randomUUID(),
       entityType: 'tax_template',
@@ -1863,7 +1920,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       expect(
         (
           await new SyncService(store).push(
-            { id: actorId, roles: ['administrator'] },
+            {
+              id: actorId,
+              roles: ['administrator'],
+              installationId: randomUUID(),
+            },
             {
               deviceId: randomUUID(),
               events: [
@@ -1959,7 +2020,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       },
     }
     const request = { deviceId: randomUUID(), events: [event] }
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const first = await service.push(actor, request)
     expect(first.results[0]).toMatchObject({
       status: 'accepted',
@@ -1980,7 +2045,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       version: '1',
     })
     const pulled = await service.pull(
-      { id: actorId, roles: ['engineer'] },
+      { id: actorId, roles: ['engineer'], installationId: randomUUID() },
       { cursor, limit: 500 },
     )
     expect(
@@ -2037,7 +2102,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         default_tax_template_id: null,
       },
     }
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const request = { deviceId: randomUUID(), events: [event] }
     expect((await service.push(actor, request)).results[0]?.status).toBe(
       'validation_error',
@@ -2103,7 +2172,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     )
     const store = new PostgresSyncStore(pool!)
     const service = new SyncService(store)
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const makeEvent = (baseVersion: number, address: string) => ({
       eventId: randomUUID(),
       entityType: 'project_defaults',
@@ -2217,7 +2290,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     }
     const rest = new PostgresMasterDataStore(pool!)
     const sync = new SyncService(new PostgresSyncStore(pool!))
-    const engineer = { id: actorId, roles: ['engineer' as const] }
+    const engineer = {
+      id: actorId,
+      roles: ['engineer' as const],
+      installationId: randomUUID(),
+    }
     await rest.saveProjectDefaults(defaults, actorId)
     const first = await sync.pull(engineer, { cursor, limit: 500 })
     expect(
@@ -2257,7 +2334,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     expect(
       (
         await sync.push(
-          { id: actorId, roles: ['administrator'] },
+          {
+            id: actorId,
+            roles: ['administrator'],
+            installationId: randomUUID(),
+          },
           { deviceId: randomUUID(), events: [stale] },
         )
       ).results[0],
@@ -2381,7 +2462,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       }
       expect(waitingForEarlierWriter).toBe(true)
       const sync = new SyncService(new PostgresSyncStore(pool!))
-      const engineer = { id: actorId, roles: ['engineer' as const] }
+      const engineer = {
+        id: actorId,
+        roles: ['engineer' as const],
+        installationId: randomUUID(),
+      }
       const affectedIds = new Set<string>([materialId, projectId])
       const beforeCommit = await sync.pull(engineer, { cursor, limit: 500 })
       expect(
@@ -2441,7 +2526,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       payload: { ...rest, companyAddress: 'Offline edit' },
     }
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     expect(
       (await service.push(actor, { deviceId: randomUUID(), events: [event] }))
         .results[0],
@@ -2629,7 +2718,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     ).rows[0]!.sequence
     const taxId = randomUUID()
     const rateId = randomUUID()
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const events = [
       {
         eventId: randomUUID(),
@@ -2672,7 +2765,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     ])
     expect(await service.push(actor, request)).toEqual(first)
     const pulled = await service.pull(
-      { id: actorId, roles: ['engineer'] },
+      { id: actorId, roles: ['engineer'], installationId: randomUUID() },
       { cursor, limit: 500 },
     )
     expect(
@@ -2726,7 +2819,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         reason: '  Fixture approval  ',
       },
     }
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const request = { deviceId: randomUUID(), events: [event] }
     const first = await service.push(actor, request)
     expect(first.results[0]).toMatchObject({
@@ -2773,7 +2870,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       version: 1,
     })
     const pulled = await service.pull(
-      { id: actorId, roles: ['engineer'] },
+      { id: actorId, roles: ['engineer'], installationId: randomUUID() },
       { cursor, limit: 500 },
     )
     expect(
@@ -2799,7 +2896,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
     const eventId = randomUUID()
     const result = await service.push(
-      { id: actorId, roles: ['administrator'] },
+      { id: actorId, roles: ['administrator'], installationId: randomUUID() },
       {
         deviceId: randomUUID(),
         events: [
@@ -2875,7 +2972,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('rejects a second event for an immutable exchange-rate ID while accepting an independent rate', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const [rateId, otherId] = [randomUUID(), randomUUID()]
     const original = {
       eventId: randomUUID(),
@@ -2972,7 +3073,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     const service = new SyncService(new PostgresSyncStore(failingPool))
     await expect(
       service.push(
-        { id: actorId, roles: ['administrator'] },
+        { id: actorId, roles: ['administrator'], installationId: randomUUID() },
         {
           deviceId: randomUUID(),
           events: [
@@ -3051,7 +3152,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     } as unknown as Pool
     const service = new SyncService(new PostgresSyncStore(racingPool))
     const result = await service.push(
-      { id: actorId, roles: ['administrator'] },
+      { id: actorId, roles: ['administrator'], installationId: randomUUID() },
       {
         deviceId: randomUUID(),
         events: [
@@ -3113,7 +3214,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       },
     }
     const request = { deviceId: randomUUID(), events: [event] }
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const first = await service.push(actor, request)
     expect(first.results[0]).toMatchObject({
       status: 'accepted',
@@ -3162,7 +3267,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('keeps a rejected tax-template event retryable after its country arrives', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const [countryId, taxId] = [randomUUID(), randomUUID()]
     const taxEvent = {
       eventId: randomUUID(),
@@ -3231,7 +3340,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     const master = new PostgresMasterDataStore(pool!)
     const taxId = randomUUID()
     const businessCode = `TAX-${taxId}`
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const event = {
       eventId: randomUUID(),
       entityType: 'tax_template' as const,
@@ -3357,7 +3470,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('rejects a tax-template code collision and preserves the accepted template', async () => {
     const service = new SyncService(new PostgresSyncStore(pool!))
-    const actor = { id: actorId, roles: ['administrator' as const] }
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
     const [taxId, duplicateId, independentId] = [
       randomUUID(),
       randomUUID(),
@@ -3584,7 +3701,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       },
     }
     const result = await service.push(
-      { id: actorId, roles: ['administrator'] },
+      { id: actorId, roles: ['administrator'], installationId: randomUUID() },
       { deviceId: randomUUID(), events: [event] },
     )
     expect(inserted).toBe(true)
@@ -3615,20 +3732,58 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
 
   it('does not return an event result to a different authenticated origin', async () => {
     const store = new PostgresSyncStore(pool!)
-    const event = { eventId: randomUUID(), entityType: 'material' as const, entityId: randomUUID(), operation: 'upsert' as const, baseVersion: 0, payload: { nameZh: 'private origin' } }
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'material' as const,
+      entityId: randomUUID(),
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: { nameZh: 'private origin' },
+    }
     const installationId = randomUUID()
-    await expect(store.pushEvent({ event, installationId, actorId })).resolves.toMatchObject({ status: 'accepted' })
-    await expect(store.pushEvent({ event, installationId: randomUUID(), actorId: otherActorId })).resolves.toEqual({ eventId: event.eventId, status: 'validation_error', serverVersion: null })
+    await expect(
+      store.pushEvent({ event, installationId, actorId }),
+    ).resolves.toMatchObject({ status: 'accepted' })
+    await expect(
+      store.pushEvent({
+        event,
+        installationId: randomUUID(),
+        actorId: otherActorId,
+      }),
+    ).resolves.toEqual({
+      eventId: event.eventId,
+      status: 'validation_error',
+      serverVersion: null,
+    })
   })
 
   it('fails closed for a quarantined legacy event without rewriting its origin', async () => {
     const store = new PostgresSyncStore(pool!)
-    const event = { eventId: randomUUID(), entityType: 'material' as const, entityId: randomUUID(), operation: 'upsert' as const, baseVersion: 0, payload: { nameZh: 'legacy origin' } }
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'material' as const,
+      entityId: randomUUID(),
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: { nameZh: 'legacy origin' },
+    }
     const installationId = randomUUID()
     await store.pushEvent({ event, installationId, actorId })
-    await pool!.query(`UPDATE sync_events SET origin_account_id = NULL, origin_installation_id = NULL, origin_status = 'legacy_unverified', origin_attested_at = NULL WHERE event_id = $1`, [event.eventId])
-    await pool!.query(`INSERT INTO sync_origin_quarantine (source_table, source_id, reason) VALUES ('sync_events', $1, 'fixture legacy origin')`, [event.eventId])
-    await expect(store.pushEvent({ event, installationId, actorId })).resolves.toEqual({ eventId: event.eventId, status: 'validation_error', serverVersion: null })
+    await pool!.query(
+      `UPDATE sync_events SET origin_account_id = NULL, origin_installation_id = NULL, origin_status = 'legacy_unverified', origin_attested_at = NULL WHERE event_id = $1`,
+      [event.eventId],
+    )
+    await pool!.query(
+      `INSERT INTO sync_origin_quarantine (source_table, source_id, reason) VALUES ('sync_events', $1, 'fixture legacy origin')`,
+      [event.eventId],
+    )
+    await expect(
+      store.pushEvent({ event, installationId, actorId }),
+    ).resolves.toEqual({
+      eventId: event.eventId,
+      status: 'validation_error',
+      serverVersion: null,
+    })
   })
 
   it('pulls supplier and price changes only from an engineer’s bound countries', async () => {
@@ -3693,7 +3848,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       })
       expect(result.status).toBe('accepted')
     }
-    const engineer = { id: actorId, roles: ['engineer' as const] }
+    const engineer = {
+      id: actorId,
+      roles: ['engineer' as const],
+      installationId: randomUUID(),
+    }
     const permitted = await store.pullChanges({
       actor: engineer,
       cursor,
@@ -3704,7 +3863,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       priceA,
     ])
     const purchaser = await store.pullChanges({
-      actor: { id: actorId, roles: ['purchaser'] },
+      actor: {
+        id: actorId,
+        roles: ['purchaser'],
+        installationId: randomUUID(),
+      },
       cursor,
       limit: 20,
     })

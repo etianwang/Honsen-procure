@@ -44,7 +44,7 @@ export class PostgresAuthStore implements AuthStore {
        JOIN users u ON u.id = s.user_id
        LEFT JOIN user_roles ur ON ur.user_id = u.id
        WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2 AND u.deleted_at IS NULL
-       GROUP BY u.id`,
+       GROUP BY u.id, s.installation_id`,
       [tokenHash, now],
     )
     const row = result.rows[0]

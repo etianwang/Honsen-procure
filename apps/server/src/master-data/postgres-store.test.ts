@@ -81,7 +81,11 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
       ).rows[0]!.sequence
       await store.saveReferenceData(unit, actorId)
       const first = await sync.pullChanges({
-        actor: { id: actorId, roles: ['engineer'] },
+        actor: {
+          id: actorId,
+          roles: ['engineer'],
+          installationId: randomUUID(),
+        },
         cursor,
         limit: 500,
       })
@@ -106,7 +110,11 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
         actorId,
       )
       const second = await sync.pullChanges({
-        actor: { id: actorId, roles: ['engineer'] },
+        actor: {
+          id: actorId,
+          roles: ['engineer'],
+          installationId: randomUUID(),
+        },
         cursor: first.nextCursor,
         limit: 500,
       })
@@ -317,7 +325,11 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
       }>('SELECT business_code, version FROM units WHERE id = $1', [unitId])
       expect(business.rows[0]).toEqual({ business_code: code, version: '5' })
       const changes = await new PostgresSyncStore(testPool!).pullChanges({
-        actor: { id: actorId, roles: ['engineer'] },
+        actor: {
+          id: actorId,
+          roles: ['engineer'],
+          installationId: randomUUID(),
+        },
         cursor,
         limit: 500,
       })
@@ -350,7 +362,11 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
       )
       expect(advanced.rows[0]?.version).toBe('10')
       const resumed = await new PostgresSyncStore(testPool!).pullChanges({
-        actor: { id: actorId, roles: ['engineer'] },
+        actor: {
+          id: actorId,
+          roles: ['engineer'],
+          installationId: randomUUID(),
+        },
         cursor: changes.nextCursor,
         limit: 500,
       })
@@ -453,7 +469,11 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
       expect(waitingForEarlierWriter).toBe(true)
       const sync = new PostgresSyncStore(testPool!)
       const beforeCommit = await sync.pullChanges({
-        actor: { id: actorId, roles: ['engineer'] },
+        actor: {
+          id: actorId,
+          roles: ['engineer'],
+          installationId: randomUUID(),
+        },
         cursor,
         limit: 500,
       })
@@ -467,7 +487,11 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
       committed = true
       await save
       const pulled = await sync.pullChanges({
-        actor: { id: actorId, roles: ['engineer'] },
+        actor: {
+          id: actorId,
+          roles: ['engineer'],
+          installationId: randomUUID(),
+        },
         cursor: beforeCommit.nextCursor,
         limit: 500,
       })

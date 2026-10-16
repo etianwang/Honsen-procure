@@ -42,6 +42,12 @@ Generic Push now applies the same project/default-tax compatibility rule, includ
 
 The first T04 server business-table projection slice now applies country Push atomically with audit and sync bookkeeping. PostgreSQL create/edit/replay and immutable/duplicate-code rejection passed; remaining master-data entity projections, deployed/native tests and milestone acceptance remain open.
 
+The 2026-10-15 owner-formal server slice adds transactional OPA number/installation-sequence registration and frozen-snapshot conflict handling to Push/Pull. Isolated PostgreSQL migration, retry, collision, rollback and cursor-Pull tests passed without skipped database cases. Desktop projector, source-rate provenance, native multi-client evidence and the original T08/T10 acceptance gates remain open; M2/M3 status is unchanged.
+
+Independent review then found and a test-first repair closed three server trust-boundary gaps: direct issue without a prior approved server snapshot, engineer approval/issue via Push, and incomplete frozen-field/status-transition checks. Isolated API/PostgreSQL and full development gates passed; this does not accept owner receiving, multi-client/native E2E or the M2/M3 milestones.
+
+The next independent review found applicant self-approval mislabeling and soft-deleted order revival. A second server test-first repair binds approval to a distinct authenticated approver and immutable applicant identity, and blocks post-deletion upserts; isolated PostgreSQL proof passed. Self-approval with a local policy override remains fail-closed pending server-authoritative policy evidence, and M2/M3 stay partial.
+
 The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 
 The 2026-10-15 T08-C local RFQ lifecycle slice adds trusted draft → sent → closed transitions, parent audit/outbox atomicity, snapshot-retaining history and regular procurement-page controls. It is local/DOM evidence only; server RFQ projection, cross-device recovery, actual expenditure and formal HPA/SPO are still required. M2/M3 and T08-C remain unchecked.

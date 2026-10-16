@@ -21,13 +21,18 @@ const account: LoginAccount = {
 class AuthFixture implements AuthStore {
   sessions: string[] = []
 
+  constructor(private readonly loginAccount: LoginAccount = account) {}
+
   async findAccountByUsername() {
-    return account
+    return this.loginAccount
   }
 
   async findActiveSession(tokenHash: string) {
     return this.sessions.includes(tokenHash)
-      ? { ...account, installationId: '00000000-0000-4000-8000-000000000099' }
+      ? {
+          ...this.loginAccount,
+          installationId: '00000000-0000-4000-8000-000000000099',
+        }
       : null
   }
 
@@ -80,6 +85,71 @@ function captchaAnswer(question: string): string {
 }
 
 describe('sync API', () => {
+  it('rejects an authenticated engineer formal issue before store mutation', async () => {
+    const engineer = {
+      ...account,
+      id: '00000000-0000-4000-8000-000000000051',
+      username: 'formal-engineer',
+      roles: ['engineer' as const],
+    }
+    const authStore = new AuthFixture(engineer)
+    const syncStore = new SyncFixture()
+    const app = createApp(
+      new AuthService(authStore, { verify: async () => true }),
+      undefined,
+      new SyncService(syncStore),
+    )
+    try {
+      const captcha = (
+        await app.inject({ method: 'GET', url: '/api/auth/captcha' })
+      ).json<{ id: string; question: string }>()
+      const login = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers: {
+          'x-installation-id': '00000000-0000-4000-8000-000000000099',
+        },
+        payload: {
+          username: engineer.username,
+          password: 'fixture-password',
+          captchaId: captcha.id,
+          captchaAnswer: captchaAnswer(captcha.question),
+        },
+      })
+      const token = login.json<{ accessToken: string }>().accessToken
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/sync/push',
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          deviceId: '00000000-0000-4000-8000-000000000098',
+          events: [
+            {
+              eventId: '00000000-0000-4000-8000-000000000052',
+              entityType: 'purchase_order',
+              entityId: '00000000-0000-4000-8000-000000000053',
+              operation: 'upsert',
+              baseVersion: 0,
+              payload: {
+                projectId: '00000000-0000-4000-8000-000000000054',
+                departmentId: '00000000-0000-4000-8000-000000000055',
+                teamId: '00000000-0000-4000-8000-000000000056',
+                applicantId: engineer.id,
+                workflowStatus: 'formally_issued',
+                formalDocumentNo: 'FORGED',
+              },
+            },
+          ],
+        },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().results[0].status).toBe('validation_error')
+      expect(syncStore.pushed).toBe(0)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('registers the authenticated WebSocket hint route', async () => {
     const app = createApp(
       new AuthService(new AuthFixture(), { verify: async () => true }),

@@ -89,7 +89,7 @@ describe('SyncService', () => {
       { ...event, operation: 'soft_delete' as const },
     ]) {
       const response = await service.push(
-        { id: engineer.id, roles: ['purchaser'] },
+        { id: engineer.id, roles: ['purchaser'], installationId: randomUUID() },
         {
           deviceId: '00000000-0000-4000-8000-000000000005',
           events: [candidate],
@@ -136,7 +136,7 @@ describe('SyncService', () => {
     }
     const push = () =>
       service.push(
-        { id: engineer.id, roles: ['purchaser'] },
+        { id: engineer.id, roles: ['purchaser'], installationId: randomUUID() },
         { deviceId: '00000000-0000-4000-8000-000000000005', events: [event] },
       )
     expect((await push()).results[0]?.status).toBe('accepted')
@@ -167,7 +167,7 @@ describe('SyncService', () => {
       },
     ]) {
       const response = await service.push(
-        { id: engineer.id, roles: ['purchaser'] },
+        { id: engineer.id, roles: ['purchaser'], installationId: randomUUID() },
         {
           deviceId: '00000000-0000-4000-8000-000000000005',
           events: [{ ...event, payload }],
@@ -434,7 +434,11 @@ describe('SyncService', () => {
     ])
     expect(store.pushed).toBe(0)
     const accepted = await service.push(
-      { id: engineer.id, roles: ['super_administrator'] },
+      {
+        id: engineer.id,
+        roles: ['super_administrator'],
+        installationId: randomUUID(),
+      },
       request,
     )
     expect(accepted.results.map((result) => result.status)).toEqual([
@@ -444,7 +448,11 @@ describe('SyncService', () => {
     ])
     expect(store.pushed).toBe(3)
     const invalid = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: randomUUID(),
+      },
       {
         deviceId: randomUUID(),
         events: [
@@ -516,7 +524,11 @@ describe('SyncService', () => {
     ])
     expect(store.pushed).toBe(0)
     const accepted = await service.push(
-      { id: engineer.id, roles: ['super_administrator'] },
+      {
+        id: engineer.id,
+        roles: ['super_administrator'],
+        installationId: randomUUID(),
+      },
       request,
     )
     expect(accepted.results.map((result) => result.status)).toEqual([
@@ -524,7 +536,11 @@ describe('SyncService', () => {
       'accepted',
     ])
     const camelCaseNullCountry = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: randomUUID(),
+      },
       {
         deviceId: randomUUID(),
         events: [
@@ -546,7 +562,11 @@ describe('SyncService', () => {
     )
     expect(camelCaseNullCountry.results[0]?.status).toBe('accepted')
     const invalid = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: randomUUID(),
+      },
       {
         deviceId: randomUUID(),
         events: [
@@ -599,7 +619,7 @@ describe('SyncService', () => {
       events: (typeof event)[],
     ) =>
       service.push(
-        { id: engineer.id, roles },
+        { id: engineer.id, roles, installationId: randomUUID() },
         { deviceId: randomUUID(), events },
       )
     expect((await push(['engineer'], [event])).results[0]?.status).toBe(
@@ -732,7 +752,7 @@ describe('SyncService', () => {
     }
     const push = (roles: ('administrator' | 'engineer')[], events: unknown[]) =>
       service.push(
-        { id: engineer.id, roles },
+        { id: engineer.id, roles, installationId: randomUUID() },
         { deviceId: randomUUID(), events },
       )
     expect((await push(['engineer'], [event])).results[0]?.status).toBe(
