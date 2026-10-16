@@ -63,12 +63,18 @@ fn main() {
             commands::close_supplier_order_with_conditions,
             commands::push_pending_sync,
             commands::pull_sync,
+            commands::sync_status,
             commands::list_sync_conflicts,
             commands::resolve_sync_conflict,
             commands::create_rfq,
+            commands::list_rfqs,
+            commands::send_rfq,
+            commands::close_rfq,
             commands::save_owner_purchase_pricing,
             commands::set_procurement_mode,
+            commands::issue_owner_formal_order,
             commands::record_receipt,
+            commands::record_procurement_expenditure,
             commands::save_supplier_child_terms,
             commands::send_supplier_order,
             commands::issue_local_captcha,
@@ -106,7 +112,9 @@ fn main() {
             commands::save_reference_master_data,
             commands::list_reference_master_data,
             commands::save_tax_template,
-            commands::save_exchange_rate
+            commands::list_tax_templates,
+            commands::save_exchange_rate,
+            commands::list_exchange_rates
         ])
         .run(tauri::generate_context!())
         .expect("run Honsen Procure desktop");

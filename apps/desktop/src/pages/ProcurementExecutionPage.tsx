@@ -4,6 +4,7 @@ import { RfqPanel } from '../components/RfqPanel'
 import { SupplierAllocationPanel } from '../components/SupplierAllocationPanel'
 import { SupplierChildTermsPanel } from '../components/SupplierChildTermsPanel'
 import { ReceiptPanel } from '../components/ReceiptPanel'
+import { ProcurementExpenditurePanel } from '../components/ProcurementExpenditurePanel'
 import type { SupplierView } from '../lib/catalog-api'
 import type {
   ProcurementExecutionApi,
@@ -12,6 +13,7 @@ import type {
 import type { RfqApi } from '../lib/rfq-api'
 import type { SupplierOrderApi } from '../lib/supplier-order-api'
 import { tauriReceiptApi } from '../lib/receipt-api'
+import { tauriProcurementExpenditureApi } from '../lib/procurement-expenditure-api'
 
 type Props = {
   api: ProcurementExecutionApi
@@ -129,20 +131,28 @@ export function ProcurementExecutionPage({
           ) : null}
           {selected.procurementMode === 'honsen_self_purchase' &&
           ['executing', 'receiving'].includes(selected.workflowStatus) ? (
-            <ReceiptPanel
-              key={selected.id}
-              api={tauriReceiptApi}
-              orderId={selected.id}
-              receiverId={receiverId}
-              initialStatus={selected.workflowStatus}
-              onChanged={refresh}
-              lines={selected.lines.map((line) => ({
-                id: line.id,
-                materialName: line.materialName,
-                unit: line.unit,
-                orderedQuantity: line.quantity,
-              }))}
-            />
+            <>
+              <ReceiptPanel
+                key={`receipt-${selected.id}`}
+                api={tauriReceiptApi}
+                orderId={selected.id}
+                receiverId={receiverId}
+                initialStatus={selected.workflowStatus}
+                onChanged={refresh}
+                lines={selected.lines.map((line) => ({
+                  id: line.id,
+                  materialName: line.materialName,
+                  unit: line.unit,
+                  orderedQuantity: line.quantity,
+                }))}
+              />
+              <ProcurementExpenditurePanel
+                api={tauriProcurementExpenditureApi}
+                orderId={selected.id}
+                paymentHandlerId={receiverId}
+                currency={selected.primaryCurrency}
+              />
+            </>
           ) : null}
           {selected.children.length ? (
             selected.children.map((child) => (
@@ -181,12 +191,19 @@ export function ProcurementExecutionPage({
                 suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
                 onCreated={refresh}
               />
-              <RfqPanel
-                api={rfqApi}
-                sourceOrderId={selected.id}
-                suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
-              />
             </>
+          ) : null}
+          {selected.procurementMode !== 'owner_self_purchase' ? (
+            <RfqPanel
+              key={selected.id}
+              api={rfqApi}
+              sourceOrderId={selected.id}
+              suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
+              canCreate={
+                selected.children.length === 0 &&
+                ['confirmed', 'approved'].includes(selected.workflowStatus)
+              }
+            />
           ) : null}
         </section>
       ) : null}

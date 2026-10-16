@@ -1,4 +1,9 @@
 import { useEffect, useState } from 'react'
+import {
+  readSyncStatus,
+  startSyncLifecycle,
+  type SyncState,
+} from './lib/sync-lifecycle'
 import { ConfigProvider } from 'antd'
 import { calculateDraftTotals } from '@honsen/shared'
 import {
@@ -79,6 +84,14 @@ const previewRequisitionApi: RequisitionApi = {
           ? line.quoteSource.unitPriceMinor
           : '1250',
     }))
+  },
+  async issueOwnerFormalOrder(orderId) {
+    return {
+      documentType: 'OPA',
+      formalDocumentNo: `PREVIEW-OPA-${orderId}`,
+      formalInstallationId: crypto.randomUUID(),
+      formalSequence: 1,
+    }
   },
   async submitRequisitionDraft() {},
   async withdrawRequisition() {},
@@ -172,18 +185,64 @@ function App() {
     username: string
     roles: string[]
     requires_password_change: boolean
+    onlineAuthenticated: boolean
   } | null>(null)
+  const [syncState, setSyncState] = useState<SyncState>({
+    kind: 'offline-pending',
+  })
   const [authorizationContext, setAuthorizationContext] =
     useState<RequisitionContext | null>(null)
   const [authorizationContexts, setAuthorizationContexts] = useState<
     AuthorizationContextOption[]
   >([])
   const [contextError, setContextError] = useState('')
+  const authorizationRefreshReady =
+    session?.onlineAuthenticated &&
+    (syncState.kind === 'pending' || syncState.kind === 'synced')
+  useEffect(() => {
+    if (!session?.onlineAuthenticated) return
+    const invoke = (
+      window as Window & {
+        __TAURI__?: { core?: { invoke?: <T>(command: string) => Promise<T> } }
+      }
+    ).__TAURI__?.core?.invoke
+    if (!invoke) return
+    return startSyncLifecycle(invoke, setSyncState, window)
+  }, [session?.user_id, session?.onlineAuthenticated])
+  useEffect(() => {
+    if (!session || session.onlineAuthenticated) return
+    const invoke = (
+      window as Window & {
+        __TAURI__?: {
+          core?: { invoke?: (command: string) => Promise<unknown> }
+        }
+      }
+    ).__TAURI__?.core?.invoke
+    if (!invoke) return
+    let active = true
+    const refresh = async () => {
+      try {
+        const status = await readSyncStatus(invoke)
+        if (active) setSyncState({ kind: 'offline-pending', ...status })
+      } catch {
+        if (active) setSyncState({ kind: 'offline-pending' })
+      }
+    }
+    void refresh()
+    const timer = setInterval(() => {
+      void refresh()
+    }, 5_000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [session])
   useEffect(() => {
     if (!session) {
       setAuthorizationContext(null)
       return
     }
+    let active = true
     const invoke = (
       window as Window & {
         __TAURI__?: { core?: { invoke?: <T>(command: string) => Promise<T> } }
@@ -207,6 +266,7 @@ function App() {
       >('get_authorization_context'),
     ])
       .then(([contexts, context]) => {
+        if (!active) return
         setAuthorizationContexts(contexts)
         setAuthorizationContext({
           ...context,
@@ -222,11 +282,15 @@ function App() {
         setContextError('')
       })
       .catch(() => {
+        if (!active) return
         setAuthorizationContexts([])
         setAuthorizationContext(null)
         setContextError('当前账户没有有效的离线授权范围，无法新建采购申请。')
       })
-  }, [session])
+    return () => {
+      active = false
+    }
+  }, [session, authorizationRefreshReady])
   const selectAuthorizationContext = (value: string) => {
     const [projectId, departmentId, teamId] = value.split(':')
     const invoke = (
@@ -350,6 +414,7 @@ function App() {
               : undefined
           }
           onSelectAuthorizationContext={selectAuthorizationContext}
+          syncState={syncState}
           onLock={
             session
               ? () => {
@@ -360,7 +425,11 @@ function App() {
                       }
                     }
                   ).__TAURI__?.core?.invoke
-                  void invoke?.('lock_session').finally(() => setSession(null))
+                  void invoke?.('lock_session').finally(() => {
+                    setAuthorizationContexts([])
+                    setAuthorizationContext(null)
+                    setSession(null)
+                  })
                 }
               : undefined
           }
@@ -448,7 +517,17 @@ function App() {
         </AppShell>
       ) : (
         <LoginPage
-          onLogin={setSession}
+          onLogin={(authenticated, mode) => {
+            setAuthorizationContexts([])
+            setAuthorizationContext(null)
+            setSyncState({
+              kind: mode === 'online' ? 'syncing' : 'offline-pending',
+            })
+            setSession({
+              ...authenticated,
+              onlineAuthenticated: mode === 'online',
+            })
+          }}
           onPreview={() => setPreviewOpen(true)}
         />
       )}

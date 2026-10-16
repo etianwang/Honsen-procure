@@ -1,17 +1,63 @@
 import {
+  exchangeRateSchema,
+  projectDefaultsSchema,
   referenceMasterDataSchema,
+  uuidSchema,
   syncPullQuerySchema,
   syncPushRequestSchema,
+  taxTemplateSchema,
   type SyncEvent,
   type SyncEventResult,
   type SyncPullResponse,
   type SyncPushResponse,
 } from '@honsen/shared'
 import type { Role } from '@honsen/shared'
+import { z } from 'zod'
 import type { SyncActor, SyncStore } from './types.js'
 
 const procurementRoles: Role[] = ['purchaser', 'administrator']
-const referenceMasterDataTypes = ['country', 'project', 'site'] as const
+const masterDataRoles: Role[] = [
+  'super_administrator',
+  'administrator',
+  'purchaser',
+]
+const referenceMasterDataTypes = [
+  'country',
+  'project',
+  'site',
+  'department',
+  'team',
+  'unit',
+] as const
+const rfqPayloadSchema = z.strictObject({
+  id: uuidSchema,
+  sourceOrderId: uuidSchema,
+  supplierId: uuidSchema,
+  supplierSnapshot: z.strictObject({
+    id: uuidSchema,
+    name: z.string().trim().min(1),
+  }),
+  projectId: uuidSchema,
+  displayNo: z.string().trim().min(1),
+  currency: z.enum(['XOF', 'CNY', 'USD', 'EUR']),
+  status: z.enum(['draft', 'sent', 'closed']),
+  items: z
+    .array(
+      z.strictObject({
+        sourceItemId: uuidSchema,
+        materialSnapshot: z.strictObject({
+          nameZh: z.string().trim().min(1),
+          nameFr: z.string().nullable(),
+          model: z.string(),
+          specification: z.string(),
+        }),
+        quantity: z.string().regex(/^(?!0+(?:\.0{1,2})?$)\d+(?:\.\d{1,2})?$/),
+        unit: z.string().trim().min(1),
+        sortOrder: z.number().int().min(0),
+      }),
+    )
+    .min(1),
+})
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
@@ -49,6 +95,39 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'rfq') {
+      if (
+        event.operation !== 'upsert' ||
+        !actor.roles.some((role) => procurementRoles.includes(role))
+      )
+        return false
+      const parsed = rfqPayloadSchema.safeParse(event.payload)
+      if (
+        !parsed.success ||
+        parsed.data.id !== event.entityId ||
+        parsed.data.supplierSnapshot.id !== parsed.data.supplierId
+      )
+        return false
+      const order = await this.store.getEntityPayload(
+        'purchase_order',
+        parsed.data.sourceOrderId,
+      )
+      const mode = order ? stringField(order, 'procurementMode') : null
+      return (
+        order !== null &&
+        stringField(order, 'parentOrderId') === null &&
+        stringField(order, 'projectId') === parsed.data.projectId &&
+        (mode === null || mode === 'honsen_self_purchase') &&
+        [
+          'confirmed',
+          'approved',
+          'executing',
+          'receiving',
+          'completed',
+          'completed_with_conditions',
+        ].includes(stringField(order, 'workflowStatus') ?? '')
+      )
+    }
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
     if (
@@ -64,12 +143,47 @@ export class SyncService {
       }
       return (
         event.operation === 'upsert' &&
-        actor.roles.some((role) => procurementRoles.includes(role)) &&
+        actor.roles.some((role) => masterDataRoles.includes(role)) &&
         referenceMasterDataSchema.safeParse({
           ...referencePayload(event.payload),
           kind: event.entityType,
           id: event.entityId,
         }).success
+      )
+    }
+    if (
+      event.entityType === 'tax_template' ||
+      event.entityType === 'exchange_rate'
+    ) {
+      const schema =
+        event.entityType === 'tax_template'
+          ? taxTemplateSchema
+          : exchangeRateSchema
+      return (
+        event.operation === 'upsert' &&
+        actor.roles.some((role) => masterDataRoles.includes(role)) &&
+        schema.safeParse({
+          ...referencePayload(event.payload),
+          id: event.entityId,
+        }).success
+      )
+    }
+    if (event.entityType === 'project_defaults') {
+      const payload = referencePayload(event.payload)
+      if (!(
+        event.operation === 'upsert' &&
+        actor.roles.some((role) => masterDataRoles.includes(role)) &&
+        payload.projectId === event.entityId &&
+        projectDefaultsSchema.safeParse(payload).success
+      ))
+        return false
+      return (
+        payload.defaultTaxTemplateId === null ||
+        (typeof payload.defaultTaxTemplateId === 'string' &&
+          (await this.store.isCompatibleProjectTax(
+            event.entityId,
+            payload.defaultTaxTemplateId,
+          )))
       )
     }
     if (actor.roles.some((role) => procurementRoles.includes(role))) return true
@@ -144,13 +258,30 @@ function referencePayload(
     ...payload,
     businessCode: payload.businessCode ?? payload.business_code,
     timeZone: payload.timeZone ?? payload.time_zone,
-    countryId: payload.countryId ?? payload.country_id,
+    countryId:
+      payload.countryId !== undefined ? payload.countryId : payload.country_id,
     departmentName: payload.departmentName ?? payload.department_name,
+    departmentId: payload.departmentId ?? payload.department_id,
     defaultCurrency: payload.defaultCurrency ?? payload.default_currency,
     defaultLanguagePair:
       payload.defaultLanguagePair ?? payload.default_language_pair,
     projectId: payload.projectId ?? payload.project_id,
     isActive: payload.isActive ?? payload.is_active,
+    rateBasisPoints: payload.rateBasisPoints ?? payload.rate_basis_points,
+    effectiveAt: payload.effectiveAt ?? payload.effective_at,
+    fromCurrency: payload.fromCurrency ?? payload.from_currency,
+    toCurrency: payload.toCurrency ?? payload.to_currency,
+    rateDecimal: payload.rateDecimal ?? payload.rate_decimal,
+    departmentTitle: payload.departmentTitle ?? payload.department_title,
+    companyAddress: payload.companyAddress ?? payload.company_address,
+    companyContact:
+      payload.companyContact !== undefined
+        ? payload.companyContact
+        : payload.company_contact,
+    defaultTaxTemplateId:
+      payload.defaultTaxTemplateId !== undefined
+        ? payload.defaultTaxTemplateId
+        : payload.default_tax_template_id,
   }
 }
 
