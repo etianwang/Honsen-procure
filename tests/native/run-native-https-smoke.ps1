@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('ab-sync-security', 'pull-recovery', 'offline-push-recovery')]
+  [ValidateSet('ab-sync-security', 'pull-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security'
 )
 
@@ -17,6 +17,7 @@ $interruptedResult = Join-Path $qaRoot "$runId-pull-interrupted.test.json"
 $recoveredResult = Join-Path $qaRoot "$runId-pull-recovered.test.json"
 $offlineResult = Join-Path $qaRoot "$runId-offline-push.test.json"
 $offlineRecoveredResult = Join-Path $qaRoot "$runId-offline-push-recovered.test.json"
+$partialBatchResult = Join-Path $qaRoot "$runId-push-partial-batch.test.json"
 $offlineReady = Join-Path $qaRoot "$runId-offline-ready.signal"
 $offlineContinue = Join-Path $qaRoot "$runId-offline-continue.signal"
 $diagnostics = Join-Path $qaRoot "$runId-server-sync.test.jsonl"
@@ -114,6 +115,10 @@ try {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
       & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native HonsenProcure.exe smoke failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 'push-partial-batch') {
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $partialBatchResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native partial Push batch smoke failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'pull-recovery') {
       $env:HONSEN_PROCURE_NATIVE_PULL_RECOVERY_PHASE = 'interrupted'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $interruptedResult
@@ -172,6 +177,15 @@ try {
       throw "native smoke result is invalid: $result"
     }
     Write-Output "PASS native HonsenProcure.exe HTTPS A/B sync security smoke: $result"
+  } elseif ($Mode -eq 'push-partial-batch') {
+    $partial = Get-Content -Raw $partialBatchResult | ConvertFrom-Json
+    $partialRecord = @(Get-Content $diagnostics | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.route -eq 'POST /api/sync/push' -and $_.eventIds -contains $partial.acceptedEventId -and $_.eventIds -contains $partial.conflictEventId })
+    $partialPayload = if ($partialRecord.Count -eq 1) { $partialRecord[0].servicePayload | ConvertFrom-Json } else { $null }
+    $partialStatuses = @($partialPayload.results | ForEach-Object { "$( $_.eventId ):$( $_.status )" })
+    if ($partial.mode -ne 'push-partial-batch' -or $partial.partialBatchAcceptedOnly -ne 'PASS' -or $partial.conflictEventRetained -ne 'PASS' -or $partial.conflictProjected -ne 'PASS' -or $partial.replayRetained -ne 'PASS' -or $partial.partialAcceptedCount -ne 1 -or $partial.partialPendingCount -ne 1 -or $partial.pendingAfterPartial -ne 1 -or $partial.pullAppliedCount -ne 2 -or $partial.conflictCount -ne 1 -or $partial.replayAcceptedCount -ne 0 -or $partial.replayPendingCount -ne 1 -or $partialRecord.Count -ne 1 -or $partialRecord[0].serverStatus -ne 200 -or $partialStatuses -notcontains "$($partial.acceptedEventId):accepted" -or $partialStatuses -notcontains "$($partial.conflictEventId):conflict") {
+      throw "native partial Push batch result is invalid: $partialBatchResult / $diagnostics"
+    }
+    Write-Output "PASS native HonsenProcure.exe HTTPS partial Push batch smoke: $partialBatchResult"
   } elseif ($Mode -eq 'pull-recovery') {
     $interrupted = Get-Content -Raw $interruptedResult | ConvertFrom-Json
     $recovered = Get-Content -Raw $recoveredResult | ConvertFrom-Json

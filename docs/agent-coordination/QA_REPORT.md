@@ -419,6 +419,53 @@ Independent focused verification: `cargo test --lib` PASS (55/55), `cargo check 
 
 **NATIVE-004 is independently CLOSED for this bounded offline draft/Push recovery scenario. T10-SEC-001, P1 and Formal remain OPEN: this does not cover all reconnect failure forms or RFQ/Formal native workflows, and is not complete T10 acceptance.**
 
+## Native Push partial-success batch — 2026-10-17
+
+### T10 reliability matrix
+
+| Failure boundary | Native evidence | Status |
+| --- | --- | --- |
+| Request cannot reach service before Push | NATIVE-004: actual loopback HTTPS host stopped; retained draft/outbox then restart recovery. | COVERED |
+| Service commits but Push response is lost | NATIVE-002: test-host post-commit 503 and same-event replay. | COVERED |
+| One Push batch has accepted and conflict results | NATIVE-005 below. | READY_FOR_RECHECK |
+| First Pull transport failure / restart | NATIVE-003: 503, cursor unchanged, process restart, one projection. | COVERED |
+| Pull after a full 500-change page then transport failure | Rust unit coverage exists for page continuation; no real-native second-page interruption. | NOT COVERED |
+| Local cursor persistence write fails | Atomic SQLite unit coverage exists; no sanctioned real-disk fault injection in the native harness. | NOT COVERED |
+| EXE terminates during an in-flight request | Not covered; existing tests terminate only after a completed failed/successful operation boundary. | NOT COVERED |
+| Duplicate-event idempotency | NATIVE-002/NATIVE-004 cover accepted replay; NATIVE-005 covers retained conflict replay. | COVERED for these bounded forms |
+
+The selected smallest high-risk gap is partial Push acknowledgement: the protocol permits a batch to contain safe accepted and retained conflict results, and the client must never acknowledge every local event merely because the HTTP request returned 200.
+
+The first RED run added only the `push-partial-batch` test-script mode and invoked the real EXE. Fresh `native-smoke-20261017162327` failed at the pre-existing production test-mode whitelist with `unknown native smoke mode`; no business action ran. This proves the new scenario was not inherited from a prior native PASS. The subsequent narrow implementation is debug/test-profile-only: it opens the existing second profile, uses production `save_requisition_draft`, `push_pending_https` and `pull_sync_https`, and adds test-server diagnostics for all event IDs in an already-real Fastify Push request. Production sync code, TLS, session/installation checks, SQLite transaction behavior and server result semantics are unchanged.
+
+Fresh real-native GREEN command:
+
+```text
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode push-partial-batch
+```
+
+Fresh run `native-smoke-20261017162543` builds/runs real debug `HonsenProcure.exe`, isolated PostgreSQL, Fastify HTTPS, two newly seeded absolute SQLite profiles and Windows Credential Manager. A first A event establishes server version 1. Purchaser B then creates a valid new draft followed by a stale copy of A's entity, and sends both with one real production Push request.
+
+| Assertion | Result | Fresh evidence |
+| --- | --- | --- |
+| Partial server result is genuine | PASS | The one B Push request has two event IDs; Fastify's actual SyncService response is `accepted@1` for B's new order and `conflict@1` for B's stale event. |
+| Client acknowledgement is selective | PASS | Real Rust result is accepted `1`, pending `1`; debug-only read-only checks require the accepted outbox record acknowledged and the conflict record unacknowledged. |
+| Pull preserves conflict evidence | PASS | B's real Pull applies two remote changes, cursor `0→2`, projects the accepted order at version 1 and creates exactly one local conflict for the stale event. |
+| Retained conflict replay | PASS | A repeated production Push sends only the stale event and returns accepted `0`, pending `1`; it is not silently discarded. |
+| Test/release boundary and cleanup | PASS | No fault-response variable is enabled; the test uses service validation, not a response Mock. `cargo check --release --bin HonsenProcure` passes and release smoke entry returns unavailable. The disposable Compose project and loopback listeners were absent after completion. |
+
+Artifacts:
+
+- `.honsen-native-qa/native-smoke-20261017162327.test.json` and `test-results/native-push-partial-red-20261017162327-{log,error.log}` (expected RED)
+- `.honsen-native-qa/native-smoke-20261017162543-push-partial-batch.test.json`
+- `.honsen-native-qa/native-smoke-20261017162543-server-sync.test.jsonl`
+- `test-results/native-push-partial-green-20261017162542.{log,error.log}`
+- `test-results/native-smoke-20261017162543-{client,server,server-error,compose,compose-error}.log`
+
+Focused checks: Rust `cargo fmt --check`, `cargo test --lib` (55/55), debug and release `cargo check --bin HonsenProcure`, server lint/typecheck and `git diff --check` PASS. Existing debug-only release warnings remain. No production database, existing E2E data, production TLS/keyring policy, push, merge or deployment was touched.
+
+**NATIVE-005 is READY_FOR_RECHECK. T10-SEC-001, P1 and Formal remain OPEN; full-page Pull interruption, durable-cursor write failure, in-flight termination and RFQ/Formal native flows remain outside this one slice.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.

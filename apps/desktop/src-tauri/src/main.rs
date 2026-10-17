@@ -54,6 +54,7 @@ fn main() {
         None | Some("online-login")
             | Some("ab-login-switch")
             | Some("ab-sync-security")
+            | Some("push-partial-batch")
             | Some("offline-push-recovery")
             | Some("pull-recovery")
             | Some("vault-readback")
@@ -80,6 +81,12 @@ fn main() {
                 if let Err(error) = run_native_ab_sync_security_smoke(&auth, &database_path) {
                     write_native_smoke_failure("ab-sync-security", &error);
                     panic!("run native A/B sync security smoke: {error}");
+                }
+            }
+            "push-partial-batch" => {
+                if let Err(error) = run_native_push_partial_batch_smoke(&auth, &database_path) {
+                    write_native_smoke_failure("push-partial-batch", &error);
+                    panic!("run native partial Push batch smoke: {error}");
                 }
             }
             "pull-recovery" => {
@@ -755,6 +762,167 @@ fn run_native_pull_recovery_smoke(
 }
 
 #[cfg(debug_assertions)]
+fn run_native_push_partial_batch_smoke(
+    account_a: &LocalAuthService,
+    account_a_path: &PathBuf,
+) -> Result<(), String> {
+    let account_b_path = PathBuf::from(required_test_value(
+        "HONSEN_PROCURE_NATIVE_AB_SECOND_DB_PATH",
+    )?);
+    if !account_b_path.is_absolute()
+        || !account_b_path.to_string_lossy().ends_with(".test.sqlite")
+        || account_b_path == *account_a_path
+    {
+        return Err("native partial Push requires a distinct absolute B test database".into());
+    }
+    let account_b = LocalAuthService::open_test_path(
+        account_b_path
+            .to_str()
+            .ok_or_else(|| "native partial Push B database path must be UTF-8".to_owned())?,
+    )
+    .map_err(|error| error.to_string())?;
+    let engineer_a_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD")?;
+    let purchaser_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+
+    let account_a_session =
+        native_online_login(account_a, "engineer-a", &engineer_a_password, now)?;
+    let stale_order_id = Uuid::new_v4();
+    account_a
+        .save_requisition_draft(
+            native_sync_draft(stale_order_id, account_a_session.user_id),
+            now,
+        )
+        .map_err(|error| error.to_string())?;
+    let initial_push = tauri::async_runtime::block_on(account_a.push_pending_https(now))
+        .map_err(|error| error.to_string())?;
+    if initial_push.accepted_count != 1 || initial_push.pending_count != 0 {
+        return Err(format!(
+            "partial Push fixture was not accepted: {initial_push:?}"
+        ));
+    }
+
+    let purchaser_session = native_online_login(&account_b, "purchaser", &purchaser_password, now)?;
+    let accepted_order_id = Uuid::new_v4();
+    account_b
+        .save_requisition_draft(
+            native_sync_draft(accepted_order_id, purchaser_session.user_id),
+            now,
+        )
+        .map_err(|error| error.to_string())?;
+    account_b
+        .save_requisition_draft(
+            native_sync_draft(stale_order_id, account_a_session.user_id),
+            now,
+        )
+        .map_err(|error| error.to_string())?;
+    let pending_before = account_b
+        .pending_sync_events(10, now)
+        .map_err(|error| error.to_string())?;
+    if pending_before.len() != 2
+        || pending_before[0].entity_id != accepted_order_id
+        || pending_before[1].entity_id != stale_order_id
+    {
+        return Err("partial Push fixture did not create an ordered valid/stale batch".into());
+    }
+    let accepted_event_id = pending_before[0].event_id;
+    let conflict_event_id = pending_before[1].event_id;
+    let partial_push = tauri::async_runtime::block_on(account_b.push_pending_https(now))
+        .map_err(|error| error.to_string())?;
+    let pending_after = account_b
+        .pending_sync_events(10, now)
+        .map_err(|error| error.to_string())?;
+    if partial_push.accepted_count != 1
+        || partial_push.pending_count != 1
+        || pending_after.len() != 1
+        || pending_after[0].event_id != conflict_event_id
+        || account_b
+            .test_outbox_acknowledged(accepted_event_id)
+            .map_err(|error| error.to_string())?
+            != Some(true)
+        || account_b
+            .test_outbox_acknowledged(conflict_event_id)
+            .map_err(|error| error.to_string())?
+            != Some(false)
+    {
+        return Err(format!(
+            "partial Push did not acknowledge only the accepted event: {partial_push:?}; pending={pending_after:?}"
+        ));
+    }
+
+    let cursor_before_pull = account_b
+        .test_pull_cursor(purchaser_session.user_id)
+        .map_err(|error| error.to_string())?;
+    let pull = tauri::async_runtime::block_on(account_b.pull_sync_https(now))
+        .map_err(|error| error.to_string())?;
+    let cursor_after_pull = account_b
+        .test_pull_cursor(purchaser_session.user_id)
+        .map_err(|error| error.to_string())?;
+    let conflicts = account_b
+        .list_sync_conflicts(now)
+        .map_err(|error| error.to_string())?;
+    if pull.applied_count != 2
+        || pull.next_cursor == cursor_before_pull
+        || cursor_after_pull != pull.next_cursor
+        || conflicts.len() != 1
+        || conflicts[0].entity_id != stale_order_id
+        || account_b
+            .test_remote_entity_version("purchase_order", accepted_order_id)
+            .map_err(|error| error.to_string())?
+            != Some(1)
+    {
+        return Err(format!(
+            "partial Push conflict Pull did not retain/projection states: pull={pull:?}; conflicts={conflicts:?}"
+        ));
+    }
+    let replay_push = tauri::async_runtime::block_on(account_b.push_pending_https(now))
+        .map_err(|error| error.to_string())?;
+    let pending_after_replay = account_b
+        .pending_sync_events(10, now)
+        .map_err(|error| error.to_string())?;
+    if replay_push.accepted_count != 0
+        || replay_push.pending_count != 1
+        || pending_after_replay.len() != 1
+        || pending_after_replay[0].event_id != conflict_event_id
+    {
+        return Err(format!(
+            "partial Push replay did not retain only the conflict event: {replay_push:?}"
+        ));
+    }
+    fs::write(
+        result_path,
+        serde_json::json!({
+            "mode": "push-partial-batch",
+            "partialBatchAcceptedOnly": "PASS",
+            "conflictEventRetained": "PASS",
+            "conflictProjected": "PASS",
+            "replayRetained": "PASS",
+            "accountA": account_a_session.user_id,
+            "accountB": purchaser_session.user_id,
+            "installationB": account_b.test_installation_id().map_err(|error| error.to_string())?,
+            "profileA": account_a_path,
+            "profileB": account_b_path,
+            "acceptedOrderId": accepted_order_id,
+            "staleOrderId": stale_order_id,
+            "acceptedEventId": accepted_event_id,
+            "conflictEventId": conflict_event_id,
+            "partialAcceptedCount": partial_push.accepted_count,
+            "partialPendingCount": partial_push.pending_count,
+            "pendingAfterPartial": pending_after.len(),
+            "pullAppliedCount": pull.applied_count,
+            "cursorBeforePull": cursor_before_pull,
+            "cursorAfterPull": cursor_after_pull,
+            "conflictCount": conflicts.len(),
+            "replayAcceptedCount": replay_push.accepted_count,
+            "replayPendingCount": replay_push.pending_count,
+        })
+        .to_string(),
+    )
+    .map_err(|_| "cannot write native partial Push result".to_owned())
+}
+
+#[cfg(debug_assertions)]
 fn run_native_offline_push_recovery_smoke(
     auth: &LocalAuthService,
     database_path: &PathBuf,
@@ -981,6 +1149,14 @@ fn run_native_pull_recovery_smoke(
     _database_path: &PathBuf,
 ) -> Result<(), String> {
     Err("native Pull recovery smoke is unavailable outside a debug test build".into())
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_push_partial_batch_smoke(
+    _account_a: &LocalAuthService,
+    _account_a_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native partial Push batch smoke is unavailable outside a debug test build".into())
 }
 
 #[cfg(not(debug_assertions))]

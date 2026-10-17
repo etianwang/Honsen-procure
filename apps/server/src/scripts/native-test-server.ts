@@ -152,9 +152,10 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
     return payload
   }
   if (request.method !== 'POST' || request.url !== '/api/sync/push') return payload
-  const eventId = (
+  const eventIds = (
     request.body as { events?: Array<{ eventId?: string }> } | undefined
-  )?.events?.[0]?.eventId
+  )?.events?.flatMap((event) => (event.eventId ? [event.eventId] : [])) ?? []
+  const eventId = eventIds[0]
   let origin: {
     actor_id: string
     origin_account_id: string
@@ -196,6 +197,7 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
     writeDiagnostic({
       route: 'POST /api/sync/push',
       eventId,
+      eventIds,
       serverStatus: 503,
       injectedPostCommitFault: true,
       servicePayload,
@@ -206,6 +208,7 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
   writeDiagnostic({
     route: 'POST /api/sync/push',
     eventId,
+    eventIds,
     serverStatus: reply.statusCode,
     servicePayload,
     origin,
