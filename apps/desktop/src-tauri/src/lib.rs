@@ -1097,6 +1097,12 @@ fn test_profile_accounts() -> [(Uuid, &'static str, Vec<Role>, &'static str); 3]
 
 fn test_profile_credential_services(path: &Path) -> (String, String) {
     let profile_hash = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
+    let profile_scope = &profile_hash[..8];
+    (format!("V-{profile_scope}"), format!("S-{profile_scope}"))
+}
+
+fn prior_test_profile_credential_services(path: &Path) -> (String, String) {
+    let profile_hash = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
     (
         format!("Honsen Procure test offline verifier {profile_hash}"),
         format!("Honsen Procure test sync session {profile_hash}"),
@@ -1110,6 +1116,7 @@ pub struct LocalAuthService {
     online_session_account: Mutex<Option<Uuid>>,
     credential_vault: Box<dyn CredentialVault>,
     test_tls_root: Option<reqwest::Certificate>,
+    test_expected_sync_origin_installation: Mutex<Option<String>>,
 }
 
 impl LocalAuthService {
@@ -1207,10 +1214,14 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         let (verifier_service, sync_service) = test_profile_credential_services(path);
+        let (prior_verifier_service, prior_sync_service) =
+            prior_test_profile_credential_services(path);
         for (id, _, _, _) in test_profile_accounts() {
             for service in [
                 verifier_service.as_str(),
                 sync_service.as_str(),
+                prior_verifier_service.as_str(),
+                prior_sync_service.as_str(),
                 "Honsen Procure test offline verifier",
                 "Honsen Procure test sync session",
             ] {
@@ -1259,7 +1270,84 @@ impl LocalAuthService {
             online_session_account: Mutex::new(None),
             credential_vault,
             test_tls_root,
+            test_expected_sync_origin_installation: Mutex::new(None),
         })
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn test_installation_id(&self) -> Result<Uuid, AuthError> {
+        let installation_id: String = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT installation_id FROM local_sync_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        Uuid::parse_str(&installation_id).map_err(|_| AuthError::Database)
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn replace_test_installation_id(&self, forged: Uuid) -> Result<Uuid, AuthError> {
+        let original = self.test_installation_id()?;
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .execute(
+                "UPDATE local_sync_state SET installation_id = ?1 WHERE singleton = 1",
+                [forged.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        *self
+            .test_expected_sync_origin_installation
+            .lock()
+            .map_err(|_| AuthError::Database)? = Some(original.to_string());
+        Ok(original)
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn test_sync_session_state(&self) -> Result<(Option<Uuid>, Option<Uuid>, bool), AuthError> {
+        let local_session = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row("SELECT user_id FROM local_session", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .map(|id| Uuid::parse_str(&id).map_err(|_| AuthError::Database))
+            .transpose()?;
+        let online_session = *self
+            .online_session_account
+            .lock()
+            .map_err(|_| AuthError::Database)?;
+        let has_token = match local_session {
+            Some(account_id) => self.credential_vault.load_sync_token(account_id)?.is_some(),
+            None => false,
+        };
+        Ok((local_session, online_session, has_token))
+    }
+
+    fn verify_test_sync_origin(&self, response: &reqwest::Response) -> Result<(), AuthError> {
+        #[cfg(debug_assertions)]
+        if let Some(expected) = self
+            .test_expected_sync_origin_installation
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .as_deref()
+        {
+            let actual = response
+                .headers()
+                .get("x-honsen-test-origin-installation-id")
+                .and_then(|value| value.to_str().ok());
+            if actual != Some(expected) {
+                return Err(AuthError::SyncTransport);
+            }
+        }
+        Ok(())
     }
 
     fn https_client(&self) -> Result<reqwest::Client, AuthError> {
@@ -5180,6 +5268,7 @@ impl LocalAuthService {
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }
+        self.verify_test_sync_origin(&response)?;
         let acknowledgements = response
             .json::<SyncPushResponse>()
             .await
@@ -9686,10 +9775,21 @@ mod tests {
 
     #[test]
     fn test_profile_credential_services_are_path_scoped() {
+        let first = test_profile_credential_services(Path::new(r"C:\\qa\\a.test.sqlite"));
+        let second = test_profile_credential_services(Path::new(r"C:\\qa\\b.test.sqlite"));
+        assert_ne!(first, second);
+        assert!(first.0.len() <= 10 && first.1.len() <= 10);
+    }
+
+    #[test]
+    fn test_profile_can_replace_only_its_local_installation_id() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let forged = Uuid::new_v4();
         assert_ne!(
-            test_profile_credential_services(Path::new(r"C:\\qa\\a.test.sqlite")),
-            test_profile_credential_services(Path::new(r"C:\\qa\\b.test.sqlite")),
+            service.replace_test_installation_id(forged).unwrap(),
+            forged
         );
+        assert_eq!(service.test_installation_id().unwrap(), forged);
     }
 
     #[test]

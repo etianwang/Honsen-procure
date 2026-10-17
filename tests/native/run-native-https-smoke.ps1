@@ -62,6 +62,7 @@ try {
   $env:HONSEN_TEST_ENGINEER_A_PASSWORD = "native-a-$([Guid]::NewGuid().ToString('N'))"
   $env:HONSEN_TEST_ENGINEER_B_PASSWORD = "native-b-$([Guid]::NewGuid().ToString('N'))"
   $env:HONSEN_TEST_PURCHASER_PASSWORD = "native-p-$([Guid]::NewGuid().ToString('N'))"
+  $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE = '1'
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
   for ($launch = 0; $launch -lt 3; $launch++) {
@@ -89,21 +90,23 @@ try {
     $env:HONSEN_PROCURE_PROFILE = 'test'
     $env:HONSEN_PROCURE_TEST_TLS_CA_PEM = $pem
     $env:HONSEN_SYNC_API_BASE_URL = 'https://localhost:3443'
-    $env:HONSEN_PROCURE_NATIVE_SMOKE = 'ab-login-switch'
+    $env:HONSEN_PROCURE_NATIVE_SMOKE = 'ab-sync-security'
     $env:HONSEN_PROCURE_NATIVE_AB_SECOND_DB_PATH = $profileB
     $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD = $env:HONSEN_TEST_ENGINEER_A_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD = $env:HONSEN_TEST_ENGINEER_B_PASSWORD
+    $env:HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD = $env:HONSEN_TEST_PURCHASER_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
+    $env:RUST_BACKTRACE = '1'
     & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
     if ($LASTEXITCODE -ne 0) { throw "native HonsenProcure.exe smoke failed; inspect $nativeLog" }
   } finally {
     Pop-Location
   }
   $smoke = Get-Content -Raw $result | ConvertFrom-Json
-  if ($smoke.mode -ne 'ab-login-switch' -or $smoke.accountALogin -ne 'PASS' -or $smoke.accountBLogin -ne 'PASS' -or $smoke.accountSwitch -ne 'PASS' -or $smoke.oldTokenRejected -ne 'PASS' -or $smoke.logoutBlocksClient -ne 'PASS') {
+  if ($smoke.mode -ne 'ab-sync-security' -or $smoke.independentInstallations -ne 'PASS' -or $smoke.forgedDeviceIdTrustedOrigin -ne 'PASS' -or $smoke.accountIsolation -ne 'PASS' -or $smoke.conflictIsolation -ne 'PASS' -or $smoke.pushReplayIdempotency -ne 'PASS') {
     throw "native smoke result is invalid: $result"
   }
-  Write-Output "PASS native HonsenProcure.exe HTTPS A/B login-switch smoke: $result"
+  Write-Output "PASS native HonsenProcure.exe HTTPS A/B sync security smoke: $result"
 } finally {
   if ($server -and !$server.HasExited) {
     Stop-Process -Id $server.Id -Force

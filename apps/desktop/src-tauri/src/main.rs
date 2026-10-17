@@ -1,6 +1,10 @@
-use honsen_materials_desktop_core::{AuthError, AuthenticatedSession, LocalAuthService, commands};
+use honsen_materials_desktop_core::{
+    AdjustmentInput, AuthError, AuthenticatedSession, LocalAuthService, MaterialSnapshotInput,
+    RequisitionDraftInput, RequisitionLineInput, commands,
+};
 use std::{env, fs, path::PathBuf, time::SystemTime};
 use tauri::Manager;
+use uuid::Uuid;
 
 fn profile_path() -> Result<(PathBuf, bool), String> {
     match env::var("HONSEN_PROCURE_PROFILE").as_deref() {
@@ -39,7 +43,7 @@ fn main() {
     }
     if !matches!(
         native_smoke.as_deref(),
-        None | Some("online-login") | Some("ab-login-switch")
+        None | Some("online-login") | Some("ab-login-switch") | Some("ab-sync-security")
     ) {
         panic!("unknown native smoke mode");
     }
@@ -59,6 +63,12 @@ fn main() {
             }
             "ab-login-switch" => run_native_ab_login_switch_smoke(&auth, &database_path)
                 .expect("run native A/B login switch smoke"),
+            "ab-sync-security" => {
+                if let Err(error) = run_native_ab_sync_security_smoke(&auth, &database_path) {
+                    write_native_smoke_failure("ab-sync-security", &error);
+                    panic!("run native A/B sync security smoke: {error}");
+                }
+            }
             _ => unreachable!("validated native smoke mode"),
         }
         return;
@@ -188,6 +198,13 @@ fn run_native_ab_login_switch_smoke(
 
     let account_a_session =
         native_online_login(account_a, "engineer-a", &engineer_a_password, now)?;
+    if !account_a
+        .test_sync_session_state()
+        .map_err(|error| error.to_string())?
+        .2
+    {
+        return Err("account A login did not persist its test-profile sync token".into());
+    }
     let account_b_session =
         native_online_login(&account_b, "engineer-b", &engineer_b_password, now)?;
     let switched_session =
@@ -250,8 +267,198 @@ fn native_online_login(
     .map_err(|error| error.to_string())
 }
 
+#[cfg(debug_assertions)]
+fn run_native_ab_sync_security_smoke(
+    account_a: &LocalAuthService,
+    account_a_path: &PathBuf,
+) -> Result<(), String> {
+    let account_b_path = PathBuf::from(required_test_value(
+        "HONSEN_PROCURE_NATIVE_AB_SECOND_DB_PATH",
+    )?);
+    if !account_b_path.is_absolute()
+        || !account_b_path.to_string_lossy().ends_with(".test.sqlite")
+        || account_b_path == *account_a_path
+    {
+        return Err(
+            "native A/B second database must be a distinct absolute .test.sqlite path".into(),
+        );
+    }
+    let account_b = LocalAuthService::open_test_path(
+        account_b_path
+            .to_str()
+            .ok_or_else(|| "native A/B second database path must be UTF-8".to_owned())?,
+    )
+    .map_err(|error| error.to_string())?;
+    let engineer_a_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD")?;
+    let engineer_b_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD")?;
+    let purchaser_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+
+    let account_a_session =
+        native_online_login(account_a, "engineer-a", &engineer_a_password, now)?;
+    let account_b_session =
+        native_online_login(&account_b, "engineer-b", &engineer_b_password, now)?;
+    if account_a_session.username != "engineer-a" || account_b_session.username != "engineer-b" {
+        return Err("native A/B sync login returned an unexpected account".into());
+    }
+    if account_a
+        .test_installation_id()
+        .map_err(|error| error.to_string())?
+        == account_b
+            .test_installation_id()
+            .map_err(|error| error.to_string())?
+    {
+        return Err("native A/B profiles unexpectedly share an installation identity".into());
+    }
+    tauri::async_runtime::block_on(account_a.refresh_authorization_https(now)).map_err(
+        |error| {
+            let state = account_a.test_sync_session_state();
+            format!("account A lost its protected session after login: {error:?}; state={state:?}")
+        },
+    )?;
+    let order_id = Uuid::new_v4();
+    account_a
+        .save_requisition_draft(native_sync_draft(order_id, account_a_session.user_id), now)
+        .map_err(|error| error.to_string())?;
+    let forged_installation_id = Uuid::new_v4();
+    let trusted_installation_id = account_a
+        .replace_test_installation_id(forged_installation_id)
+        .map_err(|error| error.to_string())?;
+    if trusted_installation_id == forged_installation_id {
+        return Err("native test generated an ineffective forged installation ID".into());
+    }
+    let first_push = tauri::async_runtime::block_on(account_a.push_pending_https(now));
+    if !matches!(first_push, Err(AuthError::SyncTransport)) {
+        return Err(format!(
+            "first native Push did not observe the configured post-commit transport fault: {first_push:?}"
+        ));
+    }
+    let replay = tauri::async_runtime::block_on(account_a.push_pending_https(now))
+        .map_err(|error| error.to_string())?;
+    if replay.accepted_count != 1 || replay.pending_count != 0 {
+        return Err("native Push replay was not idempotently acknowledged".into());
+    }
+    let isolated_pull = tauri::async_runtime::block_on(account_b.pull_sync_https(now))
+        .map_err(|error| error.to_string())?;
+    if isolated_pull.applied_count != 0 || isolated_pull.next_cursor != "0" {
+        return Err(
+            "account B received account A project data without a server authorization binding"
+                .into(),
+        );
+    }
+    let empty_b_push = tauri::async_runtime::block_on(account_b.push_pending_https(now))
+        .map_err(|error| error.to_string())?;
+    if empty_b_push.accepted_count != 0 || empty_b_push.pending_count != 0 {
+        return Err("account B Push included an event not owned by account B".into());
+    }
+    let purchaser_session = native_online_login(&account_b, "purchaser", &purchaser_password, now)?;
+    account_b
+        .save_requisition_draft(native_sync_draft(order_id, account_a_session.user_id), now)
+        .map_err(|error| error.to_string())?;
+    let conflict_push = tauri::async_runtime::block_on(account_b.push_pending_https(now))
+        .map_err(|error| error.to_string())?;
+    if conflict_push.accepted_count != 0 {
+        return Err("stale account B Push did not produce a synchronization conflict".into());
+    }
+    let conflicts = account_b
+        .list_sync_conflicts(now)
+        .map_err(|error| error.to_string())?;
+    if purchaser_session.username != "purchaser"
+        || conflicts.len() != 1
+        || conflicts[0].entity_id != order_id
+    {
+        return Err("account B conflict query did not contain only its own stale event".into());
+    }
+    let account_a_status = account_a
+        .sync_status(now)
+        .map_err(|error| error.to_string())?;
+    if account_a_status.conflict_count != 0 {
+        return Err("account A observed account B's local synchronization conflict".into());
+    }
+    fs::write(
+        result_path,
+        serde_json::json!({
+            "mode": "ab-sync-security",
+            "independentInstallations": "PASS",
+            "forgedDeviceIdTrustedOrigin": "PASS",
+            "accountIsolation": "PASS",
+            "conflictIsolation": "PASS",
+            "pushReplayIdempotency": "PASS",
+        })
+        .to_string(),
+    )
+    .map_err(|_| "cannot write native A/B sync result".to_owned())
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_ab_sync_security_smoke(
+    _account_a: &LocalAuthService,
+    _account_a_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native A/B sync smoke is unavailable outside a debug test build".into())
+}
+
+#[cfg(debug_assertions)]
+fn native_sync_draft(order_id: Uuid, applicant_id: Uuid) -> RequisitionDraftInput {
+    let country_id = Uuid::parse_str("10000000-0000-4000-8000-000000000001").expect("test UUID");
+    let project_id = Uuid::parse_str("10000000-0000-4000-8000-000000000002").expect("test UUID");
+    let department_id = Uuid::parse_str("10000000-0000-4000-8000-000000000003").expect("test UUID");
+    let team_id = Uuid::parse_str("10000000-0000-4000-8000-000000000004").expect("test UUID");
+    RequisitionDraftInput {
+        id: order_id,
+        display_no: format!("NATIVE-SYNC-{order_id}"),
+        country_id,
+        project_id,
+        site: "Test site".into(),
+        department_id,
+        team_id,
+        applicant_id,
+        currency: "XOF".into(),
+        primary_currency: "XOF".into(),
+        language_pair: "zh_fr".into(),
+        urgency: "normal".into(),
+        urgency_reason: None,
+        order_date: "2026-10-16".into(),
+        delivery_address: "native test address".into(),
+        expected_delivery_date: None,
+        notes: None,
+        order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+        order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+        tax_rate_basis_points: 0,
+        lines: vec![RequisitionLineInput {
+            id: Uuid::new_v4(),
+            material_id: None,
+            material_snapshot: MaterialSnapshotInput {
+                name_zh: "Native sync fixture".into(),
+                name_fr: None,
+                model: "NATIVE-SYNC".into(),
+                specification: "Native HTTPS synchronization fixture".into(),
+            },
+            supplier_id: None,
+            currency: "XOF".into(),
+            quantity: "1".into(),
+            unit: "piece".into(),
+            unit_price_minor: "100".into(),
+            line_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+            line_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+            freight_included: false,
+            sort_order: 0,
+        }],
+    }
+}
+
 fn required_test_value(name: &str) -> Result<String, String> {
     env::var(name).map_err(|_| format!("{name} is required and is not persisted"))
+}
+
+fn write_native_smoke_failure(mode: &str, error: &str) {
+    if let Ok(result_path) = test_result_path() {
+        let _ = fs::write(
+            result_path,
+            serde_json::json!({ "mode": mode, "result": "FAIL", "error": error }).to_string(),
+        );
+    }
 }
 
 fn test_result_path() -> Result<PathBuf, String> {

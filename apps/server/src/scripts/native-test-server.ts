@@ -14,10 +14,16 @@ import { PostgresSyncStore } from '../sync/postgres-store.js'
 import { SyncService } from '../sync/service.js'
 
 const accounts = [
-  ['10000000-0000-4000-8000-000000000011', 'engineer-a', 'engineer'],
-  ['10000000-0000-4000-8000-000000000012', 'engineer-b', 'engineer'],
-  ['10000000-0000-4000-8000-000000000013', 'purchaser', 'purchaser'],
+  ['10000000-0000-4000-8000-000000000011', 'engineer-a', ['engineer']],
+  ['10000000-0000-4000-8000-000000000012', 'engineer-b', ['engineer']],
+  ['10000000-0000-4000-8000-000000000013', 'purchaser', ['purchaser', 'administrator']],
 ] as const
+const nativeScope = {
+  countryId: '10000000-0000-4000-8000-000000000001',
+  projectId: '10000000-0000-4000-8000-000000000002',
+  departmentId: '10000000-0000-4000-8000-000000000003',
+  teamId: '10000000-0000-4000-8000-000000000004',
+}
 
 const databaseUrl = required('HONSEN_PROCURE_TEST_DATABASE_URL')
 const pfxPath = required('HONSEN_PROCURE_TEST_TLS_PFX')
@@ -39,9 +45,9 @@ if (
 }
 
 const pool = createPostgresPool(databaseUrl)
-await waitForDatabase(pool)
+await waitForNativeDatabase(pool)
 await runMigrations(pool)
-for (const [id, username, role] of accounts) {
+for (const [id, username, roles] of accounts) {
   const password = required(
     `HONSEN_TEST_${username.replace('-', '_').toUpperCase()}_PASSWORD`,
   )
@@ -53,16 +59,84 @@ for (const [id, username, role] of accounts) {
        is_enabled = TRUE, requires_password_change = FALSE, deleted_at = NULL`,
     [id, `NATIVE-${username.toUpperCase()}`, username, passwordHash],
   )
-  await pool.query(
-    `INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-    [id, role],
-  )
+  for (const role of roles)
+    await pool.query(
+      `INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [id, role],
+    )
 }
+await pool.query(
+  `INSERT INTO countries (id, business_code, name, time_zone)
+   VALUES ($1, 'NATIVE-TEST-COUNTRY', 'Native test country', 'UTC')
+   ON CONFLICT (id) DO NOTHING`,
+  [nativeScope.countryId],
+)
+await pool.query(
+  `INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair)
+   VALUES ($1, $2, 'NATIVE-TEST-PROJECT', 'Native test project', 'Test site', 'Test procurement', 'XOF', 'zh_fr')
+   ON CONFLICT (id) DO NOTHING`,
+  [nativeScope.projectId, nativeScope.countryId],
+)
+await pool.query(
+  `INSERT INTO departments (id, business_code, name)
+   VALUES ($1, 'NATIVE-TEST-DEPARTMENT', 'Native test department')
+   ON CONFLICT (id) DO NOTHING`,
+  [nativeScope.departmentId],
+)
+await pool.query(
+  `INSERT INTO teams (id, department_id, business_code, name)
+   VALUES ($1, $2, 'NATIVE-TEST-TEAM', 'Native test team')
+   ON CONFLICT (id) DO NOTHING`,
+  [nativeScope.teamId, nativeScope.departmentId],
+)
+await pool.query(
+  `INSERT INTO user_project_bindings (user_id, project_id)
+   VALUES ($1, $2) ON CONFLICT (user_id, project_id) DO UPDATE SET deleted_at = NULL`,
+  [accounts[0][0], nativeScope.projectId],
+)
+await pool.query(
+  `INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id)
+   VALUES ($1, $2, $3, $4)
+   ON CONFLICT (user_id, project_id, department_id, team_id) DO UPDATE SET deleted_at = NULL, updated_at = NOW()`,
+  [
+    accounts[0][0],
+    nativeScope.projectId,
+    nativeScope.departmentId,
+    nativeScope.teamId,
+  ],
+)
 
 const nativeApp = Fastify({
   logger: false,
   https: { pfx: readFileSync(pfxPath), passphrase: pfxPassphrase },
 }) as unknown as FastifyInstance
+let failedFirstPushResponse = false
+nativeApp.addHook('onSend', async (request, reply, payload) => {
+  if (request.method !== 'POST' || request.url !== '/api/sync/push') return payload
+  const eventId = (
+    request.body as { events?: Array<{ eventId?: string }> } | undefined
+  )?.events?.[0]?.eventId
+  if (eventId) {
+    const origin = await pool.query<{ origin_installation_id: string }>(
+      `SELECT origin_installation_id FROM sync_events WHERE event_id = $1`,
+      [eventId],
+    )
+    if (origin.rows[0])
+      reply.header(
+        'x-honsen-test-origin-installation-id',
+        origin.rows[0].origin_installation_id,
+      )
+  }
+  if (
+    process.env.HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE === '1' &&
+    !failedFirstPushResponse
+  ) {
+    failedFirstPushResponse = true
+    reply.code(503)
+    return JSON.stringify({ error: 'native test post-commit transport fault' })
+  }
+  return payload
+})
 const app = createApp(
   new AuthService(new PostgresAuthStore(pool), { verify: argon2.verify }),
   new MasterDataService(new PostgresMasterDataStore(pool)),
@@ -78,4 +152,18 @@ function required(name: string): string {
   const value = process.env[name]
   if (!value) throw new Error(`${name} is required`)
   return value
+}
+
+async function waitForNativeDatabase(pool: ReturnType<typeof createPostgresPool>) {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await waitForDatabase(pool)
+      return
+    } catch (error) {
+      lastError = error
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  }
+  throw lastError
 }
