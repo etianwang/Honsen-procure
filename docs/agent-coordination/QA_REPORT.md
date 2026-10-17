@@ -319,6 +319,40 @@ Focused checks: `cargo fmt --check`, `cargo test --lib` (55/55), `cargo check --
 
 **This adds the required native Pull-fault/restart cursor evidence but is not independent Fixer acceptance. T10-SEC-001, P1 and Formal remain OPEN; RFQ/Formal native and broader offline/reconnect cases remain outstanding.**
 
+## Independent Fixer recheck: Native Pull recovery — 2026-10-17
+
+Baseline rechecked: actual HEAD is `bc80b09e303d09e338a629736dbbc783cbc940f0`, and `git merge-base --is-ancestor bc80b09 HEAD` returned 0. The only untracked path before and after execution is the deliberately ignored `.honsen-native-qa/` evidence directory; no application code changed in this recheck.
+
+The Fixer independently ran the two required native commands against fresh disposable PostgreSQL/Fastify HTTPS instances. Both commands build and execute the real debug `HonsenProcure.exe`, use newly seeded absolute SQLite test profiles and Windows Credential Manager, and use an ephemeral test-profile CA. They are not HTTP-client, Mock, Playwright, or renderer tests.
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode pull-recovery
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode ab-sync-security
+```
+
+| Item | Result | Independent evidence |
+| --- | --- | --- |
+| Test-only fault boundary | PASS | `native-test-server.ts` returns one 503 only when `HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE=1`; it does not write profile SQLite. Release `cargo check --release --bin HonsenProcure` passes with the debug-only smoke entry unavailable. |
+| First real Pull and cursor preservation | PASS | `native-smoke-20261017155533` records `pullFailure=PASS`, zero projected changes and cursor `0→0`; sanitized HTTPS JSONL records `GET /api/sync/pull`, cursor `0`, status `503`, `injectedTransportFault=true`. |
+| Actual EXE exit / restart, not in-process reuse | PASS | The script synchronously invokes `HonsenProcure.exe` once, fails on any nonzero exit, then invokes it a second time only after the first result file is read. The second result uses the same profile/account/installation, starts at cursor `0`, projects exactly one remote entity and persists `0→1`. |
+| Real replay without duplicate/rollback | PASS | The third production Pull is recorded at cursor `1`; the recovered result requires zero new projections and cursor `1→1` while the entity remains server version 1. |
+| Existing A/B safety assertions | PASS | Fresh `native-smoke-20261017155623` records different A/B installations, forged A device ID different from trusted A origin, same-event post-commit 503 replay, B trusted conflict origin, exactly one B SQLite conflict and zero A conflicts. |
+| Focused release/server guards | PASS | `cargo fmt --check`, release `cargo check --bin HonsenProcure`, server lint and server typecheck all pass. The release check has only pre-existing debug-test unused-symbol warnings. |
+
+Artifacts:
+
+- `.honsen-native-qa/native-smoke-20261017155533-pull-interrupted.test.json`
+- `.honsen-native-qa/native-smoke-20261017155533-pull-recovered.test.json`
+- `.honsen-native-qa/native-smoke-20261017155533-server-sync.test.jsonl`
+- `test-results/native-smoke-20261017155533-{client,server,server-error,compose,compose-error}.log`
+- `.honsen-native-qa/native-smoke-20261017155623.test.json`
+- `.honsen-native-qa/native-smoke-20261017155623-server-sync.test.jsonl`
+- `test-results/native-smoke-20261017155623-{client,server,server-error,compose,compose-error}.log`
+
+The per-run test containers and loopback listeners were absent after completion. No production database, pre-existing E2E profile, production TLS/keyring policy, push, merge or deployment was used.
+
+**NATIVE-003 is independently verified for this bounded Pull-fault/restart scenario. T10-SEC-001, P1 and Formal remain OPEN: this is not complete T10 acceptance, and RFQ/Formal plus remaining offline/reconnect variants are still unexecuted.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.
