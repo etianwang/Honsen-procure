@@ -1308,7 +1308,9 @@ impl LocalAuthService {
     }
 
     #[cfg(debug_assertions)]
-    pub fn test_sync_session_state(&self) -> Result<(Option<Uuid>, Option<Uuid>, bool), AuthError> {
+    pub fn test_sync_session_state(
+        &self,
+    ) -> Result<(Option<Uuid>, Option<Uuid>, Option<Uuid>, bool), AuthError> {
         let local_session = self
             .connection
             .lock()
@@ -1324,11 +1326,23 @@ impl LocalAuthService {
             .online_session_account
             .lock()
             .map_err(|_| AuthError::Database)?;
+        let last_authenticated = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT last_authenticated_user_id FROM local_sync_state WHERE singleton = 1",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(|_| AuthError::Database)?
+            .map(|id| Uuid::parse_str(&id).map_err(|_| AuthError::Database))
+            .transpose()?;
         let has_token = match local_session {
             Some(account_id) => self.credential_vault.load_sync_token(account_id)?.is_some(),
             None => false,
         };
-        Ok((local_session, online_session, has_token))
+        Ok((local_session, online_session, last_authenticated, has_token))
     }
 
     fn verify_test_sync_origin(&self, response: &reqwest::Response) -> Result<(), AuthError> {

@@ -201,7 +201,7 @@ fn run_native_ab_login_switch_smoke(
     if !account_a
         .test_sync_session_state()
         .map_err(|error| error.to_string())?
-        .2
+        .3
     {
         return Err("account A login did not persist its test-profile sync token".into());
     }
@@ -297,8 +297,24 @@ fn run_native_ab_sync_security_smoke(
 
     let account_a_session =
         native_online_login(account_a, "engineer-a", &engineer_a_password, now)?;
+    let account_a_state = account_a
+        .test_sync_session_state()
+        .map_err(|error| error.to_string())?;
+    if !account_a_state.3 {
+        return Err(format!(
+            "account A token was absent immediately after its own native login; loginUser={}; state={account_a_state:?}",
+            account_a_session.user_id
+        ));
+    }
     let account_b_session =
         native_online_login(&account_b, "engineer-b", &engineer_b_password, now)?;
+    if !account_b
+        .test_sync_session_state()
+        .map_err(|error| error.to_string())?
+        .3
+    {
+        return Err("account B token was absent immediately after its own native login".into());
+    }
     if account_a_session.username != "engineer-a" || account_b_session.username != "engineer-b" {
         return Err("native A/B sync login returned an unexpected account".into());
     }
