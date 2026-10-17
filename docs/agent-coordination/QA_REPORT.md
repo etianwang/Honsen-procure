@@ -224,3 +224,37 @@ honsen-procure-test-profile.exe vault-probe
 Fresh checks: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); both native binaries build PASS. The required immediate real-EXE readback is **FAIL/BLOCKED**, so this batch provides no new A/B security acceptance evidence and no minimal application fix is safe without repairing the Windows Credential Manager/keyring environment.
 
 **T10-SEC-001, P1 and Formal remain OPEN.**
+
+## Windows Credential Manager backend repair — 2026-10-17
+
+Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.
+
+The minimal repair is `keyring = { version = "3.6.3", features = ["windows-native"] }`. It retains the existing `account.service` target, Generic credential type, Enterprise persistence, username, production service names and token encoding; it only enables keyring's documented Windows Credential Manager backend. No Windows policy, TLS behavior, database, or authentication rule changed.
+
+| Scenario | Result | Evidence |
+| --- | --- | --- |
+| Direct Win32 Generic, Enterprise persistence | PASS | Same-process and child-process `CredReadW` read the same SHA-256 digest after `CredWriteW`, Type=1, Persist=3, Win32 status=0. |
+| Direct Win32 keyring-shaped credential | PASS | Exact UTF-16 blob, `account.service` target, UUID username and `keyring v3.6.3` comment pass same/cross-process read. |
+| Direct Win32 LocalMachine control | PASS | Persist=2 same/cross-process control also passes; no policy was changed or adopted by production code. |
+| Corrected keyring `vault-probe` | PASS | New Entry reads both independent profile targets after write. |
+| Real `HonsenProcure.exe` immediate readback | PASS | `vault-readback` direct/reopened/wrapped write/read all pass. |
+| Real EXE exit/restart readback | PASS | One EXE writes a runtime-generated synthetic token; a second EXE reads it from the same absolute test profile; a third EXE deletes only that controlled target. |
+| A/B profile isolation harness | BLOCKED / new failure | The existing real HTTPS harness now passes the former credential barrier but fails later at `account B conflict query did not contain only its own stale event`. No sync assertion is accepted from that run. |
+
+Commands and evidence:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/invoke-windows-credential-readback.ps1 -Persist Enterprise -KeyringShape
+cargo test --lib
+cargo build --bin HonsenProcure --bin honsen-procure-test-profile
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1
+```
+
+- Direct Win32: `test-results/windows-credential-api-20261017152337-{enterprise,local-machine}.json` and `test-results/windows-credential-api-keyring-shape-20261017152403.json`.
+- Real immediate readback: `.honsen-native-qa/native-vault-fixed-20261017152532-exe.test.json`.
+- Real restart boundary: `.honsen-native-qa/native-vault-restart-20261017152623-{write,read,clear}.test.json`.
+- A/B native HTTPS run: `.honsen-native-qa/native-smoke-20261017152627.test.json`, with server/client/Compose logs in `test-results/native-smoke-20261017152627-*`.
+
+Fresh Rust library validation passed 55/55; `cargo check --release --bin HonsenProcure` also passed after placing the pre-existing A/B smoke behind the same debug-only release guard as the vault entry. The native sync harness is not recorded as PASS because its conflict assertion failed after credentials were repaired. No token plaintext was written to SQLite, logs or ordinary files; direct Win32 evidence prints only controlled target metadata and token digests.
+
+**T10-SEC-001, P1 and Formal remain OPEN.**

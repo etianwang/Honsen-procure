@@ -211,6 +211,67 @@ fn run_native_vault_readback_smoke(
     );
     let context = &context[..12];
     let result_path = test_result_path()?;
+    let action =
+        env::var("HONSEN_PROCURE_NATIVE_VAULT_ACTION").unwrap_or_else(|_| "roundtrip".to_owned());
+    if action == "write" {
+        let token = format!("native-vault-restart-{}{}", Uuid::new_v4(), Uuid::new_v4());
+        auth.cache_sync_access_token(account_id, &token)
+            .map_err(|error| format!("target={target}; wrapped-write={error:?}"))?;
+        fs::write(
+            result_path,
+            serde_json::json!({
+                "mode": "vault-readback", "action": "write", "result": "PASS",
+                "target": target, "service": service, "account": ACCOUNT_ID,
+                "tokenSha256Prefix": &format!("{:x}", Sha256::digest(token.as_bytes()))[..12],
+                "processId": std::process::id(), "processContextSha256Prefix": context,
+            })
+            .to_string(),
+        )
+        .map_err(|_| "cannot write native vault readback result".to_owned())?;
+        return Ok(());
+    }
+    if action == "read" {
+        let present = auth
+            .test_sync_token_is_present(account_id)
+            .map_err(|error| format!("target={target}; wrapped-read={error:?}"))?;
+        fs::write(
+            result_path,
+            serde_json::json!({
+                "mode": "vault-readback", "action": "read",
+                "result": if present { "PASS" } else { "FAIL" },
+                "target": target, "service": service, "account": ACCOUNT_ID,
+                "processId": std::process::id(), "processContextSha256Prefix": context,
+            })
+            .to_string(),
+        )
+        .map_err(|_| "cannot write native vault readback result".to_owned())?;
+        return if present {
+            Ok(())
+        } else {
+            Err(format!("target={target}; restarted-read=absent"))
+        };
+    }
+    if action == "clear" {
+        match Entry::new(&service, ACCOUNT_ID)
+            .map_err(|error| format!("target={target}; clear-create={error:?}"))?
+            .delete_credential()
+        {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(error) => return Err(format!("target={target}; clear={error:?}")),
+        }
+        fs::write(
+            result_path,
+            serde_json::json!({ "mode": "vault-readback", "action": "clear", "result": "PASS", "target": target })
+                .to_string(),
+        )
+        .map_err(|_| "cannot write native vault readback result".to_owned())?;
+        return Ok(());
+    }
+    if action != "roundtrip" {
+        return Err(
+            "HONSEN_PROCURE_NATIVE_VAULT_ACTION must be write, read, clear or omitted".into(),
+        );
+    }
     let entry = Entry::new(&service, ACCOUNT_ID)
         .map_err(|error| format!("target={target}; create={error:?}"))?;
     let readback = (|| -> Result<(bool, bool, bool), String> {
@@ -273,6 +334,7 @@ fn run_native_vault_readback_smoke(
     Err("native vault readback smoke is unavailable outside a debug test build".into())
 }
 
+#[cfg(debug_assertions)]
 fn run_native_ab_login_switch_smoke(
     account_a: &LocalAuthService,
     account_a_path: &PathBuf,
@@ -368,6 +430,14 @@ fn native_online_login(
         now,
     ))
     .map_err(|error| error.to_string())
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_ab_login_switch_smoke(
+    _account_a: &LocalAuthService,
+    _account_a_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native A/B login smoke is unavailable outside a debug test build".into())
 }
 
 #[cfg(debug_assertions)]

@@ -1363,6 +1363,11 @@ impl LocalAuthService {
             == Some(expected_token))
     }
 
+    #[cfg(debug_assertions)]
+    pub fn test_sync_token_is_present(&self, account_id: Uuid) -> Result<bool, AuthError> {
+        Ok(self.credential_vault.load_sync_token(account_id)?.is_some())
+    }
+
     fn verify_test_sync_origin(&self, response: &reqwest::Response) -> Result<(), AuthError> {
         #[cfg(debug_assertions)]
         if let Some(expected) = self
