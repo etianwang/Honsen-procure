@@ -168,3 +168,31 @@ Artifacts retained for reproduction:
 Fresh focused checks: `cargo fmt --check` PASS; credential-service isolation and test-installation replacement Rust tests PASS (2/2); `npm run lint --workspace @honsen/server` PASS; `npm run typecheck --workspace @honsen/server` PASS. The native command itself is FAIL/BLOCKED at credential retention, so it is not counted as an acceptance pass. The temporary Compose project was removed with its own scoped `down --volumes`; existing E2E data, production databases, production TLS policy, P1 and Formal state were not changed.
 
 **T10-SEC-001 remains OPEN; P1 and Formal holds remain OPEN.** Before another run, the Integration Owner must diagnose the Windows keyring process/profile behavior with a minimal vault-level reproduction or provide an approved native vault isolation mechanism. Do not replace this with HTTP/Playwright evidence.
+
+## Integration Owner Windows keyring investigation — 2026-10-17
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Test-profile keyring target/service A/B round trip | PASS | `honsen-procure-test-profile.exe vault-probe` writes, reads, distinguishes and deletes two synthetic 43-character base64url-shaped tokens using the same `S-<profile SHA>` services and fixed account UUID. |
+| Real `HonsenProcure.exe` A login token readback | FAIL | Run `native-smoke-20261017094219` fails immediately after A login, before B opens: local session, in-memory online account and `last_authenticated_user_id` are all A, while `load_sync_token(A)` returns `None`. |
+| B overwrite / test cleanup / server revocation | NOT CAUSAL | The failure occurs before B login, `clear_test_profile` invocation, protected request, or server-session validation. |
+| Explicit profile-first keyring target experiment | FAIL / reverted | A test-only `Entry::new_with_target` target with profile hash first reproduced the same native A failure. It was not retained as a product or harness semantic change. |
+
+The minimum root-cause evidence is therefore: `cache_sync_access_token(A, accessToken)` returned success and updated SQLite `last_authenticated_user_id=A`; an immediate vault read by the same live `HonsenProcure.exe` returned `NoEntry`. The same process's profile, account, token shape and default keyring naming were independently successful in the test-profile executable. There is no application call site that deletes a sync credential between those two operations. The remaining differentiation is executable/process-specific Windows Credential Manager behavior, not a service/account/target collision and not an expected server revocation.
+
+Reproducible commands:
+
+```text
+cargo build --bin HonsenProcure --bin honsen-procure-test-profile
+honsen-procure-test-profile.exe vault-probe
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1
+```
+
+Relevant artifacts:
+
+- `.honsen-native-qa/native-smoke-20261017094219.test.json`
+- `test-results/native-smoke-20261017094219-{client,server,server-error,compose,compose-error}.log`
+
+Fresh local validation: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); both native binaries build PASS. The script is FAIL as above, so A/B switch, old-token rejection, logout clearing, and sync matrix are not re-accepted in this batch. No production TLS, credential policy, database, existing E2E data, server suite, P1 or Formal state changed.
+
+**T10-SEC-001, P1 and Formal remain OPEN.** Fixer must independently reproduce this process-specific vault failure before accepting a platform-appropriate repair; no HTTP/Playwright/Mock substitution is acceptable.
