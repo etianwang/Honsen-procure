@@ -1,6 +1,7 @@
 import argon2 from 'argon2'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import { createApp } from '../app.js'
 import { AuthService } from '../auth/service.js'
 import { AuthorizationService } from '../authorization/service.js'
@@ -42,6 +43,20 @@ if (
   throw new Error(
     'native test server requires a loopback database whose name includes test',
   )
+}
+const diagnosticPath = process.env.HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH
+if (
+  diagnosticPath &&
+  (!isAbsolute(diagnosticPath) || !diagnosticPath.endsWith('.test.jsonl'))
+) {
+  throw new Error(
+    'HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH must be an absolute .test.jsonl path',
+  )
+}
+
+function writeDiagnostic(value: Record<string, unknown>) {
+  if (diagnosticPath)
+    appendFileSync(diagnosticPath, `${JSON.stringify(value)}\n`, 'utf8')
 }
 
 const pool = createPostgresPool(databaseUrl)
@@ -116,25 +131,61 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
   const eventId = (
     request.body as { events?: Array<{ eventId?: string }> } | undefined
   )?.events?.[0]?.eventId
+  let origin: {
+    actor_id: string
+    origin_account_id: string
+    origin_installation_id: string
+    result_status: string
+    server_version: string | null
+  } | undefined
   if (eventId) {
-    const origin = await pool.query<{ origin_installation_id: string }>(
-      `SELECT origin_installation_id FROM sync_events WHERE event_id = $1`,
+    const origins = await pool.query<{
+      actor_id: string
+      origin_account_id: string
+      origin_installation_id: string
+      result_status: string
+      server_version: string | null
+    }>(
+      `SELECT actor_id, origin_account_id, origin_installation_id, result_status, server_version
+       FROM sync_events WHERE event_id = $1`,
       [eventId],
     )
-    if (origin.rows[0])
+    origin = origins.rows[0]
+    if (origin)
       reply.header(
         'x-honsen-test-origin-installation-id',
-        origin.rows[0].origin_installation_id,
+        origin.origin_installation_id,
       )
   }
+  const servicePayload =
+    typeof payload === 'string'
+      ? payload
+      : payload instanceof Uint8Array
+        ? Buffer.from(payload).toString('utf8')
+        : JSON.stringify(payload)
   if (
     process.env.HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE === '1' &&
     !failedFirstPushResponse
   ) {
     failedFirstPushResponse = true
     reply.code(503)
+    writeDiagnostic({
+      route: 'POST /api/sync/push',
+      eventId,
+      serverStatus: 503,
+      injectedPostCommitFault: true,
+      servicePayload,
+      origin,
+    })
     return JSON.stringify({ error: 'native test post-commit transport fault' })
   }
+  writeDiagnostic({
+    route: 'POST /api/sync/push',
+    eventId,
+    serverStatus: reply.statusCode,
+    servicePayload,
+    origin,
+  })
   return payload
 })
 const app = createApp(

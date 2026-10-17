@@ -9,6 +9,7 @@ $logRoot = Join-Path $repo 'test-results'
 $profileA = Join-Path $qaRoot "$runId-account-a.test.sqlite"
 $profileB = Join-Path $qaRoot "$runId-account-b.test.sqlite"
 $result = Join-Path $qaRoot "$runId.test.json"
+$diagnostics = Join-Path $qaRoot "$runId-server-sync.test.jsonl"
 $pfx = Join-Path $qaRoot "$runId.pfx"
 $cer = Join-Path $qaRoot "$runId.cer"
 $pem = Join-Path $qaRoot "$runId.pem"
@@ -63,6 +64,7 @@ try {
   $env:HONSEN_TEST_ENGINEER_B_PASSWORD = "native-b-$([Guid]::NewGuid().ToString('N'))"
   $env:HONSEN_TEST_PURCHASER_PASSWORD = "native-p-$([Guid]::NewGuid().ToString('N'))"
   $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE = '1'
+  $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
   for ($launch = 0; $launch -lt 3; $launch++) {

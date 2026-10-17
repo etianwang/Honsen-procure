@@ -225,6 +225,36 @@ Fresh checks: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); both na
 
 **T10-SEC-001, P1 and Formal remain OPEN.**
 
+## NATIVE-002 native A/B conflict projection diagnosis — 2026-10-17
+
+`native-smoke-20261017152627` failed because the harness queried B's local conflict table immediately after the stale Push. This was a **harness timing defect**, not a cross-account data leak. The shared production client intentionally records a Push acknowledgement only when `status=accepted`; a `conflict` acknowledgement contains no server payload. The next production `pull_sync_https` receives the authoritative remote entity and `apply_sync_pull_page_for_account` atomically inserts the local conflict only when the matching pending outbox event belongs to the active account.
+
+The repair adds that required real Rust Pull before the conflict assertion and tightens the checks: stale B Push must remain pending, Pull must advance the cursor and apply exactly one remote change, B must have exactly one local conflict for the shared order, and A must still have zero local conflicts. The test-only Fastify host now records only non-secret Push metadata (event UUID, status/version, trusted actor/origin installation, and the small response body) in an ignored `.test.jsonl` file. No production SyncService, Postgres filtering, authentication, TLS, keyring naming or SQLite schema changed.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| A/B profiles and installations | PASS | Result records A installation `87a280de-8a3b-454c-9007-b43d805d0c29` and B installation `e39814fc-ffa2-4926-bbd5-fca28da03aef`; profiles are distinct absolute `.test.sqlite` files. |
+| Forged client `deviceId` | PASS | A's locally forged ID `a50ab94f-4e56-4e9a-948a-94d9ac991124` differs from the server's trusted A origin installation above. |
+| A Push post-commit retry | PASS | Diagnostic records one injected 503 after accepted commit and the same A event replayed as accepted at version 1. |
+| A/B Pull isolation | PASS | B's pre-purchaser Pull remains cursor `0` with zero A changes; after B switches to purchaser, its authorized Pull receives A's one remote entity and cursor advances `0→1`. |
+| B stale Push and conflict ownership | PASS | Raw B response is `status=conflict`, version 1, with actor/origin account `10000000-0000-4000-8000-000000000013` and B installation. The resulting B SQLite state contains one conflict for entity `7ded78e2-f21f-47ae-9c38-b8a6fbd1042d`, server version 1; A has zero conflicts. |
+
+Reproducible command:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1
+```
+
+Fresh real-native run: `native-smoke-20261017153555` (exit 0).
+
+- Result and local SQLite metadata: `.honsen-native-qa/native-smoke-20261017153555.test.json`
+- Sanitized raw server Push evidence: `.honsen-native-qa/native-smoke-20261017153555-server-sync.test.jsonl`
+- Client/server/Compose evidence: `test-results/native-smoke-20261017153555-{client,server,server-error,compose,compose-error}.log`
+
+Focused checks: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); `cargo check --bin HonsenProcure --bin honsen-procure-test-profile` PASS; server `npm run lint` and `npm run typecheck` PASS. The disposable Compose database was removed with scoped `down --volumes`; existing E2E data was not removed and no production database was opened.
+
+**NATIVE-002 is fixed as a harness defect. T10-SEC-001, P1 and Formal remain OPEN.** This is only the first native synchronization slice; offline/reconnect/cursor-retry and RFQ/Formal native acceptance have not run.
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.

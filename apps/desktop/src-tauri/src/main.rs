@@ -547,17 +547,34 @@ fn run_native_ab_sync_security_smoke(
         .map_err(|error| error.to_string())?;
     let conflict_push = tauri::async_runtime::block_on(account_b.push_pending_https(now))
         .map_err(|error| error.to_string())?;
-    if conflict_push.accepted_count != 0 {
-        return Err("stale account B Push did not produce a synchronization conflict".into());
+    if conflict_push.accepted_count != 0 || conflict_push.pending_count != 1 {
+        return Err(format!(
+            "stale account B Push was not retained for conflict projection: {conflict_push:?}"
+        ));
     }
+    let conflict_pull = tauri::async_runtime::block_on(account_b.pull_sync_https(now))
+        .map_err(|error| error.to_string())?;
     let conflicts = account_b
         .list_sync_conflicts(now)
+        .map_err(|error| error.to_string())?;
+    let account_b_status = account_b
+        .sync_status(now)
         .map_err(|error| error.to_string())?;
     if purchaser_session.username != "purchaser"
         || conflicts.len() != 1
         || conflicts[0].entity_id != order_id
+        || account_b_status.conflict_count != 1
+        || conflict_pull.applied_count != 1
+        || conflict_pull.next_cursor == "0"
     {
-        return Err("account B conflict query did not contain only its own stale event".into());
+        return Err(format!(
+            "account B conflict projection was not isolated: pull={conflict_pull:?}; localConflictCount={}; localEntityIds={:?}",
+            account_b_status.conflict_count,
+            conflicts
+                .iter()
+                .map(|conflict| conflict.entity_id)
+                .collect::<Vec<_>>(),
+        ));
     }
     let account_a_status = account_a
         .sync_status(now)
@@ -574,6 +591,19 @@ fn run_native_ab_sync_security_smoke(
             "accountIsolation": "PASS",
             "conflictIsolation": "PASS",
             "pushReplayIdempotency": "PASS",
+            "evidence": {
+                "accountA": account_a_session.user_id,
+                "accountBInitial": account_b_session.user_id,
+                "accountBConflictActor": purchaser_session.user_id,
+                "accountAInstallation": trusted_installation_id,
+                "accountBInstallation": account_b.test_installation_id().map_err(|error| error.to_string())?,
+                "forgedClientDeviceId": forged_installation_id,
+                "conflictPullAppliedCount": conflict_pull.applied_count,
+                "conflictPullNextCursor": conflict_pull.next_cursor,
+                "localConflictCount": account_b_status.conflict_count,
+                "localConflictEntityIds": conflicts.iter().map(|conflict| conflict.entity_id).collect::<Vec<_>>(),
+                "localConflictServerVersions": conflicts.iter().map(|conflict| conflict.server_version).collect::<Vec<_>>(),
+            },
         })
         .to_string(),
     )
