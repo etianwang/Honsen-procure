@@ -255,6 +255,39 @@ Focused checks: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); `carg
 
 **NATIVE-002 is fixed as a harness defect. T10-SEC-001, P1 and Formal remain OPEN.** This is only the first native synchronization slice; offline/reconnect/cursor-retry and RFQ/Formal native acceptance have not run.
 
+## Independent Fixer recheck: NATIVE-002 — 2026-10-17
+
+Baseline reviewed: `87ab8e5bf18511cfa84ce97ef925502a7210e75f` is the actual HEAD and descends from the keyring repair `28441d1`. No tracked source or harness change was present for this recheck; the only working-tree entry is the preserved ignored `.honsen-native-qa/` evidence directory.
+
+The Fixer independently executed the same real native command:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1
+```
+
+Fresh run `native-smoke-20261017153900` exited 0 after building/running real debug `HonsenProcure.exe`, two newly seeded absolute SQLite test profiles, Windows Credential Manager, ephemeral test-profile TLS trust, Fastify HTTPS and disposable PostgreSQL. It is not a Playwright, Mock or standalone HTTP-client result.
+
+| Item | Result | Independent evidence |
+| --- | --- | --- |
+| Baseline / profile / installation separation | PASS | A installation `d1e9ba9f-5762-4072-be1d-fb940ecff600` and B installation `93872dc5-b614-4596-9603-177d0359bc6d` differ in the fresh result. |
+| Trusted source despite forged client device ID | PASS | Forged A client ID differs from the Fastify-recorded trusted A installation in the sanitized Push record. |
+| Post-commit fault and replay | PASS | One injected 503 carries an accepted server commit; retry of the exact event returns accepted version 1. |
+| B Push/Pull visibility isolation | PASS | B begins with no A project data; the authorized purchaser phase Pull advances only after B's own stale event is pending. |
+| Conflict projection account boundary | PASS | Raw B result is `conflict@1`, with B purchaser account/installation as origin. The test requires `accepted_count=0`, `pending_count=1`, Pull `applied_count=1`, nonzero cursor, B local conflict count 1/entity match, and A conflict count 0. |
+| Server/client errors | PASS | Client and server-error logs are zero bytes; Compose report contains normal create/healthy lifecycle output only. |
+
+Artifacts:
+
+- `.honsen-native-qa/native-smoke-20261017153900.test.json`
+- `.honsen-native-qa/native-smoke-20261017153900-server-sync.test.jsonl`
+- `test-results/native-smoke-20261017153900-{client,server,server-error,compose,compose-error}.log`
+
+### Next minimal native scenario
+
+**BLOCKED as-is, but ready for a bounded harness extension:** existing native modes are `online-login`, `ab-login-switch`, `ab-sync-security` and `vault-readback`; none injects a Pull transport fault, controls an EXE restart, or asserts durable per-account cursor recovery. Existing Rust unit tests cover Pull failure/replay/cursor behavior, but are not native acceptance evidence. The next smallest valid test-profile slice is one native A/B reconnect mode plus one Fastify test-only first-Pull fault: make real `pull_sync_https` return `SyncTransport`, assert the SQLite account cursor is unchanged, restart the real EXE against the same profile, retry Pull and require one durable projection/cursor advance with no duplicate. This preserves HTTPS, SQLite, OS credential vault and production Rust sync paths. RFQ/Formal is explicitly outside that next slice.
+
+**T10-SEC-001, P1 and Formal remain OPEN.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.
