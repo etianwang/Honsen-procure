@@ -130,3 +130,41 @@ Latest successful run: `native-smoke-20261016173505`.
 Focused checks: `cargo fmt --check` PASS, `cargo test --lib` PASS (54/54), `cargo build --bin HonsenProcure --bin honsen-procure-test-profile` PASS, and the native A/B command above PASS. The temporary Compose project was removed with scoped `down --volumes`; only new ignored QA profiles and their public PEM evidence remain. No production database, existing E2E data, Root trust, global TLS bypass, push, PR, or main merge was used.
 
 **T10-SEC-001 remains OPEN; P1 and Formal holds remain OPEN.** This result is evidence only for A/B authentication/session replacement and local logout isolation. Native `deviceId` source integrity, Push/Pull, conflicts, replay, offline/reconnect/cursor/retry, and RFQ/Formal flows are deliberately not claimed and remain the next matrix batch.
+
+## Native A/B synchronization-security harness checkpoint — 2026-10-17
+
+This batch extended the existing controlled, real-client harness only. It invokes the compiled debug `HonsenProcure.exe`, two fresh absolute test-profile SQLite files, the OS credential vault, the production Rust local-auth/sync functions, an isolated PostgreSQL Fastify HTTPS service, and the test-profile PEM trust path. It does not use Playwright, a mocked Tauri command, or a standalone HTTP client.
+
+| Scenario | Result | Evidence |
+| --- | --- | --- |
+| A/B independently seeded installations | BLOCKED | The harness asserts different SQLite installation UUIDs before sync; execution reached both native logins but could not retain A's credential-vault token after B login. |
+| Forged `deviceId` retains authenticated origin | BLOCKED | The harness changes only A's test SQLite `installation_id`, then checks the server-recorded `origin_installation_id` response header after an actual Rust Push. It was not reached. |
+| A/B Push/Pull isolation | BLOCKED | A's project binding and B's zero-binding Pull assertion were prepared but not reached. |
+| A/B conflict-query isolation | BLOCKED | The actual purchaser stale-Push/local-conflict path was prepared but not reached. |
+| Post-commit failure, replay and idempotency | BLOCKED | The HTTPS test server is configured to return a single 503 only after its real Push handler commits, then accepts the same Rust outbox event on retry; the native client did not reach Push. |
+
+The actual reproducible run was:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1
+```
+
+Run `native-smoke-20261017083543` used a new scoped Compose PostgreSQL service and stopped with the result JSON:
+
+```text
+account A lost its protected session after login: NoActiveSession;
+state=Ok((Some(engineer-a UUID), Some(engineer-a UUID), false))
+```
+
+The result proves that A's SQLite local session and in-memory online-account marker still point to A, but its OS credential-vault sync token is absent after B's login. The A/B paths are distinct: profile SHA-256 prefixes were `a184106b` and `411b7fc5`, yielding distinct `S-...` credential services, and the underlying Windows keyring target is `account_uuid.service`. The original longer names, a 24-character scoped name, and the current 10-character scoped name all reproduced the same loss. This is a **native-test-harness BLOCKER**, not evidence of a server account-isolation defect; no Push request was made and no product security assertion has been relaxed.
+
+Artifacts retained for reproduction:
+
+- `.honsen-native-qa/native-smoke-20261017083543.test.json`
+- `.honsen-native-qa/native-smoke-20261017083543-account-a.test.sqlite`
+- `.honsen-native-qa/native-smoke-20261017083543-account-b.test.sqlite`
+- `test-results/native-smoke-20261017083543-{client,server,server-error,compose,compose-error}.log`
+
+Fresh focused checks: `cargo fmt --check` PASS; credential-service isolation and test-installation replacement Rust tests PASS (2/2); `npm run lint --workspace @honsen/server` PASS; `npm run typecheck --workspace @honsen/server` PASS. The native command itself is FAIL/BLOCKED at credential retention, so it is not counted as an acceptance pass. The temporary Compose project was removed with its own scoped `down --volumes`; existing E2E data, production databases, production TLS policy, P1 and Formal state were not changed.
+
+**T10-SEC-001 remains OPEN; P1 and Formal holds remain OPEN.** Before another run, the Integration Owner must diagnose the Windows keyring process/profile behavior with a minimal vault-level reproduction or provide an approved native vault isolation mechanism. Do not replace this with HTTP/Playwright evidence.
