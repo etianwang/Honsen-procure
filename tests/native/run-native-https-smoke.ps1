@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param()
+param(
+  [ValidateSet('ab-sync-security', 'pull-recovery')]
+  [string]$Mode = 'ab-sync-security'
+)
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -9,6 +12,8 @@ $logRoot = Join-Path $repo 'test-results'
 $profileA = Join-Path $qaRoot "$runId-account-a.test.sqlite"
 $profileB = Join-Path $qaRoot "$runId-account-b.test.sqlite"
 $result = Join-Path $qaRoot "$runId.test.json"
+$interruptedResult = Join-Path $qaRoot "$runId-pull-interrupted.test.json"
+$recoveredResult = Join-Path $qaRoot "$runId-pull-recovered.test.json"
 $diagnostics = Join-Path $qaRoot "$runId-server-sync.test.jsonl"
 $pfx = Join-Path $qaRoot "$runId.pfx"
 $cer = Join-Path $qaRoot "$runId.cer"
@@ -63,7 +68,8 @@ try {
   $env:HONSEN_TEST_ENGINEER_A_PASSWORD = "native-a-$([Guid]::NewGuid().ToString('N'))"
   $env:HONSEN_TEST_ENGINEER_B_PASSWORD = "native-b-$([Guid]::NewGuid().ToString('N'))"
   $env:HONSEN_TEST_PURCHASER_PASSWORD = "native-p-$([Guid]::NewGuid().ToString('N'))"
-  $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE = '1'
+  $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE = if ($Mode -eq 'ab-sync-security') { '1' } else { '0' }
+  $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE = if ($Mode -eq 'pull-recovery') { '1' } else { '0' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
@@ -92,23 +98,45 @@ try {
     $env:HONSEN_PROCURE_PROFILE = 'test'
     $env:HONSEN_PROCURE_TEST_TLS_CA_PEM = $pem
     $env:HONSEN_SYNC_API_BASE_URL = 'https://localhost:3443'
-    $env:HONSEN_PROCURE_NATIVE_SMOKE = 'ab-sync-security'
+    $env:HONSEN_PROCURE_NATIVE_SMOKE = $Mode
     $env:HONSEN_PROCURE_NATIVE_AB_SECOND_DB_PATH = $profileB
     $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD = $env:HONSEN_TEST_ENGINEER_A_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD = $env:HONSEN_TEST_ENGINEER_B_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD = $env:HONSEN_TEST_PURCHASER_PASSWORD
-    $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
     $env:RUST_BACKTRACE = '1'
-    & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
-    if ($LASTEXITCODE -ne 0) { throw "native HonsenProcure.exe smoke failed; inspect $nativeLog" }
+    if ($Mode -eq 'ab-sync-security') {
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native HonsenProcure.exe smoke failed; inspect $nativeLog" }
+    } else {
+      $env:HONSEN_PROCURE_NATIVE_PULL_RECOVERY_PHASE = 'interrupted'
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $interruptedResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native interrupted Pull smoke failed; inspect $nativeLog" }
+      $interrupted = Get-Content -Raw $interruptedResult | ConvertFrom-Json
+      $env:HONSEN_PROCURE_NATIVE_PULL_RECOVERY_PHASE = 'recovered'
+      $env:HONSEN_PROCURE_NATIVE_PULL_RECOVERY_ENTITY_ID = $interrupted.entityId
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $recoveredResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native recovered Pull smoke failed; inspect $nativeLog" }
+    }
   } finally {
     Pop-Location
   }
-  $smoke = Get-Content -Raw $result | ConvertFrom-Json
-  if ($smoke.mode -ne 'ab-sync-security' -or $smoke.independentInstallations -ne 'PASS' -or $smoke.forgedDeviceIdTrustedOrigin -ne 'PASS' -or $smoke.accountIsolation -ne 'PASS' -or $smoke.conflictIsolation -ne 'PASS' -or $smoke.pushReplayIdempotency -ne 'PASS') {
-    throw "native smoke result is invalid: $result"
+  if ($Mode -eq 'ab-sync-security') {
+    $smoke = Get-Content -Raw $result | ConvertFrom-Json
+    if ($smoke.mode -ne 'ab-sync-security' -or $smoke.independentInstallations -ne 'PASS' -or $smoke.forgedDeviceIdTrustedOrigin -ne 'PASS' -or $smoke.accountIsolation -ne 'PASS' -or $smoke.conflictIsolation -ne 'PASS' -or $smoke.pushReplayIdempotency -ne 'PASS') {
+      throw "native smoke result is invalid: $result"
+    }
+    Write-Output "PASS native HonsenProcure.exe HTTPS A/B sync security smoke: $result"
+  } else {
+    $interrupted = Get-Content -Raw $interruptedResult | ConvertFrom-Json
+    $recovered = Get-Content -Raw $recoveredResult | ConvertFrom-Json
+    if ($interrupted.mode -ne 'pull-recovery' -or $interrupted.pullFailure -ne 'PASS' -or $interrupted.cursorUnchanged -ne 'PASS' -or $recovered.mode -ne 'pull-recovery' -or $recovered.recovery -ne 'PASS' -or $recovered.replay -ne 'PASS' -or $recovered.cursorPersisted -ne 'PASS') {
+      throw "native Pull recovery result is invalid: $interruptedResult / $recoveredResult"
+    }
+    Write-Output "PASS native HonsenProcure.exe HTTPS Pull recovery smoke: $interruptedResult / $recoveredResult"
   }
-  Write-Output "PASS native HonsenProcure.exe HTTPS A/B sync security smoke: $result"
 } finally {
   if ($server -and !$server.HasExited) {
     Stop-Process -Id $server.Id -Force

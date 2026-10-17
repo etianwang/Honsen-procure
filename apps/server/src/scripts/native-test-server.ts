@@ -126,7 +126,31 @@ const nativeApp = Fastify({
   https: { pfx: readFileSync(pfxPath), passphrase: pfxPassphrase },
 }) as unknown as FastifyInstance
 let failedFirstPushResponse = false
+let failedFirstPullResponse = false
 nativeApp.addHook('onSend', async (request, reply, payload) => {
+  if (request.method === 'GET' && request.url.startsWith('/api/sync/pull')) {
+    const cursor = (request.query as { cursor?: string } | undefined)?.cursor
+    if (
+      process.env.HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE === '1' &&
+      !failedFirstPullResponse
+    ) {
+      failedFirstPullResponse = true
+      reply.code(503)
+      writeDiagnostic({
+        route: 'GET /api/sync/pull',
+        requestedCursor: cursor ?? '0',
+        serverStatus: 503,
+        injectedTransportFault: true,
+      })
+      return JSON.stringify({ error: 'native test Pull transport fault' })
+    }
+    writeDiagnostic({
+      route: 'GET /api/sync/pull',
+      requestedCursor: cursor ?? '0',
+      serverStatus: reply.statusCode,
+    })
+    return payload
+  }
   if (request.method !== 'POST' || request.url !== '/api/sync/push') return payload
   const eventId = (
     request.body as { events?: Array<{ eventId?: string }> } | undefined

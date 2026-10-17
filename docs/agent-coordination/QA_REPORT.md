@@ -288,6 +288,37 @@ Artifacts:
 
 **T10-SEC-001, P1 and Formal remain OPEN.**
 
+## Native Pull transport interruption / restart recovery — 2026-10-17
+
+The native harness now has a deliberately narrow `pull-recovery` mode.  In the isolated Fastify HTTPS test host only, `HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE=1` changes the first real `GET /api/sync/pull` response to HTTP 503 after the normal route has run.  The actual debug `HonsenProcure.exe` still calls production `LocalAuthService::pull_sync_https`; neither the harness nor the host writes the profile SQLite database or simulates a Rust response.  The mode is compiled only with `debug_assertions`, requires the existing absolute test-profile database guard, and the release binary returns unavailable.
+
+Fresh run command:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode pull-recovery
+```
+
+Fresh real-native run `native-smoke-20261017154749` exited 0 using an ephemeral loopback PostgreSQL database, Fastify HTTPS with per-run test-profile certificate trust, Windows Credential Manager and the same absolute A SQLite profile for both EXE processes.
+
+| Pull phase | Result | Evidence |
+| --- | --- | --- |
+| First real Pull after accepted Push | PASS | Server JSONL records `GET /api/sync/pull`, requested cursor `0`, injected HTTP `503`; the first EXE result requires `SyncTransport`, zero projections and durable cursor `0→0`. |
+| Exit then restart same EXE/profile | PASS | The second real `HonsenProcure.exe` opens the same profile and credentials, executes production Pull at cursor `0`, projects exactly one entity and persists cursor `0→1`. |
+| Repeated real Pull | PASS | Server sees cursor `1`; the result requires zero new projections, cursor remains `1`, and the already-projected entity remains server version `1`. |
+| Existing A/B native safety regression | PASS | `native-smoke-20261017154824` retains different installations, trusted-origin protection for forged device ID, post-commit 503 idempotent replay, Push/Pull account isolation and B-only conflict projection. |
+
+Artifacts (ignored, non-secret test evidence):
+
+- `.honsen-native-qa/native-smoke-20261017154749-pull-interrupted.test.json`
+- `.honsen-native-qa/native-smoke-20261017154749-pull-recovered.test.json`
+- `.honsen-native-qa/native-smoke-20261017154749-server-sync.test.jsonl`
+- `test-results/native-smoke-20261017154749-{client,server,server-error,compose,compose-error}.log`
+- `.honsen-native-qa/native-smoke-20261017154824.test.json` and `.honsen-native-qa/native-smoke-20261017154824-server-sync.test.jsonl`
+
+Focused checks: `cargo fmt --check`, `cargo test --lib` (55/55), `cargo check --bin HonsenProcure`, `cargo check --release --bin HonsenProcure`, and server `npm run lint` / `npm run typecheck` all PASS. The scoped disposable Compose projects were removed with their volumes; no production database or pre-existing E2E data was opened or deleted.
+
+**This adds the required native Pull-fault/restart cursor evidence but is not independent Fixer acceptance. T10-SEC-001, P1 and Formal remain OPEN; RFQ/Formal native and broader offline/reconnect cases remain outstanding.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.

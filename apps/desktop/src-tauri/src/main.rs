@@ -52,6 +52,7 @@ fn main() {
         None | Some("online-login")
             | Some("ab-login-switch")
             | Some("ab-sync-security")
+            | Some("pull-recovery")
             | Some("vault-readback")
     ) {
         panic!("unknown native smoke mode");
@@ -76,6 +77,12 @@ fn main() {
                 if let Err(error) = run_native_ab_sync_security_smoke(&auth, &database_path) {
                     write_native_smoke_failure("ab-sync-security", &error);
                     panic!("run native A/B sync security smoke: {error}");
+                }
+            }
+            "pull-recovery" => {
+                if let Err(error) = run_native_pull_recovery_smoke(&auth, &database_path) {
+                    write_native_smoke_failure("pull-recovery", &error);
+                    panic!("run native Pull recovery smoke: {error}");
                 }
             }
             "vault-readback" => {
@@ -610,12 +617,148 @@ fn run_native_ab_sync_security_smoke(
     .map_err(|_| "cannot write native A/B sync result".to_owned())
 }
 
+#[cfg(debug_assertions)]
+fn run_native_pull_recovery_smoke(
+    auth: &LocalAuthService,
+    database_path: &PathBuf,
+) -> Result<(), String> {
+    let phase = required_test_value("HONSEN_PROCURE_NATIVE_PULL_RECOVERY_PHASE")?;
+    let engineer_a_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+
+    match phase.as_str() {
+        "interrupted" => {
+            let session = native_online_login(auth, "engineer-a", &engineer_a_password, now)?;
+            let cursor_before = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let entity_id = Uuid::new_v4();
+            auth.save_requisition_draft(native_sync_draft(entity_id, session.user_id), now)
+                .map_err(|error| error.to_string())?;
+            let push = tauri::async_runtime::block_on(auth.push_pending_https(now))
+                .map_err(|error| error.to_string())?;
+            if push.accepted_count != 1 || push.pending_count != 0 {
+                return Err(format!(
+                    "recovery fixture Push was not acknowledged: {push:?}"
+                ));
+            }
+            let failed_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now));
+            if !matches!(failed_pull, Err(AuthError::SyncTransport)) {
+                return Err(format!(
+                    "first native Pull did not observe the configured transport fault: {failed_pull:?}"
+                ));
+            }
+            let cursor_after = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if cursor_after != cursor_before {
+                return Err(format!(
+                    "failed native Pull advanced the durable cursor: before={cursor_before}; after={cursor_after}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "pull-recovery",
+                    "phase": "interrupted",
+                    "pullFailure": "PASS",
+                    "cursorUnchanged": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "entityId": entity_id,
+                    "cursorBefore": cursor_before,
+                    "cursorAfterFailure": cursor_after,
+                    "projectedCount": 0,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write interrupted Pull recovery result".to_owned())
+        }
+        "recovered" => {
+            let entity_id = Uuid::parse_str(&required_test_value(
+                "HONSEN_PROCURE_NATIVE_PULL_RECOVERY_ENTITY_ID",
+            )?)
+            .map_err(|_| "native Pull recovery entity ID must be a UUID".to_owned())?;
+            let session = native_online_login(auth, "engineer-a", &engineer_a_password, now)?;
+            let cursor_before = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let recovered_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            let cursor_after_recovery = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if recovered_pull.applied_count != 1
+                || recovered_pull.next_cursor == cursor_before
+                || cursor_after_recovery != recovered_pull.next_cursor
+                || auth
+                    .test_remote_entity_version("purchase_order", entity_id)
+                    .map_err(|error| error.to_string())?
+                    != Some(1)
+            {
+                return Err(format!(
+                    "native Pull recovery did not durably project the pending entity: pull={recovered_pull:?}; before={cursor_before}; after={cursor_after_recovery}"
+                ));
+            }
+            let replay_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            let cursor_after_replay = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if replay_pull.applied_count != 0
+                || replay_pull.next_cursor != cursor_after_recovery
+                || cursor_after_replay != cursor_after_recovery
+                || auth
+                    .test_remote_entity_version("purchase_order", entity_id)
+                    .map_err(|error| error.to_string())?
+                    != Some(1)
+            {
+                return Err(format!(
+                    "native Pull replay duplicated projection or cursor movement: pull={replay_pull:?}; before={cursor_after_recovery}; after={cursor_after_replay}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "pull-recovery",
+                    "phase": "recovered",
+                    "recovery": "PASS",
+                    "replay": "PASS",
+                    "cursorPersisted": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "entityId": entity_id,
+                    "cursorBeforeRecovery": cursor_before,
+                    "cursorAfterRecovery": cursor_after_recovery,
+                    "cursorAfterReplay": cursor_after_replay,
+                    "recoveryProjectedCount": recovered_pull.applied_count,
+                    "replayProjectedCount": replay_pull.applied_count,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write recovered Pull recovery result".to_owned())
+        }
+        _ => Err("native Pull recovery phase must be interrupted or recovered".into()),
+    }
+}
+
 #[cfg(not(debug_assertions))]
 fn run_native_ab_sync_security_smoke(
     _account_a: &LocalAuthService,
     _account_a_path: &PathBuf,
 ) -> Result<(), String> {
     Err("native A/B sync smoke is unavailable outside a debug test build".into())
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_pull_recovery_smoke(
+    _auth: &LocalAuthService,
+    _database_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native Pull recovery smoke is unavailable outside a debug test build".into())
 }
 
 #[cfg(debug_assertions)]

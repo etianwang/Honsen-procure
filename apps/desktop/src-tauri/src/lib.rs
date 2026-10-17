@@ -1295,6 +1295,29 @@ impl LocalAuthService {
     }
 
     #[cfg(debug_assertions)]
+    pub fn test_pull_cursor(&self, account_id: Uuid) -> Result<String, AuthError> {
+        self.pull_cursor_for_account(account_id)
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn test_remote_entity_version(
+        &self,
+        entity_type: &str,
+        entity_id: Uuid,
+    ) -> Result<Option<i64>, AuthError> {
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT server_version FROM local_sync_remote_entities WHERE entity_type = ?1 AND entity_id = ?2",
+                params![entity_type, entity_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)
+    }
+
+    #[cfg(debug_assertions)]
     pub fn replace_test_installation_id(&self, forged: Uuid) -> Result<Uuid, AuthError> {
         let original = self.test_installation_id()?;
         self.connection
