@@ -47,10 +47,20 @@ fn probe_vault(path: &Path, second_path: &Path) -> Result<(), String> {
         .set_password(&second_token)
         .map_err(|error| error.to_string())?;
     let result = (|| -> Result<(), String> {
-        if first.get_password().map_err(|error| error.to_string())? != first_token {
+        if Entry::new(&first_service, account)
+            .map_err(|error| error.to_string())?
+            .get_password()
+            .map_err(|error| error.to_string())?
+            != first_token
+        {
             return Err("first profile vault token was not retained".into());
         }
-        if second.get_password().map_err(|error| error.to_string())? != second_token {
+        if Entry::new(&second_service, account)
+            .map_err(|error| error.to_string())?
+            .get_password()
+            .map_err(|error| error.to_string())?
+            != second_token
+        {
             return Err("second profile vault token was not retained".into());
         }
         Ok(())

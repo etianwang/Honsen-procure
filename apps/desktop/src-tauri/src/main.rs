@@ -1,7 +1,13 @@
+#[cfg(debug_assertions)]
+use honsen_materials_desktop_core::test_profile_sync_credential_service;
 use honsen_materials_desktop_core::{
     AdjustmentInput, AuthError, AuthenticatedSession, LocalAuthService, MaterialSnapshotInput,
     RequisitionDraftInput, RequisitionLineInput, commands,
 };
+#[cfg(debug_assertions)]
+use keyring::Entry;
+#[cfg(debug_assertions)]
+use sha2::{Digest, Sha256};
 use std::{env, fs, path::PathBuf, time::SystemTime};
 use tauri::Manager;
 use uuid::Uuid;
@@ -43,7 +49,10 @@ fn main() {
     }
     if !matches!(
         native_smoke.as_deref(),
-        None | Some("online-login") | Some("ab-login-switch") | Some("ab-sync-security")
+        None | Some("online-login")
+            | Some("ab-login-switch")
+            | Some("ab-sync-security")
+            | Some("vault-readback")
     ) {
         panic!("unknown native smoke mode");
     }
@@ -67,6 +76,12 @@ fn main() {
                 if let Err(error) = run_native_ab_sync_security_smoke(&auth, &database_path) {
                     write_native_smoke_failure("ab-sync-security", &error);
                     panic!("run native A/B sync security smoke: {error}");
+                }
+            }
+            "vault-readback" => {
+                if let Err(error) = run_native_vault_readback_smoke(&auth, &database_path) {
+                    write_native_smoke_failure("vault-readback", &error);
+                    panic!("run native vault readback smoke: {error}");
                 }
             }
             _ => unreachable!("validated native smoke mode"),
@@ -168,6 +183,94 @@ fn run_native_online_login_smoke(auth: &LocalAuthService) -> Result<(), String> 
         .to_string(),
     )
     .map_err(|_| "cannot write native smoke result".to_owned())
+}
+
+#[cfg(debug_assertions)]
+fn run_native_vault_readback_smoke(
+    auth: &LocalAuthService,
+    database_path: &PathBuf,
+) -> Result<(), String> {
+    const ACCOUNT_ID: &str = "10000000-0000-4000-8000-000000000011";
+    const CONTROLLED_TOKEN: &str = "native-vault-readback-control-token-0123456789";
+
+    let account_id = Uuid::parse_str(ACCOUNT_ID).expect("fixed test account UUID");
+    let service = test_profile_sync_credential_service(database_path);
+    let target = format!("{ACCOUNT_ID}.{service}");
+    let token_digest = format!("{:x}", Sha256::digest(CONTROLLED_TOKEN.as_bytes()));
+    let context = format!(
+        "{:x}",
+        Sha256::digest(
+            [
+                env::var("USERDOMAIN").unwrap_or_default(),
+                env::var("USERNAME").unwrap_or_default(),
+                env::var("SESSIONNAME").unwrap_or_default(),
+            ]
+            .join("\u{0}")
+            .as_bytes(),
+        )
+    );
+    let context = &context[..12];
+    let result_path = test_result_path()?;
+    let entry = Entry::new(&service, ACCOUNT_ID)
+        .map_err(|error| format!("target={target}; create={error:?}"))?;
+    let readback = (|| -> Result<(bool, bool, bool), String> {
+        entry
+            .set_password(CONTROLLED_TOKEN)
+            .map_err(|error| format!("target={target}; direct-write={error:?}"))?;
+        let direct_matches = entry
+            .get_password()
+            .map_err(|error| format!("target={target}; direct-read={error:?}"))?
+            == CONTROLLED_TOKEN;
+        let reopened_matches = Entry::new(&service, ACCOUNT_ID)
+            .map_err(|error| format!("target={target}; direct-reopen={error:?}"))?
+            .get_password()
+            .map_err(|error| format!("target={target}; direct-reopen-read={error:?}"))?
+            == CONTROLLED_TOKEN;
+        auth.cache_sync_access_token(account_id, CONTROLLED_TOKEN)
+            .map_err(|error| format!("target={target}; wrapped-write={error:?}"))?;
+        let wrapped_matches = auth
+            .test_sync_token_matches(account_id, CONTROLLED_TOKEN)
+            .map_err(|error| format!("target={target}; wrapped-read={error:?}"))?;
+        Ok((direct_matches, reopened_matches, wrapped_matches))
+    })();
+    let _ = entry.delete_credential();
+    let (direct_matches, reopened_matches, wrapped_matches) = readback?;
+    fs::write(
+        result_path,
+        serde_json::json!({
+            "mode": "vault-readback",
+            "result": if direct_matches && reopened_matches && wrapped_matches { "PASS" } else { "FAIL" },
+            "target": target,
+            "service": service,
+            "account": ACCOUNT_ID,
+            "directWrite": "PASS",
+            "directRead": if direct_matches { "PASS" } else { "FAIL" },
+            "directReopenRead": if reopened_matches { "PASS" } else { "FAIL" },
+            "wrappedWrite": "PASS",
+            "wrappedRead": if wrapped_matches { "PASS" } else { "FAIL" },
+            "tokenSha256Prefix": &token_digest[..12],
+            "processId": std::process::id(),
+            "processContextSha256Prefix": context,
+            "thread": format!("{:?}", std::thread::current().id()),
+        })
+        .to_string(),
+    )
+    .map_err(|_| "cannot write native vault readback result".to_owned())?;
+    if direct_matches && reopened_matches && wrapped_matches {
+        Ok(())
+    } else {
+        Err(format!(
+            "target={target}; directMatches={direct_matches}; reopenedMatches={reopened_matches}; wrappedMatches={wrapped_matches}"
+        ))
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_vault_readback_smoke(
+    _auth: &LocalAuthService,
+    _database_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native vault readback smoke is unavailable outside a debug test build".into())
 }
 
 fn run_native_ab_login_switch_smoke(

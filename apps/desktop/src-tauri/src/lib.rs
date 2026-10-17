@@ -1101,6 +1101,11 @@ fn test_profile_credential_services(path: &Path) -> (String, String) {
     (format!("V-{profile_scope}"), format!("S-{profile_scope}"))
 }
 
+#[cfg(debug_assertions)]
+pub fn test_profile_sync_credential_service(path: &Path) -> String {
+    test_profile_credential_services(path).1
+}
+
 fn prior_test_profile_credential_services(path: &Path) -> (String, String) {
     let profile_hash = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
     (
@@ -1343,6 +1348,19 @@ impl LocalAuthService {
             None => false,
         };
         Ok((local_session, online_session, last_authenticated, has_token))
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn test_sync_token_matches(
+        &self,
+        account_id: Uuid,
+        expected_token: &str,
+    ) -> Result<bool, AuthError> {
+        Ok(self
+            .credential_vault
+            .load_sync_token(account_id)?
+            .as_deref()
+            == Some(expected_token))
     }
 
     fn verify_test_sync_origin(&self, response: &reqwest::Response) -> Result<(), AuthError> {

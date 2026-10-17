@@ -196,3 +196,31 @@ Relevant artifacts:
 Fresh local validation: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); both native binaries build PASS. The script is FAIL as above, so A/B switch, old-token rejection, logout clearing, and sync matrix are not re-accepted in this batch. No production TLS, credential policy, database, existing E2E data, server suite, P1 or Formal state changed.
 
 **T10-SEC-001, P1 and Formal remain OPEN.** Fixer must independently reproduce this process-specific vault failure before accepting a platform-appropriate repair; no HTTP/Playwright/Mock substitution is acceptable.
+
+## Independent Fixer Windows Credential Manager readback diagnosis — 2026-10-17
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Real `HonsenProcure.exe`: same Entry write/read | PASS | Test-profile-only `vault-readback` wrote and read a controlled synthetic token through one `keyring::Entry`. |
+| Real `HonsenProcure.exe`: recreated Entry read | FAIL | The identical target immediately returned `NoEntry` after recreating `Entry`; final result is `.honsen-native-qa/native-vault-readback-final-20261017151305.test.json`. |
+| Production wrapper write/read | FAIL | `cache_sync_access_token` returned success, then `load_sync_token` (which creates a fresh Entry) returned absent in the same EXE/process. |
+| Console probe with recreated Entries | FAIL | `test-results/native-vault-probe-final-20261017151306-client.log` records `No matching entry found in secure storage`; the earlier probe had only proved same-object reads. |
+| Credential Manager metadata | FAIL | Read-only `cmdkey /list:<controlled-target>` found no stored credential after the controlled failed run. No existing credential was queried or deleted. |
+
+The corrected minimum root cause is not an A/B collision, application deletion, session revocation, TLS, or a Tauri-specific target difference. In this Windows user/session, `keyring` 3.6.3 reports successful `CredWriteW` for a controlled Generic credential, but a fresh `CredReadW` for the same exact `account.service` target returns `NoEntry`. `keyring` maps that result from Win32 `ERROR_NOT_FOUND` (1168). The test uses only a fixed synthetic account, a synthetic token whose SHA-256 prefix (not its value) is emitted, a new absolute `.test.sqlite` profile, and a hashed process-context marker.
+
+No application workaround was accepted: retaining the original `Entry` would merely hide the fault inside one process and would fail the required restart/persistence boundary. The diagnostic entry is accepted only in debug/test-profile mode and deletes its own controlled credential on every completed probe path. Production credential service names, TLS, authentication, SQLite token policy and server code are unchanged.
+
+Reproducible commands:
+
+```text
+cargo build --bin HonsenProcure --bin honsen-procure-test-profile
+# Set HONSEN_PROCURE_PROFILE=test, an absolute new *.test.sqlite path,
+# HONSEN_PROCURE_NATIVE_SMOKE=vault-readback and an absolute *.test.json result path.
+HonsenProcure.exe
+honsen-procure-test-profile.exe vault-probe
+```
+
+Fresh checks: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); both native binaries build PASS. The required immediate real-EXE readback is **FAIL/BLOCKED**, so this batch provides no new A/B security acceptance evidence and no minimal application fix is safe without repairing the Windows Credential Manager/keyring environment.
+
+**T10-SEC-001, P1 and Formal remain OPEN.**
