@@ -387,6 +387,38 @@ Focused quality checks: Rust `cargo fmt --check`, `cargo test --lib` (55/55), `c
 
 **NATIVE-004 is ready for independent Fixer recheck. T10-SEC-001, P1 and Formal remain OPEN; this is only the offline-edit/Push-recovery slice, not complete native T10 acceptance.**
 
+## Independent Fixer recheck: NATIVE-004 — 2026-10-17
+
+Reviewed baseline: actual `HEAD` was `b16f3061ce28d43b2b82ff8cbdd4f6d59c1ae91e`; `git merge-base --is-ancestor b16f306 HEAD` returned 0.  Before the rerun, the only worktree entry was the preserved ignored `.honsen-native-qa/` evidence directory.  The Fixer made no business-code change.
+
+The Fixer independently executed the real native scenario using a fresh disposable PostgreSQL/Fastify HTTPS instance, a newly generated test-profile certificate, a new absolute SQLite profile and Windows Credential Manager:
+
+```text
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode offline-push-recovery
+```
+
+Fresh run `native-smoke-20261017161819` completed successfully.  It builds and starts the debug `HonsenProcure.exe` twice; it is neither a standalone HTTP client nor a Mock/Playwright result.  The actual loopback HTTPS process is stopped before the first EXE creates its draft, then a second EXE opens the same profile only after the HTTPS service is restarted.
+
+| Boundary | Result | Fresh evidence |
+| --- | --- | --- |
+| Profile/session continuity | PASS | Offline and recovered results have the same A account, installation, profile path, entity and event UUIDs. |
+| Offline SQLite mutation and failed Push | PASS | The first real EXE records local `draft`, outbox pending `1→1`, cursor `0→0`, and Rust `SyncTransport` after the script confirmed port 3443 was unavailable. The debug-only read-only rusqlite assertions check the actual local order/outbox; no direct SQLite write exists in the harness. |
+| Process exit/restart retention | PASS | The recovery phase is a new EXE process and requires the same pending event/local draft before any Push. |
+| Recovered Push and idempotency | PASS | The recovery EXE acknowledges the retained event (`1→0`); its second production Push sends no event. Sanitized server JSONL contains exactly one HTTP 200 Push for that event. |
+| Trusted server event / authority convergence | PASS | The sole server event records A's matching account and installation, `accepted` version 1; real Pull projects one change, keeps local `draft`, and persists cursor `0→1`. |
+| Test-only and release boundary | PASS | `HONSEN_PROCURE_TEST_FAIL_FIRST_{PUSH,PULL}_RESPONSE` is read only by `apps/server/src/scripts/native-test-server.ts`; this mode sets both to `0` and obtains its offline failure by stopping the isolated host. The native test entry and state accessors are `debug_assertions`-only; release `cargo check --release --bin HonsenProcure` passes. |
+
+Artifacts:
+
+- `.honsen-native-qa/native-smoke-20261017161819-offline-push.test.json`
+- `.honsen-native-qa/native-smoke-20261017161819-offline-push-recovered.test.json`
+- `.honsen-native-qa/native-smoke-20261017161819-server-sync.test.jsonl`
+- `test-results/native-offline-push-fixer-20261017161818.{log,error.log}`
+
+Independent focused verification: `cargo test --lib` PASS (55/55), `cargo check --release --bin HonsenProcure` PASS, `git diff --check` PASS. The release check has existing debug-test unused-symbol warnings. No listener or native Compose project remained after the run. The host lacks a standalone SQLite CLI, so SQLite file state was validated through the real EXE's debug-only read-only rusqlite checks plus the phase result files, not claimed as an external CLI inspection.
+
+**NATIVE-004 is independently CLOSED for this bounded offline draft/Push recovery scenario. T10-SEC-001, P1 and Formal remain OPEN: this does not cover all reconnect failure forms or RFQ/Formal native workflows, and is not complete T10 acceptance.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.
