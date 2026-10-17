@@ -9,6 +9,8 @@ use keyring::Entry;
 #[cfg(debug_assertions)]
 use sha2::{Digest, Sha256};
 use std::{env, fs, path::PathBuf, time::SystemTime};
+#[cfg(debug_assertions)]
+use std::{thread, time::Duration};
 use tauri::Manager;
 use uuid::Uuid;
 
@@ -52,6 +54,7 @@ fn main() {
         None | Some("online-login")
             | Some("ab-login-switch")
             | Some("ab-sync-security")
+            | Some("offline-push-recovery")
             | Some("pull-recovery")
             | Some("vault-readback")
     ) {
@@ -83,6 +86,12 @@ fn main() {
                 if let Err(error) = run_native_pull_recovery_smoke(&auth, &database_path) {
                     write_native_smoke_failure("pull-recovery", &error);
                     panic!("run native Pull recovery smoke: {error}");
+                }
+            }
+            "offline-push-recovery" => {
+                if let Err(error) = run_native_offline_push_recovery_smoke(&auth, &database_path) {
+                    write_native_smoke_failure("offline-push-recovery", &error);
+                    panic!("run native offline Push recovery smoke: {error}");
                 }
             }
             "vault-readback" => {
@@ -745,6 +754,219 @@ fn run_native_pull_recovery_smoke(
     }
 }
 
+#[cfg(debug_assertions)]
+fn run_native_offline_push_recovery_smoke(
+    auth: &LocalAuthService,
+    database_path: &PathBuf,
+) -> Result<(), String> {
+    let phase = required_test_value("HONSEN_PROCURE_NATIVE_OFFLINE_PUSH_PHASE")?;
+    let engineer_a_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+
+    match phase.as_str() {
+        "offline" => {
+            let session = native_online_login(auth, "engineer-a", &engineer_a_password, now)?;
+            let baseline_cursor = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let baseline_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            if baseline_pull.applied_count != 0 || baseline_pull.next_cursor != baseline_cursor {
+                return Err(format!(
+                    "online baseline Pull was not empty and stable: {baseline_pull:?}; cursor={baseline_cursor}"
+                ));
+            }
+            let ready_path =
+                native_offline_control_path("HONSEN_PROCURE_NATIVE_OFFLINE_READY_PATH")?;
+            let continue_path =
+                native_offline_control_path("HONSEN_PROCURE_NATIVE_OFFLINE_CONTINUE_PATH")?;
+            fs::write(&ready_path, "online baseline complete")
+                .map_err(|_| "cannot signal native offline baseline readiness".to_owned())?;
+            for _ in 0..300 {
+                if continue_path.exists() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            if !continue_path.exists() {
+                return Err(
+                    "native offline harness did not confirm HTTPS endpoint shutdown".into(),
+                );
+            }
+            let order_id = Uuid::new_v4();
+            auth.save_requisition_draft(native_sync_draft(order_id, session.user_id), now)
+                .map_err(|error| error.to_string())?;
+            let pending_before = auth
+                .pending_sync_events(10, now)
+                .map_err(|error| error.to_string())?;
+            if pending_before.len() != 1
+                || pending_before[0].entity_type != "purchase_order"
+                || pending_before[0].entity_id != order_id
+                || auth
+                    .test_purchase_order_status(order_id)
+                    .map_err(|error| error.to_string())?
+                    .as_deref()
+                    != Some("draft")
+            {
+                return Err(
+                    "offline draft did not atomically persist one pending order event".into(),
+                );
+            }
+            let event_id = pending_before[0].event_id;
+            let failed_push = tauri::async_runtime::block_on(auth.push_pending_https(now));
+            if !matches!(failed_push, Err(AuthError::SyncTransport)) {
+                return Err(format!(
+                    "offline Push did not observe real transport failure: {failed_push:?}"
+                ));
+            }
+            let pending_after = auth
+                .pending_sync_events(10, now)
+                .map_err(|error| error.to_string())?;
+            let status = auth.sync_status(now).map_err(|error| error.to_string())?;
+            if pending_after.len() != 1
+                || pending_after[0].event_id != event_id
+                || status.pending_count != 1
+                || auth
+                    .test_outbox_acknowledged(event_id)
+                    .map_err(|error| error.to_string())?
+                    != Some(false)
+            {
+                return Err("offline Push lost or acknowledged the pending event".into());
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "offline-push-recovery",
+                    "phase": "offline",
+                    "onlineBaseline": "PASS",
+                    "offlineTransportFailure": "PASS",
+                    "outboxRetained": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "entityId": order_id,
+                    "eventId": event_id,
+                    "cursorBefore": baseline_cursor,
+                    "cursorAfter": auth.test_pull_cursor(session.user_id).map_err(|error| error.to_string())?,
+                    "localEntityStatus": "draft",
+                    "outboxPendingBeforePush": 1,
+                    "outboxPendingAfterPush": status.pending_count,
+                    "serverEventCount": 0,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write offline Push result".to_owned())
+        }
+        "recovered" => {
+            let order_id = Uuid::parse_str(&required_test_value(
+                "HONSEN_PROCURE_NATIVE_OFFLINE_ENTITY_ID",
+            )?)
+            .map_err(|_| "native offline order ID must be a UUID".to_owned())?;
+            let event_id = Uuid::parse_str(&required_test_value(
+                "HONSEN_PROCURE_NATIVE_OFFLINE_EVENT_ID",
+            )?)
+            .map_err(|_| "native offline event ID must be a UUID".to_owned())?;
+            let session = native_online_login(auth, "engineer-a", &engineer_a_password, now)?;
+            let pending_before = auth
+                .pending_sync_events(10, now)
+                .map_err(|error| error.to_string())?;
+            if pending_before.len() != 1
+                || pending_before[0].event_id != event_id
+                || auth
+                    .test_purchase_order_status(order_id)
+                    .map_err(|error| error.to_string())?
+                    .as_deref()
+                    != Some("draft")
+            {
+                return Err(
+                    "restarted client did not retain the offline local order and outbox".into(),
+                );
+            }
+            let recovered_push = tauri::async_runtime::block_on(auth.push_pending_https(now))
+                .map_err(|error| error.to_string())?;
+            if recovered_push.accepted_count != 1
+                || recovered_push.pending_count != 0
+                || auth
+                    .test_outbox_acknowledged(event_id)
+                    .map_err(|error| error.to_string())?
+                    != Some(true)
+            {
+                return Err(format!(
+                    "recovered Push did not acknowledge exactly one retained event: {recovered_push:?}"
+                ));
+            }
+            let replay_push = tauri::async_runtime::block_on(auth.push_pending_https(now))
+                .map_err(|error| error.to_string())?;
+            if replay_push.accepted_count != 0 || replay_push.pending_count != 0 {
+                return Err(format!(
+                    "recovered Push replay was not empty: {replay_push:?}"
+                ));
+            }
+            let cursor_before_pull = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            let cursor_after_pull = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if pull.applied_count != 1
+                || pull.next_cursor == cursor_before_pull
+                || cursor_after_pull != pull.next_cursor
+                || auth
+                    .test_remote_entity_version("purchase_order", order_id)
+                    .map_err(|error| error.to_string())?
+                    != Some(1)
+                || auth
+                    .test_purchase_order_status(order_id)
+                    .map_err(|error| error.to_string())?
+                    .as_deref()
+                    != Some("draft")
+            {
+                return Err(format!(
+                    "recovered Push/Pull did not converge local authority: push={recovered_push:?}; pull={pull:?}; cursor={cursor_before_pull}->{cursor_after_pull}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "offline-push-recovery",
+                    "phase": "recovered",
+                    "restartRetention": "PASS",
+                    "recoveredPush": "PASS",
+                    "pushReplay": "PASS",
+                    "authoritativePull": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "entityId": order_id,
+                    "eventId": event_id,
+                    "outboxPendingBeforeRecovery": 1,
+                    "outboxPendingAfterRecovery": 0,
+                    "serverEventCount": 1,
+                    "localEntityStatus": "draft",
+                    "cursorBeforePull": cursor_before_pull,
+                    "cursorAfterPull": cursor_after_pull,
+                    "pullProjectedCount": pull.applied_count,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write recovered offline Push result".to_owned())
+        }
+        _ => Err("native offline Push phase must be offline or recovered".into()),
+    }
+}
+
+#[cfg(debug_assertions)]
+fn native_offline_control_path(name: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(required_test_value(name)?);
+    if !path.is_absolute() || path.extension().and_then(|value| value.to_str()) != Some("signal") {
+        return Err(format!("{name} must be an absolute .signal path"));
+    }
+    Ok(path)
+}
+
 #[cfg(not(debug_assertions))]
 fn run_native_ab_sync_security_smoke(
     _account_a: &LocalAuthService,
@@ -759,6 +981,14 @@ fn run_native_pull_recovery_smoke(
     _database_path: &PathBuf,
 ) -> Result<(), String> {
     Err("native Pull recovery smoke is unavailable outside a debug test build".into())
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_offline_push_recovery_smoke(
+    _auth: &LocalAuthService,
+    _database_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native offline Push recovery smoke is unavailable outside a debug test build".into())
 }
 
 #[cfg(debug_assertions)]

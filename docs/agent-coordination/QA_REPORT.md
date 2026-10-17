@@ -353,6 +353,40 @@ The per-run test containers and loopback listeners were absent after completion.
 
 **NATIVE-003 is independently verified for this bounded Pull-fault/restart scenario. T10-SEC-001, P1 and Formal remain OPEN: this is not complete T10 acceptance, and RFQ/Formal plus remaining offline/reconnect variants are still unexecuted.**
 
+## Native offline edit / Push recovery — 2026-10-17
+
+The native harness now has one additional debug/test-profile-only `offline-push-recovery` mode. It deliberately executes three separate real `HonsenProcure.exe` process phases: an online A baseline Pull, an EXE that waits until the script has stopped the isolated loopback Fastify HTTPS process before creating a requisition draft and attempting production Push, and a new EXE after that HTTPS host restarts. The test code calls the same `save_requisition_draft`, `push_pending_https` and `pull_sync_https` Rust production functions; its only new desktop accessors are debug-only read-only checks for outbox acknowledgement and local order status. No test directly writes SQLite, sends an independent HTTP request, or mocks a sync response.
+
+The fresh full run used a new disposable PostgreSQL/Fastify HTTPS instance and `native-smoke-20261017161207` profile. The runner verified that port 3443 was no longer listening before releasing the offline EXE. The same A profile and installation then crossed the restart boundary.
+
+| Step | Result | Evidence |
+| --- | --- | --- |
+| Online A baseline | PASS | Real HTTPS Pull applied 0 at cursor `0`; baseline account/installation are recorded in the offline result. |
+| Offline business mutation | PASS | Real Rust draft save leaves local purchase order status `draft` and exactly one pending `purchase_order` outbox event. |
+| Disconnected Push | PASS | With the loopback HTTPS host stopped, production Push returns `SyncTransport`; event remains unacknowledged/pending `1`, cursor stays `0`. |
+| Exit/restart retention | PASS | A new real EXE on the same profile retains the exact event, local draft and pending count. |
+| Reconnected Push/replay | PASS | Real Push accepts one event then reports pending `0`; a second Push sends no event. Sanitized server JSONL contains exactly one accepted POST for the event, trusted A account and original installation. |
+| Authoritative Pull | PASS | Real Pull projects one change, local status remains `draft`, remote version is 1 and cursor advances `0→1`. |
+| Existing A/B regression | PASS | Fresh `native-smoke-20261017161438` retains independent installations, forged-device trusted origin, post-commit replay, account isolation and B-only conflict checks. |
+
+Reproducible command (the current interactive PowerShell command remains supported):
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode offline-push-recovery
+```
+
+Evidence:
+
+- `.honsen-native-qa/native-smoke-20261017161207-offline-push.test.json`
+- `.honsen-native-qa/native-smoke-20261017161207-offline-push-recovered.test.json`
+- `.honsen-native-qa/native-smoke-20261017161207-server-sync.test.jsonl`
+- `test-results/native-smoke-20261017161207-{client,client-error,server,server-error,compose,compose-error}.log`
+- `.honsen-native-qa/native-smoke-20261017161438.test.json`
+
+Focused quality checks: Rust `cargo fmt --check`, `cargo test --lib` (55/55), `cargo check --release --bin HonsenProcure`, server lint and server typecheck PASS. Existing debug-only unused-symbol warnings remain in the release check. The two early harness-only attempts are not acceptance evidence: a WSL Compose health race and then a quoted server restart argument were diagnosed; after the minimal harness correction, the fresh run above passed. All temporary Compose projects were removed with their scoped volumes; no production database, existing E2E data, production TLS/keyring policy, push, merge or deployment was touched.
+
+**NATIVE-004 is ready for independent Fixer recheck. T10-SEC-001, P1 and Formal remain OPEN; this is only the offline-edit/Push-recovery slice, not complete native T10 acceptance.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.

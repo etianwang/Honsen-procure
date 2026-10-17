@@ -1318,6 +1318,34 @@ impl LocalAuthService {
     }
 
     #[cfg(debug_assertions)]
+    pub fn test_outbox_acknowledged(&self, event_id: Uuid) -> Result<Option<bool>, AuthError> {
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT acknowledged_at IS NOT NULL FROM local_sync_outbox WHERE event_id = ?1",
+                [event_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn test_purchase_order_status(&self, order_id: Uuid) -> Result<Option<String>, AuthError> {
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)
+    }
+
+    #[cfg(debug_assertions)]
     pub fn replace_test_installation_id(&self, forged: Uuid) -> Result<Uuid, AuthError> {
         let original = self.test_installation_id()?;
         self.connection
