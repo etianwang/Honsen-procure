@@ -55,6 +55,7 @@ fn main() {
             | Some("ab-login-switch")
             | Some("ab-sync-security")
             | Some("push-partial-batch")
+            | Some("pull-page-recovery")
             | Some("offline-push-recovery")
             | Some("pull-recovery")
             | Some("vault-readback")
@@ -93,6 +94,12 @@ fn main() {
                 if let Err(error) = run_native_pull_recovery_smoke(&auth, &database_path) {
                     write_native_smoke_failure("pull-recovery", &error);
                     panic!("run native Pull recovery smoke: {error}");
+                }
+            }
+            "pull-page-recovery" => {
+                if let Err(error) = run_native_pull_page_recovery_smoke(&auth, &database_path) {
+                    write_native_smoke_failure("pull-page-recovery", &error);
+                    panic!("run native paged Pull recovery smoke: {error}");
                 }
             }
             "offline-push-recovery" => {
@@ -762,6 +769,197 @@ fn run_native_pull_recovery_smoke(
 }
 
 #[cfg(debug_assertions)]
+fn run_native_pull_page_recovery_smoke(
+    auth: &LocalAuthService,
+    database_path: &PathBuf,
+) -> Result<(), String> {
+    const PAGE_SIZE: usize = 500;
+    const EVENT_COUNT: usize = PAGE_SIZE + 1;
+    let phase = required_test_value("HONSEN_PROCURE_NATIVE_PULL_PAGE_RECOVERY_PHASE")?;
+    let engineer_a_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD")?;
+    let purchaser_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+
+    match phase.as_str() {
+        "producer" => {
+            let session = native_online_login(auth, "purchaser", &purchaser_password, now)?;
+            let mut entity_ids = Vec::with_capacity(EVENT_COUNT);
+            for _ in 0..EVENT_COUNT {
+                let entity_id = Uuid::new_v4();
+                auth.save_requisition_draft(native_sync_draft(entity_id, session.user_id), now)
+                    .map_err(|error| error.to_string())?;
+                entity_ids.push(entity_id);
+            }
+            let queued = auth
+                .test_pending_outbox_count(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if queued != EVENT_COUNT as i64 {
+                return Err(format!(
+                    "paged Pull producer queued {queued}, expected {EVENT_COUNT}"
+                ));
+            }
+            let mut accepted_count = 0;
+            for _ in 0..=((EVENT_COUNT - 1) / 100) {
+                let push = tauri::async_runtime::block_on(auth.push_pending_https(now))
+                    .map_err(|error| error.to_string())?;
+                accepted_count += push.accepted_count;
+                if auth
+                    .test_pending_outbox_count(session.user_id)
+                    .map_err(|error| error.to_string())?
+                    == 0
+                {
+                    break;
+                }
+                if push.accepted_count == 0 {
+                    return Err("paged Pull producer Push made no progress".into());
+                }
+            }
+            let pending_after_push = auth
+                .test_pending_outbox_count(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if accepted_count != EVENT_COUNT || pending_after_push != 0 {
+                return Err(format!(
+                    "paged Pull producer did not persist exactly {EVENT_COUNT} remote events: accepted={accepted_count}; pending={pending_after_push}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "pull-page-recovery",
+                    "phase": "producer",
+                    "producerPush": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "eventCount": EVENT_COUNT,
+                    "acceptedCount": accepted_count,
+                    "outboxPendingAfterPush": pending_after_push,
+                    "firstEntityId": entity_ids.first(),
+                    "lastEntityId": entity_ids.last(),
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write paged Pull producer result".to_owned())
+        }
+        "interrupted" => {
+            let session = native_online_login(auth, "engineer-a", &engineer_a_password, now)?;
+            let cursor_before = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let failed_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now));
+            if !matches!(failed_pull, Err(AuthError::SyncTransport)) {
+                return Err(format!(
+                    "second native Pull page did not observe the configured transport fault: {failed_pull:?}"
+                ));
+            }
+            let cursor_after_failure = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let projected_after_failure = auth
+                .test_remote_entity_count("purchase_order")
+                .map_err(|error| error.to_string())?;
+            let outbox_pending = auth
+                .test_pending_outbox_count(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if cursor_before != "0"
+                || cursor_after_failure != PAGE_SIZE.to_string()
+                || projected_after_failure != PAGE_SIZE as i64
+                || outbox_pending != 0
+            {
+                return Err(format!(
+                    "paged Pull interruption did not preserve the committed first page boundary: before={cursor_before}; after={cursor_after_failure}; projected={projected_after_failure}; outbox={outbox_pending}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "pull-page-recovery",
+                    "phase": "interrupted",
+                    "firstPageCommitted": "PASS",
+                    "secondPageTransportFailure": "PASS",
+                    "cursorAtCommittedBoundary": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "cursorBefore": cursor_before,
+                    "cursorAfterFailure": cursor_after_failure,
+                    "projectedAfterFailure": projected_after_failure,
+                    "outboxPending": outbox_pending,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write interrupted paged Pull result".to_owned())
+        }
+        "recovered" => {
+            let session = native_online_login(auth, "engineer-a", &engineer_a_password, now)?;
+            let cursor_before_recovery = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let recovered_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            let cursor_after_recovery = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let projected_after_recovery = auth
+                .test_remote_entity_count("purchase_order")
+                .map_err(|error| error.to_string())?;
+            let replay_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            let cursor_after_replay = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let projected_after_replay = auth
+                .test_remote_entity_count("purchase_order")
+                .map_err(|error| error.to_string())?;
+            let outbox_pending = auth
+                .test_pending_outbox_count(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if cursor_before_recovery != PAGE_SIZE.to_string()
+                || recovered_pull.applied_count != 1
+                || cursor_after_recovery != EVENT_COUNT.to_string()
+                || projected_after_recovery != EVENT_COUNT as i64
+                || replay_pull.applied_count != 0
+                || cursor_after_replay != cursor_after_recovery
+                || projected_after_replay != projected_after_recovery
+                || outbox_pending != 0
+            {
+                return Err(format!(
+                    "paged Pull recovery did not finish exactly once: recovered={recovered_pull:?}; replay={replay_pull:?}; before={cursor_before_recovery}; after={cursor_after_recovery}; final={cursor_after_replay}; projected={projected_after_replay}; outbox={outbox_pending}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "pull-page-recovery",
+                    "phase": "recovered",
+                    "restartRecovery": "PASS",
+                    "allEventsProjectedOnce": "PASS",
+                    "cursorMonotonic": "PASS",
+                    "replayEmpty": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "cursorBeforeRecovery": cursor_before_recovery,
+                    "cursorAfterRecovery": cursor_after_recovery,
+                    "cursorAfterReplay": cursor_after_replay,
+                    "recoveryProjectedCount": recovered_pull.applied_count,
+                    "replayProjectedCount": replay_pull.applied_count,
+                    "projectedAfterRecovery": projected_after_recovery,
+                    "projectedAfterReplay": projected_after_replay,
+                    "outboxPending": outbox_pending,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write recovered paged Pull result".to_owned())
+        }
+        _ => Err(
+            "native paged Pull recovery phase must be producer, interrupted or recovered".into(),
+        ),
+    }
+}
+
+#[cfg(debug_assertions)]
 fn run_native_push_partial_batch_smoke(
     account_a: &LocalAuthService,
     account_a_path: &PathBuf,
@@ -1149,6 +1347,14 @@ fn run_native_pull_recovery_smoke(
     _database_path: &PathBuf,
 ) -> Result<(), String> {
     Err("native Pull recovery smoke is unavailable outside a debug test build".into())
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_pull_page_recovery_smoke(
+    _auth: &LocalAuthService,
+    _database_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native paged Pull recovery smoke is unavailable outside a debug test build".into())
 }
 
 #[cfg(not(debug_assertions))]

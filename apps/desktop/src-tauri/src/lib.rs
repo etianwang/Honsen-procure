@@ -1318,6 +1318,32 @@ impl LocalAuthService {
     }
 
     #[cfg(debug_assertions)]
+    pub fn test_remote_entity_count(&self, entity_type: &str) -> Result<i64, AuthError> {
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_remote_entities WHERE entity_type = ?1",
+                [entity_type],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn test_pending_outbox_count(&self, account_id: Uuid) -> Result<i64, AuthError> {
+        self.connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL",
+                [account_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)
+    }
+
+    #[cfg(debug_assertions)]
     pub fn test_outbox_acknowledged(&self, event_id: Uuid) -> Result<Option<bool>, AuthError> {
         self.connection
             .lock()

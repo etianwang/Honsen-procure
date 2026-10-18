@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('ab-sync-security', 'pull-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [ValidateSet('ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security'
 )
 
@@ -15,6 +15,9 @@ $profileB = Join-Path $qaRoot "$runId-account-b.test.sqlite"
 $result = Join-Path $qaRoot "$runId.test.json"
 $interruptedResult = Join-Path $qaRoot "$runId-pull-interrupted.test.json"
 $recoveredResult = Join-Path $qaRoot "$runId-pull-recovered.test.json"
+$pageInterruptedResult = Join-Path $qaRoot "$runId-pull-page-interrupted.test.json"
+$pageRecoveredResult = Join-Path $qaRoot "$runId-pull-page-recovered.test.json"
+$pageProducerResult = Join-Path $qaRoot "$runId-pull-page-producer.test.json"
 $offlineResult = Join-Path $qaRoot "$runId-offline-push.test.json"
 $offlineRecoveredResult = Join-Path $qaRoot "$runId-offline-push-recovered.test.json"
 $partialBatchResult = Join-Path $qaRoot "$runId-push-partial-batch.test.json"
@@ -77,6 +80,7 @@ try {
   $env:HONSEN_TEST_PURCHASER_PASSWORD = "native-p-$([Guid]::NewGuid().ToString('N'))"
   $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE = if ($Mode -eq 'ab-sync-security') { '1' } else { '0' }
   $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE = if ($Mode -eq 'pull-recovery') { '1' } else { '0' }
+  $env:HONSEN_PROCURE_TEST_FAIL_PULL_AT_CURSOR = if ($Mode -eq 'pull-page-recovery') { '500' } else { '' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
@@ -130,6 +134,21 @@ try {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $recoveredResult
       & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native recovered Pull smoke failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 'pull-page-recovery') {
+      $env:HONSEN_PROCURE_TEST_DB_PATH = $profileB
+      $env:HONSEN_PROCURE_NATIVE_PULL_PAGE_RECOVERY_PHASE = 'producer'
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $pageProducerResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native paged Pull producer smoke failed; inspect $nativeLog" }
+      $env:HONSEN_PROCURE_TEST_DB_PATH = $profileA
+      $env:HONSEN_PROCURE_NATIVE_PULL_PAGE_RECOVERY_PHASE = 'interrupted'
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $pageInterruptedResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native interrupted paged Pull smoke failed; inspect $nativeLog" }
+      $env:HONSEN_PROCURE_NATIVE_PULL_PAGE_RECOVERY_PHASE = 'recovered'
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $pageRecoveredResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native recovered paged Pull smoke failed; inspect $nativeLog" }
     } else {
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_PUSH_PHASE = 'offline'
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_READY_PATH = $offlineReady
@@ -193,6 +212,19 @@ try {
       throw "native Pull recovery result is invalid: $interruptedResult / $recoveredResult"
     }
     Write-Output "PASS native HonsenProcure.exe HTTPS Pull recovery smoke: $interruptedResult / $recoveredResult"
+  } elseif ($Mode -eq 'pull-page-recovery') {
+    $producer = Get-Content -Raw $pageProducerResult | ConvertFrom-Json
+    $interrupted = Get-Content -Raw $pageInterruptedResult | ConvertFrom-Json
+    $recovered = Get-Content -Raw $pageRecoveredResult | ConvertFrom-Json
+    $pullRecords = @(Get-Content $diagnostics | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.route -eq 'GET /api/sync/pull' })
+    $firstPage = @($pullRecords | Where-Object { $_.requestedCursor -eq '0' -and $_.serverStatus -eq 200 -and $_.responseChangeCount -eq 500 -and $_.responseNextCursor -eq '500' })
+    $fault = @($pullRecords | Where-Object { $_.requestedCursor -eq '500' -and $_.serverStatus -eq 503 -and $_.injectedTransportFault -eq $true })
+    $recoveryPage = @($pullRecords | Where-Object { $_.requestedCursor -eq '500' -and $_.serverStatus -eq 200 -and $_.responseChangeCount -eq 1 -and $_.responseNextCursor -eq '501' })
+    $replayPage = @($pullRecords | Where-Object { $_.requestedCursor -eq '501' -and $_.serverStatus -eq 200 -and $_.responseChangeCount -eq 0 -and $_.responseNextCursor -eq '501' })
+    if ($producer.mode -ne 'pull-page-recovery' -or $producer.phase -ne 'producer' -or $producer.producerPush -ne 'PASS' -or $producer.eventCount -ne 501 -or $producer.acceptedCount -ne 501 -or $producer.outboxPendingAfterPush -ne 0 -or $interrupted.mode -ne 'pull-page-recovery' -or $interrupted.phase -ne 'interrupted' -or $interrupted.firstPageCommitted -ne 'PASS' -or $interrupted.secondPageTransportFailure -ne 'PASS' -or $interrupted.cursorAfterFailure -ne '500' -or $interrupted.projectedAfterFailure -ne 500 -or $interrupted.outboxPending -ne 0 -or $recovered.mode -ne 'pull-page-recovery' -or $recovered.phase -ne 'recovered' -or $recovered.restartRecovery -ne 'PASS' -or $recovered.allEventsProjectedOnce -ne 'PASS' -or $recovered.cursorAfterRecovery -ne '501' -or $recovered.cursorAfterReplay -ne '501' -or $recovered.projectedAfterRecovery -ne 501 -or $recovered.projectedAfterReplay -ne 501 -or $recovered.replayProjectedCount -ne 0 -or $recovered.outboxPending -ne 0 -or $firstPage.Count -ne 1 -or $fault.Count -ne 1 -or $recoveryPage.Count -ne 1 -or $replayPage.Count -ne 1) {
+      throw "native paged Pull recovery result is invalid: $pageProducerResult / $pageInterruptedResult / $pageRecoveredResult / $diagnostics"
+    }
+    Write-Output "PASS native HonsenProcure.exe HTTPS paged Pull recovery smoke: $pageProducerResult / $pageInterruptedResult / $pageRecoveredResult"
   } else {
     $offline = Get-Content -Raw $offlineResult | ConvertFrom-Json
     $recovered = Get-Content -Raw $offlineRecoveredResult | ConvertFrom-Json

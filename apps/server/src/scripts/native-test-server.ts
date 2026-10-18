@@ -127,6 +127,10 @@ const nativeApp = Fastify({
 }) as unknown as FastifyInstance
 let failedFirstPushResponse = false
 let failedFirstPullResponse = false
+let failedPullAtCursorResponse = false
+const failPullAtCursor = optionalTestCursor(
+  'HONSEN_PROCURE_TEST_FAIL_PULL_AT_CURSOR',
+)
 nativeApp.addHook('onSend', async (request, reply, payload) => {
   if (request.method === 'GET' && request.url.startsWith('/api/sync/pull')) {
     const cursor = (request.query as { cursor?: string } | undefined)?.cursor
@@ -144,10 +148,27 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
       })
       return JSON.stringify({ error: 'native test Pull transport fault' })
     }
+    if (
+      failPullAtCursor === (cursor ?? '0') &&
+      !failedPullAtCursorResponse
+    ) {
+      failedPullAtCursorResponse = true
+      reply.code(503)
+      writeDiagnostic({
+        route: 'GET /api/sync/pull',
+        requestedCursor: cursor ?? '0',
+        serverStatus: 503,
+        injectedTransportFault: true,
+      })
+      return JSON.stringify({ error: 'native test Pull page transport fault' })
+    }
+    const page = parsePullPage(payload)
     writeDiagnostic({
       route: 'GET /api/sync/pull',
       requestedCursor: cursor ?? '0',
       serverStatus: reply.statusCode,
+      responseChangeCount: page?.changes?.length,
+      responseNextCursor: page?.nextCursor,
     })
     return payload
   }
@@ -230,6 +251,30 @@ function required(name: string): string {
   const value = process.env[name]
   if (!value) throw new Error(`${name} is required`)
   return value
+}
+
+function optionalTestCursor(name: string): string | undefined {
+  const value = process.env[name]
+  if (!value) return undefined
+  if (!/^(0|[1-9][0-9]*)$/.test(value))
+    throw new Error(`${name} must be a non-negative integer cursor`)
+  return value
+}
+
+function parsePullPage(payload: unknown):
+  | { changes?: unknown[]; nextCursor?: string }
+  | undefined {
+  try {
+    const text =
+      typeof payload === 'string'
+        ? payload
+        : payload instanceof Uint8Array
+          ? Buffer.from(payload).toString('utf8')
+          : JSON.stringify(payload)
+    return JSON.parse(text) as { changes?: unknown[]; nextCursor?: string }
+  } catch {
+    return undefined
+  }
 }
 
 async function waitForNativeDatabase(pool: ReturnType<typeof createPostgresPool>) {

@@ -427,9 +427,9 @@ Independent focused verification: `cargo test --lib` PASS (55/55), `cargo check 
 | --- | --- | --- |
 | Request cannot reach service before Push | NATIVE-004: actual loopback HTTPS host stopped; retained draft/outbox then restart recovery. | COVERED |
 | Service commits but Push response is lost | NATIVE-002: test-host post-commit 503 and same-event replay. | COVERED |
-| One Push batch has accepted and conflict results | NATIVE-005 below. | READY_FOR_RECHECK |
+| One Push batch has accepted and conflict results | NATIVE-005 independently closed. | COVERED |
 | First Pull transport failure / restart | NATIVE-003: 503, cursor unchanged, process restart, one projection. | COVERED |
-| Pull after a full 500-change page then transport failure | Rust unit coverage exists for page continuation; no real-native second-page interruption. | NOT COVERED |
+| Pull after a full 500-change page then transport failure | NATIVE-006 below; Integration Owner native evidence awaits independent recheck. | READY_FOR_RECHECK |
 | Local cursor persistence write fails | Atomic SQLite unit coverage exists; no sanctioned real-disk fault injection in the native harness. | NOT COVERED |
 | EXE terminates during an in-flight request | Not covered; existing tests terminate only after a completed failed/successful operation boundary. | NOT COVERED |
 | Duplicate-event idempotency | NATIVE-002/NATIVE-004 cover accepted replay; NATIVE-005 covers retained conflict replay. | COVERED for these bounded forms |
@@ -498,6 +498,42 @@ Artifacts:
 Fresh focused checks: `cargo fmt --check`, `cargo test --lib` (55/55), `cargo check --release --bin HonsenProcure`, server lint/typecheck and `git diff --check` PASS. Existing debug-test unused-symbol warnings remain in the release check. No Mock, Playwright, standalone HTTP client, production database, existing E2E data, production TLS/keyring policy, push, merge or deployment was used.
 
 **NATIVE-005 is independently CLOSED for the bounded partial-Push scenario. T10-SEC-001, P1 and Formal remain OPEN: full-page Pull interruption, cursor-write fault, in-flight process termination and RFQ/Formal native workflows remain unverified.**
+
+## Native second-page Pull interruption / restart — 2026-10-18
+
+NATIVE-006 adds only a debug/test-profile entry, read-only SQLite state accessors, and a test-only Fastify `onSend` fault boundary. It does not alter `pull_sync_https`, SQLite projection, cursor handling, authentication, TLS, credential-vault naming, or production server behavior. The new mode invokes the existing production Rust `save_requisition_draft`, `push_pending_https`, and `pull_sync_https` functions through real `HonsenProcure.exe` processes. No test writes SQLite directly or substitutes an HTTP client.
+
+The RED run `native-smoke-20261018010204` added only the test-script mode and failed at the existing native-mode whitelist (`unknown native smoke mode`) before any business action. The earlier `native-smoke-20261018010115` did not reach a native process because the disposable WSL PostgreSQL loopback startup timed out; it is environment evidence only, not acceptance evidence.
+
+Fresh run:
+
+```text
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode pull-page-recovery
+```
+
+`native-smoke-20261018010425` used a new disposable PostgreSQL/Fastify HTTPS host, generated test certificate, two absolute test SQLite profiles, and Windows Credential Manager. A real B EXE created 501 purchase-order drafts and production Push accepted all 501 with no retained outbox row. A separate real A EXE used production Pull: the first HTTP page at cursor `0` returned 500 changes/next cursor `500` and committed 500 local remote entities. The test host then returned its single 503 only for A's real second request at cursor `500`; the production Pull returned `SyncTransport`, while the already committed boundary remained cursor `500`, projection count 500, and A outbox 0. That EXE exited. A new A EXE using exactly the same profile/installation recovered over HTTPS, projected the final one change and persisted cursor `500→501`; a final Pull returned 0 changes and left both cursor and local entity count at 501.
+
+| Boundary | Result | Evidence |
+| --- | --- | --- |
+| B production creation/Push of 501 events | PASS | B account `...0013`, distinct installation/profile; accepted `501`, pending outbox `0`. |
+| A page 1 production Pull | PASS | HTTPS GET `cursor=0`: 200, 500 changes, next cursor `500`; local cursor/projection `0→500`. |
+| A page 2 deterministic transport fault | PASS | HTTPS GET `cursor=500`: one test-host 503; Rust `SyncTransport`; local cursor/projection remain `500`/500. |
+| Same-profile A EXE restart/recovery | PASS | HTTPS GET `cursor=500`: 200, one change, next cursor `501`; local cursor `500→501`, 501 entities. |
+| Replay | PASS | HTTPS GET `cursor=501`: 200, zero changes, cursor/entity count remain 501. |
+| Outbox and partial commit safety | PASS | A outbox is 0 before/after interruption/recovery; page 1 is the established production transaction boundary, not a speculative rollback target. |
+
+Artifacts:
+
+- `.honsen-native-qa/native-smoke-20261018010425-pull-page-producer.test.json`
+- `.honsen-native-qa/native-smoke-20261018010425-pull-page-interrupted.test.json`
+- `.honsen-native-qa/native-smoke-20261018010425-pull-page-recovered.test.json`
+- `.honsen-native-qa/native-smoke-20261018010425-server-sync.test.jsonl`
+- `test-results/native-pull-page-green-20261018011200.{log,error.log}`
+- `test-results/native-smoke-20261018010425-{client,server,server-error,compose,compose-error}.log`
+
+Focused checks: Rust `cargo fmt --check` and `cargo test --lib` (55/55), server lint/typecheck and `git diff --check` PASS. The release guard is run with the final implementation before checkpoint. No production database, pre-existing E2E data, production TLS/keyring policy, push, merge or deployment was touched; scoped Compose resources and loopback listeners were absent after the run.
+
+**NATIVE-006 is READY_FOR_RECHECK. T10-SEC-001, P1 and Formal remain OPEN. This slice does not cover durable-cursor write faults, abrupt EXE termination in-flight, or RFQ/Formal native workflows.**
 
 ## Windows Credential Manager backend repair — 2026-10-17
 
