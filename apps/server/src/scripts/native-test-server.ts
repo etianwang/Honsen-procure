@@ -2,6 +2,7 @@ import argon2 from 'argon2'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { createApp } from '../app.js'
 import { AuthService } from '../auth/service.js'
 import { AuthorizationService } from '../authorization/service.js'
@@ -13,6 +14,7 @@ import { PostgresMasterDataStore } from '../master-data/postgres-store.js'
 import { MasterDataService } from '../master-data/service.js'
 import { PostgresSyncStore } from '../sync/postgres-store.js'
 import { SyncService } from '../sync/service.js'
+import { observeNativePushCancellation, type NativePushCancellationObservation } from './native-push-cancellation.js'
 
 const accounts = [
   ['10000000-0000-4000-8000-000000000011', 'engineer-a', ['engineer']],
@@ -56,6 +58,8 @@ if (
 const pushBarrier = process.env.HONSEN_PROCURE_TEST_PUSH_BARRIER
 const pushBarrierReadyPath = process.env.HONSEN_PROCURE_TEST_PUSH_BARRIER_READY_PATH
 const pushBarrierReleasePath = process.env.HONSEN_PROCURE_TEST_PUSH_BARRIER_RELEASE_PATH
+const pushBarrierPidPath = process.env.HONSEN_PROCURE_TEST_PUSH_BARRIER_PID_PATH
+const nativeTestRunId = process.env.HONSEN_PROCURE_TEST_RUN_ID
 if (
   pushBarrier &&
   (pushBarrier !== 'before-commit' && pushBarrier !== 'after-commit')
@@ -63,9 +67,9 @@ if (
   throw new Error('HONSEN_PROCURE_TEST_PUSH_BARRIER must be before-commit or after-commit')
 if (
   pushBarrier &&
-  (!pushBarrierReadyPath || !pushBarrierReleasePath || !isAbsolute(pushBarrierReadyPath) || !isAbsolute(pushBarrierReleasePath) || !pushBarrierReadyPath.endsWith('.signal') || !pushBarrierReleasePath.endsWith('.signal'))
+  (!pushBarrierReadyPath || !pushBarrierReleasePath || !pushBarrierPidPath || !nativeTestRunId || !isAbsolute(pushBarrierReadyPath) || !isAbsolute(pushBarrierReleasePath) || !isAbsolute(pushBarrierPidPath) || !pushBarrierReadyPath.endsWith('.signal') || !pushBarrierReleasePath.endsWith('.signal') || !pushBarrierPidPath.endsWith('.pid'))
 )
-  throw new Error('native Push barrier requires absolute .signal ready/release paths')
+  throw new Error('native Push barrier requires absolute ready/release .signal paths, EXE .pid path and run ID')
 
 function writeDiagnostic(value: Record<string, unknown>) {
   if (diagnosticPath)
@@ -140,12 +144,21 @@ const nativeApp = Fastify({
 }) as unknown as FastifyInstance
 let pushBarrierUsed = false
 let pushTerminationSnapshotRecorded = false
+let pushTerminationEvidence: PushTerminationEvidence | undefined
+type PushTerminationEvidence = NativePushCancellationObservation & {
+  runId: string
+  scenario: 'A' | 'B'
+  requestId: string
+  eventId: string
+  exePid: string
+  handlerExecuted: boolean
+}
 async function recordPushTerminationSnapshot(
   eventId: string,
   entityId: string | undefined,
   snapshot: 'before-recovery' | 'after-recovery',
   handlerExecuted: boolean,
-  cancellationObserved: boolean,
+  evidence: PushTerminationEvidence,
 ) {
   const event = await pool.query<{ count: string; version: string | null }>(
     `SELECT COUNT(*)::text AS count, MAX(server_version)::text AS version
@@ -166,46 +179,80 @@ async function recordPushTerminationSnapshot(
     eventVersion: event.rows[0]?.version ?? '0',
     entityVersion: entity.rows[0]?.version ?? '0',
     handlerExecuted,
-    cancellationObserved,
+    cancellationObserved: true,
+    runId: evidence.runId,
+    scenario: evidence.scenario,
+    requestId: evidence.requestId,
+    exePid: evidence.exePid,
+    cancellationSource: evidence.cancellationSource,
+    cancellationObservedAt: evidence.cancellationObservedAt,
+    barrierReleasedAt: evidence.barrierReleasedAt,
+    responseCompleted: evidence.responseCompleted,
+    socketDestroyed: evidence.socketDestroyed,
   })
 }
 async function waitForPushBarrier(
   request: { raw: NodeJS.EventEmitter },
+  reply: { raw: { writableEnded?: boolean; finished?: boolean } },
   boundary: string,
   eventId: string,
   entityId: string | undefined,
 ) {
   if (!pushBarrier || pushBarrier !== boundary || pushBarrierUsed) return false
   pushBarrierUsed = true
-  let cancellationObserved = false
-  const raw = request.raw as NodeJS.EventEmitter & { socket?: NodeJS.EventEmitter }
-  const cancelled = new Promise<void>((resolve) => {
-    const observeCancellation = () => {
-      if (cancellationObserved) return
-      cancellationObserved = true
-      resolve()
-    }
-    raw.once('aborted', observeCancellation)
-    raw.once('close', observeCancellation)
-    raw.socket?.once('close', observeCancellation)
+  const requestId = randomUUID()
+  const scenario = boundary === 'before-commit' ? 'A' : 'B'
+  const raw = request.raw as NodeJS.EventEmitter & {
+    socket?: NodeJS.EventEmitter & { destroyed?: boolean }
+  }
+  const observer = observeNativePushCancellation({
+    raw,
+    response: reply.raw,
+    onObservation: (observation) => {
+      writeDiagnostic({
+        route: 'POST /api/sync/push',
+        cancellationObservation: true,
+        runId: nativeTestRunId,
+        scenario,
+        requestId,
+        eventId,
+        exePid: readFileSync(pushBarrierPidPath!, 'utf8').trim(),
+        handlerExecuted: boundary === 'after-commit',
+        ...observation,
+      })
+    },
   })
+  if (!existsSync(pushBarrierPidPath!))
+    throw new Error('native Push barrier requires the EXE PID file before it becomes ready')
   writeFileSync(pushBarrierReadyPath!, boundary, 'utf8')
-  writeDiagnostic({ route: 'POST /api/sync/push', barrier: boundary, barrierReached: true })
+  writeDiagnostic({ route: 'POST /api/sync/push', barrier: boundary, barrierReached: true, runId: nativeTestRunId, scenario, requestId, eventId })
+  const observation = await Promise.race([
+    observer.cancellation,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('native Push cancellation was not observed while the response barrier was held')), 10_000)),
+  ]) as NativePushCancellationObservation
   while (!existsSync(pushBarrierReleasePath!))
     await new Promise((resolve) => setTimeout(resolve, 20))
-  await Promise.race([
-    cancelled,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('native Push cancellation was not observed')), 10_000)),
-  ])
-  await recordPushTerminationSnapshot(eventId, entityId, 'before-recovery', boundary === 'after-commit', cancellationObserved)
+  const barrierReleasedAt = observer.markBarrierReleased()
+  writeDiagnostic({ route: 'POST /api/sync/push', barrier: boundary, barrierReleasedAt, runId: nativeTestRunId, scenario, requestId, eventId })
+  pushTerminationEvidence = {
+    ...observation,
+    barrierReleasedAt,
+    runId: nativeTestRunId!,
+    scenario,
+    requestId,
+    eventId,
+    exePid: readFileSync(pushBarrierPidPath!, 'utf8').trim(),
+    handlerExecuted: boundary === 'after-commit',
+  }
+  await recordPushTerminationSnapshot(eventId, entityId, 'before-recovery', boundary === 'after-commit', pushTerminationEvidence)
   pushTerminationSnapshotRecorded = true
-  return cancellationObserved
+  return true
 }
 nativeApp.addHook('preHandler', async (request, reply) => {
   if (request.method !== 'POST' || request.url !== '/api/sync/push') return
   const event = (request.body as { events?: Array<{ eventId?: string; entityId?: string }> } | undefined)?.events?.[0]
   if (!event?.eventId) return
-  if (await waitForPushBarrier(request, 'before-commit', event.eventId, event.entityId)) {
+  if (await waitForPushBarrier(request, reply, 'before-commit', event.eventId, event.entityId)) {
     reply.code(499).send({ error: 'native test client terminated before commit' })
   }
 })
@@ -295,10 +342,10 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
         ? Buffer.from(payload).toString('utf8')
         : JSON.stringify(payload)
   const afterCommitBarrierReached = eventId
-    ? await waitForPushBarrier(request, 'after-commit', eventId, entityId)
+    ? await waitForPushBarrier(request, reply, 'after-commit', eventId, entityId)
     : false
   if (pushBarrier && eventId && pushTerminationSnapshotRecorded && !afterCommitBarrierReached && reply.statusCode === 200) {
-    await recordPushTerminationSnapshot(eventId, entityId, 'after-recovery', true, true)
+    await recordPushTerminationSnapshot(eventId, entityId, 'after-recovery', true, pushTerminationEvidence!)
     pushTerminationSnapshotRecorded = false
   }
   if (

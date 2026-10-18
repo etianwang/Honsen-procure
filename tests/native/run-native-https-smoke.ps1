@@ -3,13 +3,15 @@ param(
   [ValidateSet('ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security',
   [ValidateSet('before-commit', 'after-commit')]
-  [string]$TerminationBoundary = 'before-commit'
+  [string]$TerminationBoundary = 'before-commit',
+  [ValidatePattern('^native-smoke-[0-9]{14}$')]
+  [string]$RunId
 )
 
 $ErrorActionPreference = 'Stop'
 if (!(Test-Path 'Cert:\CurrentUser\My')) { throw 'CurrentUser certificate store is unavailable for native HTTPS test trust' }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$runId = "native-smoke-$((Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))"
+$runId = if ($RunId) { $RunId } else { "native-smoke-$((Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))" }
 $qaRoot = Join-Path $repo '.honsen-native-qa'
 $logRoot = Join-Path $repo 'test-results'
 $profileA = Join-Path $qaRoot "$runId-account-a.test.sqlite"
@@ -30,6 +32,7 @@ $terminationInflightResult = Join-Path $qaRoot "$runId-push-termination-inflight
 $terminationRecoveredResult = Join-Path $qaRoot "$runId-push-termination-recovered.test.json"
 $terminationReady = Join-Path $qaRoot "$runId-push-termination-ready.signal"
 $terminationRelease = Join-Path $qaRoot "$runId-push-termination-release.signal"
+$terminationPidPath = Join-Path $qaRoot "$runId-push-termination.pid"
 $offlineReady = Join-Path $qaRoot "$runId-offline-ready.signal"
 $offlineContinue = Join-Path $qaRoot "$runId-offline-continue.signal"
 $diagnostics = Join-Path $qaRoot "$runId-server-sync.test.jsonl"
@@ -93,6 +96,8 @@ try {
   $env:HONSEN_PROCURE_TEST_PUSH_BARRIER = if ($Mode -eq 'push-termination-recovery') { $TerminationBoundary } else { '' }
   $env:HONSEN_PROCURE_TEST_PUSH_BARRIER_READY_PATH = if ($Mode -eq 'push-termination-recovery') { $terminationReady } else { '' }
   $env:HONSEN_PROCURE_TEST_PUSH_BARRIER_RELEASE_PATH = if ($Mode -eq 'push-termination-recovery') { $terminationRelease } else { '' }
+  $env:HONSEN_PROCURE_TEST_PUSH_BARRIER_PID_PATH = if ($Mode -eq 'push-termination-recovery') { $terminationPidPath } else { '' }
+  $env:HONSEN_PROCURE_TEST_RUN_ID = $runId
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
@@ -180,13 +185,14 @@ try {
       $env:HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_PHASE = 'inflight'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $terminationInflightResult
       $terminationProcess = Start-Process -FilePath (Join-Path $desktop 'target\debug\HonsenProcure.exe') -PassThru -RedirectStandardOutput $nativeLog -RedirectStandardError $nativeErrorLog -WindowStyle Hidden
+      $terminationPid = $terminationProcess.Id
+      Set-Content -LiteralPath $terminationPidPath -Value $terminationPid -NoNewline
       for ($attempt = 0; $attempt -lt 120; $attempt++) {
         if (Test-Path $terminationReady) { break }
         if ($terminationProcess.HasExited) { throw "native termination EXE exited before server barrier; inspect $nativeLog / $nativeErrorLog" }
         Start-Sleep -Milliseconds 100
       }
       if (!(Test-Path $terminationReady) -or !(Test-Path $terminationInflightResult)) { throw "native termination barrier was not reached" }
-      $terminationPid = $terminationProcess.Id
       Stop-Process -Id $terminationPid -Force
       if (!$terminationProcess.WaitForExit(10000)) { throw "could not force-terminate native EXE PID $terminationPid" }
       New-Item -ItemType File -Path $terminationRelease | Out-Null
@@ -290,9 +296,10 @@ try {
     $barrier = @($records | Where-Object { $_.barrier -eq $TerminationBoundary -and $_.barrierReached -eq $true })
     $beforeRecovery = @($records | Where-Object { $_.terminationSnapshot -eq 'before-recovery' -and $_.eventId -eq $inflight.eventId })
     $afterRecovery = @($records | Where-Object { $_.terminationSnapshot -eq 'after-recovery' -and $_.eventId -eq $inflight.eventId })
+    $cancellations = @($records | Where-Object { $_.cancellationObservation -eq $true -and $_.eventId -eq $inflight.eventId -and $_.accepted -eq $true })
     $pushes = @($records | Where-Object { $_.route -eq 'POST /api/sync/push' -and $_.eventId -eq $inflight.eventId })
     $beforeExpectedCount = if ($TerminationBoundary -eq 'before-commit') { '0' } else { '1' }
-    if ($inflight.mode -ne 'push-termination-recovery' -or $inflight.outboxPending -ne 1 -or $recovered.recovery -ne 'PASS' -or $recovered.eventId -ne $inflight.eventId -or $recovered.acceptedCount -ne 1 -or $recovered.replayAcceptedCount -ne 0 -or $recovered.pullAppliedCount -ne 1 -or $recovered.outboxPending -ne 0 -or $recovered.cursor -ne '1' -or $barrier.Count -ne 1 -or $pushes.Count -lt 1 -or $beforeRecovery.Count -ne 1 -or $afterRecovery.Count -ne 1 -or !$beforeRecovery[0].cancellationObserved -or $beforeRecovery[0].eventCount -ne $beforeExpectedCount -or $afterRecovery[0].eventCount -ne '1' -or $afterRecovery[0].eventVersion -ne '1' -or $afterRecovery[0].entityVersion -ne '1' -or ($TerminationBoundary -eq 'before-commit' -and $beforeRecovery[0].handlerExecuted) -or ($TerminationBoundary -eq 'after-commit' -and !$beforeRecovery[0].handlerExecuted) -or ($TerminationBoundary -eq 'after-commit' -and $beforeRecovery[0].eventVersion -ne '1') -or ($TerminationBoundary -eq 'after-commit' -and $beforeRecovery[0].entityVersion -ne '1')) { throw "native Push termination result is invalid: $terminationInflightResult / $terminationRecoveredResult / $diagnostics" }
+    if ($inflight.mode -ne 'push-termination-recovery' -or $inflight.outboxPending -ne 1 -or $recovered.recovery -ne 'PASS' -or $recovered.eventId -ne $inflight.eventId -or $recovered.acceptedCount -ne 1 -or $recovered.replayAcceptedCount -ne 0 -or $recovered.pullAppliedCount -ne 1 -or $recovered.outboxPending -ne 0 -or $recovered.cursor -ne '1' -or $barrier.Count -ne 1 -or $pushes.Count -lt 1 -or $beforeRecovery.Count -ne 1 -or $afterRecovery.Count -ne 1 -or $cancellations.Count -ne 1 -or $cancellations[0].runId -ne $runId -or $cancellations[0].scenario -ne $(if ($TerminationBoundary -eq 'before-commit') { 'A' } else { 'B' }) -or $cancellations[0].exePid -ne "$terminationPid" -or $cancellations[0].cancellationSource -notin @('aborted', 'socket-close') -or [string]::IsNullOrWhiteSpace($cancellations[0].cancellationObservedAt) -or $null -ne $cancellations[0].barrierReleasedAt -or $cancellations[0].responseCompleted -or ($cancellations[0].cancellationSource -eq 'socket-close' -and !$cancellations[0].socketDestroyed) -or !$beforeRecovery[0].cancellationObserved -or [string]::IsNullOrWhiteSpace($beforeRecovery[0].barrierReleasedAt) -or $beforeRecovery[0].cancellationObservedAt -gt $beforeRecovery[0].barrierReleasedAt -or $beforeRecovery[0].cancellationSource -ne $cancellations[0].cancellationSource -or $beforeRecovery[0].requestId -ne $cancellations[0].requestId -or $beforeRecovery[0].eventCount -ne $beforeExpectedCount -or $afterRecovery[0].eventCount -ne '1' -or $afterRecovery[0].eventVersion -ne '1' -or $afterRecovery[0].entityVersion -ne '1' -or ($TerminationBoundary -eq 'before-commit' -and $beforeRecovery[0].handlerExecuted) -or ($TerminationBoundary -eq 'after-commit' -and !$beforeRecovery[0].handlerExecuted) -or ($TerminationBoundary -eq 'after-commit' -and $beforeRecovery[0].eventVersion -ne '1') -or ($TerminationBoundary -eq 'after-commit' -and $beforeRecovery[0].entityVersion -ne '1')) { throw "native Push termination result is invalid: $terminationInflightResult / $terminationRecoveredResult / $diagnostics" }
     Write-Output "PASS native HonsenProcure.exe HTTPS Push termination ($TerminationBoundary): pid=$terminationPid $terminationInflightResult / $terminationRecoveredResult"
   } else {
     $offline = Get-Content -Raw $offlineResult | ConvertFrom-Json
