@@ -650,7 +650,7 @@ pub struct SyncConflictView {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResolveSyncConflictInput {
     pub conflict_id: Uuid,
     pub resolution: String,
@@ -1795,12 +1795,38 @@ impl LocalAuthService {
         self.require_active_scope_for_country(None, now)
     }
 
-    fn require_conflict_resolution(&self, now: SystemTime) -> Result<(), AuthError> {
-        match self.require_role(Role::Administrator, now) {
-            Ok(()) => Ok(()),
-            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now),
-            Err(error) => Err(error),
+    fn require_conflict_resolution(
+        connection: &Connection,
+        now: SystemTime,
+    ) -> Result<Uuid, AuthError> {
+        // Authorize the account and role under the same lock as conflict access.
+        let session: Option<(String, i64, String, bool)> = connection.query_row(
+            "SELECT s.user_id, s.last_active_at, a.roles_json, a.enabled FROM local_session s JOIN local_accounts a ON a.id = s.user_id",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional().map_err(|_| AuthError::Database)?;
+        let (account_id, last_active_at, roles_json, enabled) =
+            session.ok_or(AuthError::NoActiveSession)?;
+        if !enabled || unix_seconds(now) - last_active_at > IDLE_LOCK_WINDOW.as_secs() as i64 {
+            connection
+                .execute("DELETE FROM local_session", [])
+                .map_err(|_| AuthError::Database)?;
+            return Err(AuthError::NoActiveSession);
         }
+        let roles: Vec<Role> =
+            serde_json::from_str(&roles_json).map_err(|_| AuthError::Database)?;
+        if !roles
+            .iter()
+            .any(|role| matches!(role, Role::Administrator | Role::SuperAdministrator))
+        {
+            return Err(AuthError::Forbidden);
+        }
+        connection
+            .execute(
+                "UPDATE local_session SET last_active_at = ?1 WHERE user_id = ?2",
+                params![unix_seconds(now), account_id],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Uuid::parse_str(&account_id).map_err(|_| AuthError::Database)
     }
 
     pub fn save_project_defaults(
@@ -5258,11 +5284,11 @@ impl LocalAuthService {
     }
 
     pub fn list_sync_conflicts(&self, now: SystemTime) -> Result<Vec<SyncConflictView>, AuthError> {
-        self.require_conflict_resolution(now)?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        connection.prepare("SELECT id, entity_type, entity_id, server_version, local_payload_json, server_payload_json, server_operation FROM local_sync_conflicts WHERE resolved_at IS NULL ORDER BY created_at, id")
+        let account_id = Self::require_conflict_resolution(&connection, now)?;
+        connection.prepare("SELECT c.id, c.entity_type, c.entity_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE c.resolved_at IS NULL AND o.owner_account_id = ?1 AND o.owner_account_id = (SELECT user_id FROM local_session) ORDER BY c.created_at, c.id")
             .map_err(|_| AuthError::Database)?
-            .query_map([], |row| Ok(SyncConflictView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, server_version: row.get(3)?, local_payload_json: row.get(4)?, server_payload_json: row.get(5)?, server_operation: row.get(6)? }))
+            .query_map([account_id.to_string()], |row| Ok(SyncConflictView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, server_version: row.get(3)?, local_payload_json: row.get(4)?, server_payload_json: row.get(5)?, server_operation: row.get(6)? }))
             .map_err(|_| AuthError::Database)?.collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)
     }
 
@@ -5271,16 +5297,15 @@ impl LocalAuthService {
         input: ResolveSyncConflictInput,
         now: SystemTime,
     ) -> Result<(), AuthError> {
-        self.require_conflict_resolution(now)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let actor_id = Self::require_conflict_resolution(&connection, now)?;
         if !matches!(input.resolution.as_str(), "keep_local" | "use_server")
             || !valid_required_text(&input.reason, 1000)
         {
             return Err(AuthError::InvalidInput);
         }
-        let actor_id = self.active_session_user_id()?;
-        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let row: (String, String, String, i64, String, String, String) = transaction.query_row("SELECT c.entity_type, c.entity_id, c.event_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c WHERE c.id = ?1 AND c.resolved_at IS NULL", [input.conflict_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).map_err(|_| AuthError::InvalidInput)?;
+        let row: (String, String, String, i64, String, String, String) = transaction.query_row("SELECT c.entity_type, c.entity_id, c.event_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE c.id = ?1 AND c.resolved_at IS NULL AND o.owner_account_id = ?2 AND o.owner_account_id = (SELECT user_id FROM local_session)", params![input.conflict_id.to_string(), actor_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::SyncAccountBoundary)?;
         let entity_id = Uuid::parse_str(&row.1).map_err(|_| AuthError::Database)?;
         if !is_directly_resolvable_sync_entity(&row.0) {
             return Err(AuthError::InvalidInput);
@@ -9634,6 +9659,280 @@ mod tests {
     }
 
     #[test]
+    fn conflict_resolution_never_changes_another_accounts_or_legacy_event_owner() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account_a = Uuid::new_v4();
+        let account_b = Uuid::new_v4();
+        for (id, username) in [(account_a, "conflict-a"), (account_b, "conflict-b")] {
+            service
+                .cache_verified_account(
+                    CachedAccount {
+                        id,
+                        username: username.into(),
+                        roles: vec![Role::Administrator],
+                        enabled: true,
+                        requires_password_change: false,
+                    },
+                    "correct-password",
+                    now,
+                )
+                .unwrap();
+        }
+        let owned_event = Uuid::new_v4();
+        let owned_conflict = Uuid::new_v4();
+        let legacy_event = Uuid::new_v4();
+        let legacy_conflict = Uuid::new_v4();
+        {
+            let connection = service.connection.lock().unwrap();
+            for (event, conflict, owner) in [
+                (owned_event, owned_conflict, Some(account_a)),
+                (legacy_event, legacy_conflict, None),
+            ] {
+                let entity = Uuid::new_v4();
+                connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'material', ?2, 'upsert', 0, '{}', 1, ?3)", params![event.to_string(), entity.to_string(), owner.map(|id| id.to_string())]).unwrap();
+                connection.execute("INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) VALUES (?1, ?2, 'material', ?3, 0, 1, '{}', '{}', 'upsert', 2)", params![conflict.to_string(), event.to_string(), entity.to_string()]).unwrap();
+            }
+        }
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "conflict-b",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        for (conflict, resolution) in [
+            (owned_conflict, "keep_local"),
+            (owned_conflict, "use_server"),
+            (legacy_conflict, "keep_local"),
+            (legacy_conflict, "use_server"),
+            (Uuid::new_v4(), "keep_local"),
+        ] {
+            assert_eq!(
+                service.resolve_sync_conflict(
+                    ResolveSyncConflictInput {
+                        conflict_id: conflict,
+                        resolution: resolution.into(),
+                        reason: "cross-account attempt".into()
+                    },
+                    now
+                ),
+                Err(AuthError::SyncAccountBoundary)
+            );
+        }
+        {
+            let connection = service.connection.lock().unwrap();
+            let pending: i64 = connection.query_row("SELECT COUNT(*) FROM local_sync_outbox WHERE superseded_at IS NULL AND acknowledged_at IS NULL", [], |row| row.get(0)).unwrap();
+            let unresolved: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_conflicts WHERE resolved_at IS NULL",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!((pending, unresolved), (2, 2));
+        }
+        service.lock().unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "conflict-a",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: legacy_conflict,
+                    resolution: "use_server".into(),
+                    reason: "legacy still unowned".into(),
+                },
+                now,
+            ),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        service
+            .resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: owned_conflict,
+                    resolution: "keep_local".into(),
+                    reason: "owner resolves".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let new_owner: String = connection
+            .query_row(
+                "SELECT owner_account_id FROM local_sync_outbox WHERE event_id NOT IN (?1, ?2)",
+                params![owned_event.to_string(), legacy_event.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_owner, account_a.to_string());
+        let retry: (i64, String) = connection.query_row(
+            "SELECT base_version, payload_json FROM local_sync_outbox WHERE event_id NOT IN (?1, ?2)",
+            params![owned_event.to_string(), legacy_event.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(retry, (1, "{}".into()));
+        let audit: (String, String) = connection.query_row(
+            "SELECT resolved_by, resolution_reason FROM local_sync_conflicts WHERE id = ?1 AND resolved_at IS NOT NULL",
+            [owned_conflict.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(audit, (account_a.to_string(), "owner resolves".into()));
+        let legacy_unchanged: (Option<String>, Option<i64>) = connection
+            .query_row(
+                "SELECT owner_account_id, superseded_at FROM local_sync_outbox WHERE event_id = ?1",
+                [legacy_event.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(legacy_unchanged, (None, None));
+    }
+
+    #[test]
+    fn conflict_listing_excludes_other_account_and_legacy_payloads() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account_a = Uuid::new_v4();
+        let account_b = Uuid::new_v4();
+        for (id, username) in [(account_a, "list-a"), (account_b, "list-b")] {
+            service
+                .cache_verified_account(
+                    CachedAccount {
+                        id,
+                        username: username.into(),
+                        roles: vec![Role::Administrator],
+                        enabled: true,
+                        requires_password_change: false,
+                    },
+                    "correct-password",
+                    now,
+                )
+                .unwrap();
+        }
+        let owned_conflict = Uuid::new_v4();
+        {
+            let connection = service.connection.lock().unwrap();
+            for (conflict, owner) in [(owned_conflict, Some(account_a)), (Uuid::new_v4(), None)] {
+                let event = Uuid::new_v4();
+                let entity = Uuid::new_v4();
+                connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'material', ?2, 'upsert', 0, '{\"private\":\"local source\"}', 1, ?3)", params![event.to_string(), entity.to_string(), owner.map(|id| id.to_string())]).unwrap();
+                connection.execute("INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) VALUES (?1, ?2, 'material', ?3, 0, 1, '{\"private\":\"local source\"}', '{\"private\":\"server source\"}', 'upsert', 2)", params![conflict.to_string(), event.to_string(), entity.to_string()]).unwrap();
+            }
+        }
+        for username in ["list-b", "list-a"] {
+            service.lock().unwrap();
+            let captcha = service.issue_captcha(now).unwrap();
+            service
+                .offline_login(
+                    username,
+                    "correct-password",
+                    captcha.id,
+                    answer(&captcha.question),
+                    now,
+                )
+                .unwrap();
+            let conflicts = service.list_sync_conflicts(now).unwrap();
+            if username == "list-b" {
+                assert!(
+                    conflicts.is_empty(),
+                    "another account's source was disclosed"
+                );
+            } else {
+                assert_eq!(conflicts.len(), 1);
+                assert_eq!(conflicts[0].id, owned_conflict);
+                assert_eq!(
+                    conflicts[0].local_payload_json,
+                    r#"{"private":"local source"}"#
+                );
+                assert_eq!(
+                    conflicts[0].server_payload_json,
+                    r#"{"private":"server source"}"#
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn conflict_authorization_holds_the_account_lock_during_a_competing_login() {
+        let service = std::sync::Arc::new(LocalAuthService::open_in_memory().unwrap());
+        let now = SystemTime::now();
+        let engineer = account();
+        let administrator = CachedAccount {
+            id: Uuid::new_v4(),
+            username: "atomic-admin".into(),
+            roles: vec![Role::Administrator],
+            ..account()
+        };
+        for account in [&engineer, &administrator] {
+            service
+                .cache_verified_account(account.clone(), "correct-password", now)
+                .unwrap();
+        }
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &engineer.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        let connection = service.connection.lock().unwrap();
+        let (started, receiving) = std::sync::mpsc::channel();
+        let switching_service = service.clone();
+        let login = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            switching_service.offline_login(
+                "atomic-admin",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+        });
+        receiving.recv().unwrap();
+        assert_eq!(
+            LocalAuthService::require_conflict_resolution(&connection, now),
+            Err(AuthError::Forbidden)
+        );
+        drop(connection);
+        assert_eq!(login.join().unwrap().unwrap().user_id, administrator.id);
+        let connection = service.connection.lock().unwrap();
+        assert_eq!(
+            LocalAuthService::require_conflict_resolution(&connection, now),
+            Ok(administrator.id)
+        );
+    }
+
+    #[test]
+    fn conflict_resolution_input_rejects_forged_identity_fields() {
+        let input = serde_json::json!({
+            "conflictId": Uuid::new_v4(), "resolution": "keep_local", "reason": "fixture",
+        });
+        assert!(serde_json::from_value::<ResolveSyncConflictInput>(input.clone()).is_ok());
+        for field in ["accountId", "deviceId", "installationId"] {
+            let mut forged = input.clone();
+            forged[field] = serde_json::json!(Uuid::new_v4());
+            assert!(
+                serde_json::from_value::<ResolveSyncConflictInput>(forged).is_err(),
+                "accepted forged {field}"
+            );
+        }
+    }
+
+    #[test]
     fn sync_outbox_never_reassigns_legacy_or_sends_another_accounts_event() {
         let service = LocalAuthService::open_in_memory().unwrap();
         let now = SystemTime::now();
@@ -10313,7 +10612,7 @@ mod tests {
                 CachedAccount {
                     id: purchaser_id,
                     username: "sync-purchaser".into(),
-                    roles: vec![Role::Purchaser],
+                    roles: vec![Role::Administrator],
                     enabled: true,
                     requires_password_change: false,
                 },
@@ -10512,31 +10811,6 @@ mod tests {
             .unwrap();
         assert_eq!(local_name, "local fixture");
         drop(connection);
-        let administrator_id = Uuid::new_v4();
-        service.lock().unwrap();
-        service
-            .cache_verified_account(
-                CachedAccount {
-                    id: administrator_id,
-                    username: "sync-administrator".into(),
-                    roles: vec![Role::Administrator],
-                    enabled: true,
-                    requires_password_change: false,
-                },
-                "correct-password",
-                now,
-            )
-            .unwrap();
-        let captcha = service.issue_captcha(now).unwrap();
-        service
-            .offline_login(
-                "sync-administrator",
-                "correct-password",
-                captcha.id,
-                answer(&captcha.question),
-                now,
-            )
-            .unwrap();
         let conflict = service
             .list_sync_conflicts(now)
             .unwrap()

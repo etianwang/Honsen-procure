@@ -1,5 +1,88 @@
 # Independent QA Report — T08/T10/P1/Formal Combination
 
+## G1 Integration Owner handoff — 2026-10-18 — READY_FOR_RECHECK
+
+**This is Integration Owner evidence, not independent Fixer/native acceptance. G1 is not CLOSED. T10, T10-SEC-001, original P1 and Formal hold remain OPEN; NATIVE-008 remains CLOSED.**
+
+### Baseline and minimal adaptation
+
+Caller: `50378ddc0f52bcf2432199f0a6c6c38bf61dcb0c`, `codex/t10-closure-gap-audit`, with its two original untracked evidence directories untouched. Work: isolated `E:/Project/honsen-g1-integration`, `codex/g1-conflict-origin`, starting exactly at **`be20d760bdee5f0146dc8f9e3d2ef6fe8de3ff95`** (Q). Fetched main `5139cc8f7d5a70cddb80b3ce5665100a316c9656` is already its ancestor. No main merge or source-worktree mutation occurred.
+
+Source `031ad670b90903c280f7b01567e7d6753bd8a3c9` has parent/common ancestor `f0cbe71a8d8afddc42ad4aaa3987dc911874e96d`. Q includes that migration-alias prerequisite and owner/cursor migrations 0046/0047, but not source conflict containment. Source UI files match their Q versions before integration; Rust/docs contain later combined changes. **Partial reuse with minimal adaptation**, not blind cherry-pick: reused source owner join/containment, Rust regression, safe UI denial/row retention and DOM fixture. Added list filtering and resolver input rejection required by this task.
+
+Final native local boundary: the existing private authorizer now reads active account, enabled state, idle lifetime and admin/super-admin role under the **same connection lock held through list/resolve ownership SQL and the business transaction**. This closes the role-borrowing account-switch interleaving found by the single read-only auxiliary reviewer; its recheck found no remaining issue. Both choices deny foreign and NULL-owner records before supersede/version/projection/outbox/audit changes. Unknown/resolved IDs return the same generic `sync_account_boundary`, without source payload/identity. Resolver input rejects unknown `accountId`, `deviceId`, `installationId`; the IPC list accepts no identity selector. Existing server session/origin/scope checks are unchanged. No installation filter was added to local conflicts and no all-different-installations rejection was introduced.
+
+The generic Pull test formerly switched to an unrelated administrator to resolve the original account's conflict. It now uses the originating administrator, following the source patch; new negative tests explicitly cover the formerly allowed cross-account path, rather than weakening assertions. Authorized globally shared business data remains shared under the PRD; local pending conflict provenance is not a replacement for server read authorization.
+
+**Implementation SHA: the local checkpoint commit containing this section and its tested code/tests; parent Q.** The exact SHA is supplied in delivery and discoverable with `git log -1 --format=%H -- apps/desktop/src-tauri/src/lib.rs` on this branch. Results apply to that implementation, not caller HEAD/main.
+
+### Executed checks and security coverage
+
+| Check / test                                                                              | Result and boundary                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `conflict_listing_excludes_other_account_and_legacy_payloads`                             | Own admin sees its exact local/server source; B and NULL-owner sources absent.                                                                                                                                                                             |
+| Source-derived `conflict_resolution_never_changes_another_accounts_or_legacy_event_owner` | Both choices deny A-owned/NULL-owner under B and deny unknown ID; original rows retained. Own admin local choice preserves owner/base=1/payload/resolution actor and reason. Existing adapted Pull test covers own admin server choice.                    |
+| `conflict_resolution_input_rejects_forged_identity_fields`                                | All three forged identity fields rejected at deserialization; legitimate input accepted.                                                                                                                                                                   |
+| `conflict_authorization_holds_the_account_lock_during_a_competing_login`                  | Channel-controlled real offline login cannot replace the engineer while the held connection authorizes it; engineer denied, administrator authorized after release. No test-only production callbacks.                                                     |
+| `cargo test --lib conflict_ -- --nocapture`                                               | Final **5/5 PASS**, including existing RFQ dirty-conflict test. Original Q first failed the three new source/list/input assertions for the intended reasons.                                                                                               |
+| `cargo test --lib`; `cargo check --bins`; `cargo fmt --check`                             | Final **59/59 PASS**, bin check/fmt PASS; owner/cursor/migrations/replay/dirty-entity guards retained. No real EXE build/run claimed.                                                                                                                      |
+| `src/sync/g1-origin.integration.test.ts`                                                  | Real PostgreSQL/Fastify/AuthService/PostgresAuthStore/SyncService/PostgresSyncStore **3/3 PASS**, final run 19:04:18 UTC. Synthetic sessions bypass password-login setup only; no mock auth/store.                                                         |
+| HTTP case: unauthorized engineer + forged account/device/installation/known conflict ID   | No source or cursor movement; exact generic validation results; origin/conflict retained; accepted replay creates one change-log row, stale conflict replay one conflict row. Existing Rust foreign-dirty Pull test retains local account/cursor boundary. |
+| HTTP case: two authorized accounts, same installation                                     | Isolates account-origin comparison: B cannot replay A's event even when scope permits; authorized global Pull and new B event succeed, recorded as B. This is distinct from an earlier engineer/no-binding rejection.                                      |
+| HTTP case: same account, replacement installation                                         | Old token 401; same old event ID rejected under existing attested-origin rule; new event accepted@2 and Pull versions 1/2 succeed with new trusted origin. Preserves one-active-online-session policy.                                                     |
+| `sync/api.test.ts` + `sync/service.test.ts`                                               | **19/19 PASS**, final run 19:04:27 UTC.                                                                                                                                                                                                                    |
+| Five selected `sync/postgres-store.test.ts` tests                                         | **5/5 PASS**, 19:04:28 UTC: idempotent version/conflict, pending-Push cursor order, foreign origin, legacy quarantine, bound-country Pull. **34 deliberately name-filtered**, not absent-DB skips and not counted as PASS.                                 |
+| `npm run lint`; `npm run typecheck`                                                       | PASS; one existing `App.tsx:242` React effect warning retained.                                                                                                                                                                                            |
+| Desktop production build / unit                                                           | PASS / **11/11 PASS**; existing bundle-size warning.                                                                                                                                                                                                       |
+| Focused navigation DOM                                                                    | **2/2 PASS**: own conflict success and cross-account denial with row/error retained, no page error. Screenshots under this worktree's `test-results/`. Uses mock IPC fixture; not native security evidence.                                                |
+| Code / new-doc-section Prettier; `git diff --check`                                       | PASS; historical QA tables retained verbatim to avoid unrelated formatting changes.                                                                                                                                                                        |
+
+Node `v24.18.0`; committed lock retained. Normal WSL2 user `honsen-dev`, Docker/Compose/Buildx verified. Every official DB batch first passed Windows Node `SELECT 1`, used fresh disposable PostgreSQL 16 project `honsen-g1-20261018`, and kept the foreground WSL session alive. Scoped `down --volumes` ran afterward; `compose ps -a` is empty. No business database or pre-existing QA/E2E data was opened or cleaned.
+
+Setup failures, not PASS: first npm install omitted the lock's Windows Rolldown optional binding; `npm ci --include=optional` repaired it without dependency/lock change. Initial `node -e` PowerShell probe lost quoting before tests; replaced with temporary file-based probe. One fresh cold migration exceeded the 10-second hook while Rust compiled; this test's bounded setup timeout is now 30 seconds, without changing assertions; final 3/3 passed. Temporary runners were moved outside Playwright's disposable output location after its normal results reset. No original user evidence was affected.
+
+Toolbox preflight read the five mandated upstream sources in order and compared local integration documentation: identity matches; installer/Runner/manifest/registry/release E2E remain existing gaps. Upstream documented launch/apply compatibility gaps remain T15 work; no contract fields/logic changed. No migrations, shared sync protocol, server production code, G2/G3 or complete order-conflict workflow changed.
+
+### Independent Fixer commands and native limit
+
+Use a fresh worktree at the delivered SHA, Node from `.nvmrc`, `npm ci --include=optional`. Prepare ignored `.env.test` containing only disposable test database/user/password and `POSTGRES_TEST_PORT=54329`. Q does not track `.env.test.example` despite older docs; this batch copied the caller's existing local example, never `.env`/deployment credentials. Do not commit test credentials.
+
+Keep a normal-user WSL2 terminal open in this worktree's WSL path throughout Windows checks:
+
+```sh
+docker compose --project-name honsen-g1-fixer --env-file .env.test -f compose.test.yaml up -d --wait
+```
+
+Run in a separate PowerShell at the corresponding Windows worktree:
+
+```powershell
+$g1Test = ConvertFrom-StringData (Get-Content -Raw .env.test)
+$env:TEST_DATABASE_URL = 'postgresql://{0}:{1}@127.0.0.1:{2}/{3}' -f $g1Test.POSTGRES_TEST_USER, $g1Test.POSTGRES_TEST_PASSWORD, $g1Test.POSTGRES_TEST_PORT, $g1Test.POSTGRES_TEST_DATABASE
+npm.cmd run test --workspace @honsen/server -- src/sync/g1-origin.integration.test.ts src/sync/api.test.ts src/sync/service.test.ts --no-file-parallelism
+Push-Location apps/server
+node ../../node_modules/vitest/vitest.mjs run src/sync/postgres-store.test.ts --no-file-parallelism -t 'is.idempotent.and.records|does.not.return.an.event.result|quarantined.legacy|bound.countries|does.not.skip.a.pending.Push'
+Pop-Location
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --bins
+cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+npm.cmd run lint
+npm.cmd run typecheck
+npm.cmd run build --workspace @honsen/desktop
+npm.cmd run test --workspace @honsen/desktop
+npx.cmd playwright test tests/e2e/navigation.spec.ts --grep 'administrator resolves a sync conflict|cross-account conflict resolution' --workers=1
+git diff --check
+```
+
+Then, in the still-open WSL terminal:
+
+```sh
+docker compose --project-name honsen-g1-fixer --env-file .env.test -f compose.test.yaml down --volumes
+```
+
+**Independent real EXE evidence remains necessary before G1 CLOSED.** Existing `pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode ab-sync-security` is the relevant bounded regression for allowed own-conflict listing/origin/isolation. It **does not** prove same-profile A/B-admin foreign/NULL-owner resolution denial. Fixer must additionally drive the real EXE trusted commands: create an A-owned conflict through actual mutations/Push/Pull, switch the same installation to B, verify source absent and known/unknown-ID denial without mutation, return to A for valid resolution, verify owner/base/reason. Legacy cases need a preserved migration fixture. No G1-specific native mode is currently registered; record a native-automation blocker if safe driving is unavailable, rather than substitute unit/HTTP/mock DOM. Do not mechanically rerun NATIVE-003–008.
+
+**READY_FOR_RECHECK = implemented, locally checked and available for independent review; not CLOSED or complete native security acceptance.** Full unchanged server, all-DOM and native chaos suites were intentionally not repeated. Existing Rust linker-output warnings remain. No push, main merge or deployment.
+
 **Date:** 2026-10-16  
 **QA branch:** `codex/qa-b203c70-server`  
 **Verified baseline:** `b203c70fd83a5dbcdb01fcaf9184d5b9fa9bbd13`  

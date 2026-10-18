@@ -16,7 +16,14 @@ export function SyncConflictFixturePage() {
               serverOperation: 'upsert',
             },
           ],
-          resolveSyncConflict: async () => {},
+          resolveSyncConflict: async () => {
+            if (
+              new URLSearchParams(window.location.search).get('deny') ===
+              'account'
+            ) {
+              throw { code: 'sync_account_boundary' }
+            }
+          },
         }}
       />
     </main>

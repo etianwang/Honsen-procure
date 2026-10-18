@@ -19,9 +19,20 @@ export function SyncConflictPanel({ api }: { api: SyncApi }) {
       setMessage('请填写处理原因。')
       return
     }
-    await api.resolveSyncConflict({ conflictId: item.id, resolution, reason })
-    setItems((current) => current.filter(({ id }) => id !== item.id))
-    setMessage('冲突已解决，并保留审计记录。')
+    try {
+      await api.resolveSyncConflict({ conflictId: item.id, resolution, reason })
+      setItems((current) => current.filter(({ id }) => id !== item.id))
+      setMessage('冲突已解决，并保留审计记录。')
+    } catch (error) {
+      setMessage(
+        typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === 'sync_account_boundary'
+          ? '该冲突属于其他账户或未归属旧事件，当前账户不能处理。'
+          : '冲突处理失败，原记录已保留。',
+      )
+    }
   }
   return (
     <section className="card" aria-label="同步冲突">

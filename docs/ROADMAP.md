@@ -181,4 +181,6 @@ An unreleased-profile migration compatibility repair now recognizes the exact ol
 
 ## Original foundation instruction (retained; not current progress)
 
+G1 integration handoff (2026-10-18): `codex/g1-conflict-origin` starts at QA `be20d76` and minimally adapts source `031ad67` to protect local conflict list/resolve provenance with atomic account/role checks and strict input. Local Rust/real PostgreSQL/API/fixture DOM checks pass; independent Fixer and the real EXE same-profile conflict-origin case remain pending. G1 is READY_FOR_RECHECK, not CLOSED; T10/SEC-001/P1/Formal and M3 remain open, NATIVE-008 CLOSED. This is a narrow security integration, not G2/G3 or full order-resolution acceptance. Recheck commands and skipped coverage are in QA_REPORT/memory.
+
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
