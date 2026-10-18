@@ -225,6 +225,10 @@ Fresh checks: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); both na
 
 **T10-SEC-001, P1 and Formal remain OPEN.**
 
+## NATIVE-008 Integration Owner repair — 2026-10-18
+
+The test host now waits for an observed Node `aborted`, request `close` or socket `close` event after barrier release; it does not use a fixed sleep or immediate `destroyed` read. Before teardown it writes trusted PostgreSQL event count/server version and authoritative entity version snapshots. A fresh real EXE run `native-smoke-20261018130905` force-terminated PID 30388 and records cancel=true, handler=false, `0/0/0→1/1/1`; B `native-smoke-20261018131113` force-terminated PID 29188 and records cancel=true, handler=true, `1/1/1→1/1/1`. Both use the same profile/installation/event across recovery, outbox `1→0`, Pull `0→1`, replay 0. Rust 55/55, fmt, release check and server lint/typecheck PASS. **NATIVE-008 READY_FOR_RECHECK; T10-SEC-001/P1/Formal OPEN.**
+
 ## Independent Fixer NATIVE-008 recheck — 2026-10-18
 
 Actual isolated QA `HEAD`, implementation SHA and QA checkpoint are `ed9505953f803f8abc859ab402bbc30f896d8035` (`git merge-base --is-ancestor` PASS); it is not reachable from the caller worktree's former `74365f0` or `origin/main`. The registered mode is `push-termination-recovery` with boundaries `before-commit` and `after-commit`.
