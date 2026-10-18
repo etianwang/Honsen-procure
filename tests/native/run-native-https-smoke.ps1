@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [ValidateSet('ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security'
 )
 
@@ -18,6 +18,9 @@ $recoveredResult = Join-Path $qaRoot "$runId-pull-recovered.test.json"
 $pageInterruptedResult = Join-Path $qaRoot "$runId-pull-page-interrupted.test.json"
 $pageRecoveredResult = Join-Path $qaRoot "$runId-pull-page-recovered.test.json"
 $pageProducerResult = Join-Path $qaRoot "$runId-pull-page-producer.test.json"
+$cursorWriteProducerResult = Join-Path $qaRoot "$runId-cursor-write-producer.test.json"
+$cursorWriteFaultResult = Join-Path $qaRoot "$runId-cursor-write-fault.test.json"
+$cursorWriteRecoveredResult = Join-Path $qaRoot "$runId-cursor-write-recovered.test.json"
 $offlineResult = Join-Path $qaRoot "$runId-offline-push.test.json"
 $offlineRecoveredResult = Join-Path $qaRoot "$runId-offline-push-recovered.test.json"
 $partialBatchResult = Join-Path $qaRoot "$runId-push-partial-batch.test.json"
@@ -149,6 +152,21 @@ try {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $pageRecoveredResult
       & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native recovered paged Pull smoke failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 'cursor-write-recovery') {
+      $env:HONSEN_PROCURE_TEST_DB_PATH = $profileB
+      $env:HONSEN_PROCURE_NATIVE_CURSOR_WRITE_RECOVERY_PHASE = 'producer'
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $cursorWriteProducerResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native Cursor write producer smoke failed; inspect $nativeLog" }
+      $env:HONSEN_PROCURE_TEST_DB_PATH = $profileA
+      $env:HONSEN_PROCURE_NATIVE_CURSOR_WRITE_RECOVERY_PHASE = 'fault'
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $cursorWriteFaultResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native Cursor write fault smoke failed; inspect $nativeLog" }
+      $env:HONSEN_PROCURE_NATIVE_CURSOR_WRITE_RECOVERY_PHASE = 'recovered'
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $cursorWriteRecoveredResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native Cursor write recovery smoke failed; inspect $nativeLog" }
     } else {
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_PUSH_PHASE = 'offline'
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_READY_PATH = $offlineReady
@@ -225,6 +243,17 @@ try {
       throw "native paged Pull recovery result is invalid: $pageProducerResult / $pageInterruptedResult / $pageRecoveredResult / $diagnostics"
     }
     Write-Output "PASS native HonsenProcure.exe HTTPS paged Pull recovery smoke: $pageProducerResult / $pageInterruptedResult / $pageRecoveredResult"
+  } elseif ($Mode -eq 'cursor-write-recovery') {
+    $producer = Get-Content -Raw $cursorWriteProducerResult | ConvertFrom-Json
+    $fault = Get-Content -Raw $cursorWriteFaultResult | ConvertFrom-Json
+    $recovered = Get-Content -Raw $cursorWriteRecoveredResult | ConvertFrom-Json
+    $pullRecords = @(Get-Content $diagnostics | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.route -eq 'GET /api/sync/pull' })
+    $faultPage = @($pullRecords | Where-Object { $_.requestedCursor -eq '0' -and $_.serverStatus -eq 200 -and $_.responseChangeCount -eq 1 -and $_.responseNextCursor -eq '1' })
+    $replayPage = @($pullRecords | Where-Object { $_.requestedCursor -eq '1' -and $_.serverStatus -eq 200 -and $_.responseChangeCount -eq 0 -and $_.responseNextCursor -eq '1' })
+    if ($producer.mode -ne 'cursor-write-recovery' -or $producer.phase -ne 'producer' -or $producer.producerPush -ne 'PASS' -or $producer.acceptedCount -ne 1 -or $producer.outboxPending -ne 0 -or $fault.mode -ne 'cursor-write-recovery' -or $fault.phase -ne 'fault' -or $fault.cursorWriteFailure -ne 'PASS' -or $fault.transactionRollback -ne 'PASS' -or $fault.cursorNotAhead -ne 'PASS' -or !$fault.faultTriggered -or $fault.cursorBefore -ne '0' -or $fault.cursorAfter -ne '0' -or $fault.projectedBefore -ne 0 -or $fault.projectedAfter -ne 0 -or $fault.outboxPending -ne 0 -or $recovered.mode -ne 'cursor-write-recovery' -or $recovered.phase -ne 'recovered' -or $recovered.restartRecovery -ne 'PASS' -or $recovered.allEventsProjectedOnce -ne 'PASS' -or $recovered.cursorMonotonic -ne 'PASS' -or $recovered.replayEmpty -ne 'PASS' -or $recovered.cursorBefore -ne '0' -or $recovered.cursorAfterRecovery -ne '1' -or $recovered.cursorAfterReplay -ne '1' -or $recovered.recoveryProjectedCount -ne 1 -or $recovered.replayProjectedCount -ne 0 -or $recovered.projectedAfterRecovery -ne 1 -or $recovered.projectedAfterReplay -ne 1 -or $recovered.outboxPending -ne 0 -or $producer.accountId -eq $fault.accountId -or $producer.installationId -eq $fault.installationId -or $producer.profilePath -eq $fault.profilePath -or $faultPage.Count -ne 2 -or $replayPage.Count -ne 1) {
+      throw "native Cursor write recovery result is invalid: $cursorWriteProducerResult / $cursorWriteFaultResult / $cursorWriteRecoveredResult / $diagnostics"
+    }
+    Write-Output "PASS native HonsenProcure.exe HTTPS Cursor write recovery smoke: $cursorWriteProducerResult / $cursorWriteFaultResult / $cursorWriteRecoveredResult"
   } else {
     $offline = Get-Content -Raw $offlineResult | ConvertFrom-Json
     $recovered = Get-Content -Raw $offlineRecoveredResult | ConvertFrom-Json

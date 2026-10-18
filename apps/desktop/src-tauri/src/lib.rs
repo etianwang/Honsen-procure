@@ -1122,6 +1122,10 @@ pub struct LocalAuthService {
     credential_vault: Box<dyn CredentialVault>,
     test_tls_root: Option<reqwest::Certificate>,
     test_expected_sync_origin_installation: Mutex<Option<String>>,
+    #[cfg(debug_assertions)]
+    test_fail_before_pull_cursor_write: Mutex<bool>,
+    #[cfg(debug_assertions)]
+    test_pull_cursor_write_fault_triggered: Mutex<bool>,
 }
 
 impl LocalAuthService {
@@ -1276,6 +1280,10 @@ impl LocalAuthService {
             credential_vault,
             test_tls_root,
             test_expected_sync_origin_installation: Mutex::new(None),
+            #[cfg(debug_assertions)]
+            test_fail_before_pull_cursor_write: Mutex::new(false),
+            #[cfg(debug_assertions)]
+            test_pull_cursor_write_fault_triggered: Mutex::new(false),
         })
     }
 
@@ -1297,6 +1305,27 @@ impl LocalAuthService {
     #[cfg(debug_assertions)]
     pub fn test_pull_cursor(&self, account_id: Uuid) -> Result<String, AuthError> {
         self.pull_cursor_for_account(account_id)
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn inject_test_pull_cursor_write_failure_once(&self) -> Result<(), AuthError> {
+        *self
+            .test_fail_before_pull_cursor_write
+            .lock()
+            .map_err(|_| AuthError::Database)? = true;
+        *self
+            .test_pull_cursor_write_fault_triggered
+            .lock()
+            .map_err(|_| AuthError::Database)? = false;
+        Ok(())
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn test_pull_cursor_write_failure_triggered(&self) -> Result<bool, AuthError> {
+        self.test_pull_cursor_write_fault_triggered
+            .lock()
+            .map(|triggered| *triggered)
+            .map_err(|_| AuthError::Database)
     }
 
     #[cfg(debug_assertions)]
@@ -5201,6 +5230,26 @@ impl LocalAuthService {
         project_staged_purchase_orders(&transaction, now)?;
         project_staged_rfqs(&transaction, now)?;
         project_staged_order_comments(&transaction)?;
+        #[cfg(debug_assertions)]
+        if std::mem::replace(
+            &mut *self
+                .test_fail_before_pull_cursor_write
+                .lock()
+                .map_err(|_| AuthError::Database)?,
+            false,
+        ) {
+            *self
+                .test_pull_cursor_write_fault_triggered
+                .lock()
+                .map_err(|_| AuthError::Database)? = true;
+            // This deliberately violates the cursor column's NOT NULL constraint before its upsert.
+            transaction
+                .execute(
+                    "INSERT INTO local_sync_account_pull_state (account_id, last_pull_cursor, last_success_at) VALUES (?1, NULL, ?2)",
+                    params![account_id_text, unix_seconds(now)],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
         transaction.execute(
             "INSERT INTO local_sync_account_pull_state (account_id, last_pull_cursor, last_success_at) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET last_pull_cursor = excluded.last_pull_cursor, last_success_at = excluded.last_success_at",
             params![account_id_text, page.next_cursor, unix_seconds(now)],

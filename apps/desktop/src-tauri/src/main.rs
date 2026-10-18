@@ -55,6 +55,7 @@ fn main() {
             | Some("ab-login-switch")
             | Some("ab-sync-security")
             | Some("push-partial-batch")
+            | Some("cursor-write-recovery")
             | Some("pull-page-recovery")
             | Some("offline-push-recovery")
             | Some("pull-recovery")
@@ -100,6 +101,12 @@ fn main() {
                 if let Err(error) = run_native_pull_page_recovery_smoke(&auth, &database_path) {
                     write_native_smoke_failure("pull-page-recovery", &error);
                     panic!("run native paged Pull recovery smoke: {error}");
+                }
+            }
+            "cursor-write-recovery" => {
+                if let Err(error) = run_native_cursor_write_recovery_smoke(&auth, &database_path) {
+                    write_native_smoke_failure("cursor-write-recovery", &error);
+                    panic!("run native Cursor write recovery smoke: {error}");
                 }
             }
             "offline-push-recovery" => {
@@ -960,6 +967,173 @@ fn run_native_pull_page_recovery_smoke(
 }
 
 #[cfg(debug_assertions)]
+fn run_native_cursor_write_recovery_smoke(
+    auth: &LocalAuthService,
+    database_path: &PathBuf,
+) -> Result<(), String> {
+    let phase = required_test_value("HONSEN_PROCURE_NATIVE_CURSOR_WRITE_RECOVERY_PHASE")?;
+    let engineer_a_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD")?;
+    let purchaser_password = required_test_value("HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+
+    match phase.as_str() {
+        "producer" => {
+            let session = native_online_login(auth, "purchaser", &purchaser_password, now)?;
+            let entity_id = Uuid::new_v4();
+            auth.save_requisition_draft(native_sync_draft(entity_id, session.user_id), now)
+                .map_err(|error| error.to_string())?;
+            let push = tauri::async_runtime::block_on(auth.push_pending_https(now))
+                .map_err(|error| error.to_string())?;
+            let pending = auth
+                .test_pending_outbox_count(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if push.accepted_count != 1 || pending != 0 {
+                return Err(format!(
+                    "Cursor write producer did not accept one event: {push:?}; pending={pending}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "cursor-write-recovery",
+                    "phase": "producer",
+                    "producerPush": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "entityId": entity_id,
+                    "acceptedCount": push.accepted_count,
+                    "outboxPending": pending,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write Cursor write producer result".to_owned())
+        }
+        "fault" => {
+            let session = native_online_login(auth, "engineer-a", &engineer_a_password, now)?;
+            let cursor_before = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let projected_before = auth
+                .test_remote_entity_count("purchase_order")
+                .map_err(|error| error.to_string())?;
+            auth.inject_test_pull_cursor_write_failure_once()
+                .map_err(|error| error.to_string())?;
+            let failed_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now));
+            let fault_triggered = auth
+                .test_pull_cursor_write_failure_triggered()
+                .map_err(|error| error.to_string())?;
+            let cursor_after = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let projected_after = auth
+                .test_remote_entity_count("purchase_order")
+                .map_err(|error| error.to_string())?;
+            let outbox_pending = auth
+                .test_pending_outbox_count(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if !matches!(failed_pull, Err(AuthError::Database))
+                || !fault_triggered
+                || cursor_before != "0"
+                || cursor_after != cursor_before
+                || projected_before != 0
+                || projected_after != projected_before
+                || outbox_pending != 0
+            {
+                return Err(format!(
+                    "Cursor write failure did not roll back the Pull page: fault={fault_triggered}; pull={failed_pull:?}; cursor={cursor_before}->{cursor_after}; projected={projected_before}->{projected_after}; outbox={outbox_pending}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "cursor-write-recovery",
+                    "phase": "fault",
+                    "cursorWriteFailure": "PASS",
+                    "transactionRollback": "PASS",
+                    "cursorNotAhead": "PASS",
+                    "faultTriggered": fault_triggered,
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "cursorBefore": cursor_before,
+                    "cursorAfter": cursor_after,
+                    "projectedBefore": projected_before,
+                    "projectedAfter": projected_after,
+                    "outboxPending": outbox_pending,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write Cursor write fault result".to_owned())
+        }
+        "recovered" => {
+            let session = native_online_login(auth, "engineer-a", &engineer_a_password, now)?;
+            let cursor_before = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let recovered_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            let cursor_after_recovery = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let projected_after_recovery = auth
+                .test_remote_entity_count("purchase_order")
+                .map_err(|error| error.to_string())?;
+            let replay_pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            let cursor_after_replay = auth
+                .test_pull_cursor(session.user_id)
+                .map_err(|error| error.to_string())?;
+            let projected_after_replay = auth
+                .test_remote_entity_count("purchase_order")
+                .map_err(|error| error.to_string())?;
+            let outbox_pending = auth
+                .test_pending_outbox_count(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if cursor_before != "0"
+                || recovered_pull.applied_count != 1
+                || cursor_after_recovery != "1"
+                || projected_after_recovery != 1
+                || replay_pull.applied_count != 0
+                || cursor_after_replay != cursor_after_recovery
+                || projected_after_replay != projected_after_recovery
+                || outbox_pending != 0
+            {
+                return Err(format!(
+                    "Cursor write recovery did not project exactly once: recovery={recovered_pull:?}; replay={replay_pull:?}; cursor={cursor_before}->{cursor_after_recovery}->{cursor_after_replay}; projected={projected_after_recovery}->{projected_after_replay}; outbox={outbox_pending}"
+                ));
+            }
+            fs::write(
+                result_path,
+                serde_json::json!({
+                    "mode": "cursor-write-recovery",
+                    "phase": "recovered",
+                    "restartRecovery": "PASS",
+                    "allEventsProjectedOnce": "PASS",
+                    "cursorMonotonic": "PASS",
+                    "replayEmpty": "PASS",
+                    "accountId": session.user_id,
+                    "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                    "profilePath": database_path,
+                    "cursorBefore": cursor_before,
+                    "cursorAfterRecovery": cursor_after_recovery,
+                    "cursorAfterReplay": cursor_after_replay,
+                    "recoveryProjectedCount": recovered_pull.applied_count,
+                    "replayProjectedCount": replay_pull.applied_count,
+                    "projectedAfterRecovery": projected_after_recovery,
+                    "projectedAfterReplay": projected_after_replay,
+                    "outboxPending": outbox_pending,
+                })
+                .to_string(),
+            )
+            .map_err(|_| "cannot write Cursor write recovered result".to_owned())
+        }
+        _ => Err("native Cursor write recovery phase must be producer, fault or recovered".into()),
+    }
+}
+
+#[cfg(debug_assertions)]
 fn run_native_push_partial_batch_smoke(
     account_a: &LocalAuthService,
     account_a_path: &PathBuf,
@@ -1355,6 +1529,14 @@ fn run_native_pull_page_recovery_smoke(
     _database_path: &PathBuf,
 ) -> Result<(), String> {
     Err("native paged Pull recovery smoke is unavailable outside a debug test build".into())
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_cursor_write_recovery_smoke(
+    _auth: &LocalAuthService,
+    _database_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native Cursor write recovery smoke is unavailable outside a debug test build".into())
 }
 
 #[cfg(not(debug_assertions))]

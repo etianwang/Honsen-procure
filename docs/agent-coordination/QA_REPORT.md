@@ -569,6 +569,40 @@ Artifacts:
 
 **NATIVE-006 is independently CLOSED for this bounded paged-Pull interruption/restart scenario. T10-SEC-001, P1 and Formal remain OPEN: this does not cover cursor-write faults, in-flight EXE termination, or RFQ/Formal native workflows.**
 
+## Native Cursor-write failure / transaction recovery — 2026-10-18
+
+NATIVE-007 audits `LocalAuthService::apply_sync_pull_page_for_account`: remote entity/conflict projection, staged business projection, the account-scoped cursor upsert, and `transaction.commit()` all occur in one SQLite transaction. The test-only debug hook is placed immediately before that production cursor upsert and performs one intentionally invalid cursor-state insert (`last_pull_cursor = NULL`), so SQLite rejects the write and drops the uncommitted transaction. It is compiled only under `debug_assertions`; the release smoke function is fail-closed.
+
+Fresh native execution:
+
+```text
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode cursor-write-recovery
+```
+
+Run `native-smoke-20261018112716` used a new disposable PostgreSQL/Fastify HTTPS endpoint, generated test certificate, Windows Credential Manager, and distinct A/B absolute test SQLite profiles. A real B `HonsenProcure.exe` created the source requisition and production Push accepted exactly one event. A first real A EXE received the actual HTTPS Pull page `cursor=0`, then the cursor-boundary injection fired; Rust returned `AuthError::Database`, while read-only native checks report cursor `0→0`, remote projection `0→0`, and pending outbox `0`. That EXE exited. A second real A EXE with the same profile and installation performed production Pull, projected one event and persisted cursor `0→1`; its replay Pull projected zero and left cursor/entity count at `1`.
+
+| Boundary | Result | Evidence |
+| --- | --- | --- |
+| B production source event | PASS | One accepted production Push; B account/profile/installation differ from A. |
+| A cursor-write failure | PASS | Real HTTPS `GET cursor=0` completed; debug hook confirms it triggered; Rust result is `Database`. |
+| Atomicity | PASS | Before/after failure: A cursor 0, projected entities 0, pending outbox 0. Cursor cannot be ahead of durable projection. |
+| Same-profile EXE restart | PASS | New A EXE pulls one event/cursor `0→1`; no SQL file mutation or test HTTP client is used. |
+| Replay stability | PASS | HTTPS `GET cursor=1` returns zero changes; cursor and entity count stay 1. |
+| Release/test boundary | PASS | `cargo check --release` compiles no injection state and resolves the native test entry to fail-closed. |
+| Existing A/B security regression | PASS | Fresh `native-smoke-20261018112931` retains separate installations, trusted forged-device origin, account/conflict isolation and Push replay idempotency. |
+
+Artifacts:
+
+- `.honsen-native-qa/native-smoke-20261018112716-cursor-write-{producer,fault,recovered}.test.json`
+- `.honsen-native-qa/native-smoke-20261018112716-server-sync.test.jsonl`
+- `test-results/native-smoke-20261018112716-{client,server,server-error,compose,compose-error}.log`
+- `.honsen-native-qa/native-smoke-20261018112931.test.json`
+- `test-results/native-smoke-20261018112931-{client,server,server-error,compose,compose-error}.log`
+
+Focused checks: `cargo fmt --check`, `cargo test --lib` (55/55), `cargo check --release`, server lint/typecheck, both native commands, and `git diff --check` PASS. Release check has only pre-existing debug-test unused-symbol warnings. No production database, existing E2E data, production TLS/keyring/authentication setting, push, merge or deployment was touched.
+
+**NATIVE-007 is READY_FOR_RECHECK. T10-SEC-001, P1 and Formal remain OPEN. In-flight process termination during a sync transaction and RFQ/Formal native workflows remain unverified.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.
