@@ -1,6 +1,6 @@
 import argon2 from 'argon2'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import { createApp } from '../app.js'
 import { AuthService } from '../auth/service.js'
@@ -53,6 +53,19 @@ if (
     'HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH must be an absolute .test.jsonl path',
   )
 }
+const pushBarrier = process.env.HONSEN_PROCURE_TEST_PUSH_BARRIER
+const pushBarrierReadyPath = process.env.HONSEN_PROCURE_TEST_PUSH_BARRIER_READY_PATH
+const pushBarrierReleasePath = process.env.HONSEN_PROCURE_TEST_PUSH_BARRIER_RELEASE_PATH
+if (
+  pushBarrier &&
+  (pushBarrier !== 'before-commit' && pushBarrier !== 'after-commit')
+)
+  throw new Error('HONSEN_PROCURE_TEST_PUSH_BARRIER must be before-commit or after-commit')
+if (
+  pushBarrier &&
+  (!pushBarrierReadyPath || !pushBarrierReleasePath || !isAbsolute(pushBarrierReadyPath) || !isAbsolute(pushBarrierReleasePath) || !pushBarrierReadyPath.endsWith('.signal') || !pushBarrierReleasePath.endsWith('.signal'))
+)
+  throw new Error('native Push barrier requires absolute .signal ready/release paths')
 
 function writeDiagnostic(value: Record<string, unknown>) {
   if (diagnosticPath)
@@ -125,6 +138,22 @@ const nativeApp = Fastify({
   logger: false,
   https: { pfx: readFileSync(pfxPath), passphrase: pfxPassphrase },
 }) as unknown as FastifyInstance
+let pushBarrierUsed = false
+async function waitForPushBarrier(request: { raw: { destroyed: boolean } }, boundary: string) {
+  if (!pushBarrier || pushBarrier !== boundary || pushBarrierUsed) return false
+  pushBarrierUsed = true
+  writeFileSync(pushBarrierReadyPath!, boundary, 'utf8')
+  writeDiagnostic({ route: 'POST /api/sync/push', barrier: boundary, barrierReached: true })
+  while (!existsSync(pushBarrierReleasePath!))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  return request.raw.destroyed
+}
+nativeApp.addHook('preHandler', async (request, reply) => {
+  if (request.method !== 'POST' || request.url !== '/api/sync/push') return
+  if (await waitForPushBarrier(request, 'before-commit')) {
+    reply.code(499).send({ error: 'native test client terminated before commit' })
+  }
+})
 let failedFirstPushResponse = false
 let failedFirstPullResponse = false
 let failedPullAtCursorResponse = false
@@ -209,6 +238,7 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
       : payload instanceof Uint8Array
         ? Buffer.from(payload).toString('utf8')
         : JSON.stringify(payload)
+  await waitForPushBarrier(request, 'after-commit')
   if (
     process.env.HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE === '1' &&
     !failedFirstPushResponse

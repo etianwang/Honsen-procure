@@ -56,6 +56,7 @@ fn main() {
             | Some("ab-sync-security")
             | Some("push-partial-batch")
             | Some("cursor-write-recovery")
+            | Some("push-termination-recovery")
             | Some("pull-page-recovery")
             | Some("offline-push-recovery")
             | Some("pull-recovery")
@@ -107,6 +108,12 @@ fn main() {
                 if let Err(error) = run_native_cursor_write_recovery_smoke(&auth, &database_path) {
                     write_native_smoke_failure("cursor-write-recovery", &error);
                     panic!("run native Cursor write recovery smoke: {error}");
+                }
+            }
+            "push-termination-recovery" => {
+                if let Err(error) = run_native_push_termination_smoke(&auth, &database_path) {
+                    write_native_smoke_failure("push-termination-recovery", &error);
+                    panic!("run native Push termination smoke: {error}");
                 }
             }
             "offline-push-recovery" => {
@@ -1134,6 +1141,78 @@ fn run_native_cursor_write_recovery_smoke(
 }
 
 #[cfg(debug_assertions)]
+fn run_native_push_termination_smoke(
+    auth: &LocalAuthService,
+    database_path: &PathBuf,
+) -> Result<(), String> {
+    let phase = required_test_value("HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_PHASE")?;
+    let password = required_test_value("HONSEN_PROCURE_NATIVE_AB_ENGINEER_A_PASSWORD")?;
+    let result_path = test_result_path()?;
+    let now = SystemTime::now();
+    let session = native_online_login(auth, "engineer-a", &password, now)?;
+    match phase.as_str() {
+        "inflight" => {
+            let entity_id = Uuid::new_v4();
+            auth.save_requisition_draft(native_sync_draft(entity_id, session.user_id), now)
+                .map_err(|error| error.to_string())?;
+            let events = auth
+                .pending_sync_events(1, now)
+                .map_err(|error| error.to_string())?;
+            if events.len() != 1 {
+                return Err("termination fixture lacks one pending event".into());
+            }
+            fs::write(result_path, serde_json::json!({
+                "mode": "push-termination-recovery", "phase": "inflight",
+                "accountId": session.user_id,
+                "installationId": auth.test_installation_id().map_err(|error| error.to_string())?,
+                "profilePath": database_path, "entityId": entity_id, "eventId": events[0].event_id,
+                "outboxPending": 1
+            }).to_string()).map_err(|_| "cannot write native termination inflight result".to_owned())?;
+            let _ = tauri::async_runtime::block_on(auth.push_pending_https(now));
+            Err("native termination process was not forcibly terminated".into())
+        }
+        "recovered" => {
+            let event_id = Uuid::parse_str(&required_test_value(
+                "HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_EVENT_ID",
+            )?)
+            .map_err(|_| "termination event ID must be UUID".to_owned())?;
+            let pending_before = auth
+                .pending_sync_events(10, now)
+                .map_err(|error| error.to_string())?;
+            if pending_before.len() != 1 || pending_before[0].event_id != event_id {
+                return Err("terminated Push event was not retained in Outbox".into());
+            }
+            let push = tauri::async_runtime::block_on(auth.push_pending_https(now))
+                .map_err(|error| error.to_string())?;
+            let replay_push = tauri::async_runtime::block_on(auth.push_pending_https(now))
+                .map_err(|error| error.to_string())?;
+            let pull = tauri::async_runtime::block_on(auth.pull_sync_https(now))
+                .map_err(|error| error.to_string())?;
+            let pending_after = auth
+                .test_pending_outbox_count(session.user_id)
+                .map_err(|error| error.to_string())?;
+            if push.accepted_count != 1
+                || replay_push.accepted_count != 0
+                || pending_after != 0
+                || pull.applied_count != 1
+            {
+                return Err(format!(
+                    "terminated Push recovery mismatch: {push:?}; {replay_push:?}; {pull:?}; pending={pending_after}"
+                ));
+            }
+            fs::write(result_path, serde_json::json!({
+                "mode": "push-termination-recovery", "phase": "recovered", "recovery": "PASS",
+                "accountId": session.user_id, "installationId": auth.test_installation_id().map_err(|error| error.to_string())?, "profilePath": database_path,
+                "eventId": event_id, "acceptedCount": push.accepted_count, "replayAcceptedCount": replay_push.accepted_count,
+                "pullAppliedCount": pull.applied_count, "outboxPending": pending_after,
+                "cursor": auth.test_pull_cursor(session.user_id).map_err(|error| error.to_string())?
+            }).to_string()).map_err(|_| "cannot write native termination recovery result".to_owned())
+        }
+        _ => Err("native Push termination phase must be inflight or recovered".into()),
+    }
+}
+
+#[cfg(debug_assertions)]
 fn run_native_push_partial_batch_smoke(
     account_a: &LocalAuthService,
     account_a_path: &PathBuf,
@@ -1537,6 +1616,14 @@ fn run_native_cursor_write_recovery_smoke(
     _database_path: &PathBuf,
 ) -> Result<(), String> {
     Err("native Cursor write recovery smoke is unavailable outside a debug test build".into())
+}
+
+#[cfg(not(debug_assertions))]
+fn run_native_push_termination_smoke(
+    _auth: &LocalAuthService,
+    _database_path: &PathBuf,
+) -> Result<(), String> {
+    Err("native Push termination smoke is unavailable outside a debug test build".into())
 }
 
 #[cfg(not(debug_assertions))]

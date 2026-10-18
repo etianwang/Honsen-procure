@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'offline-push-recovery', 'push-partial-batch')]
-  [string]$Mode = 'ab-sync-security'
+  [ValidateSet('ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [string]$Mode = 'ab-sync-security',
+  [ValidateSet('before-commit', 'after-commit')]
+  [string]$TerminationBoundary = 'before-commit'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +26,10 @@ $cursorWriteRecoveredResult = Join-Path $qaRoot "$runId-cursor-write-recovered.t
 $offlineResult = Join-Path $qaRoot "$runId-offline-push.test.json"
 $offlineRecoveredResult = Join-Path $qaRoot "$runId-offline-push-recovered.test.json"
 $partialBatchResult = Join-Path $qaRoot "$runId-push-partial-batch.test.json"
+$terminationInflightResult = Join-Path $qaRoot "$runId-push-termination-inflight.test.json"
+$terminationRecoveredResult = Join-Path $qaRoot "$runId-push-termination-recovered.test.json"
+$terminationReady = Join-Path $qaRoot "$runId-push-termination-ready.signal"
+$terminationRelease = Join-Path $qaRoot "$runId-push-termination-release.signal"
 $offlineReady = Join-Path $qaRoot "$runId-offline-ready.signal"
 $offlineContinue = Join-Path $qaRoot "$runId-offline-continue.signal"
 $diagnostics = Join-Path $qaRoot "$runId-server-sync.test.jsonl"
@@ -84,6 +90,9 @@ try {
   $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE = if ($Mode -eq 'ab-sync-security') { '1' } else { '0' }
   $env:HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE = if ($Mode -eq 'pull-recovery') { '1' } else { '0' }
   $env:HONSEN_PROCURE_TEST_FAIL_PULL_AT_CURSOR = if ($Mode -eq 'pull-page-recovery') { '500' } else { '' }
+  $env:HONSEN_PROCURE_TEST_PUSH_BARRIER = if ($Mode -eq 'push-termination-recovery') { $TerminationBoundary } else { '' }
+  $env:HONSEN_PROCURE_TEST_PUSH_BARRIER_READY_PATH = if ($Mode -eq 'push-termination-recovery') { $terminationReady } else { '' }
+  $env:HONSEN_PROCURE_TEST_PUSH_BARRIER_RELEASE_PATH = if ($Mode -eq 'push-termination-recovery') { $terminationRelease } else { '' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
@@ -167,6 +176,26 @@ try {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $cursorWriteRecoveredResult
       & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native Cursor write recovery smoke failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 'push-termination-recovery') {
+      $env:HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_PHASE = 'inflight'
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $terminationInflightResult
+      $terminationProcess = Start-Process -FilePath (Join-Path $desktop 'target\debug\HonsenProcure.exe') -PassThru -RedirectStandardOutput $nativeLog -RedirectStandardError $nativeErrorLog -WindowStyle Hidden
+      for ($attempt = 0; $attempt -lt 120; $attempt++) {
+        if (Test-Path $terminationReady) { break }
+        if ($terminationProcess.HasExited) { throw "native termination EXE exited before server barrier; inspect $nativeLog / $nativeErrorLog" }
+        Start-Sleep -Milliseconds 100
+      }
+      if (!(Test-Path $terminationReady) -or !(Test-Path $terminationInflightResult)) { throw "native termination barrier was not reached" }
+      $terminationPid = $terminationProcess.Id
+      Stop-Process -Id $terminationPid -Force
+      if (!$terminationProcess.WaitForExit(10000)) { throw "could not force-terminate native EXE PID $terminationPid" }
+      New-Item -ItemType File -Path $terminationRelease | Out-Null
+      $inflight = Get-Content -Raw $terminationInflightResult | ConvertFrom-Json
+      $env:HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_PHASE = 'recovered'
+      $env:HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_EVENT_ID = $inflight.eventId
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $terminationRecoveredResult
+      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native termination recovery smoke failed; inspect $nativeLog / $nativeErrorLog" }
     } else {
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_PUSH_PHASE = 'offline'
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_READY_PATH = $offlineReady
@@ -254,6 +283,14 @@ try {
       throw "native Cursor write recovery result is invalid: $cursorWriteProducerResult / $cursorWriteFaultResult / $cursorWriteRecoveredResult / $diagnostics"
     }
     Write-Output "PASS native HonsenProcure.exe HTTPS Cursor write recovery smoke: $cursorWriteProducerResult / $cursorWriteFaultResult / $cursorWriteRecoveredResult"
+  } elseif ($Mode -eq 'push-termination-recovery') {
+    $inflight = Get-Content -Raw $terminationInflightResult | ConvertFrom-Json
+    $recovered = Get-Content -Raw $terminationRecoveredResult | ConvertFrom-Json
+    $records = @(Get-Content $diagnostics | ForEach-Object { $_ | ConvertFrom-Json })
+    $barrier = @($records | Where-Object { $_.barrier -eq $TerminationBoundary -and $_.barrierReached -eq $true })
+    $pushes = @($records | Where-Object { $_.route -eq 'POST /api/sync/push' -and $_.eventId -eq $inflight.eventId })
+    if ($inflight.mode -ne 'push-termination-recovery' -or $inflight.outboxPending -ne 1 -or $recovered.recovery -ne 'PASS' -or $recovered.eventId -ne $inflight.eventId -or $recovered.acceptedCount -ne 1 -or $recovered.replayAcceptedCount -ne 0 -or $recovered.pullAppliedCount -ne 1 -or $recovered.outboxPending -ne 0 -or $recovered.cursor -ne '1' -or $barrier.Count -ne 1 -or $pushes.Count -lt 1) { throw "native Push termination result is invalid: $terminationInflightResult / $terminationRecoveredResult / $diagnostics" }
+    Write-Output "PASS native HonsenProcure.exe HTTPS Push termination ($TerminationBoundary): pid=$terminationPid $terminationInflightResult / $terminationRecoveredResult"
   } else {
     $offline = Get-Content -Raw $offlineResult | ConvertFrom-Json
     $recovered = Get-Content -Raw $offlineRecoveredResult | ConvertFrom-Json

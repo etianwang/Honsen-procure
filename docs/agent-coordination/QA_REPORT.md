@@ -638,6 +638,10 @@ Fresh focused checks: `cargo fmt --check`, `cargo test --lib` (55/55), `cargo ch
 
 **NATIVE-007 is independently CLOSED for the bounded Cursor-write failure/restart transaction scenario. T10-SEC-001, P1 and Formal remain OPEN: abrupt process termination while a transaction is in-flight and RFQ/Formal native workflows remain unverified.**
 
+## NATIVE-008 Push in-flight termination — 2026-10-18
+
+Fresh real-EXE pre-commit run `native-smoke-20261018115151` reached a test-host `preHandler` barrier, forcibly terminated the recorded EXE PID, then released the host; it emitted 499 and no server event. Same profile/installation/event ID restart accepted once, cleared Outbox and Pull projected once. Fresh post-commit run `native-smoke-20261018115314` reached `onSend` after commit/before ACK, forcibly terminated PID `40376`, then restarted same profile/event ID; server idempotency accepted no duplicate, Outbox cleared and Pull projected once. Barriers require absolute `.signal` paths, the loopback test DB, and are absent from production server/release. Rust 55/55, fmt, release check and server lint/typecheck PASS. **NATIVE-008 READY_FOR_RECHECK; T10-SEC-001/P1/Formal OPEN.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.
