@@ -32,6 +32,7 @@ export function observeNativePushCancellation({
   onObservation: (observation: NativePushCancellationObservation) => void
 }) {
   let barrierReleasedAt: string | null = null
+  let acceptedCancellation: NativePushCancellationObservation | undefined
   let resolveCancellation: (observation: NativePushCancellationObservation) => void
   const cancellation = new Promise<NativePushCancellationObservation>((resolve) => {
     resolveCancellation = resolve
@@ -47,12 +48,22 @@ export function observeNativePushCancellation({
     }
     observation.accepted = observation.barrierReleasedAt === null && !observation.responseCompleted
     onObservation(observation)
-    if (observation.accepted) resolveCancellation(observation)
+    if (observation.accepted) {
+      acceptedCancellation = observation
+      resolveCancellation(observation)
+    }
   }
-  raw.once('aborted', () => observe('aborted'))
-  raw.socket?.once('close', () => observe('socket-close'))
+  const onAborted = () => observe('aborted')
+  const onSocketClose = () => observe('socket-close')
+  raw.once('aborted', onAborted)
+  raw.socket?.once('close', onSocketClose)
   return {
+    acceptedCancellation: () => acceptedCancellation,
     cancellation,
+    dispose: () => {
+      raw.off('aborted', onAborted)
+      raw.socket?.off('close', onSocketClose)
+    },
     markBarrierReleased: () => {
       barrierReleasedAt = now()
       return barrierReleasedAt

@@ -51,4 +51,32 @@ describe('observeNativePushCancellation', () => {
     await Promise.resolve()
     expect(cancellationResolved).toBe(true)
   })
+
+  it('rejects socket close after response completion', () => {
+    const raw = new EventEmitter() as EventEmitter & { socket: EventEmitter & { destroyed?: boolean } }
+    raw.socket = new EventEmitter() as EventEmitter & { destroyed?: boolean }
+    const diagnostics: Array<Record<string, unknown>> = []
+    const observer = observeNativePushCancellation({
+      raw,
+      response: { writableEnded: true, finished: false },
+      now: () => '2026-10-18T00:00:00.000Z',
+      onObservation: (observation) => diagnostics.push(observation),
+    })
+
+    raw.socket.destroyed = true
+    raw.socket.emit('close')
+
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      cancellationSource: 'socket-close',
+      accepted: false,
+      barrierReleasedAt: null,
+      responseCompleted: true,
+      socketDestroyed: true,
+    }))
+    expect(observer.acceptedCancellation()).toBeUndefined()
+    expect(observer.acceptedCancellation()?.cancellationObservedAt).toBeUndefined()
+    observer.dispose()
+    expect(raw.listenerCount('aborted')).toBe(0)
+    expect(raw.socket.listenerCount('close')).toBe(0)
+  })
 })
