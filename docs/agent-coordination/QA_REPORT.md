@@ -429,7 +429,7 @@ Independent focused verification: `cargo test --lib` PASS (55/55), `cargo check 
 | Service commits but Push response is lost | NATIVE-002: test-host post-commit 503 and same-event replay. | COVERED |
 | One Push batch has accepted and conflict results | NATIVE-005 independently closed. | COVERED |
 | First Pull transport failure / restart | NATIVE-003: 503, cursor unchanged, process restart, one projection. | COVERED |
-| Pull after a full 500-change page then transport failure | NATIVE-006 below; Integration Owner native evidence awaits independent recheck. | READY_FOR_RECHECK |
+| Pull after a full 500-change page then transport failure | NATIVE-006 independently closed. | COVERED |
 | Local cursor persistence write fails | Atomic SQLite unit coverage exists; no sanctioned real-disk fault injection in the native harness. | NOT COVERED |
 | EXE terminates during an in-flight request | Not covered; existing tests terminate only after a completed failed/successful operation boundary. | NOT COVERED |
 | Duplicate-event idempotency | NATIVE-002/NATIVE-004 cover accepted replay; NATIVE-005 covers retained conflict replay. | COVERED for these bounded forms |
@@ -534,6 +534,40 @@ Artifacts:
 Focused checks: Rust `cargo fmt --check` and `cargo test --lib` (55/55), server lint/typecheck and `git diff --check` PASS. The release guard is run with the final implementation before checkpoint. No production database, pre-existing E2E data, production TLS/keyring policy, push, merge or deployment was touched; scoped Compose resources and loopback listeners were absent after the run.
 
 **NATIVE-006 is READY_FOR_RECHECK. T10-SEC-001, P1 and Formal remain OPEN. This slice does not cover durable-cursor write faults, abrupt EXE termination in-flight, or RFQ/Formal native workflows.**
+
+## Independent Fixer recheck: NATIVE-006 — 2026-10-18
+
+Baseline checked: actual `HEAD` was `1a5d71960507c5adc48b4bddd1bf84e016b07b77`; `git merge-base --is-ancestor 1a5d719 HEAD` returned 0. The only pre-existing worktree artifact was the ignored native-evidence directory. The Fixer made no application-code change.
+
+Fresh independent execution:
+
+```text
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode pull-page-recovery
+```
+
+Fresh run `native-smoke-20261018112034` started the real debug `HonsenProcure.exe` three times with a new disposable PostgreSQL/Fastify HTTPS endpoint, generated test certificate, new A/B absolute SQLite profiles, and Windows Credential Manager. It is not a standalone HTTP, Mock, Playwright, or prior-result replay.
+
+| Check | Result | Fresh evidence |
+| --- | --- | --- |
+| B production Push | PASS | B account `...0013` accepted 501 real outbox events, pending 0; JSONL has six accepted Push batches totaling 501 events. |
+| A page 1 | PASS | HTTPS GET `cursor=0` returned 200 / 500 changes / next `500`; A durable cursor and projections are both 500. |
+| A page 2 fault | PASS | Actual HTTPS GET `cursor=500` received the only injected 503; Rust returned `SyncTransport`, while A remains cursor 500, 500 projected, outbox 0. |
+| A restart recovery | PASS | New A EXE retains the same profile and installation, then GET `cursor=500` projects 1 / advances to 501. |
+| Replay | PASS | GET `cursor=501` returns zero changes; cursor and entity count both remain 501. |
+| Production safety guards | PASS | Fault env is consumed only by `native-test-server.ts`; test entry/accessors are `debug_assertions`; release build uses the fail-closed smoke implementation. Cursor/account/projection assertions remain strict. |
+
+Fresh quality checks: Rust `cargo fmt --check`, `cargo test --lib` (55/55), `cargo check --release --bin HonsenProcure`, server lint/typecheck and `git diff --check` PASS. Release check reports only the existing debug-test unused-symbol warnings. The scoped Compose project was removed; ports 3443/54329 had no listener afterward.
+
+Artifacts:
+
+- `.honsen-native-qa/native-smoke-20261018112034-pull-page-producer.test.json`
+- `.honsen-native-qa/native-smoke-20261018112034-pull-page-interrupted.test.json`
+- `.honsen-native-qa/native-smoke-20261018112034-pull-page-recovered.test.json`
+- `.honsen-native-qa/native-smoke-20261018112034-server-sync.test.jsonl`
+- `test-results/native-pull-page-fixer-20261018012000.{log,error.log}`
+- `test-results/native-smoke-20261018112034-{client,server,server-error,compose,compose-error}.log`
+
+**NATIVE-006 is independently CLOSED for this bounded paged-Pull interruption/restart scenario. T10-SEC-001, P1 and Formal remain OPEN: this does not cover cursor-write faults, in-flight EXE termination, or RFQ/Formal native workflows.**
 
 ## Windows Credential Manager backend repair — 2026-10-17
 
