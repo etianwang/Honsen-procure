@@ -225,6 +225,19 @@ Fresh checks: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55); both na
 
 **T10-SEC-001, P1 and Formal remain OPEN.**
 
+## Independent Fixer NATIVE-008 recheck — 2026-10-18
+
+Actual isolated QA `HEAD`, implementation SHA and QA checkpoint are `ed9505953f803f8abc859ab402bbc30f896d8035` (`git merge-base --is-ancestor` PASS); it is not reachable from the caller worktree's former `74365f0` or `origin/main`. The registered mode is `push-termination-recovery` with boundaries `before-commit` and `after-commit`.
+
+| Scenario | Fresh run | Result | Evidence |
+| --- | --- | --- | --- |
+| A pre-handler / pre-commit | `native-smoke-20261018115728` | BLOCKED | Force-terminated real `HonsenProcure.exe` PID 18540; same profile/account/installation/event `7c0fc20e-727d-4dd2-8e5d-02fff84d6223` restarted. JSONL shows barrier, `499` with no origin, then one `accepted@1`; outbox `1→0`, Pull one/cursor `0→1`, replay 0. |
+| B onSend / post-commit, pre-ACK | `native-smoke-20261018115952` | BLOCKED | Force-terminated real EXE PID 26628; same profile/account/installation/event `72351df2-04af-421c-89af-f140bc8e3467` restarted. Both server observations read the same `accepted@1`; outbox `1→0`, Pull one/cursor `0→1`, replay 0. |
+
+`preHandler` is before the Push route/`SyncService.push`; `onSend` is after the handler awaits it and before response release. The host permits only loopback `test` databases and absolute `.signal` paths; desktop is test-profile/debug-only and release selects a fail-closed stub. The fault boundary uses ready/release conditions, not a fixed sleep.
+
+NATIVE-008 remains **OPEN**: A releases then immediately samples `request.raw.destroyed`; process `WaitForExit` does not ensure Node has observed socket cancellation, so a delayed observation could enter the production handler. The assertion also only requires `pushes.Count -ge 1`, omitting A committed `count=0/version` and B `count=1/version`. Integration Owner must wait for cancellation acknowledgement before A proceeds and persist/assert count/version for both boundaries before Compose teardown, then rerun both EXE modes. Server lint/typecheck PASS; `cargo fmt --check` completed, but Rust library/release checks were BLOCKED by C: zero free bytes (LNK1201/OS 112). No Mock, Playwright, standalone HTTP, direct SQLite mutation, existing-E2E-data cleanup, push, merge or deployment.
+
 ## NATIVE-002 native A/B conflict projection diagnosis — 2026-10-17
 
 `native-smoke-20261017152627` failed because the harness queried B's local conflict table immediately after the stale Push. This was a **harness timing defect**, not a cross-account data leak. The shared production client intentionally records a Push acknowledgement only when `status=accepted`; a `conflict` acknowledgement contains no server payload. The next production `pull_sync_https` receives the authoritative remote entity and `apply_sync_pull_page_for_account` atomically inserts the local conflict only when the matching pending outbox event belongs to the active account.
