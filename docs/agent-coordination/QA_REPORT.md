@@ -466,6 +466,39 @@ Focused checks: Rust `cargo fmt --check`, `cargo test --lib` (55/55), debug and 
 
 **NATIVE-005 is READY_FOR_RECHECK. T10-SEC-001, P1 and Formal remain OPEN; full-page Pull interruption, durable-cursor write failure, in-flight termination and RFQ/Formal native flows remain outside this one slice.**
 
+## Independent Fixer recheck: NATIVE-005 — 2026-10-17
+
+Baseline checked: actual `HEAD` was `ae1bfc9c336ad91e068bf4e15895314eeeb5a901`; `git merge-base --is-ancestor ae1bfc9 HEAD` returned 0. The only pre-existing worktree path was the preserved ignored `.honsen-native-qa/` evidence directory. Code review confirms `eventIds` is appended only to the test-only Fastify `.test.jsonl` diagnostic; it does not enter SyncService, authentication, acknowledgement or persistence decisions. The original RED evidence is a missing debug smoke-mode registration (`unknown native smoke mode`), not a business failure.
+
+The Fixer independently used a new disposable PostgreSQL/Fastify HTTPS instance, a newly generated test-profile certificate, new A/B absolute SQLite profiles, Windows Credential Manager and real debug `HonsenProcure.exe`:
+
+```text
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode push-partial-batch
+```
+
+Fresh run `native-smoke-20261017162947` completed without using the Builder's prior result. The native result contains distinct profiles and B installation `5b3239a9-c8cd-44e2-bc2f-5b7c651f1fff`; server/client error logs are zero bytes and no loopback listener or Compose project remained after cleanup.
+
+| Boundary | Result | Independent evidence |
+| --- | --- | --- |
+| A establishes authoritative remote record | PASS | First A Push event `08ed1564-8f42-47f3-a71f-e6ae29770a74` is accepted at server version 1. |
+| One real B batch contains two different events | PASS | The single B POST contains `00699ad8-4fc2-46c5-ae04-637cb4a99a92` and `8500243f-ed29-415b-b551-22a434a59778`. |
+| Actual mixed server response | PASS | Fastify JSONL records HTTP 200 with the first event `accepted@1` and the second `conflict@1`; no fault-response variable was enabled. |
+| Selective outbox acknowledgement | PASS | Real Rust result is accepted `1`, pending `1`; debug-only read-only rusqlite checks require accepted acknowledged and conflict unacknowledged. |
+| Authoritative Pull and cursor | PASS | Real Pull applies 2 changes and persists B cursor `0→2`; it retains exactly one local conflict. |
+| Conflict-only replay | PASS | The final POST has only `8500243f-ed29-415b-b551-22a434a59778`, returns conflict, and reports accepted `0`, pending `1`; the accepted event is not resent. |
+| Release/test boundary | PASS | Release `cargo check --release --bin HonsenProcure` passes; test entry is unavailable outside `debug_assertions`. |
+
+Artifacts:
+
+- `.honsen-native-qa/native-smoke-20261017162947-push-partial-batch.test.json`
+- `.honsen-native-qa/native-smoke-20261017162947-server-sync.test.jsonl`
+- `test-results/native-push-partial-fixer-20261017162946.{log,error.log}`
+- `test-results/native-smoke-20261017162947-{client,server,server-error,compose,compose-error}.log`
+
+Fresh focused checks: `cargo fmt --check`, `cargo test --lib` (55/55), `cargo check --release --bin HonsenProcure`, server lint/typecheck and `git diff --check` PASS. Existing debug-test unused-symbol warnings remain in the release check. No Mock, Playwright, standalone HTTP client, production database, existing E2E data, production TLS/keyring policy, push, merge or deployment was used.
+
+**NATIVE-005 is independently CLOSED for the bounded partial-Push scenario. T10-SEC-001, P1 and Formal remain OPEN: full-page Pull interruption, cursor-write fault, in-flight process termination and RFQ/Formal native workflows remain unverified.**
+
 ## Windows Credential Manager backend repair — 2026-10-17
 
 Root cause: desktop declared `keyring = "3.6.3"` with only its empty default feature set. Cargo therefore compiled keyring without `windows-native`; `cargo tree -e features -i keyring` showed no `windows-sys` or `byteorder` beneath keyring. That selected keyring's in-process mock credential implementation, which explains why a single `Entry` worked while a new Entry or process returned `NoEntry`.
