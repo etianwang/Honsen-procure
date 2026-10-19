@@ -1,5 +1,19 @@
 # T10 Closure Gap Audit — Honsen Procure v1.0
 
+## G1 独立安全复核覆盖记录 — 2026-10-19 — OPEN / FAIL
+
+本记录优先于下方 READY_FOR_RECHECK 交接；历史 Q 验收矩阵不改写为当前候选 PASS。实际被测应用/执行 HEAD 为 `fbdb14b6afac217688de6cb138514d1bd593cdc8`，父为 `be20d760bdee5f0146dc8f9e3d2ef6fe8de3ff95`。QA 分支 `codex/g1-security-recheck`，指定工作树 `E:/Project/honsen-g1-integration`；最终 QA 检查点仅含测试切片及记录，完整 SHA 由交付给出，生产应用 diff 为空。
+
+- 既有 owner 保护未丢失：列表/ID 处理在同一 SQLite 锁内校验角色、当前账号、outbox owner；无 owner/外账号/未知 ID 不可重新归属。独立新鲜 Rust 59/59、真实 PostgreSQL G1 3/3、API/service 19/19、定向 store 5/5（34 筛选）、desktop11/11、fixture DOM2/2 及 lint/typecheck/build/fmt/release 检查通过。它们不替代原生/真实 UI。
+- 新增仅测试 G1 原生驱动：真实 debug EXE/WebView2→生产 Tauri IPC、SQLite、Windows Credential Manager、Fastify HTTPS 和隔离 PostgreSQL。账号 B 初始合成 fixture 授予 administrator，避免角色不足掩盖 owner 校验。冲突由真实 `save_material`/Outbox/Push/Pull 生成；无 SQLite 冲突写入、HTTP 客户端冒充 EXE或 Mock IPC。既有 NATIVE002～008 未重构/机械重跑。
+- 有界命令场景 `native-smoke-20261019002504` PASS：A→同 profile B→A，B 列表空、已知 ID keep/use 与未知 ID 均 `sync_account_boundary`，伪造身份字段 Tauri 拒绝，B 合法事件成功、foreign-dirty Pull 拒绝，A 原冲突恢复及合法解决至 server v2，显式锁定后拒绝读取/处理。
+- **真实反证 G1-QA-001（P1 / BLOCKER）**：最终 `native-smoke-20261019002730` 在另一真实 EXE 正常登录 A、撤销旧 token；旧端 Pull 返回 `reauthentication_required`，紧接着旧端 `list_sync_conflicts` 仍返回来源：`denied=false / conflictCount=1 / sourceDisclosed=true`。保留失败断言和 exit1，不因前一有界 PASS 覆盖 FAIL。401 路径只返回错误、未失效 `local_session`；冲突 authorizer 仍接受该会话。这是已知在线认证失效后未强制锁定，不是正常 24h 离线登录，也不是已证明 B 绕过 A 的 owner。
+- **UI 验收 BLOCKED**：App 仅由 mock fixture 挂载冲突面板，生产 `tauriSyncApi` 无调用者。已检查真实 B Home 截图/控制台，无 fixture 来源标记，但此前没有真实冲突敏感 UI 可见，不能当作“切换后缓存已清除”。缺少实际冲突视图的认证挂载/卸载及迟到响应证据；不在本轮擅自开发完整 G4 订单解决。
+
+结论：**G1 = OPEN，独立验收 FAIL，不允许 CLOSED。** 最小下一任务是 G1-QA-001：在可信 Rust 边界使匹配的被拒绝账号/会话原子失效、清理对应 UI 敏感状态并保留业务/outbox/conflict；迟到 A 的401不得锁定新 B。它关联既有 G5 会话撤销根因，同时阻塞本轮 G1 明确的认证失效门，不归为 G2 正式投影或 G3 业务拒绝重试。修复后重跑保留 RED 场景，再补真实冲突 UI 生命周期证据。原生 NULL-owner 仍仅 unit/migration 证据，不伪造恢复归属；未运行真实 idle 等待。详见 QA_REPORT 最新 G1 段及 BUG_QUEUE。
+
+所有原生原件保留于本 QA 工作树 `.honsen-native-qa/`、`test-results/`；不提交 SQLite/WebView/凭据文件。未改生产/迁移/协议、未推送/合并 main、未清理旧证据。**NATIVE-008 CLOSED；T10、T10-SEC-001、P1、Formal hold OPEN。**
+
 ## G1 实施覆盖记录 — 2026-10-18
 
 以下审计原文继承自文档提交 `50378dd`，其 Q 基线矩阵和 15/22/6/2 历史计数保持原义，不自动改成实施后的独立验收结果。

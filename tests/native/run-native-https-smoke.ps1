@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [ValidateSet('g1-conflict-origin', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security',
   [ValidateSet('before-commit', 'after-commit')]
   [string]$TerminationBoundary = 'before-commit',
@@ -62,7 +62,7 @@ try {
     if (!(Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue)) { throw "$name is required by .env.test" }
   }
 
-  $wslRepo = (& wsl.exe -- wslpath -a $repo).Trim()
+  $wslRepo = (& wsl.exe -- wslpath -a $repo.Replace('\', '/')).Trim()
   if (!$wslRepo) { throw 'WSL is required for the disposable PostgreSQL test service' }
   $composeCommand = "cd '$wslRepo' && docker compose --project-name $composeProject --env-file .env.test -f compose.test.yaml up -d --wait && exec tail -f /dev/null"
   $wslHolder = Start-Process -FilePath wsl.exe -ArgumentList @('--', 'bash', '-lc', $composeCommand) -PassThru -RedirectStandardOutput $composeLog -RedirectStandardError $composeErrorLog -WindowStyle Hidden
@@ -132,7 +132,12 @@ try {
     $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD = $env:HONSEN_TEST_ENGINEER_B_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD = $env:HONSEN_TEST_PURCHASER_PASSWORD
     $env:RUST_BACKTRACE = '1'
-    if ($Mode -eq 'ab-sync-security') {
+    if ($Mode -eq 'g1-conflict-origin') {
+      Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
+      node (Join-Path $repo 'tests/native/g1-conflict-origin.mjs') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native G1 command/UI driver failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 'ab-sync-security') {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
       & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native HonsenProcure.exe smoke failed; inspect $nativeLog" }
@@ -243,7 +248,13 @@ try {
   } finally {
     Pop-Location
   }
-  if ($Mode -eq 'ab-sync-security') {
+  if ($Mode -eq 'g1-conflict-origin') {
+    $smoke = Get-Content -Raw $result | ConvertFrom-Json
+    if ($smoke.mode -ne 'g1-conflict-origin' -or $smoke.coreResult -ne 'PASS' -or $smoke.sameProfileSwitch -ne 'PASS' -or $smoke.ownerRecoveryAndResolution -ne 'PASS') {
+      throw "native G1 command result is invalid: $result"
+    }
+    Write-Output "PASS native G1 command slice only (UI conflict residue remains BLOCKED): $result"
+  } elseif ($Mode -eq 'ab-sync-security') {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
     if ($smoke.mode -ne 'ab-sync-security' -or $smoke.independentInstallations -ne 'PASS' -or $smoke.forgedDeviceIdTrustedOrigin -ne 'PASS' -or $smoke.accountIsolation -ne 'PASS' -or $smoke.conflictIsolation -ne 'PASS' -or $smoke.pushReplayIdempotency -ne 'PASS') {
       throw "native smoke result is invalid: $result"
@@ -316,7 +327,7 @@ try {
     $server.WaitForExit()
   }
   if ($wslHolder -and !$wslHolder.HasExited) {
-    $wslRepo = (& wsl.exe -- wslpath -a $repo).Trim()
+    $wslRepo = (& wsl.exe -- wslpath -a $repo.Replace('\', '/')).Trim()
     & wsl.exe -- bash -lc "cd '$wslRepo' && docker compose --project-name $composeProject --env-file .env.test -f compose.test.yaml down --volumes" | Out-Null
     $wslHolder.Refresh()
     if (!$wslHolder.HasExited) { Stop-Process -Id $wslHolder.Id -Force }

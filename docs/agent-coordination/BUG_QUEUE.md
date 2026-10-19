@@ -1,5 +1,15 @@
 # Fixer Bug Queue
 
+## G1 Independent Security QA — 2026-10-19 (supersedes handoff status)
+
+| ID | Status | Priority | Evidence / impact | Minimal next action |
+| --- | --- | --- | --- | --- |
+| G1 | OPEN — FAIL | P1 gate | Tested application `fbdb14b6afac217688de6cb138514d1bd593cdc8`; independent Rust 59/59, PostgreSQL G1 3/3, API/service 19/19, selected store 5/5, desktop 11/11, fixture DOM 2/2. Real EXE `native-smoke-20261019002504` proves bounded shared-profile A/B ownership and explicit-lock denial, but final `native-smoke-20261019002730` fails auth invalidation. Production conflict UI residue remains BLOCKED. | Fix G1-QA-001 separately; independently rerun retained RED native case and obtain actual conflict UI lifecycle proof. G1 is not CLOSED. |
+| G1-QA-001 | OPEN / BLOCKER | P1 security | Second real EXE normally logs into A, revoking old token. Old EXE Pull returns `reauthentication_required`, yet its next real Tauri conflict list succeeds: `denied=false, conflictCount=1, sourceDisclosed=true`. `.honsen-native-qa/native-smoke-20261019002730.test.json` and matching client log. `refresh_authorization_https`/sync 401 returns do not invalidate `local_session`; conflict helper still accepts it. No B-to-A owner bypass demonstrated. | Trusted, account/session-conditional atomic invalidation after known auth rejection; clear matching UI cache; preserve business/outbox/conflict evidence. Test delayed A 401 cannot lock new B. Existing G5 lifecycle root cause; not G2/G3 scope. No fix in this QA checkpoint. |
+| G1-UI-EVIDENCE | BLOCKED | Acceptance evidence | Conflict panel is only mounted with mock `SyncConflictFixturePage`; no production `tauriSyncApi` caller. Real B Home screenshot is not proof of clearing A's previously visible conflict source. | Obtain authorized real conflict-view mount/teardown evidence for A→lock/B→A and stale async results. Do not treat mock DOM or hiding controls as authorization, or silently develop full order resolver. |
+
+NATIVE-008 stays CLOSED. T10, T10-SEC-001, original P1 and Formal hold stay OPEN. Detailed commands, baseline, limitations and retained setup failures: latest G1 section in `QA_REPORT.md`.
+
 ## G1 integration handoff — 2026-10-18
 
 | ID  | Status            | Delivery / evidence                                                                                                                                                                                                                                                                                                                                                                                                 | Remaining gate                                                                                                                                                   |
