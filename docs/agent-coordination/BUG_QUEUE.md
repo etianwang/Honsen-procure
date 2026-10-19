@@ -1,5 +1,12 @@
 # Fixer Bug Queue
 
+## G1-QA-001 independent final recheck — 2026-10-19 — OPEN / FAIL
+
+| ID | Status | Evidence / impact | Minimal next action |
+| --- | --- | --- | --- |
+| G1-QA-001 | OPEN / BLOCKER | Independent QA at `85d0565` against `bfa6752`: fresh real EXE `native-smoke-20261019090425` passes revoked conflict list/known-ID denial (`sourceDisclosed=false`), delayed A→B (`req-1n`) and A1→A2 (`req-26`) actual-401 preservation, and Rust SQLite-delete-failure closure. However management list/change/replace return 401 without session invalidation; cached local authorization context remains readable/selectable after that first known rejection. | Route all three management 401 paths through the existing matching private session invalidator; test old 401 cannot revoke B/A2 and cached authorization context fails closed. Then independently rerun only G1 mode and this focused regression. |
+| G1 | OPEN | Production conflict UI lifecycle evidence remains BLOCKED and is not closed by this command slice. | Keep it as its own acceptance item after G1-QA-001 is repaired. |
+
 ## G1-QA-001 repair handoff — 2026-10-19 — READY_FOR_RECHECK
 
 Integration Owner evidence on `codex/g1-session-invalidation`, starting at QA `bfa6752ccd64a6b39c36bdab96e1cb4c611ada5d`; implementation is this local checkpoint (full SHA in delivery). Historical independent FAIL below is retained, not retroactively changed to PASS.

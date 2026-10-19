@@ -1,5 +1,11 @@
 # T10 Closure Gap Audit — Honsen Procure v1.0
 
+## G1-QA-001 独立最终复核补充 — 2026-10-19 — OPEN / FAIL
+
+被测 SHA `85d0565a5b695a94da7bd5aa861178bfcbc77a52`，独立 QA 基线 `bfa6752ccd64a6b39c36bdab96e1cb4c611ada5d`。新鲜真实 EXE Harness `native-smoke-20261019090425`（Harness PID `29624`；观察到 EXE PID `9232`、`33936`）完成于 `09:06:06.824Z`：当前被撤销会话的冲突列表和已知 ID 均拒绝，`sourceDisclosed=false`；迟到 A→B 的 `req-1n`、同账号 A1→A2 的 `req-26` 均为匹配 run/phase 的实际 HTTP 401，且新会话保留正常冲突列表/Push。Rust `rejected_sync_session` 5/5 也覆盖 SQLite 删除失败仍关闭。
+
+但独立授权管理 list/change/replace 的 401 仍只返回 `NoActiveSession`，未使匹配的本地 session/generation 失效；若它是首个已知 401，随后本地授权上下文 list/select 仍读取/写入未过期 SQLite cache。这是可触发的同类本地权限泄露，故 **G1-QA-001 = OPEN，G1 = OPEN**，不可因冲突命令切片 PASS 而关闭。最小修复是复用私有请求 session 的 generation 比对和 `reject_sync_session`，并增加管理 401 后 cache fail-closed、迟到 A 不影响 B/A2 的回归。生产冲突 UI 生命周期证据仍是独立 BLOCKED 项；NATIVE-008 CLOSED，T10/T10-SEC-001/P1/Formal hold OPEN。
+
 ## G1-QA-001 修复交接覆盖记录 — 2026-10-19 — READY_FOR_RECHECK
 
 Integration Owner证据，不是独立验收。本轮从QA `bfa6752ccd64a6b39c36bdab96e1cb4c611ada5d`（含G1 `fbdb14b`）在指定工作树建立 `codex/g1-session-invalidation`；实现为包含本记录的检查点，完整SHA见交付。**G1-QA-001 READY_FOR_RECHECK；G1 OPEN，历史独立FAIL不改写为PASS；Q原矩阵/计数保持历史含义。**
