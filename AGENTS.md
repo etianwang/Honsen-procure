@@ -26,7 +26,7 @@ Then compare the project with `docs/HONSEN_TOOLBOX_INTEGRATION.md` and report an
 6. UUID identifiers, soft deletes, server versions, idempotent push and cursor-based pull. Conflict handling cannot silently discard data.
 7. Do not hardcode real prices, tax rates, exchange rates, credentials or vendor details.
 8. Use strict TypeScript, validate input at API and Tauri boundaries, parameterized SQL, versioned migrations, structured errors.
-9. Tests required for changes; run lint, typecheck, unit and relevant integration/e2e tests before declaring done.
+9. Code changes require affected-package quality gates and directly relevant regression/integration/e2e tests before declaring done. Documentation-only changes require formatting, reference and status-consistency checks, not application test reruns.
 10. Do not implement unapproved features or change scope silently; document assumptions and open questions.
 
 ## Work protocol
@@ -37,6 +37,17 @@ Then compare the project with `docs/HONSEN_TOOLBOX_INTEGRATION.md` and report an
 - After work: report changed files, test commands/results, limitations, next steps.
 - For installer/update work: update `docs/HONSEN_TOOLBOX_INTEGRATION.md` with actual values and end-to-end evidence.
 - Never delete user data, overwrite production databases, or deploy without explicit approval.
+
+## v1.0 Delivery-First and scope control
+
+- Follow **IMPLEMENT → TARGETED TEST → INDEPENDENT RECHECK → CLOSE**. Deliver one bounded, real user workflow or confirmed defect repair per turn. Implementation or builder PASS is not independent acceptance.
+- Preserve M0–M4, T00–T15, approved PRD scope and acceptance gates. OPA/HPA/SPO slices and audit G1–G10 are mappings into those tasks, not additional task systems. `docs/BUILD-TASKS.md` owns the remaining-work register; `docs/planning/V1-DELIVERY-CLOSURE-PLAN.md` is navigation only.
+- Classify work as A (required functionality missing), B (confirmed defect), C (acceptance evidence missing), D (accepted bounded scope), or E (non-required optimization). Do not turn C into redevelopment or E into a release blocker. Printing, three languages, receiving, payments, backups and release remain v1.0 requirements; postponement requires explicit approval.
+- Distinguish implementation prerequisites, final-acceptance prerequisites and external authorization. Preserve the original dependency table. An open final gate does not prohibit an independently safe slice whose technical/security prerequisites exist; it still prevents closing its parent. Record contradictory dependency boundaries and await approval rather than silently rewriting them.
+- Reuse evidence only for its exact SHA, scope and environment, or after an explicit unchanged-boundary comparison. Never transfer another worktree's implementation/test status to current HEAD. Record independent failures and subsequent builder readiness separately.
+- Run directly affected checks, preserving all original final gates. Do not mechanically rerun NATIVE-002–008, create NATIVE-009, split tests into extra tasks, or block delivery on nonessential Harness refactoring. A necessary new regression belongs to the existing task and must address an actual changed boundary.
+- Confirmed security, authorization, data-loss, silent-overwrite and immutable-snapshot defects must be fixed and independently rechecked. Record unrelated nonblocking findings without expanding the selected task. No automatic closure of security or Formal holds.
+- New work enters v1.0 only by tracing it to an approved PRD requirement/original acceptance condition or a confirmed correctness/security defect. Otherwise record it as nonblocking Backlog and request approval before expanding scope.
 
 ## Git workflow
 
@@ -68,7 +79,7 @@ When the user says **「开始任务」**, perform this startup protocol before 
 1. Read `AGENTS.md`, `memory.md`, and the relevant task/child entries and acceptance criteria in `docs/BUILD-TASKS.md`; use `docs/ROADMAP.md` to confirm milestone status and dependencies. Read the required product/architecture/security/test documents for the selected scope.
 2. Inspect `git status --short`, recent commits, and the diff for every existing uncommitted change. Preserve valid user or prior-session work; never reset, clean, overwrite, or silently fold unrelated changes into the new task.
 3. Identify the highest-priority unblocked **single minimal independently verifiable child task**. When multiple child tasks are available, prefer one whose prerequisites are satisfied, does not expand the modification scope, and can be accepted independently. State its callers, schemas/migrations, tests, fixtures, UI/API/Rust boundaries, data-loss or exposure risks, and prerequisite status before editing.
-4. If a required dependency, authority, environment, or acceptance-boundary decision is blocked, do not force work around it or mark it complete. Keep all existing code, record the exact blocker and safe next action in `memory.md`, then stop.
+4. Classify blocked dependencies first. Never bypass a missing technical/security prerequisite, external authority or disputed acceptance boundary. An unrelated final-acceptance hold alone does not stop a safe independent approved slice. If the selected slice truly cannot proceed, preserve code and record the exact blocker and safe next action in `memory.md`; select an eligible independent slice only before starting work, otherwise stop.
 5. For application, installer, update, release, or publishing changes, complete the Toolbox preflight above in its stated order. For contract conflicts, report the impact and proposed repair, then wait for approval.
 
 ### Execution rules
@@ -84,14 +95,14 @@ When the user says **「开始任务」**, perform this startup protocol before 
 When the main path is blocked by external approval, product decisions, or task dependencies, inspect for a separately verifiable fallback task before stopping. Eligible work is limited to a known defect fix, targeted test-coverage improvement, error-handling gap, documentation consistency repair, or reliability improvement for an already implemented feature.
 
 - Record the evidence, scope, affected callers/tests, acceptance criteria, and why it does not alter product behavior before editing.
-- Use the normal branch, validation, progress-record, and checkpoint workflow for each fallback task; re-evaluate the queue after it completes.
+- Use the normal branch, validation, progress-record, and checkpoint workflow for the selected fallback task; recommend the next item after it completes, then stop. Independently implementable approved v1.0 work may also be selected through the normal startup protocol; it is not an invented fallback feature.
 - Do not invent requirements, bypass a blocked dependency, change product behavior, or conduct an unfocused refactor to create fallback work. If no eligible task exists, save the checkpoint and stop.
 
 ### Trigger: `收尾任务`
 
 When the user says **「收尾任务」**, perform the following only for the currently selected child task:
 
-1. Reinspect the diff and affected callers/tests. Run its focused test first, then every mandatory affected-package quality gate from `docs/BUILD-TASKS.md`: formatting, lint, strict typecheck, unit tests, production build, relevant Rust/API/integration checks, and the required reproducible Playwright DOM proof when the scope has UI acceptance.
+1. Reinspect the diff and affected callers/tests. For code, run its focused test first, then every mandatory affected-package quality gate from `docs/BUILD-TASKS.md`: formatting, lint, strict typecheck, unit tests, production build, relevant Rust/API/integration checks, and reproducible Playwright DOM proof when the scope has UI acceptance. Do not rerun unrelated suites. Documentation-only tasks check formatting, references and status consistency. Preserve final release gates and name the SHA/scope of reused evidence.
 2. Do not claim success when a required check is skipped, fails, or is blocked. Preserve the work; record the command, result, failure/skip reason, migration/sync effect, remaining risk, and next action in `memory.md`. Every skipped test must name the affected acceptance item and the impact of not running it.
 3. If the selected child task is accepted, update the actual partial/full status and evidence consistently in `memory.md`, `docs/BUILD-TASKS.md`, and `docs/ROADMAP.md`. Keep incomplete parent tasks and milestones unchecked.
 4. Create one local Git checkpoint commit containing only the selected task's code, tests, and progress documentation. Never push, deploy, delete data, or start another task without explicit user instruction.

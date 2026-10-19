@@ -2,6 +2,18 @@
 
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.
 
+## Current delivery path — 2026-10-19
+
+M0–M4 and their original objectives below are preserved; dated progress paragraphs are historical checkpoints, not additional queues. The [current delivery register](BUILD-TASKS.md#current-delivery-register--2026-10-19) owns remaining-task status and G1–G10 mappings; the [v1.0 closure plan](planning/V1-DELIVERY-CLOSURE-PLAN.md) is a short navigation index, not another task master.
+
+- Documentation starts at `50378dd` (H), not the separate unmerged FIX2 candidate `13b22ff` (F). Latest independent QA `b0a6069` tested `85d0565`, run `native-smoke-20261019090425`: G1-QA-001 OPEN/FAIL. F's later builder run `native-smoke-20261019112134` makes the repair READY_FOR_RECHECK only. G1 and its production conflict UI lifecycle remain open; do not redo the implemented owner/session fix or claim H/main accepted it.
+- NATIVE-008 remains CLOSED within `03f432a`/`be20d76` evidence. T10, T10-SEC-001, original P1 and Formal hold remain OPEN. No milestone checkbox changes this round.
+- Nine original task IDs remain unclosed: T04/T08/T09/T10/T11/T12/T13/T14/T15. Eight require development; T14 is final acceptance evidence, not a duplicate development task. Seven historical foundation acceptances remain bounded to their evidence; account TOTP/governance, live home queues and category maintenance are not proven by foundation acceptance.
+- First independently recheck existing FIX2; recommended next development is T10-A/G2 frozen formal Pull preservation, then structured sync outcomes and real conflict convergence with remaining T08/T09 business/formal paths. Complete file ingestion, bilingual PDF/print/Excel, backup/full three-language UI and release implementation using stable interfaces where independently safe. Final closure still follows original prerequisite gates through T14 and T15.
+- Obtain actual T04 deployment authority, legacy-data recovery policy and release decisions separately. Preserve the T09-C/T11 dependency-cycle records; the proposed metadata/file-service/joint-proof boundary awaits approval. An unrelated final gate does not prohibit safe independent implementation.
+
+Execution rule: **IMPLEMENT → TARGETED TEST → INDEPENDENT RECHECK → CLOSE**; one bounded task per turn, relevant tests and valid evidence reuse, no automatic NATIVE expansion or v1.0 scope reduction. Printing, three languages, receiving, payments, backups and Windows distribution remain required.
+
 ## Current acceptance and bidirectional task mapping — 2026-10-11
 
 Original milestone objectives below are retained. Their checkboxes concern the complete stated objective, not an implemented subset. The task acceptance register and child items in BUILD-TASKS provide evidence and remaining work; memory.md provides the current handoff. Cross-stage contributions do not redefine milestones or dependencies.
@@ -121,7 +133,7 @@ M0 item tracking (all seven original objectives, in order):
 
 ## Current next-task recommendation
 
-Obtain authority for T04 authorized initial-record acceptance, then complete the remaining T08/T09 prerequisites before T10 final acceptance. See independently tracked child tasks in BUILD-TASKS. No new feature implementation is authorized by this progress update.
+Follow the current delivery path above and the single remaining-work register in BUILD-TASKS. Next verification is independent FIX2 recheck; recommended next development is T10-A/G2, not repeating G1 or waiting for every unrelated acceptance gate. T04 authorized deployment and original final dependencies remain mandatory for closure. This documentation update authorizes no implementation; await user confirmation of order.
 
 ## Approved / planned: Admin Master Data Management
 
@@ -154,5 +166,7 @@ The follow-on T10 Push cursor-order reliability slice serializes each Push chang
 The T04 unit REST-to-Pull reliability slice now makes an authorized online unit save visible to another installation's cursor Pull, with Rust-compatible payload, immutable-code protection, monotonic business/sync version and commit-ordered publication. Isolated PostgreSQL tests cover edits, stale Push conflict, legacy divergence, late failure/retry and an earlier uncommitted log writer; the full workspace, Rust and DOM gates passed. This is not publication for all other master-data types, native two-client acceptance or completion of T04/T10 or any milestone; checkboxes and dependencies remain unchanged.
 
 ## Original foundation instruction (retained; not current progress)
+
+The following instruction applied to the original foundation stage only; it does not override the current approved v1.0 scope or Delivery-First path.
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
