@@ -1,5 +1,11 @@
 # Fixer Bug Queue
 
+## T10-A/G2 — CLOSED (Independent QA, 2026-10-19)
+
+- Tested exact candidate `6e0a2a61fdf0967d75dc5edec3eed5e350056ef5` in separate `codex/qa-g2-formal-pull` tree. Independent PASS12/12 G2 +3/3 existing focused regressions; actual **native-smoke-20261019145156**, PIDs42056/41052/41088, completed2026-10-19T14:53:14.685Z, Harness exit0. All16 values match actual HTTP/DTO/SQLite/readback; real different-actor approval/issue, two EXE directories, changed current quote, receiver restart and empty replay pass. Rollback/cursor and nonempty Outbox/conflict retention pass in directed Rust. No production repair needed.
+- **G2 CLOSED for its approved OPA formal Pull scope only.** Full matrix/raw links and prior setup-only failures remain in [QA_REPORT](QA_REPORT.md); builder READY sections below are historical, not current status. No new bug/task ID or expanded matrix.
+- **G1 production UI/T10/T10-SEC-001/P1/Formal hold OPEN; NATIVE-008 CLOSED.** Prior FIX2 CLOSED unchanged. No push/merge or production code/data/evidence cleanup. Stop; G3 requires separate user ordering.
+
 ## Current G2 development checkpoint — 2026-10-19
 
 - **G1-QA-001 CLOSED on `13b22ff`**, independently decided in management checkpoint `25a56af`, fresh `native-smoke-20261019115437`. Historical builder READY/QA FAIL sections below are retained, not current status; auth is unchanged here. Full independent signoff remains at `25a56af:docs/agent-coordination/QA_REPORT.md`.

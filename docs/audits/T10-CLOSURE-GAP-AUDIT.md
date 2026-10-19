@@ -1,5 +1,11 @@
 # T10 Closure Gap Audit — Honsen Procure v1.0
 
+## G2 独立验收补充 — 2026-10-19 — PASS / CLOSED
+
+独立 QA 工作树基于被测 `6e0a2a61fdf0967d75dc5edec3eed5e350056ef5`，新鲜 Rust G2 12/12、既有直接回归3/3通过。真实双 EXE **native-smoke-20261019145156**（PID 42056/41052/41088）于 2026-10-19T14:53:14.685Z 完成、Harness exit0；生产创建/定价/提交/不同账号审批签发/Push→第二端 Pull 正常完成。实际 HTTP 响应的16个字段与 DTO、SQLite 和重启读回完全一致；当前报价9999不改冻结1234/76.5/944/20/964，重启后新会话 Pull0条/cursor7→7。失败回滚、cursor不越前和非空Outbox/冲突保留由独立定向 Rust 证明。未直接写接收端订单或冻结列；最小测试扩展只加G2驱动/模式和原始响应旁路诊断，不修改生产代码。
+
+**签署 G2 CLOSED，仅限已批准16字段 OPA 正式快照 Pull 保真。** 逐字段值、请求/session/安装归属、原始记录和测试环境失败均见 [QA_REPORT](../agent-coordination/QA_REPORT.md)。这不是重审原45项矩阵或关闭整个 T10-A/E。**G1 生产冲突 UI、T10/T10-SEC-001/原始P1/Formal hold OPEN；NATIVE-008 CLOSED。** 历史 READY/FAIL 保留；不推送、不合并、不自动执行G3。
+
 ## G2 定向实现交接 — 2026-10-19（不是重新审计或独立关闭）
 
 管理检查点 `25a56af` 已独立确认 FIX2 `13b22ff` 的 G1-QA-001 CLOSED（新鲜 `native-smoke-20261019115437`）；下方旧 READY/FAIL 和矩阵保持历史含义。当前 G2 开发以 F 为生产父提交、以该管理检查点为范围依据，完整证据和独立判定保留在原 Git 对象/工作树，不覆写。

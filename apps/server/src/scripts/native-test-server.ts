@@ -331,12 +331,33 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
       return JSON.stringify({ error: 'native test Pull page transport fault' })
     }
     const page = parsePullPage(payload)
+    // Test-only evidence from the actual serialized production response, never a replacement page.
+    const g2Evidence =
+      process.env.HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE === '1'
+        ? {
+            runId: nativeTestRunId,
+            requestId: request.id,
+            responsePage: page,
+            session: (
+              await pool.query(
+                'SELECT id, user_id, installation_id FROM account_sessions WHERE token_hash = $1',
+                [
+                  hashToken(
+                    request.headers.authorization?.replace(/^Bearer /, '') ??
+                      '',
+                  ),
+                ],
+              )
+            ).rows[0],
+          }
+        : {}
     writeDiagnostic({
       route: 'GET /api/sync/pull',
       requestedCursor: cursor ?? '0',
       serverStatus: reply.statusCode,
       responseChangeCount: page?.changes?.length,
       responseNextCursor: page?.nextCursor,
+      ...g2Evidence,
     })
     return payload
   }

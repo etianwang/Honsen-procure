@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('g1-conflict-origin', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [ValidateSet('g2-formal-pull', 'g1-conflict-origin', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security',
   [ValidateSet('before-commit', 'after-commit')]
   [string]$TerminationBoundary = 'before-commit',
@@ -100,6 +100,7 @@ try {
   $env:HONSEN_PROCURE_TEST_RUN_ID = $runId
   $env:HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX = if ($Mode -eq 'g1-conflict-origin') { Join-Path $qaRoot "$runId-auth.test" } else { '' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
+  $env:HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE = if ($Mode -eq 'g2-formal-pull') { '1' } else { '0' }
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
   for ($launch = 0; $launch -lt 3; $launch++) {
@@ -133,7 +134,12 @@ try {
     $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD = $env:HONSEN_TEST_ENGINEER_B_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD = $env:HONSEN_TEST_PURCHASER_PASSWORD
     $env:RUST_BACKTRACE = '1'
-    if ($Mode -eq 'g1-conflict-origin') {
+    if ($Mode -eq 'g2-formal-pull') {
+      Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
+      node (Join-Path $repo 'tests/native/g2-formal-pull.mjs') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native G2 driver failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 'g1-conflict-origin') {
       Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
       node (Join-Path $repo 'tests/native/g1-conflict-origin.mjs') *> $nativeLog
@@ -249,7 +255,13 @@ try {
   } finally {
     Pop-Location
   }
-  if ($Mode -eq 'g1-conflict-origin') {
+  if ($Mode -eq 'g2-formal-pull') {
+    $smoke = Get-Content -Raw $result | ConvertFrom-Json
+    if ($smoke.mode -ne 'g2-formal-pull' -or $smoke.result -ne 'PASS' -or $smoke.fieldsMatched -ne 16 -or !$smoke.restartPreserved -or !$smoke.replayPreserved -or @($smoke.exePids).Count -ne 3 -or $smoke.installations[0] -eq $smoke.installations[1] -or $smoke.exePaths[0] -eq $smoke.exePaths[1]) {
+      throw "native G2 field/restart/replay result is invalid: $result"
+    }
+    Write-Output "PASS native G2 formal Pull/restart/replay only: $result"
+  } elseif ($Mode -eq 'g1-conflict-origin') {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
     if ($smoke.mode -ne 'g1-conflict-origin' -or $smoke.coreResult -ne 'PASS' -or $smoke.sameProfileSwitch -ne 'PASS' -or $smoke.ownerRecoveryAndResolution -ne 'PASS' -or !$smoke.revokedSessionAccess.denied -or $smoke.revokedSessionAccess.sourceDisclosed -or $smoke.lateAccountPreserved -ne 'PASS' -or $smoke.lateSameAccountPreserved -ne 'PASS') {
       throw "native G1 command result is invalid: $result"
