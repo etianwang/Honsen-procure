@@ -4,6 +4,12 @@
 
 **结论：T10 不可 CLOSED；T10-SEC-001、原始 P1 和 Formal hold 均保持 OPEN。NATIVE-008 保持 CLOSED。** 已接受的原生可靠性证据不能替代采购业务、订单冲突解决、审批和正式签发的跨端验收。
 
+## 定向后续记录 — 2026-10-19（非重新全面审计）
+
+管理基线 `e5e46362`；候选 `13b22ff`。独立工作树新鲜真实 EXE **`native-smoke-20261019115437`**（PIDs3428/13116）与 Rust 管理4/4、会话5/5、API/屏障15/15通过。独立 Security QA 源码/证据复核给出 **PASS，G1-QA-001 CLOSED，仅限管理401缓存泄露修复**：四种方法实际401后缓存读取/选择/冲突来源拒绝，迟到 A/B/A2 保护、非401不注销、DELETE失败拒绝读取和数据保留均满足。完整请求/session/屏障证据见 [QA_REPORT](../agent-coordination/QA_REPORT.md)。历史 `b0a6069` 失败和 F 的 builder READY 仍保留在原 Git 记录，不改写成过去已通过；下文旧 Q 缺少的 owner guard 已在 F 实现，不重做。
+
+**G1 生产冲突 UI 生命周期仍独立未验收；G1、T10、T10-SEC-001、原始 P1、Formal hold OPEN；NATIVE-008 CLOSED。** 当前文档提交不是候选生产集成。仅准备原 T10-A/G2 的 [6个头字段/10个行字段及投影行为范围](../BUILD-TASKS.md#t10-a--g2-preparation--2026-10-19-scope-only-not-implementation)，未改 G2 代码/测试/迁移。未重跑 NATIVE-002～008，也未复算下文旧 Q 的45项矩阵；这不是新增任务体系或全面审计。
+
 ## 1. 审计基线、分支及证据归属
 
 ### 1.1 三个不同基线
