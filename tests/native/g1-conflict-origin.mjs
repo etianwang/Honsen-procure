@@ -31,6 +31,8 @@ const browsers = []
 const consoleErrors = []
 const denials = []
 const lateResponses = []
+const managementRevocations = []
+const managementReplacementSessions = []
 let revokedSessionAccess = null
 const accountA = '10000000-0000-4000-8000-000000000013'
 const accountB = '10000000-0000-4000-8000-000000000012'
@@ -228,14 +230,14 @@ try {
   children.push(vite)
   await ready('http://127.0.0.1:1420')
   const producer = await launch(profileB, 9235)
-  await login(
+  await loginCore(
     producer,
     'engineer-b',
     process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
   )
   await call(producer, 'save_material', { material })
   assert.equal((await call(producer, 'push_pending_sync')).acceptedCount, 1)
-  await lock(producer)
+  await call(producer, 'lock_session')
   const page = await launch(profileA, 9236)
   // Keep the renderer logged out during setup so automatic Pull cannot replace the deliberate stale baseline.
   await loginCore(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
@@ -333,7 +335,7 @@ try {
   )
   await lock(producer)
   await lock(page)
-  await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD, 1)
+  await loginCore(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
   await call(page, 'resolve_sync_conflict', { input })
   assert.equal((await call(page, 'push_pending_sync')).acceptedCount, 1)
   assert.deepEqual(await call(page, 'list_sync_conflicts'), [])
@@ -364,7 +366,7 @@ try {
     diagnostics.includes('validation_error') ||
       diagnostics.includes('conflict'),
   )
-  await lock(page)
+  await call(page, 'lock_session')
   await denied(
     page,
     'list_sync_conflicts',
@@ -384,14 +386,14 @@ try {
     nameZh: `G1-B-server-${randomUUID()}`,
   }
   const sourceB = `G1-B-local-${randomUUID()}`
-  await login(
+  await loginCore(
     producer,
     'engineer-b',
     process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
   )
   await call(producer, 'save_material', { material: bMaterial })
   assert.equal((await call(producer, 'push_pending_sync')).acceptedCount, 1)
-  await lock(producer)
+  await call(producer, 'lock_session')
   await loginCore(
     page,
     'engineer-b',
@@ -412,14 +414,19 @@ try {
       prefix.endsWith('.test'),
   )
 
-  async function startHeldPull(phase) {
+  async function startHeldPull(phase, command = 'pull_sync', args) {
     writeFileSync(`${prefix}.arm.signal`, phase)
-    await page.evaluate(() => {
-      window.__g1PendingPull = window.__TAURI__.core.invoke('pull_sync').then(
-        (value) => ({ ok: true, value }),
-        (error) => ({ ok: false, error }),
-      )
-    })
+    await page.evaluate(
+      ({ command, args }) => {
+        window.__g1PendingPull = window.__TAURI__.core
+          .invoke(command, args)
+          .then(
+            (value) => ({ ok: true, value }),
+            (error) => ({ ok: false, error }),
+          )
+      },
+      { command, args },
+    )
     await expect
       .poll(() => existsSync(`${prefix}.${phase}.ready.signal`), {
         timeout: 10_000,
@@ -454,6 +461,14 @@ try {
     assert.equal(actual[0].serverStatus, 401)
     assert.equal(actual[0].runId, process.env.HONSEN_PROCURE_TEST_RUN_ID)
     assert.ok(actual[0].readyAt <= actual[0].releasedAt)
+    if (phase.startsWith('management-')) {
+      assert.equal(
+        actual[0].route,
+        `GET /api/authorization/bindings/${accountA}`,
+      )
+      assert.equal(actual[0].session.user_id, accountA)
+      assert.ok(actual[0].session.revoked_at)
+    }
     lateResponses.push({ ...actual[0], clientError: response.error.code })
   }
   await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
@@ -499,6 +514,160 @@ try {
     'sync_account_boundary',
   )
   await lock(page)
+  // Keep the renderer logged out: only the deliberate management request may observe revocation first.
+  const binding = {
+    projectId: '10000000-0000-4000-8000-000000000002',
+    departmentId: '10000000-0000-4000-8000-000000000003',
+    teamId: '10000000-0000-4000-8000-000000000004',
+  }
+  const managementCases = [
+    ['list_managed_authorizations', { accountId: accountB }, 'GET'],
+    [
+      'change_managed_authorization',
+      { accountId: accountB, binding, revoke: false },
+      'PUT',
+    ],
+    [
+      'change_managed_authorization',
+      { accountId: accountB, binding, revoke: true },
+      'DELETE',
+    ],
+    [
+      'replace_managed_authorization',
+      {
+        accountId: accountB,
+        replacement: { oldScope: binding, newScope: binding },
+      },
+      'PATCH',
+    ],
+  ]
+  for (const [command, args, method] of managementCases) {
+    await loginCore(
+      page,
+      'engineer-b',
+      process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
+    )
+    await call(page, 'refresh_authorization')
+    assert.ok((await call(page, 'list_authorization_contexts')).length > 0)
+    assert.deepEqual(await call(page, 'list_sync_conflicts'), ownB)
+    const before = await pool.query(
+      'SELECT id FROM account_sessions WHERE user_id = $1 AND revoked_at IS NULL',
+      [accountB],
+    )
+    assert.equal(before.rows.length, 1)
+    await loginCore(
+      producer,
+      'engineer-b',
+      process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
+    )
+    await denied(page, command, args, 'reauthentication_required')
+    for (const [read, readArgs] of [
+      ['get_authorization_context'],
+      ['list_authorization_contexts'],
+      ['select_authorization_context', { selection: binding }],
+      ['list_sync_conflicts'],
+      [
+        'resolve_sync_conflict',
+        { input: { ...input, conflictId: ownB[0].id } },
+      ],
+    ])
+      await denied(page, read, readArgs, 'reauthentication_required')
+    const records = readFileSync(
+      process.env.HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH,
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    const actual = records.filter(
+      (row) =>
+        row.route === `${method} /api/authorization/bindings/${accountB}` &&
+        row.session?.id === before.rows[0].id,
+    )
+    assert.equal(actual.length, 1)
+    assert.equal(actual[0].serverStatus, 401)
+    assert.ok(actual[0].session.revoked_at)
+    managementRevocations.push({
+      command,
+      ...actual[0],
+      contextDenied: true,
+      selectionDenied: true,
+      sourceDisclosed: false,
+    })
+    await call(page, 'lock_session')
+    await call(producer, 'lock_session')
+  }
+  await loginCore(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  await call(page, 'refresh_authorization')
+  const managementReadyB = await startHeldPull(
+    'management-late-account',
+    'list_managed_authorizations',
+    { accountId: accountA },
+  )
+  await loginCore(
+    producer,
+    'purchaser',
+    process.env.HONSEN_TEST_PURCHASER_PASSWORD,
+  )
+  await call(page, 'lock_session')
+  await loginCore(
+    page,
+    'engineer-b',
+    process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
+  )
+  await call(page, 'refresh_authorization')
+  const contextsB = await call(page, 'list_authorization_contexts')
+  assert.ok(contextsB.length > 0)
+  const sessionB = (
+    await pool.query(
+      'SELECT id, user_id, installation_id FROM account_sessions WHERE user_id = $1 AND revoked_at IS NULL',
+      [accountB],
+    )
+  ).rows
+  assert.equal(sessionB.length, 1)
+  managementReplacementSessions.push({
+    phase: 'management-late-account',
+    ...sessionB[0],
+  })
+  await releaseHeldPull('management-late-account', managementReadyB)
+  assert.deepEqual(await call(page, 'list_authorization_contexts'), contextsB)
+  await call(page, 'select_authorization_context', { selection: binding })
+  assert.deepEqual(await call(page, 'list_sync_conflicts'), ownB)
+  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 1)
+  await call(page, 'lock_session')
+  await call(producer, 'lock_session')
+  await loginCore(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  const managementReadyA = await startHeldPull(
+    'management-late-same-account',
+    'list_managed_authorizations',
+    { accountId: accountA },
+  )
+  await call(page, 'lock_session')
+  await loginCore(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  await call(page, 'refresh_authorization')
+  const contextsA2 = await call(page, 'list_authorization_contexts')
+  assert.ok(contextsA2.length > 0)
+  const sessionA2 = (
+    await pool.query(
+      'SELECT id, user_id, installation_id FROM account_sessions WHERE user_id = $1 AND revoked_at IS NULL',
+      [accountA],
+    )
+  ).rows
+  assert.equal(sessionA2.length, 1)
+  managementReplacementSessions.push({
+    phase: 'management-late-same-account',
+    ...sessionA2[0],
+  })
+  await releaseHeldPull('management-late-same-account', managementReadyA)
+  const oldA1 = lateResponses.find(
+    (row) => row.phase === 'management-late-same-account',
+  ).session
+  assert.notEqual(sessionA2[0].id, oldA1.id)
+  assert.equal(sessionA2[0].installation_id, oldA1.installation_id)
+  assert.deepEqual(await call(page, 'list_authorization_contexts'), contextsA2)
+  await call(page, 'select_authorization_context', { selection: binding })
+  assert.equal((await call(page, 'push_pending_sync')).acceptedCount, 0)
+  await call(page, 'lock_session')
   assert.deepEqual(consoleErrors, [])
   assert.equal(
     revokedSessionAccess.denied,
@@ -520,6 +689,13 @@ try {
         denials,
         revokedSessionAccess,
         lateResponses,
+        managementRevocations,
+        managementReplacementSessions,
+        managementLateAccountPreserved: 'PASS',
+        managementLateSameAccountPreserved: 'PASS',
+        exePids: children
+          .filter((child) => child.spawnfile.endsWith('HonsenProcure.exe'))
+          .map((child) => child.pid),
         lateAccountPreserved: 'PASS',
         lateSameAccountPreserved: 'PASS',
         origins,
@@ -544,6 +720,7 @@ try {
         denials,
         revokedSessionAccess,
         lateResponses,
+        managementRevocations,
         consoleErrors,
       },
       null,

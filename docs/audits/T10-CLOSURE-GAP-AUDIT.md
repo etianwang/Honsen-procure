@@ -1,5 +1,15 @@
 # T10 Closure Gap Audit — Honsen Procure v1.0
 
+## G1-QA-001-FIX2 修复覆盖记录 — 2026-10-19 — READY_FOR_RECHECK
+
+本记录只更新修复交接状态，不改写下方独立 FAIL 和历史 Q 矩阵。基线 QA `b0a6069e1439203fd9259b8cc3e619ac6eb70c2c`，生产实现 `85d0565a5b695a94da7bd5aa861178bfcbc77a52`；任务分支 `codex/g1-qa001-fix2`，修复 SHA 为包含本记录的本地提交，完整值见交付。**G1-QA-001 = READY_FOR_RECHECK；G1 = OPEN**。
+
+- 真实 RED `native-smoke-20261019111346` 重现管理 list 的明确401后，旧 `get_authorization_context` 仍成功。Rust 三个管理命令现捕获既有私有 session generation/token，并统一复用未改动的 `reject_sync_session`；匹配比较、sticky关闭和session DELETE同锁，删除失败仍关闭，迟到 A 不影响 B/A2，400/403/409/500不注销。授权上下文 get/list/select、历史订单和order/country scope-cache守卫在查询锁内验证当前账号/权限，不删除缓存或业务/Outbox/冲突。
+- 新鲜 Rust management4/4、完整69/69、fmt/release-bin；管理API/service/barrier15/15、desktop11/11、相关fixture DOM2/2、lint/typecheck/desktopbuild/syntax/格式/diff通过。一次辅助只读复查发现并确认修正相关scope/history缓存竞态，最终无本切片Critical/Important；不代表所有业务检查/写入事务竞态已验收。
+- 最终真实 EXE **native-smoke-20261019112134**，PID **44004/36052**，完成 **11:24:07.111Z**：GET/PUT/DELETE/PATCH `req-2a/2g/2m/2s`均由真实撤销session产生401，紧接context读/已知scope选择/冲突来源list和已知ID均拒绝，sourceDisclosed=false。管理迟到A→B `req-2w`（11:23:56.570Z→11:24:00.755Z）、A1→A2 `req-36`（11:24:03.835Z→11:24:06.425Z）匹配run/phase/request/session的实际401，旧命令返回sync_account_boundary；B保留非空冲突/上下文及正常Push，A2保留读/选择/Push。真实WebView2/Tauri/SQLite/Windows vault/Fastify HTTPS/隔离PG，无Mock/SQLite写入/HTTP sync替身；consoleErrors=[]。原G1同步断言保留。
+
+原始失败、fixture自动Push竞态运行、中间PASS与最终PASS全部保留；只按正常Harness流程移除本轮隔离容器/卷与临时证书，不清理既有证据。无迁移/协议/依赖/Toolbox契约/server生产模型/G2/G3变更。**BLOCKER：独立QA复核待执行；生产冲突UI生命周期继续作为独立G1 BLOCKED项。** NATIVE002–008和无关完整套件按范围未重跑；NATIVE-008 CLOSED，T10/T10-SEC-001/P1/Formal hold OPEN。完整命令、session匹配与限制见QA_REPORT最新段；停止等待独立QA。
+
 ## G1-QA-001 独立最终复核补充 — 2026-10-19 — OPEN / FAIL
 
 被测 SHA `85d0565a5b695a94da7bd5aa861178bfcbc77a52`，独立 QA 基线 `bfa6752ccd64a6b39c36bdab96e1cb4c611ada5d`。新鲜真实 EXE Harness `native-smoke-20261019090425`（Harness PID `29624`；观察到 EXE PID `9232`、`33936`）完成于 `09:06:06.824Z`：当前被撤销会话的冲突列表和已知 ID 均拒绝，`sourceDisclosed=false`；迟到 A→B 的 `req-1n`、同账号 A1→A2 的 `req-26` 均为匹配 run/phase 的实际 HTTP 401，且新会话保留正常冲突列表/Push。Rust `rejected_sync_session` 5/5 也覆盖 SQLite 删除失败仍关闭。

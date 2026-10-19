@@ -1,5 +1,65 @@
 # Independent QA Report — T08/T10/P1/Formal Combination
 
+## G1-QA-001-FIX2 Integration Owner — 2026-10-19 — READY_FOR_RECHECK
+
+**Builder verification, pending independent QA. G1-QA-001 = READY_FOR_RECHECK; G1 = OPEN.** This supersedes readiness status only; the independent failure below and all original evidence remain historical facts. Production conflict UI lifecycle acceptance remains separately BLOCKED. NATIVE-008 stays CLOSED; T10, T10-SEC-001, P1 and Formal hold stay OPEN.
+
+### Baseline and minimal scope
+
+- Repair starts at **`b0a6069e1439203fd9259b8cc3e619ac6eb70c2c`**, whose production implementation is **`85d0565a5b695a94da7bd5aa861178bfcbc77a52`**. Continued the clean tracked QA worktree `E:/Project/honsen-g1-qa-independent-85d0565` on new task branch `codex/g1-qa001-fix2`, preserving its untracked `.honsen-native-qa/`. Fetched `origin/main` `5139cc8` remains an ancestor; caller `50378dd` and its two original evidence directories are untouched. The repair SHA is the local commit containing this section and tested changes; full hash is supplied in delivery.
+- Root cause: registered Tauri commands `list_managed_authorizations`, `change_managed_authorization` (grant/revoke), and `replace_managed_authorization` called `authorization_management_token`, which discarded the trusted request generation. Their 401 branches only returned `NoActiveSession`, leaving local permission active. This was reproduced through the real EXE before implementation: **`native-smoke-20261019111346`** got management 401, then `get_authorization_context` unexpectedly succeeded; security assertion and failed result remain retained.
+- Production change is confined to `apps/desktop/src-tauri/src/lib.rs`. Test changes: G1 CDP driver, existing PowerShell G1 result assertions, test-only auth barrier/test and disposable HTTPS host diagnostics. No migration, dependency/lockfile, shared or server production protocol, business/outbox/conflict/history deletion, Toolbox contract, G2/G3 or unrelated renderer change. Toolbox sources were read in required order; existing T15 installer/Runner/manifest/registry/release/E2E gaps remain unchanged.
+
+### Session and cache boundary
+
+`authorization_management_request` captures the existing private `SyncRequest { OnlineSession { account_id, generation }, token }` under the connection mutex, reusing the enabled/idle/administrator guard and vault credential; offline-only sessions cannot manage grants. No renderer identity or generation is accepted. `authorization_management_response` sends only actual HTTP401 through the unchanged **`reject_sync_session`**. It compares the captured identity, sets sticky invalidation and detaches online authority before SQLite DELETE in the same lock. DELETE failure still closes permission. A stale response returns payload-free `sync_account_boundary` without changing B/A2 or their token. 400/403/409/500 retain local authority and preserve structured input/forbidden/transport errors.
+
+List results are generation-checked again after awaited JSON decoding. Successful self-grant changes refresh using the original captured session, never the account that happens to be current after await. Context get/list/select hold the connection lock through current permission/account validation and cache SQL. The same lock check now also covers historical-order reads and order/country scope-cache guards; the auxiliary reviewer found this related precheck/query race and confirmed the minimal repair. Existing role and session lookups were extracted for reuse, not replaced with another invalidator. Cache rows, saved business records, Outbox and conflicts are retained. A read that acquires the lock before invalidation linearizes before rejection; a subsequent read cannot reuse the old snapshot.
+
+### Fresh checks on final code
+
+| Command / scope | Result | Evidence / limit |
+| --- | --- | --- |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib management_ -- --nocapture` | PASS 4/4 | Current401, known context selection, source denial/data retention; late A→B and A1→A2 with same token/time; nonauth400/403/409/500; DELETE-trigger failure retains row but denies cache/scope/history entry. |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` | PASS 69/69 | Fresh rerun after final cache-guard repair; existing offline, owner, migration, cursor/retry and snapshot tests retained. |
+| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check` | PASS | Final code. |
+| `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure -j 2` | PASS | Final check exit0. Cold unrestricted compilation first failed in `aws-lc-sys`/`cl.exe` exit2; bounded two-job retry passed, then final check passed again. Temporary compiler output redirected to task-local E: directory; no cache/evidence cleanup. Existing unused-symbol/linker warnings remain. |
+| Server `src/auth/service.test.ts src/authorization/service.test.ts src/scripts/native-auth-barrier.test.ts` | PASS 15/15 | Existing management API/service tests plus barrier6/6, including both new management phases. Production AuthService/routes unchanged. |
+| `npm run test --workspace @honsen/desktop` | PASS 11/11 | Existing store/lifecycle regressions. |
+| Focused navigation Playwright: cached scope switching + administrator binding management | PASS 2/2 | `test-results/g1-fix2-20261019`, HTML `playwright-report/g1-fix2-20261019`; fixture IPC DOM only, not native authorization or production conflict UI. |
+| `npm run lint`; `npm run typecheck`; `npm run build --workspace @honsen/desktop` | PASS | Existing App effect and bundle-size warnings remain. |
+| Driver `node --check`/Oxlint; changed driver/barrier/test Prettier; `git diff --check` | PASS | No unrelated formatting sweep. |
+| Actual EXE G1 mode, final **`native-smoke-20261019112134`** | PASS | Completed `2026-10-19T11:24:07.111Z`; details below. |
+
+Initial `native-smoke-20261019111146` stopped at an existing UI auto-Push/manual-Push race: server had already accepted the event before explicit Push returned0. It is not counted as a security RED or PASS. Controlled fixture/recovery steps now use real password/CAPTCHA `online_login` while renderer remains logged out, avoiding the scheduler race without weakening the acceptedCount assertion. The actual security RED `...111346`, intermediate PASS `...111646` (before the reviewer cache-guard addition), and final PASS `...112134` are all retained. Only the final run accepts the final code.
+
+### Final real-EXE evidence — native-smoke-20261019112134
+
+Actual debug `HonsenProcure.exe` PIDs **`44004` (producer), `36052` (tested profile)**; real WebView2 → registered production Rust/Tauri commands, SQLite, Windows Credential Manager, Fastify HTTPS and isolated PostgreSQL. Shared tested profile is `native-smoke-20261019112134-account-a.test.sqlite`, installation **`b6c8c06b-4adc-4b90-bed2-904b78b1e2b8`**. No Mock IPC, direct SQLite writes or HTTP sync-client substitution. PostgreSQL writes are limited to initial synthetic account/scope fixture setup; the app generates all business/outbox/conflict state. Session evidence below comes from read-only lookup by the actual bearer hash; no token/hash/password is logged.
+
+| Current rejected request | Actual request ID | Revoked session ID | Immediate local result |
+| --- | --- | --- | --- |
+| GET / bindings (list) | `req-2a` | `96d7619e-83aa-4bfb-9be6-4a3e255d84e7` | 401; context get/list, known-scope selection and conflict list/known-ID resolver all `reauthentication_required`; sourceDisclosed=false. |
+| PUT / bindings (grant) | `req-2g` | `0f56bb0e-b91c-493e-9072-dfe2e2869c97` | Same denial after real401. |
+| DELETE / bindings (revoke) | `req-2m` | `acef2005-2690-4bff-bd87-c6779753e2ef` | Same denial after real401. |
+| PATCH / bindings (replace) | `req-2s` | `39693f76-edde-4d8e-b97e-843d1fa2b8a7` | Same denial after real401. |
+
+Each is the first rejected request after a normal second-EXE login revokes the tested B session; pre-rejection local contexts and B's real nonempty conflict list were verified. The driver requires exactly one matching method/route/session observation and actual401, then checks every denial before recording PASS.
+
+- **Late A→B:** `management-late-account/req-2w`, ready `11:23:56.570Z`, release `11:24:00.755Z`, actual401 for old A session `e0347c5d-dd35-4a77-a695-df64415c2bcf` (revoked `11:23:57.746Z`). B had completed normal login before release, new session `a6edb513-e0db-4531-8f9d-5c2874937efa`. Old command returns `sync_account_boundary`; B's nonempty contexts/conflict list are unchanged, valid known scope remains selectable, and real Push returns its normal pending conflict result with HTTP200.
+- **Late A1→A2:** `management-late-same-account/req-36`, ready `11:24:03.835Z`, release `11:24:06.425Z`, actual401 for A1 `e438b602-f3e3-4869-979f-554ed0f1a26c` (revoked `11:24:04.970Z`). Replacement A2 `8628decf-5720-4156-bc4b-c5b1f6167237` has a different session ID on the same installation. Old command returns `sync_account_boundary`; A2 keeps contexts, scope selection and successful Push authorization preflight.
+- Prior G1 current-revocation/source-denial and held Pull `req-1g`/`req-1z` assertions also pass. `consoleErrors=[]`. Final explicit lock leaves local permission closed. Production conflict UI lifecycle is still BLOCKED, unchanged.
+
+Artifacts remain untracked under `.honsen-native-qa/native-smoke-20261019112134*` and ignored `test-results/`. Normal-user WSL2 Docker29.9.0/Compose5.6.0/Buildx0.38.0; Node24.18.0 with fresh `npm ci`/unchanged lockfile. Every own run-named disposable Compose project was scoped down with volumes; prior evidence was not removed.
+
+### Remaining gates and handoff
+
+- **BLOCKER for closure:** independent QA must recheck this repair; builder results do not close G1-QA-001.
+- **DEFERRED:** production conflict UI lifecycle evidence remains a separate G1 item; G2/G3, broader unrelated business-command authorization/write concurrency and parent acceptance are not undertaken or accepted here.
+- **WARNING / deliberate skips:** NATIVE-002–008 and unrelated full server/DOM suites were not rerun per requested scope. SQLite-delete failure is Rust failure-injection evidence, not a native SQLite manipulation. Existing compiler/lint/bundle warnings persist. One read-only auxiliary reviewer found the cache-consumer race above; after repair, no remaining Critical/Important finding within this slice.
+
+Stop at **READY_FOR_RECHECK**. No push, merge, deployment or next-child execution. Independent recheck should run the management Rust filter/full lib, relevant API/barrier tests, and fresh `-Mode g1-conflict-origin`, inspecting all four management401 session matches plus both held management requests. Historical records below are preserved.
+
 ## G1-QA-001 Independent Final Recheck — 2026-10-19 — FAIL / OPEN
 
 **QA HEAD:** `85d0565a5b695a94da7bd5aa861178bfcbc77a52`; **independent baseline:** `bfa6752ccd64a6b39c36bdab96e1cb4c611ada5d`. The tested detached worktree was clean before the run. This recheck did not modify production code, migrations, protocol, dependencies, or prior evidence. G1 remains OPEN; the production conflict UI lifecycle gate remains separately BLOCKED.

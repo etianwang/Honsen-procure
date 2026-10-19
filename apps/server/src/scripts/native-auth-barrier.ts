@@ -20,7 +20,14 @@ export function createNativeAuthBarrier(
   return async (requestId: string) => {
     if (!prefix || !existsSync(`${prefix}.arm.signal`)) return undefined
     const phase = readFileSync(`${prefix}.arm.signal`, 'utf8')
-    if (!['late-account', 'late-same-account'].includes(phase))
+    if (
+      ![
+        'late-account',
+        'late-same-account',
+        'management-late-account',
+        'management-late-same-account',
+      ].includes(phase)
+    )
       throw new Error('invalid native auth barrier phase')
     if (used.has(phase)) return undefined
     used.add(phase)

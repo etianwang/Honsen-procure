@@ -1784,6 +1784,14 @@ impl LocalAuthService {
 
     pub fn require_role(&self, role: Role, now: SystemTime) -> Result<(), AuthError> {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        Self::require_role_on_connection(&connection, role, now)
+    }
+
+    fn require_role_on_connection(
+        connection: &LocalConnection,
+        role: Role,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
         if connection.session_invalidated {
             return Err(AuthError::NoActiveSession);
         }
@@ -5666,6 +5674,14 @@ impl LocalAuthService {
     }
 
     fn require_catalog_read(&self, now: SystemTime) -> Result<(), AuthError> {
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        Self::catalog_account_on_connection(&connection, now).map(|_| ())
+    }
+
+    fn catalog_account_on_connection(
+        connection: &LocalConnection,
+        now: SystemTime,
+    ) -> Result<Uuid, AuthError> {
         for role in [
             Role::SuperAdministrator,
             Role::Administrator,
@@ -5673,8 +5689,13 @@ impl LocalAuthService {
             Role::Engineer,
             Role::Viewer,
         ] {
-            match self.require_role(role, now) {
-                Ok(()) => return Ok(()),
+            match Self::require_role_on_connection(connection, role, now) {
+                Ok(()) => {
+                    let id: String = connection
+                        .query_row("SELECT user_id FROM local_session", [], |row| row.get(0))
+                        .map_err(|_| AuthError::Database)?;
+                    return Uuid::parse_str(&id).map_err(|_| AuthError::Database);
+                }
                 Err(AuthError::Forbidden) => continue,
                 Err(error) => return Err(error),
             }
@@ -5699,6 +5720,10 @@ impl LocalAuthService {
 
     fn active_session_user_id(&self) -> Result<Uuid, AuthError> {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        Self::session_user_id_on_connection(&connection)
+    }
+
+    fn session_user_id_on_connection(connection: &LocalConnection) -> Result<Uuid, AuthError> {
         if connection.session_invalidated {
             return Err(AuthError::NoActiveSession);
         }
@@ -5717,9 +5742,8 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<MutexGuard<'_, LocalConnection>, AuthError> {
-        self.require_catalog_read(now)?;
-        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account_id = Self::catalog_account_on_connection(&connection, now)?;
         let authorized: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?2 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id WHERE o.id = ?1 AND o.deleted_at IS NULL)",
             params![order_id.to_string(), account_id.to_string()],
@@ -5737,8 +5761,8 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<(), AuthError> {
-        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account_id = Self::session_user_id_on_connection(&connection)?;
         let authorized: bool = connection
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?2 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?3 JOIN local_projects p ON p.id = o.project_id AND p.country_id = o.country_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.id = ?1 AND o.deleted_at IS NULL)",
@@ -5758,8 +5782,8 @@ impl LocalAuthService {
         country_id: Option<Uuid>,
         now: SystemTime,
     ) -> Result<(), AuthError> {
-        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account_id = Self::session_user_id_on_connection(&connection)?;
         let authorized: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 AND (?3 IS NULL OR p.country_id = ?3))",
             params![account_id.to_string(), unix_seconds(now), country_id.map(|value| value.to_string())],
@@ -5849,16 +5873,38 @@ impl LocalAuthService {
         self.replace_authorization_snapshots(&scopes, now, Some(request.session))
     }
 
-    fn authorization_management_token(&self, now: SystemTime) -> Result<String, AuthError> {
-        match self.require_role(Role::Administrator, now) {
-            Ok(()) => {}
-            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
-            Err(error) => return Err(error),
-        }
-        let account_id = self.active_session_user_id()?;
-        self.credential_vault
+    fn authorization_management_request(&self, now: SystemTime) -> Result<SyncRequest, AuthError> {
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account_id = Self::require_conflict_resolution(&connection, now)?;
+        let session = connection
+            .online_session
+            .ok_or(AuthError::NoActiveSession)?;
+        Self::require_request_session(&connection, session)?;
+        let token = self
+            .credential_vault
             .load_sync_token(account_id)?
-            .ok_or(AuthError::NoActiveSession)
+            .ok_or(AuthError::NoActiveSession)?;
+        Ok(SyncRequest { session, token })
+    }
+
+    fn authorization_management_response(
+        &self,
+        session: OnlineSession,
+        status: reqwest::StatusCode,
+    ) -> Result<(), AuthError> {
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return self.reject_sync_session(session);
+        }
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            session,
+        )?;
+        match status {
+            reqwest::StatusCode::FORBIDDEN => Err(AuthError::Forbidden),
+            reqwest::StatusCode::BAD_REQUEST => Err(AuthError::InvalidInput),
+            _ if !status.is_success() => Err(AuthError::SyncTransport),
+            _ => Ok(()),
+        }
     }
 
     pub async fn list_managed_authorizations(
@@ -5866,28 +5912,25 @@ impl LocalAuthService {
         account_id: Uuid,
         now: SystemTime,
     ) -> Result<Vec<CloudAuthorizationScope>, AuthError> {
-        let token = self.authorization_management_token(now)?;
+        let request = self.authorization_management_request(now)?;
         let endpoint = authorization_binding_endpoint(account_id)?;
         let response = self
             .https_client()?
             .get(endpoint)
-            .bearer_auth(token)
+            .bearer_auth(&request.token)
             .send()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(AuthError::NoActiveSession);
-        }
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
-            return Err(AuthError::Forbidden);
-        }
-        if !response.status().is_success() {
-            return Err(AuthError::SyncTransport);
-        }
-        response
+        self.authorization_management_response(request.session, response.status())?;
+        let scopes = response
             .json::<Vec<CloudAuthorizationScope>>()
             .await
-            .map_err(|_| AuthError::SyncTransport)
+            .map_err(|_| AuthError::SyncTransport)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        Ok(scopes)
     }
 
     pub async fn change_managed_authorization(
@@ -5897,7 +5940,7 @@ impl LocalAuthService {
         revoke: bool,
         now: SystemTime,
     ) -> Result<(), AuthError> {
-        let token = self.authorization_management_token(now)?;
+        let session_request = self.authorization_management_request(now)?;
         let endpoint = authorization_binding_endpoint(account_id)?;
         let client = self.https_client()?;
         let request = if revoke {
@@ -5906,25 +5949,15 @@ impl LocalAuthService {
             client.put(endpoint)
         };
         let response = request
-            .bearer_auth(token)
+            .bearer_auth(&session_request.token)
             .json(&binding)
             .send()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(AuthError::NoActiveSession);
-        }
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
-            return Err(AuthError::Forbidden);
-        }
-        if response.status() == reqwest::StatusCode::BAD_REQUEST {
-            return Err(AuthError::InvalidInput);
-        }
-        if !response.status().is_success() {
-            return Err(AuthError::SyncTransport);
-        }
-        if account_id == self.active_session_user_id()? {
-            self.refresh_authorization_https(now).await?;
+        self.authorization_management_response(session_request.session, response.status())?;
+        if account_id == session_request.session.account_id {
+            self.refresh_authorization_for_session(&session_request, now)
+                .await?;
         }
         Ok(())
     }
@@ -5935,29 +5968,19 @@ impl LocalAuthService {
         replacement: ManagedAuthorizationReplacement,
         now: SystemTime,
     ) -> Result<(), AuthError> {
-        let token = self.authorization_management_token(now)?;
+        let request = self.authorization_management_request(now)?;
         let response = self
             .https_client()?
             .patch(authorization_binding_endpoint(account_id)?)
-            .bearer_auth(token)
+            .bearer_auth(&request.token)
             .json(&replacement)
             .send()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(AuthError::NoActiveSession);
-        }
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
-            return Err(AuthError::Forbidden);
-        }
-        if response.status() == reqwest::StatusCode::BAD_REQUEST {
-            return Err(AuthError::InvalidInput);
-        }
-        if !response.status().is_success() {
-            return Err(AuthError::SyncTransport);
-        }
-        if account_id == self.active_session_user_id()? {
-            self.refresh_authorization_https(now).await?;
+        self.authorization_management_response(request.session, response.status())?;
+        if account_id == request.session.account_id {
+            self.refresh_authorization_for_session(&request, now)
+                .await?;
         }
         Ok(())
     }
@@ -5966,9 +5989,8 @@ impl LocalAuthService {
         &self,
         now: SystemTime,
     ) -> Result<AuthorizationContextView, AuthError> {
-        self.require_catalog_read(now)?;
-        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account_id = Self::catalog_account_on_connection(&connection, now)?;
         connection.query_row(
             "SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair
              FROM local_authorization_snapshots a
@@ -5999,9 +6021,8 @@ impl LocalAuthService {
         &self,
         now: SystemTime,
     ) -> Result<Vec<AuthorizationContextView>, AuthError> {
-        self.require_catalog_read(now)?;
-        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account_id = Self::catalog_account_on_connection(&connection, now)?;
         let mut statement = connection.prepare("SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 ORDER BY p.name, d.name, t.name").map_err(|_| AuthError::Database)?;
         statement
             .query_map(params![account_id.to_string(), unix_seconds(now)], |row| {
@@ -6033,9 +6054,8 @@ impl LocalAuthService {
         selection: AuthorizationContextSelectionInput,
         now: SystemTime,
     ) -> Result<(), AuthError> {
-        self.require_catalog_read(now)?;
-        let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let account_id = Self::catalog_account_on_connection(&connection, now)?;
         let valid: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.project_id = ?2 AND a.department_id = ?3 AND a.team_id = ?4 AND a.expires_at >= ?5)", params![account_id.to_string(), selection.project_id.to_string(), selection.department_id.to_string(), selection.team_id.to_string(), unix_seconds(now)], |row| row.get(0)).map_err(|_| AuthError::Database)?;
         if !valid {
             return Err(AuthError::Forbidden);
@@ -10029,6 +10049,178 @@ mod tests {
         }
     }
 
+    fn management_session_fixture() -> (LocalAuthService, Uuid, Uuid, Uuid, SystemTime) {
+        let (service, a, b, conflict, _, now) = rejected_session_fixture();
+        for account in [a, b] {
+            grant_new_test_scope(&service, account, Uuid::new_v4(), now);
+        }
+        assert_eq!(service.list_authorization_contexts(now).unwrap().len(), 1);
+        (service, a, b, conflict, now)
+    }
+
+    fn assert_management_cache_closed(
+        service: &LocalAuthService,
+        selection: AuthorizationContextSelectionInput,
+        now: SystemTime,
+    ) {
+        assert_eq!(
+            service.authorization_context(now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.list_authorization_contexts(now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.select_authorization_context(selection, now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.list_sync_conflicts(now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.require_active_scope_for_country(None, now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.require_active_scope_for_order(Uuid::new_v4(), now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service
+                .historical_order_connection(Uuid::new_v4(), now)
+                .err(),
+            Some(AuthError::NoActiveSession)
+        );
+    }
+
+    #[test]
+    fn management_401_closes_known_cached_context_without_erasing_evidence() {
+        let (service, _, _, conflict, now) = management_session_fixture();
+        let context = service.authorization_context(now).unwrap();
+        let request = service.authorization_management_request(now).unwrap();
+        assert_eq!(
+            service.authorization_management_response(
+                request.session,
+                reqwest::StatusCode::UNAUTHORIZED
+            ),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_management_cache_closed(
+            &service,
+            AuthorizationContextSelectionInput {
+                project_id: context.project_id,
+                department_id: context.department_id,
+                team_id: context.team_id,
+            },
+            now,
+        );
+        assert_eq!(
+            service.resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: conflict,
+                    resolution: "keep_local".into(),
+                    reason: "known ID denied".into()
+                },
+                now
+            ),
+            Err(AuthError::NoActiveSession)
+        );
+        let connection = service.connection.lock().unwrap();
+        let counts: (i64, i64, i64, i64) = connection.query_row("SELECT (SELECT COUNT(*) FROM local_authorization_snapshots), (SELECT COUNT(*) FROM local_sync_outbox WHERE superseded_at IS NULL), (SELECT COUNT(*) FROM local_sync_conflicts WHERE resolved_at IS NULL), (SELECT COUNT(*) FROM local_session)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap();
+        assert_eq!(counts, (2, 2, 2, 0));
+    }
+
+    #[test]
+    fn management_late_response_preserves_b_and_same_account_new_generation() {
+        for same_account in [false, true] {
+            let (service, a, b, _, now) = management_session_fixture();
+            let old = service.authorization_management_request(now).unwrap();
+            service.lock().unwrap();
+            let current = if same_account { a } else { b };
+            service
+                .activate_online_session(current, &"a".repeat(32), now)
+                .unwrap();
+            let contexts = service.list_authorization_contexts(now).unwrap();
+            assert_eq!(contexts.len(), 1);
+            for status in [reqwest::StatusCode::UNAUTHORIZED, reqwest::StatusCode::OK] {
+                assert_eq!(
+                    service.authorization_management_response(old.session, status),
+                    Err(AuthError::SyncAccountBoundary)
+                );
+                assert_eq!(service.require_online_sync_session(now), Ok(current));
+                assert_eq!(service.list_authorization_contexts(now).unwrap(), contexts);
+                let context = &contexts[0];
+                service
+                    .select_authorization_context(
+                        AuthorizationContextSelectionInput {
+                            project_id: context.project_id,
+                            department_id: context.department_id,
+                            team_id: context.team_id,
+                        },
+                        now,
+                    )
+                    .unwrap();
+                assert_eq!(service.list_sync_conflicts(now).unwrap().len(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn management_non_authentication_errors_do_not_revoke_local_authority() {
+        let (service, a, _, _, now) = management_session_fixture();
+        let request = service.authorization_management_request(now).unwrap();
+        for (status, expected) in [
+            (400, Err(AuthError::InvalidInput)),
+            (403, Err(AuthError::Forbidden)),
+            (409, Err(AuthError::SyncTransport)),
+            (500, Err(AuthError::SyncTransport)),
+            (200, Ok(())),
+        ] {
+            assert_eq!(
+                service.authorization_management_response(
+                    request.session,
+                    reqwest::StatusCode::from_u16(status).unwrap()
+                ),
+                expected
+            );
+            assert_eq!(service.require_online_sync_session(now), Ok(a));
+            assert_eq!(service.list_authorization_contexts(now).unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn management_401_sqlite_delete_failure_still_closes_cached_authority() {
+        let (service, _, _, _, now) = management_session_fixture();
+        let context = service.authorization_context(now).unwrap();
+        let request = service.authorization_management_request(now).unwrap();
+        service.connection.lock().unwrap().execute_batch("CREATE TEMP TRIGGER refuse_management_session_delete BEFORE DELETE ON local_session BEGIN SELECT RAISE(ABORT, 'test storage failure'); END;").unwrap();
+        assert_eq!(
+            service.authorization_management_response(
+                request.session,
+                reqwest::StatusCode::UNAUTHORIZED
+            ),
+            Err(AuthError::Database)
+        );
+        assert_management_cache_closed(
+            &service,
+            AuthorizationContextSelectionInput {
+                project_id: context.project_id,
+                department_id: context.department_id,
+                team_id: context.team_id,
+            },
+            now,
+        );
+        let count: i64 = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM local_session", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
     #[test]
     fn conflict_resolution_never_changes_another_accounts_or_legacy_event_owner() {
         let service = LocalAuthService::open_in_memory().unwrap();
@@ -12995,8 +13187,8 @@ mod tests {
             Err(AuthError::Forbidden)
         );
         assert_eq!(
-            service.authorization_management_token(now),
-            Err(AuthError::Forbidden)
+            service.authorization_management_request(now).err(),
+            Some(AuthError::Forbidden)
         );
         assert_eq!(
             service.require_material_mutation(now),

@@ -254,6 +254,9 @@ try {
     if ($smoke.mode -ne 'g1-conflict-origin' -or $smoke.coreResult -ne 'PASS' -or $smoke.sameProfileSwitch -ne 'PASS' -or $smoke.ownerRecoveryAndResolution -ne 'PASS' -or !$smoke.revokedSessionAccess.denied -or $smoke.revokedSessionAccess.sourceDisclosed -or $smoke.lateAccountPreserved -ne 'PASS' -or $smoke.lateSameAccountPreserved -ne 'PASS') {
       throw "native G1 command result is invalid: $result"
     }
+    if (@($smoke.managementRevocations).Count -ne 4 -or @($smoke.managementRevocations | Where-Object { $_.serverStatus -ne 401 -or !$_.session.revoked_at -or !$_.contextDenied -or !$_.selectionDenied -or $_.sourceDisclosed }).Count -ne 0 -or $smoke.managementLateAccountPreserved -ne 'PASS' -or $smoke.managementLateSameAccountPreserved -ne 'PASS' -or @($smoke.exePids).Count -ne 2) {
+      throw "native G1 management invalidation result is invalid: $result"
+    }
     Write-Output "PASS native G1 command slice only (UI conflict residue remains BLOCKED): $result"
   } elseif ($Mode -eq 'ab-sync-security') {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json

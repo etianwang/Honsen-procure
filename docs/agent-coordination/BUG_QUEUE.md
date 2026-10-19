@@ -1,5 +1,16 @@
 # Fixer Bug Queue
 
+## G1-QA-001-FIX2 Integration Owner — 2026-10-19 — READY_FOR_RECHECK
+
+| ID | Current status | Fresh evidence / remaining gate |
+| --- | --- | --- |
+| G1-QA-001 | READY_FOR_RECHECK | Starts at QA `b0a6069` (production `85d0565`), branch `codex/g1-qa001-fix2`; repair is this containing checkpoint. All management commands capture existing private generation/token and use unchanged `reject_sync_session` on matching401. Context get/list/select plus historical/scope-cache guards validate under their query lock. Rust management4/4/full69/69; API/service/barrier15/15; desktop11/11; focused DOM2/2; fmt/release/lint/typecheck/build/diff PASS. Final EXE `native-smoke-20261019112134`, PIDs44004/36052: GET/PUT/DELETE/PATCH actual401 (`req-2a/2g/2m/2s`) deny context/known selection/conflict source; held management `req-2w` preserves B, `req-36` preserves same-installation A2. Both actual401 and session IDs checked. Independent QA required before CLOSED. |
+| AUTH-MANAGEMENT-401 | Addressed by FIX2; pending independent recheck | The former deferred security gap is now in this repair's scope. No second invalidator, trusted-server identity change or business/cache/outbox/conflict deletion. Native RED `...111346`, intermediate/final PASS retained. |
+| G1 | OPEN | Production conflict UI lifecycle remains separately BLOCKED; this command/cache repair does not close G1 or parents. |
+| G1-UI-EVIDENCE | BLOCKED, independent item | Production source-visible view mount/teardown/stale-result proof remains outstanding. |
+
+NATIVE-008 CLOSED; T10/T10-SEC-001/P1/Formal hold OPEN. Full evidence and classified limits are in the latest QA_REPORT. No NATIVE002–008 rerun, unrelated full suite, push, merge, deployment or prior-evidence cleanup. Stop for independent QA.
+
 ## G1-QA-001 independent final recheck — 2026-10-19 — OPEN / FAIL
 
 | ID | Status | Evidence / impact | Minimal next action |

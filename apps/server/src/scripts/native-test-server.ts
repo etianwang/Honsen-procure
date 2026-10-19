@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createApp } from '../app.js'
-import { AuthService } from '../auth/service.js'
+import { AuthService, hashToken } from '../auth/service.js'
 import { AuthorizationService } from '../authorization/service.js'
 import { PostgresAuthorizationStore } from '../authorization/postgres-store.js'
 import { runMigrations } from '../db/migration-runner.js'
@@ -146,7 +146,11 @@ const nativeApp = Fastify({
 const waitForAuthBarrier = createNativeAuthBarrier(process.env.HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX, nativeTestRunId)
 const authBarrierObservations = new Map<string, Awaited<ReturnType<typeof waitForAuthBarrier>>>()
 nativeApp.addHook('onRequest', async request => {
-  if (request.method === 'GET' && request.url.startsWith('/api/sync/pull')) {
+  if (
+    request.method === 'GET' &&
+    (request.url.startsWith('/api/sync/pull') ||
+      request.url.startsWith('/api/authorization/bindings/'))
+  ) {
     const observation = await waitForAuthBarrier(request.id)
     if (observation) authBarrierObservations.set(request.id, observation)
   }
@@ -272,6 +276,25 @@ const failPullAtCursor = optionalTestCursor(
   'HONSEN_PROCURE_TEST_FAIL_PULL_AT_CURSOR',
 )
 nativeApp.addHook('onSend', async (request, reply, payload) => {
+  if (request.url.startsWith('/api/authorization/bindings/')) {
+    const token = request.headers.authorization?.replace(/^Bearer /, '')
+    const session = token
+      ? (await pool.query(
+          'SELECT id, user_id, installation_id, revoked_at FROM account_sessions WHERE token_hash = $1',
+          [hashToken(token)],
+        )).rows[0]
+      : undefined
+    const barrier = authBarrierObservations.get(request.id)
+    authBarrierObservations.delete(request.id)
+    writeDiagnostic({
+      route: `${request.method} ${request.url}`,
+      runId: nativeTestRunId,
+      requestId: request.id,
+      session,
+      ...(barrier ? { authBarrier: true, ...barrier } : {}),
+      serverStatus: reply.statusCode,
+    })
+  }
   if (request.method === 'GET' && request.url.startsWith('/api/sync/pull')) {
     const authBarrier = authBarrierObservations.get(request.id)
     if (authBarrier) {
