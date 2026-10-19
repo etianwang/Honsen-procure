@@ -71,15 +71,18 @@ export class SyncService {
           eventId: event.eventId,
           status: 'validation_error',
           serverVersion: null,
+          errorCode: 'FORBIDDEN',
         })
         continue
       }
       results.push(
-        await this.store.pushEvent({
-          event,
-          installationId: actor.installationId,
-          actorId: actor.id,
-        }),
+        normalizeResult(
+          await this.store.pushEvent({
+            event,
+            installationId: actor.installationId,
+            actorId: actor.id,
+          }),
+        ),
       )
     }
     return { results }
@@ -268,6 +271,15 @@ export class SyncService {
       previousCountryId === nextCountryId ||
       !(await this.store.hasProjectBusinessUse(event.entityId))
     )
+  }
+}
+
+function normalizeResult(result: SyncEventResult): SyncEventResult {
+  if (result.status === 'accepted' || result.errorCode) return result
+  return {
+    ...result,
+    errorCode:
+      result.status === 'conflict' ? 'VERSION_CONFLICT' : 'VALIDATION_REJECTED',
   }
 }
 

@@ -73,19 +73,40 @@ export class PostgresSyncStore implements SyncStore {
         [input.event.eventId],
       )
       if (prior.rows[0]) {
-        await client.query('COMMIT')
         if (
           prior.rows[0].origin_status !== 'attested' ||
           prior.rows[0].origin_account_id !== input.actorId ||
           prior.rows[0].origin_installation_id !== input.installationId
         ) {
+          await client.query('COMMIT')
           return {
             eventId: input.event.eventId,
             status: 'validation_error',
             serverVersion: null,
           }
         }
-        return eventResult(prior.rows[0])
+        const result = eventResult(prior.rows[0])
+        if (result.status === 'conflict') {
+          const conflict = await client.query<{
+            server_payload_json: Record<string, unknown>
+          }>(
+            'SELECT server_payload_json FROM sync_conflicts WHERE event_id = $1',
+            [input.event.eventId],
+          )
+          const entity = await client.query<Pick<StoredEntity, 'is_deleted'>>(
+            `SELECT is_deleted FROM sync_entities
+             WHERE entity_type = $1 AND entity_id = $2`,
+            [input.event.entityType, input.event.entityId],
+          )
+          if (conflict.rows[0] && entity.rows[0]) {
+            result.serverPayload = conflict.rows[0].server_payload_json
+            result.serverOperation = entity.rows[0].is_deleted
+              ? 'soft_delete'
+              : 'upsert'
+          }
+        }
+        await client.query('COMMIT')
+        return result
       }
 
       const entity = await client.query<StoredEntity>(
@@ -1536,6 +1557,8 @@ export class PostgresSyncStore implements SyncStore {
     current: StoredEntity | undefined,
     result: SyncEventResult,
   ): Promise<void> {
+    result.serverPayload = current?.payload_json ?? {}
+    result.serverOperation = current?.is_deleted ? 'soft_delete' : 'upsert'
     await client.query(
       `INSERT INTO sync_events
          (event_id, installation_id, actor_id, origin_account_id, origin_installation_id, origin_status, origin_attested_at, entity_type, entity_id, operation, base_version, result_status, server_version)

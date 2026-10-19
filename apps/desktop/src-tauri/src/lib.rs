@@ -615,6 +615,9 @@ pub struct SyncAcknowledgementInput {
     pub event_id: Uuid,
     pub status: String,
     pub server_version: Option<i64>,
+    pub error_code: Option<String>,
+    pub server_payload: Option<serde_json::Value>,
+    pub server_operation: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -5363,18 +5366,42 @@ impl LocalAuthService {
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         require_transaction_account(&transaction, account_id)?;
         for acknowledgement in acknowledgements {
-            if acknowledgement.status != "accepted"
-                || acknowledgement.server_version.unwrap_or(-1) < 1
-            {
-                continue;
-            }
             let entity: Option<(String, String)> = transaction.query_row(
                 "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND owner_account_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL",
                 params![acknowledgement.event_id.to_string(), account_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional().map_err(|_| AuthError::Database)?;
             if let Some((entity_type, entity_id)) = entity {
-                transaction.execute("UPDATE local_sync_outbox SET acknowledged_at = ?2, last_error = NULL WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
-                transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![entity_type, entity_id, acknowledgement.server_version]).map_err(|_| AuthError::Database)?;
+                match acknowledgement.status.as_str() {
+                    "accepted" if acknowledgement.server_version.unwrap_or(-1) >= 1 => {
+                        transaction.execute("UPDATE local_sync_outbox SET acknowledged_at = ?2, last_error = NULL WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                        transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![entity_type, entity_id, acknowledgement.server_version]).map_err(|_| AuthError::Database)?;
+                    }
+                    "validation_error" => {
+                        transaction.execute("UPDATE local_sync_outbox SET superseded_at = ?2, last_error = ?3 WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now), acknowledgement.error_code.unwrap_or_else(|| "VALIDATION_ERROR".into())]).map_err(|_| AuthError::Database)?;
+                    }
+                    "conflict" if acknowledgement.server_version.unwrap_or(-1) >= 1 => {
+                        let Some(payload) = acknowledgement
+                            .server_payload
+                            .filter(serde_json::Value::is_object)
+                        else {
+                            transaction.execute("UPDATE local_sync_outbox SET last_error = 'UNSTRUCTURED_CONFLICT' WHERE event_id = ?1", [acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                            continue;
+                        };
+                        let Some(operation) = acknowledgement.server_operation else {
+                            transaction.execute("UPDATE local_sync_outbox SET last_error = 'UNSTRUCTURED_CONFLICT' WHERE event_id = ?1", [acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                            continue;
+                        };
+                        if !matches!(operation.as_str(), "upsert" | "soft_delete") {
+                            transaction.execute("UPDATE local_sync_outbox SET last_error = 'UNSTRUCTURED_CONFLICT' WHERE event_id = ?1", [acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                            continue;
+                        }
+                        transaction.execute("INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) SELECT ?1, event_id, entity_type, entity_id, base_version, ?2, payload_json, ?3, ?4, ?5 FROM local_sync_outbox WHERE event_id = ?6 AND NOT EXISTS (SELECT 1 FROM local_sync_conflicts WHERE event_id = ?6 AND server_version = ?2)", params![Uuid::new_v4().to_string(), acknowledgement.server_version, payload.to_string(), operation, unix_seconds(now), acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                        transaction.execute("UPDATE local_sync_outbox SET superseded_at = ?2, last_error = ?3 WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now), acknowledgement.error_code.unwrap_or_else(|| "CONFLICT".into())]).map_err(|_| AuthError::Database)?;
+                    }
+                    _ => {
+                        transaction.execute("UPDATE local_sync_outbox SET retry_count = retry_count + 1, last_error = ?2 WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), acknowledgement.error_code.unwrap_or_else(|| "RETRYABLE_TRANSPORT".into())]).map_err(|_| AuthError::Database)?;
+                    }
+                }
             }
         }
         transaction.commit().map_err(|_| AuthError::Database)
@@ -10969,7 +10996,10 @@ mod tests {
                 vec![SyncAcknowledgementInput {
                     event_id: first_event,
                     status: "accepted".into(),
-                    server_version: Some(1)
+                    server_version: Some(1),
+                    error_code: None,
+                    server_payload: None,
+                    server_operation: None,
                 }],
                 now,
                 first.id,
@@ -10983,6 +11013,9 @@ mod tests {
                     event_id: first_event,
                     status: "accepted".into(),
                     server_version: Some(1),
+                    error_code: None,
+                    server_payload: None,
+                    server_operation: None,
                 }],
                 now,
             )
@@ -11011,6 +11044,9 @@ mod tests {
                     event_id: second_events[0].event_id,
                     status: "accepted".into(),
                     server_version: Some(1),
+                    error_code: None,
+                    server_payload: None,
+                    server_operation: None,
                 }],
                 now,
             )
@@ -14598,11 +14634,17 @@ mod tests {
                         event_id: first_event.event_id,
                         status: "accepted".into(),
                         server_version: Some(3),
+                        error_code: None,
+                        server_payload: None,
+                        server_operation: None,
                     },
                     SyncAcknowledgementInput {
                         event_id: pending[1].event_id,
                         status: "conflict".into(),
                         server_version: Some(2),
+                        error_code: None,
+                        server_payload: None,
+                        server_operation: None,
                     },
                 ],
                 now,
@@ -14615,6 +14657,9 @@ mod tests {
                     event_id: first_event.event_id,
                     status: "accepted".into(),
                     server_version: Some(1),
+                    error_code: None,
+                    server_payload: None,
+                    server_operation: None,
                 }],
                 now,
             )
@@ -16643,5 +16688,110 @@ mod tests {
         drop(connection);
         drop(service);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn sync_acknowledgements_quarantine_permanent_failures_without_blocking_later_events() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let user = account();
+        service
+            .cache_verified_account(user.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &user.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let (permanent, retryable, conflict) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let tx = connection.transaction().unwrap();
+            insert_local_sync_outbox(&tx, "material", Uuid::new_v4(), "{}", now).unwrap();
+            tx.execute("UPDATE local_sync_outbox SET event_id = ?1 WHERE rowid = (SELECT MIN(rowid) FROM local_sync_outbox)", [permanent.to_string()]).unwrap();
+            insert_local_sync_outbox(&tx, "material", Uuid::new_v4(), "{}", now).unwrap();
+            tx.execute("UPDATE local_sync_outbox SET event_id = ?1 WHERE rowid = (SELECT MAX(rowid) FROM local_sync_outbox)", [retryable.to_string()]).unwrap();
+            insert_local_sync_outbox(&tx, "material", Uuid::new_v4(), "{\"local\":true}", now)
+                .unwrap();
+            tx.execute("UPDATE local_sync_outbox SET event_id = ?1 WHERE rowid = (SELECT MAX(rowid) FROM local_sync_outbox)", [conflict.to_string()]).unwrap();
+            tx.commit().unwrap();
+        }
+        service
+            .apply_sync_acknowledgements(
+                vec![
+                    SyncAcknowledgementInput {
+                        event_id: permanent,
+                        status: "validation_error".into(),
+                        server_version: None,
+                        error_code: Some("INVALID_PAYLOAD".into()),
+                        server_payload: None,
+                        server_operation: None,
+                    },
+                    SyncAcknowledgementInput {
+                        event_id: retryable,
+                        status: "retryable_error".into(),
+                        server_version: None,
+                        error_code: Some("TEMPORARY_UNAVAILABLE".into()),
+                        server_payload: None,
+                        server_operation: None,
+                    },
+                    SyncAcknowledgementInput {
+                        event_id: conflict,
+                        status: "conflict".into(),
+                        server_version: Some(2),
+                        error_code: Some("VERSION_CONFLICT".into()),
+                        server_payload: Some(serde_json::json!({"server":true})),
+                        server_operation: Some("upsert".into()),
+                    },
+                ],
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let permanent_row: (Option<i64>, Option<String>) = connection
+            .query_row(
+                "SELECT superseded_at, last_error FROM local_sync_outbox WHERE event_id = ?1",
+                [permanent.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            permanent_row,
+            (Some(unix_seconds(now)), Some("INVALID_PAYLOAD".into()))
+        );
+        let conflict_row: (Option<i64>, Option<String>) = connection
+            .query_row(
+                "SELECT superseded_at, last_error FROM local_sync_outbox WHERE event_id = ?1",
+                [conflict.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            conflict_row,
+            (Some(unix_seconds(now)), Some("VERSION_CONFLICT".into()))
+        );
+        let server_payload: String = connection
+            .query_row(
+                "SELECT server_payload_json FROM local_sync_conflicts WHERE event_id = ?1",
+                [conflict.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(server_payload, "{\"server\":true}");
+        drop(connection);
+        assert_eq!(
+            service
+                .pending_sync_events(100, now)
+                .unwrap()
+                .iter()
+                .map(|event| event.event_id)
+                .collect::<Vec<_>>(),
+            vec![retryable]
+        );
     }
 }

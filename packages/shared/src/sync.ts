@@ -42,6 +42,9 @@ export const syncEventResultSchema = z.object({
   eventId: uuidSchema,
   status: z.enum(['accepted', 'conflict', 'validation_error']),
   serverVersion: z.number().int().min(0).nullable(),
+  errorCode: z.string().min(1).max(80).optional(),
+  serverPayload: z.record(z.string(), z.unknown()).optional(),
+  serverOperation: syncOperationSchema.optional(),
 })
 
 export const syncPushResponseSchema = z.object({

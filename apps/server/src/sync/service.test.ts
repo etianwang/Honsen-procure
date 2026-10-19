@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { SyncEvent } from '@honsen/shared'
+import type { SyncEvent, SyncEventResult } from '@honsen/shared'
 import { describe, expect, it } from 'vitest'
 import { SyncService } from './service.js'
 import type { SyncStore } from './types.js'
@@ -27,7 +27,9 @@ class FixtureStore implements SyncStore {
   }
   project: Record<string, unknown> | null = null
 
-  async pushEvent(input: Parameters<SyncStore['pushEvent']>[0]) {
+  async pushEvent(
+    input: Parameters<SyncStore['pushEvent']>[0],
+  ): Promise<SyncEventResult> {
     this.pushed += 1
     this.lastPush = input
     return {
@@ -76,6 +78,29 @@ function purchaseOrderEvent(applicantId = engineer.id) {
 }
 
 describe('SyncService', () => {
+  it('preserves structured conflict details and assigns its stable error code', async () => {
+    const store = new FixtureStore()
+    store.pushEvent = async (input) => ({
+      eventId: input.event.eventId,
+      status: 'conflict',
+      serverVersion: 2,
+      serverPayload: { server: true },
+      serverOperation: 'upsert',
+    })
+
+    const response = await new SyncService(store).push(
+      { ...engineer, roles: ['purchaser'] },
+      { deviceId: randomUUID(), events: [purchaseOrderEvent()] },
+    )
+
+    expect(response.results[0]).toMatchObject({
+      status: 'conflict',
+      errorCode: 'VERSION_CONFLICT',
+      serverPayload: { server: true },
+      serverOperation: 'upsert',
+    })
+  })
+
   it('rejects an RFQ tombstone or incomplete snapshot before storage', async () => {
     const store = new FixtureStore()
     const service = new SyncService(store)
@@ -95,7 +120,10 @@ describe('SyncService', () => {
           events: [candidate],
         },
       )
-      expect(response.results[0]?.status).toBe('validation_error')
+      expect(response.results[0]).toMatchObject({
+        status: 'validation_error',
+        errorCode: 'FORBIDDEN',
+      })
     }
     expect(store.pushed).toBe(0)
   })
