@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -30,6 +30,7 @@ const children = []
 const browsers = []
 const consoleErrors = []
 const denials = []
+const lateResponses = []
 let revokedSessionAccess = null
 const accountA = '10000000-0000-4000-8000-000000000013'
 const accountB = '10000000-0000-4000-8000-000000000012'
@@ -193,6 +194,21 @@ try {
     "INSERT INTO user_roles (user_id, role) VALUES ($1, 'administrator') ON CONFLICT DO NOTHING",
     [accountB],
   )
+  for (const id of [accountA, accountB]) {
+    await pool.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [id, '10000000-0000-4000-8000-000000000002'],
+    )
+    await pool.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+      [
+        id,
+        '10000000-0000-4000-8000-000000000002',
+        '10000000-0000-4000-8000-000000000003',
+        '10000000-0000-4000-8000-000000000004',
+      ],
+    )
+  }
   const vite = spawn(
     globalThis.process.execPath,
     [
@@ -307,6 +323,14 @@ try {
         item.localPayloadJson.includes(sourceA),
       ) ?? false,
   }
+  assert.equal(revokedSessionAccess.denied, true)
+  assert.equal(revokedSessionAccess.sourceDisclosed, false)
+  await denied(
+    page,
+    'resolve_sync_conflict',
+    { input },
+    'reauthentication_required',
+  )
   await lock(producer)
   await lock(page)
   await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD, 1)
@@ -353,6 +377,128 @@ try {
     { input },
     'reauthentication_required',
   )
+  // Produce B's own real unresolved conflict after A's has been resolved, so foreign-dirty protection stays intact.
+  const bMaterial = {
+    ...material,
+    id: randomUUID(),
+    nameZh: `G1-B-server-${randomUUID()}`,
+  }
+  const sourceB = `G1-B-local-${randomUUID()}`
+  await login(
+    producer,
+    'engineer-b',
+    process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
+  )
+  await call(producer, 'save_material', { material: bMaterial })
+  assert.equal((await call(producer, 'push_pending_sync')).acceptedCount, 1)
+  await lock(producer)
+  await loginCore(
+    page,
+    'engineer-b',
+    process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
+  )
+  await call(page, 'save_material', {
+    material: { ...bMaterial, nameZh: sourceB },
+  })
+  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 1)
+  await call(page, 'pull_sync')
+  const ownB = await call(page, 'list_sync_conflicts')
+  assert.equal(ownB.length, 1)
+  assert.ok(ownB[0].localPayloadJson.includes(sourceB))
+  await call(page, 'lock_session')
+  const prefix = process.env.HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX
+  assert.ok(
+    prefix?.startsWith(join(repo, '.honsen-native-qa') + '\\') &&
+      prefix.endsWith('.test'),
+  )
+
+  async function startHeldPull(phase) {
+    writeFileSync(`${prefix}.arm.signal`, phase)
+    await page.evaluate(() => {
+      window.__g1PendingPull = window.__TAURI__.core.invoke('pull_sync').then(
+        (value) => ({ ok: true, value }),
+        (error) => ({ ok: false, error }),
+      )
+    })
+    await expect
+      .poll(() => existsSync(`${prefix}.${phase}.ready.signal`), {
+        timeout: 10_000,
+      })
+      .toBe(true)
+    return JSON.parse(readFileSync(`${prefix}.${phase}.ready.signal`, 'utf8'))
+  }
+  async function releaseHeldPull(phase, ready) {
+    writeFileSync(
+      `${prefix}.${phase}.release.signal`,
+      JSON.stringify({ runId: process.env.HONSEN_PROCURE_TEST_RUN_ID, phase }),
+    )
+    const response = await page.evaluate(() => window.__g1PendingPull)
+    assert.deepEqual(response, {
+      ok: false,
+      error: { code: 'sync_account_boundary' },
+    })
+    const observations = readFileSync(
+      process.env.HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH,
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    const actual = observations.filter(
+      (row) =>
+        row.authBarrier &&
+        row.phase === phase &&
+        row.requestId === ready.requestId,
+    )
+    assert.equal(actual.length, 1)
+    assert.equal(actual[0].serverStatus, 401)
+    assert.equal(actual[0].runId, process.env.HONSEN_PROCURE_TEST_RUN_ID)
+    assert.ok(actual[0].readyAt <= actual[0].releasedAt)
+    lateResponses.push({ ...actual[0], clientError: response.error.code })
+  }
+  await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  await expect(page.getByText(/多账号拉取已暂停/u)).toBeVisible()
+  const readyB = await startHeldPull('late-account')
+  // Revoke the held A token via a second real EXE; B's login alone must not be assumed to revoke A.
+  await login(producer, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  await lock(page)
+  await login(
+    page,
+    'engineer-b',
+    process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
+    1,
+  )
+  await releaseHeldPull('late-account', readyB)
+  assert.deepEqual(await call(page, 'list_sync_conflicts'), ownB)
+  assert.ok(
+    !JSON.stringify(await call(page, 'list_sync_conflicts')).includes(sourceA),
+  )
+  await denied(
+    page,
+    'resolve_sync_conflict',
+    { input },
+    'sync_account_boundary',
+  )
+  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 1)
+  await page.screenshot({ path: `${resultPath}-late-B.png` })
+  await lock(producer)
+  await lock(page)
+  await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  await expect(page.getByText(/多账号拉取已暂停/u)).toBeVisible()
+  const readyA = await startHeldPull('late-same-account')
+  await lock(page)
+  await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  await releaseHeldPull('late-same-account', readyA)
+  assert.deepEqual(await call(page, 'list_sync_conflicts'), [])
+  await call(page, 'sync_status')
+  assert.equal((await call(page, 'push_pending_sync')).acceptedCount, 0)
+  await denied(
+    page,
+    'resolve_sync_conflict',
+    { input: { ...input, conflictId: ownB[0].id } },
+    'sync_account_boundary',
+  )
+  await lock(page)
   assert.deepEqual(consoleErrors, [])
   assert.equal(
     revokedSessionAccess.denied,
@@ -373,6 +519,9 @@ try {
         conflictId: own[0].id,
         denials,
         revokedSessionAccess,
+        lateResponses,
+        lateAccountPreserved: 'PASS',
+        lateSameAccountPreserved: 'PASS',
         origins,
         sameProfileSwitch: 'PASS',
         ownerRecoveryAndResolution: 'PASS',
@@ -394,6 +543,7 @@ try {
         error: String(error),
         denials,
         revokedSessionAccess,
+        lateResponses,
         consoleErrors,
       },
       null,

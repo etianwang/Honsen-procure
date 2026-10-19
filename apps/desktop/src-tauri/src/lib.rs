@@ -1114,11 +1114,40 @@ fn prior_test_profile_credential_services(path: &Path) -> (String, String) {
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OnlineSession {
+    account_id: Uuid,
+    generation: Uuid,
+}
+
+struct SyncRequest {
+    session: OnlineSession,
+    token: String,
+}
+
+struct LocalConnection {
+    database: Connection,
+    online_session: Option<OnlineSession>,
+    session_invalidated: bool,
+}
+
+impl std::ops::Deref for LocalConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.database
+    }
+}
+
+impl std::ops::DerefMut for LocalConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.database
+    }
+}
+
 pub struct LocalAuthService {
-    connection: Mutex<Connection>,
+    connection: Mutex<LocalConnection>,
     media_directory: PathBuf,
     captcha: Mutex<Option<LocalCaptcha>>,
-    online_session_account: Mutex<Option<Uuid>>,
     credential_vault: Box<dyn CredentialVault>,
     test_tls_root: Option<reqwest::Certificate>,
     test_expected_sync_origin_installation: Mutex<Option<String>>,
@@ -1273,10 +1302,13 @@ impl LocalAuthService {
             .map_err(|_| AuthError::Database)?;
         migrate(&mut connection)?;
         Ok(Self {
-            connection: Mutex::new(connection),
+            connection: Mutex::new(LocalConnection {
+                database: connection,
+                online_session: None,
+                session_invalidated: true,
+            }),
             media_directory,
             captcha: Mutex::new(None),
-            online_session_account: Mutex::new(None),
             credential_vault,
             test_tls_root,
             test_expected_sync_origin_installation: Mutex::new(None),
@@ -1433,10 +1465,12 @@ impl LocalAuthService {
             .map_err(|_| AuthError::Database)?
             .map(|id| Uuid::parse_str(&id).map_err(|_| AuthError::Database))
             .transpose()?;
-        let online_session = *self
-            .online_session_account
+        let online_session = self
+            .connection
             .lock()
-            .map_err(|_| AuthError::Database)?;
+            .map_err(|_| AuthError::Database)?
+            .online_session
+            .map(|session| session.account_id);
         let last_authenticated = self
             .connection
             .lock()
@@ -1612,10 +1646,7 @@ impl LocalAuthService {
         cloud_captcha_answer: &str,
         now: SystemTime,
     ) -> Result<AuthenticatedSession, AuthError> {
-        *self
-            .online_session_account
-            .lock()
-            .map_err(|_| AuthError::Database)? = None;
+        self.lock()?;
         self.consume_captcha(local_captcha_id, local_captcha_answer, now)?;
         if !valid_required_text(username, 128)
             || password.is_empty()
@@ -1668,17 +1699,7 @@ impl LocalAuthService {
             password,
             now,
         )?;
-        self.cache_sync_access_token(login.user.id, &login.access_token)?;
-        let mut online_session = self
-            .online_session_account
-            .lock()
-            .map_err(|_| AuthError::Database)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        connection
-            .execute("DELETE FROM local_session", [])
-            .map_err(|_| AuthError::Database)?;
-        connection.execute("INSERT INTO local_session (user_id, started_at, last_active_at) VALUES (?1, ?2, ?2)", params![login.user.id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
-        *online_session = Some(login.user.id);
+        self.activate_online_session(login.user.id, &login.access_token, now)?;
         Ok(AuthenticatedSession {
             user_id: login.user.id,
             username: login.user.username,
@@ -1695,14 +1716,14 @@ impl LocalAuthService {
         captcha_answer: u8,
         now: SystemTime,
     ) -> Result<AuthenticatedSession, AuthError> {
-        let mut online_session = self
-            .online_session_account
-            .lock()
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.online_session = None;
+        connection.session_invalidated = true;
+        connection
+            .execute("DELETE FROM local_session", [])
             .map_err(|_| AuthError::Database)?;
-        *online_session = None;
         self.consume_captcha(captcha_id, captcha_answer, now)?;
 
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let account = connection.query_row(
             "SELECT id, username, roles_json, enabled, requires_password_change, cached_verified_at, failed_attempts, locked_until FROM local_accounts WHERE username = ?1",
             [username],
@@ -1752,6 +1773,7 @@ impl LocalAuthService {
             .execute("DELETE FROM local_session", [])
             .map_err(|_| AuthError::Database)?;
         connection.execute("INSERT INTO local_session (user_id, started_at, last_active_at) VALUES (?1, ?2, ?2)", params![id, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        connection.session_invalidated = false;
         Ok(AuthenticatedSession {
             user_id: account_id,
             username,
@@ -1762,6 +1784,9 @@ impl LocalAuthService {
 
     pub fn require_role(&self, role: Role, now: SystemTime) -> Result<(), AuthError> {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        if connection.session_invalidated {
+            return Err(AuthError::NoActiveSession);
+        }
         let session = connection.query_row("SELECT s.user_id, s.last_active_at, a.roles_json FROM local_session s JOIN local_accounts a ON a.id = s.user_id", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))).optional().map_err(|_| AuthError::Database)?;
         let Some((user_id, last_active_at, roles_json)) = session else {
             return Err(AuthError::NoActiveSession);
@@ -1796,9 +1821,12 @@ impl LocalAuthService {
     }
 
     fn require_conflict_resolution(
-        connection: &Connection,
+        connection: &LocalConnection,
         now: SystemTime,
     ) -> Result<Uuid, AuthError> {
+        if connection.session_invalidated {
+            return Err(AuthError::NoActiveSession);
+        }
         // Authorize the account and role under the same lock as conflict access.
         let session: Option<(String, i64, String, bool)> = connection.query_row(
             "SELECT s.user_id, s.last_active_at, a.roles_json, a.enabled FROM local_session s JOIN local_accounts a ON a.id = s.user_id",
@@ -5142,7 +5170,7 @@ impl LocalAuthService {
     ) -> Result<(), AuthError> {
         self.require_catalog_read(now)?;
         let account_id = self.active_session_user_id()?;
-        self.apply_sync_acknowledgements_for_account(acknowledgements, now, account_id)
+        self.apply_sync_acknowledgements_for_account(acknowledgements, now, account_id, None)
     }
 
     fn apply_sync_acknowledgements_for_account(
@@ -5150,8 +5178,12 @@ impl LocalAuthService {
         acknowledgements: Vec<SyncAcknowledgementInput>,
         now: SystemTime,
         account_id: Uuid,
+        session: Option<OnlineSession>,
     ) -> Result<(), AuthError> {
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        if let Some(session) = session {
+            Self::require_request_session(&connection, session)?;
+        }
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         require_transaction_account(&transaction, account_id)?;
         for acknowledgement in acknowledgements {
@@ -5179,7 +5211,7 @@ impl LocalAuthService {
     ) -> Result<(), AuthError> {
         self.require_catalog_read(now)?;
         let account_id = self.active_session_user_id()?;
-        self.apply_sync_pull_page_for_account(page, now, account_id)
+        self.apply_sync_pull_page_for_account(page, now, account_id, None)
     }
 
     fn apply_sync_pull_page_for_account(
@@ -5187,6 +5219,7 @@ impl LocalAuthService {
         page: SyncPullPageInput,
         now: SystemTime,
         account_id: Uuid,
+        session: Option<OnlineSession>,
     ) -> Result<(), AuthError> {
         if page.changes.len() > 500 || !valid_sync_cursor(&page.next_cursor) {
             return Err(AuthError::InvalidInput);
@@ -5208,6 +5241,9 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        if let Some(session) = session {
+            Self::require_request_session(&connection, session)?;
+        }
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         require_transaction_account(&transaction, account_id)?;
         let account_id_text = account_id.to_string();
@@ -5333,6 +5369,94 @@ impl LocalAuthService {
         transaction.commit().map_err(|_| AuthError::Database)
     }
 
+    fn activate_online_session(
+        &self,
+        account_id: Uuid,
+        token: &str,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if token.len() < 32 {
+            return Err(AuthError::InvalidInput);
+        }
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.session_invalidated = true;
+        connection.online_session = None;
+        self.credential_vault.save_sync_token(account_id, token)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        transaction
+            .execute("DELETE FROM local_session", [])
+            .map_err(|_| AuthError::Database)?;
+        transaction.execute("INSERT INTO local_session (user_id, started_at, last_active_at) VALUES (?1, ?2, ?2)", params![account_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "UPDATE local_sync_state SET last_authenticated_user_id = ?1 WHERE singleton = 1",
+                [account_id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        connection.online_session = Some(OnlineSession {
+            account_id,
+            generation: Uuid::new_v4(),
+        });
+        connection.session_invalidated = false;
+        Ok(())
+    }
+
+    fn sync_request(&self, now: SystemTime) -> Result<SyncRequest, AuthError> {
+        let account_id = self.require_online_sync_session(now)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let session = connection
+            .online_session
+            .ok_or(AuthError::NoActiveSession)?;
+        if connection.session_invalidated || session.account_id != account_id {
+            return Err(AuthError::SyncAccountBoundary);
+        }
+        let active: Option<String> = connection
+            .query_row("SELECT user_id FROM local_session", [], |row| row.get(0))
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        if active.as_deref() != Some(account_id.to_string().as_str()) {
+            return Err(AuthError::SyncAccountBoundary);
+        }
+        let token = self
+            .credential_vault
+            .load_sync_token(account_id)?
+            .ok_or(AuthError::NoActiveSession)?;
+        Ok(SyncRequest { session, token })
+    }
+
+    fn require_request_session(
+        connection: &LocalConnection,
+        session: OnlineSession,
+    ) -> Result<(), AuthError> {
+        if connection.session_invalidated || connection.online_session != Some(session) {
+            return Err(AuthError::SyncAccountBoundary);
+        }
+        let active: Option<String> = connection
+            .query_row("SELECT user_id FROM local_session", [], |row| row.get(0))
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        if active.as_deref() != Some(session.account_id.to_string().as_str()) {
+            return Err(AuthError::SyncAccountBoundary);
+        }
+        Ok(())
+    }
+
+    fn reject_sync_session(&self, session: OnlineSession) -> Result<(), AuthError> {
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        Self::require_request_session(&connection, session)?;
+        // Keep reads closed even if SQLite cannot delete the stale session row.
+        connection.session_invalidated = true;
+        connection.online_session = None;
+        connection
+            .execute(
+                "DELETE FROM local_session WHERE user_id = ?1",
+                [session.account_id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        Err(AuthError::NoActiveSession)
+    }
+
     pub fn cache_sync_access_token(&self, account_id: Uuid, token: &str) -> Result<(), AuthError> {
         if token.len() < 32 {
             return Err(AuthError::InvalidInput);
@@ -5372,10 +5496,12 @@ impl LocalAuthService {
 
     fn require_online_sync_session(&self, now: SystemTime) -> Result<Uuid, AuthError> {
         let account_id = self.active_session_user_id()?;
-        if *self
-            .online_session_account
+        if self
+            .connection
             .lock()
             .map_err(|_| AuthError::Database)?
+            .online_session
+            .map(|session| session.account_id)
             != Some(account_id)
         {
             return Err(AuthError::NoActiveSession);
@@ -5398,9 +5524,10 @@ impl LocalAuthService {
     }
 
     pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
-        let account_id = self.require_online_sync_session(now)?;
-        self.refresh_authorization_https(now).await?;
-        self.require_online_sync_session(now)?;
+        let request = self.sync_request(now)?;
+        let account_id = request.session.account_id;
+        self.refresh_authorization_for_session(&request, now)
+            .await?;
         let events = self.pending_sync_events(100, now)?;
         self.ensure_active_sync_account(account_id)?;
         if events.is_empty() {
@@ -5409,10 +5536,6 @@ impl LocalAuthService {
                 pending_count: 0,
             });
         }
-        let token = self
-            .credential_vault
-            .load_sync_token(account_id)?
-            .ok_or(AuthError::NoActiveSession)?;
         self.ensure_active_sync_account(account_id)?;
         let installation_id: String = self
             .connection
@@ -5439,19 +5562,20 @@ impl LocalAuthService {
         {
             return Err(AuthError::Database);
         }
-        if self.require_online_sync_session(now)? != account_id {
-            return Err(AuthError::SyncAccountBoundary);
-        }
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
         let response = self
             .https_client()?
             .post(endpoint)
-            .bearer_auth(token)
+            .bearer_auth(&request.token)
             .json(&serde_json::json!({ "deviceId": installation_id, "events": request_events }))
             .send()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(AuthError::NoActiveSession);
+            self.reject_sync_session(request.session)?;
         }
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
@@ -5461,15 +5585,17 @@ impl LocalAuthService {
             .json::<SyncPushResponse>()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
-        if self.require_online_sync_session(now)? != account_id {
-            return Err(AuthError::SyncAccountBoundary);
-        }
         let accepted_count = acknowledgements
             .results
             .iter()
             .filter(|result| result.status == "accepted")
             .count();
-        self.apply_sync_acknowledgements_for_account(acknowledgements.results, now, account_id)?;
+        self.apply_sync_acknowledgements_for_account(
+            acknowledgements.results,
+            now,
+            account_id,
+            Some(request.session),
+        )?;
         self.ensure_active_sync_account(account_id)?;
         Ok(SyncPushView {
             accepted_count,
@@ -5478,31 +5604,29 @@ impl LocalAuthService {
     }
 
     pub async fn pull_sync_https(&self, now: SystemTime) -> Result<SyncPullView, AuthError> {
-        let account_id = self.require_online_sync_session(now)?;
-        self.refresh_authorization_https(now).await?;
-        self.require_online_sync_session(now)?;
-        let token = self
-            .credential_vault
-            .load_sync_token(account_id)?
-            .ok_or(AuthError::NoActiveSession)?;
+        let request = self.sync_request(now)?;
+        let account_id = request.session.account_id;
+        self.refresh_authorization_for_session(&request, now)
+            .await?;
         let mut cursor = self.pull_cursor_for_account(account_id)?;
         self.ensure_active_sync_account(account_id)?;
         let endpoint = sync_pull_endpoint()?;
         let client = self.https_client()?;
         let mut applied_count = 0;
         loop {
-            if self.require_online_sync_session(now)? != account_id {
-                return Err(AuthError::SyncAccountBoundary);
-            }
+            Self::require_request_session(
+                &*self.connection.lock().map_err(|_| AuthError::Database)?,
+                request.session,
+            )?;
             let response = client
                 .get(endpoint.clone())
-                .bearer_auth(&token)
+                .bearer_auth(&request.token)
                 .query(&[("cursor", cursor.as_str()), ("limit", "500")])
                 .send()
                 .await
                 .map_err(|_| AuthError::SyncTransport)?;
             if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-                return Err(AuthError::NoActiveSession);
+                self.reject_sync_session(request.session)?;
             }
             if !response.status().is_success() {
                 return Err(AuthError::SyncTransport);
@@ -5511,13 +5635,10 @@ impl LocalAuthService {
                 .json::<SyncPullPageInput>()
                 .await
                 .map_err(|_| AuthError::SyncTransport)?;
-            if self.require_online_sync_session(now)? != account_id {
-                return Err(AuthError::SyncAccountBoundary);
-            }
             let has_more = pull_page_has_more(&cursor, &page)?;
             let next_cursor = page.next_cursor.clone();
             applied_count += page.changes.len();
-            self.apply_sync_pull_page_for_account(page, now, account_id)?;
+            self.apply_sync_pull_page_for_account(page, now, account_id, Some(request.session))?;
             cursor = next_cursor;
             if !has_more {
                 break;
@@ -5578,6 +5699,9 @@ impl LocalAuthService {
 
     fn active_session_user_id(&self) -> Result<Uuid, AuthError> {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        if connection.session_invalidated {
+            return Err(AuthError::NoActiveSession);
+        }
         let user_id = connection
             .query_row("SELECT user_id FROM local_session", [], |row| {
                 row.get::<_, String>(0)
@@ -5592,7 +5716,7 @@ impl LocalAuthService {
         &self,
         order_id: Uuid,
         now: SystemTime,
-    ) -> Result<MutexGuard<'_, Connection>, AuthError> {
+    ) -> Result<MutexGuard<'_, LocalConnection>, AuthError> {
         self.require_catalog_read(now)?;
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
@@ -5652,6 +5776,7 @@ impl LocalAuthService {
         &self,
         scopes: &[CloudAuthorizationScope],
         now: SystemTime,
+        session: Option<OnlineSession>,
     ) -> Result<(), AuthError> {
         if scopes.len() > 5_000 {
             return Err(AuthError::InvalidInput);
@@ -5668,6 +5793,9 @@ impl LocalAuthService {
         }
         let account_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        if let Some(session) = session {
+            Self::require_request_session(&connection, session)?;
+        }
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         transaction
             .execute(
@@ -5687,21 +5815,29 @@ impl LocalAuthService {
     }
 
     pub async fn refresh_authorization_https(&self, now: SystemTime) -> Result<(), AuthError> {
-        let account_id = self.require_online_sync_session(now)?;
-        let token = self
-            .credential_vault
-            .load_sync_token(account_id)?
-            .ok_or(AuthError::NoActiveSession)?;
+        let request = self.sync_request(now)?;
+        self.refresh_authorization_for_session(&request, now).await
+    }
+
+    async fn refresh_authorization_for_session(
+        &self,
+        request: &SyncRequest,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
         let endpoint = authorization_context_endpoint()?;
         let response = self
             .https_client()?
             .get(endpoint)
-            .bearer_auth(token)
+            .bearer_auth(&request.token)
             .send()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(AuthError::NoActiveSession);
+            self.reject_sync_session(request.session)?;
         }
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
@@ -5710,7 +5846,7 @@ impl LocalAuthService {
             .json::<Vec<CloudAuthorizationScope>>()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
-        self.replace_authorization_snapshots(&scopes, now)
+        self.replace_authorization_snapshots(&scopes, now, Some(request.session))
     }
 
     fn authorization_management_token(&self, now: SystemTime) -> Result<String, AuthError> {
@@ -5909,13 +6045,10 @@ impl LocalAuthService {
     }
 
     pub fn lock(&self) -> Result<(), AuthError> {
-        *self
-            .online_session_account
-            .lock()
-            .map_err(|_| AuthError::Database)? = None;
-        self.connection
-            .lock()
-            .map_err(|_| AuthError::Database)?
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.online_session = None;
+        connection.session_invalidated = true;
+        connection
             .execute("DELETE FROM local_session", [])
             .map_err(|_| AuthError::Database)?;
         Ok(())
@@ -9477,7 +9610,9 @@ mod tests {
         );
 
         // This is the state established only by a successful cloud login in production.
-        *service.online_session_account.lock().unwrap() = Some(first.id);
+        service
+            .activate_online_session(first.id, &"x".repeat(32), now)
+            .unwrap();
         assert_eq!(service.require_online_sync_session(now), Ok(first.id));
         let second = CachedAccount {
             id: Uuid::new_v4(),
@@ -9535,7 +9670,9 @@ mod tests {
                 now,
             )
             .unwrap();
-        *service.online_session_account.lock().unwrap() = Some(engineer.id);
+        service
+            .activate_online_session(engineer.id, &"x".repeat(32), now)
+            .unwrap();
         assert_eq!(service.require_online_sync_session(now), Ok(engineer.id));
         service
             .connection
@@ -9586,7 +9723,9 @@ mod tests {
                 now,
             )
             .unwrap();
-        *service.online_session_account.lock().unwrap() = Some(engineer.id);
+        service
+            .activate_online_session(engineer.id, &"x".repeat(32), now)
+            .unwrap();
         assert_eq!(service.require_online_sync_session(now), Ok(engineer.id));
         assert_eq!(
             tauri::async_runtime::block_on(service.online_login(
@@ -9656,6 +9795,238 @@ mod tests {
         );
         service.lock().unwrap();
         assert_eq!(service.sync_status(now), Err(AuthError::NoActiveSession));
+    }
+
+    fn rejected_session_fixture() -> (LocalAuthService, Uuid, Uuid, Uuid, Uuid, SystemTime) {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let conflict_a = Uuid::new_v4();
+        let conflict_b = Uuid::new_v4();
+        for (id, username, conflict) in [(a, "reject-a", conflict_a), (b, "reject-b", conflict_b)] {
+            service
+                .cache_verified_account(
+                    CachedAccount {
+                        id,
+                        username: username.into(),
+                        roles: vec![Role::Administrator],
+                        enabled: true,
+                        requires_password_change: false,
+                    },
+                    "correct-password",
+                    now,
+                )
+                .unwrap();
+            let connection = service.connection.lock().unwrap();
+            let event = Uuid::new_v4();
+            let entity = Uuid::new_v4();
+            connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'material', ?2, 'upsert', 0, '{}', 1, ?3)", params![event.to_string(), entity.to_string(), id.to_string()]).unwrap();
+            connection.execute(r#"INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) VALUES (?1, ?2, 'material', ?3, 0, 1, '{"private":true}', '{}', 'upsert', 2)"#, params![conflict.to_string(), event.to_string(), entity.to_string()]).unwrap();
+        }
+        service
+            .activate_online_session(a, &"a".repeat(32), now)
+            .unwrap();
+        (service, a, b, conflict_a, conflict_b, now)
+    }
+
+    #[test]
+    fn rejected_sync_session_blocks_conflict_reads_and_known_id_without_data_loss() {
+        let (service, a, _, conflict, _, now) = rejected_session_fixture();
+        let request = service.sync_request(now).unwrap();
+        assert_eq!(
+            service.reject_sync_session(request.session),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.list_sync_conflicts(now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: conflict,
+                    resolution: "keep_local".into(),
+                    reason: "denied".into(),
+                },
+                now
+            ),
+            Err(AuthError::NoActiveSession)
+        );
+        service.cache_sync_access_token(a, &"a".repeat(32)).unwrap();
+        assert_eq!(
+            service.list_sync_conflicts(now),
+            Err(AuthError::NoActiveSession)
+        );
+        let connection = service.connection.lock().unwrap();
+        let counts: (i64, i64, i64) = connection.query_row("SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE superseded_at IS NULL), (SELECT COUNT(*) FROM local_sync_conflicts WHERE resolved_at IS NULL), (SELECT COUNT(*) FROM local_session)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(counts, (2, 2, 0));
+    }
+
+    #[test]
+    fn late_rejected_sync_session_preserves_new_account_and_its_conflicts() {
+        let (service, _, b, conflict_a, conflict_b, now) = rejected_session_fixture();
+        let old = service.sync_request(now).unwrap();
+        service.lock().unwrap();
+        service
+            .activate_online_session(b, &"b".repeat(32), now)
+            .unwrap();
+        assert_eq!(
+            service.reject_sync_session(old.session),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        assert_eq!(service.require_online_sync_session(now), Ok(b));
+        assert_eq!(
+            service
+                .list_sync_conflicts(now)
+                .unwrap()
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            vec![conflict_b]
+        );
+        assert_eq!(
+            service.resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: conflict_a,
+                    resolution: "use_server".into(),
+                    reason: "denied".into(),
+                },
+                now
+            ),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        service
+            .resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: conflict_b,
+                    resolution: "keep_local".into(),
+                    reason: "own conflict".into(),
+                },
+                now,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn late_rejected_sync_session_preserves_same_account_new_generation() {
+        let (service, a, _, conflict, _, now) = rejected_session_fixture();
+        let old = service.sync_request(now).unwrap();
+        service.lock().unwrap();
+        // Same timestamp AND credential: generation, not either value, distinguishes logins.
+        service
+            .activate_online_session(a, &"a".repeat(32), now)
+            .unwrap();
+        let current = service.sync_request(now).unwrap();
+        assert_ne!(old.session, current.session);
+        assert_eq!(
+            service.reject_sync_session(old.session),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        assert_eq!(service.require_online_sync_session(now), Ok(a));
+        assert_eq!(service.list_sync_conflicts(now).unwrap()[0].id, conflict);
+    }
+
+    #[test]
+    fn rejected_sync_session_recovers_only_after_legitimate_reauthentication() {
+        let (service, a, _, conflict, _, now) = rejected_session_fixture();
+        let old = service.sync_request(now).unwrap();
+        assert_eq!(
+            service.reject_sync_session(old.session),
+            Err(AuthError::NoActiveSession)
+        );
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: a,
+                    username: "reject-a".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.list_sync_conflicts(now),
+            Err(AuthError::NoActiveSession)
+        );
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "reject-a",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(service.list_sync_conflicts(now).unwrap()[0].id, conflict);
+        assert_eq!(
+            service.require_online_sync_session(now),
+            Err(AuthError::NoActiveSession)
+        );
+        service
+            .activate_online_session(a, &"c".repeat(32), now)
+            .unwrap();
+        assert_eq!(service.require_online_sync_session(now), Ok(a));
+        assert_eq!(service.list_sync_conflicts(now).unwrap()[0].id, conflict);
+    }
+
+    #[test]
+    fn rejected_sync_session_fails_closed_when_sqlite_session_delete_fails() {
+        let (service, _, _, conflict, _, now) = rejected_session_fixture();
+        let old = service.sync_request(now).unwrap();
+        service.connection.lock().unwrap().execute_batch("CREATE TEMP TRIGGER refuse_session_delete BEFORE DELETE ON local_session BEGIN SELECT RAISE(ABORT, 'test session storage failure'); END;").unwrap();
+        assert_eq!(
+            service.reject_sync_session(old.session),
+            Err(AuthError::Database)
+        );
+        assert_eq!(
+            service.list_sync_conflicts(now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.require_role(Role::Administrator, now),
+            Err(AuthError::NoActiveSession)
+        );
+        assert_eq!(
+            service.resolve_sync_conflict(
+                ResolveSyncConflictInput {
+                    conflict_id: conflict,
+                    resolution: "keep_local".into(),
+                    reason: "denied".into(),
+                },
+                now
+            ),
+            Err(AuthError::NoActiveSession)
+        );
+    }
+
+    #[test]
+    fn failed_reauthentication_detaches_previous_local_conflict_access() {
+        for online in [false, true] {
+            let (service, _, _, _, _, now) = rejected_session_fixture();
+            let result = if online {
+                tauri::async_runtime::block_on(service.online_login(
+                    "reject-a",
+                    "wrong",
+                    Uuid::new_v4(),
+                    0,
+                    Uuid::new_v4(),
+                    "0",
+                    now,
+                ))
+            } else {
+                service.offline_login("reject-a", "wrong", Uuid::new_v4(), 0, now)
+            };
+            assert_eq!(result, Err(AuthError::InvalidCredentials));
+            assert_eq!(
+                service.list_sync_conflicts(now),
+                Err(AuthError::NoActiveSession)
+            );
+        }
     }
 
     #[test]
@@ -10012,7 +10383,8 @@ mod tests {
                     next_cursor: "77".into()
                 },
                 now,
-                first.id
+                first.id,
+                None
             ),
             Err(AuthError::SyncAccountBoundary)
         );
@@ -10024,7 +10396,8 @@ mod tests {
                     server_version: Some(1)
                 }],
                 now,
-                first.id
+                first.id,
+                None
             ),
             Err(AuthError::SyncAccountBoundary)
         );
@@ -10375,7 +10748,7 @@ mod tests {
             language_pair: "zh_fr".into(),
         };
         service
-            .replace_authorization_snapshots(std::slice::from_ref(&scope), now)
+            .replace_authorization_snapshots(std::slice::from_ref(&scope), now, None)
             .unwrap();
         let count = |service: &LocalAuthService| -> i64 {
             service
@@ -10391,11 +10764,13 @@ mod tests {
         };
         assert_eq!(count(&service), 1);
         assert_eq!(
-            service.replace_authorization_snapshots(&[scope.clone(), scope.clone()], now),
+            service.replace_authorization_snapshots(&[scope.clone(), scope.clone()], now, None),
             Err(AuthError::InvalidInput)
         );
         assert_eq!(count(&service), 1);
-        service.replace_authorization_snapshots(&[], now).unwrap();
+        service
+            .replace_authorization_snapshots(&[], now, None)
+            .unwrap();
         assert_eq!(count(&service), 0);
     }
 

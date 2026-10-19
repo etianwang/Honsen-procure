@@ -1,5 +1,19 @@
 # Fixer Bug Queue
 
+## G1-QA-001 repair handoff — 2026-10-19 — READY_FOR_RECHECK
+
+Integration Owner evidence on `codex/g1-session-invalidation`, starting at QA `bfa6752ccd64a6b39c36bdab96e1cb4c611ada5d`; implementation is this local checkpoint (full SHA in delivery). Historical independent FAIL below is retained, not retroactively changed to PASS.
+
+| ID | Current status | Evidence / remaining gate |
+| --- | --- | --- |
+| G1-QA-001 | READY_FOR_RECHECK | Rust-private account+generation and request token snapshot; generation comparison, closed flag and SQLite session DELETE share conflict-access mutex. SQL failure stays closed; stale response commits generation-checked. New Rust6/6, full65/65; G1 PG3/3, API/service19/19, selected store5/5; barrier3/3, desktop11/11, fixtureDOM2/2 and quality checks PASS. Actual EXE `native-smoke-20261019022252`: current rejection denies list/known ID, sourceDisclosed=false; held actual A401 preserves B's nonempty own conflict list/token; held old-A401 preserves A2. Independent Fixer must reproduce before closure. |
+| G1 | OPEN — independent recheck outstanding | Owner guards retained; Builder proof is not independent acceptance. Production conflict-UI lifecycle evidence still BLOCKED; complete no-P1/UI gate not accepted. |
+| G1-UI-EVIDENCE | BLOCKED, unchanged | No production conflict panel mount/teardown or previously visible real-source/cache-clear proof. Not implemented in QA-001. |
+| AUTH-MANAGEMENT-401 (scope follow-up) | DEFERRED / security | Standalone authorization-management list/change/replace401 still lacks invalidation if it is the first rejection; cannot restore already-invalidated session. Separate G1/G5 scope/acceptance required, no all-auth-commands claim. |
+| AUTH-BARRIER-RELEASE-TEST | DEFERRED / minor coverage | Test-only helper checks release run/phase; add negative wrong-run/wrong-phase unit cases separately. Real native run validates matching actual401. |
+
+No business/outbox/conflict/history deletion, schema, dependency, sync protocol, G2/G3 or formal change. Initial `native-smoke-20261019021931` fixture authorization failure and final successful artifacts both retained. Full design, commands/times and limits: latest QA_REPORT. NATIVE-008 CLOSED; T10/T10-SEC-001/original P1/Formal hold OPEN. Stop for independent Fixer.
+
 ## G1 Independent Security QA — 2026-10-19 (supersedes handoff status)
 
 | ID | Status | Priority | Evidence / impact | Minimal next action |

@@ -15,6 +15,7 @@ import { MasterDataService } from '../master-data/service.js'
 import { PostgresSyncStore } from '../sync/postgres-store.js'
 import { SyncService } from '../sync/service.js'
 import { observeNativePushCancellation, type NativePushCancellationObservation } from './native-push-cancellation.js'
+import { createNativeAuthBarrier } from './native-auth-barrier.js'
 
 const accounts = [
   ['10000000-0000-4000-8000-000000000011', 'engineer-a', ['engineer']],
@@ -142,6 +143,14 @@ const nativeApp = Fastify({
   logger: false,
   https: { pfx: readFileSync(pfxPath), passphrase: pfxPassphrase },
 }) as unknown as FastifyInstance
+const waitForAuthBarrier = createNativeAuthBarrier(process.env.HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX, nativeTestRunId)
+const authBarrierObservations = new Map<string, Awaited<ReturnType<typeof waitForAuthBarrier>>>()
+nativeApp.addHook('onRequest', async request => {
+  if (request.method === 'GET' && request.url.startsWith('/api/sync/pull')) {
+    const observation = await waitForAuthBarrier(request.id)
+    if (observation) authBarrierObservations.set(request.id, observation)
+  }
+})
 let pushBarrierUsed = false
 let pushTerminationSnapshotRecorded = false
 let pushTerminationEvidence: PushTerminationEvidence | undefined
@@ -264,6 +273,11 @@ const failPullAtCursor = optionalTestCursor(
 )
 nativeApp.addHook('onSend', async (request, reply, payload) => {
   if (request.method === 'GET' && request.url.startsWith('/api/sync/pull')) {
+    const authBarrier = authBarrierObservations.get(request.id)
+    if (authBarrier) {
+      authBarrierObservations.delete(request.id)
+      writeDiagnostic({ route: 'GET /api/sync/pull', authBarrier: true, ...authBarrier, serverStatus: reply.statusCode })
+    }
     const cursor = (request.query as { cursor?: string } | undefined)?.cursor
     if (
       process.env.HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE === '1' &&

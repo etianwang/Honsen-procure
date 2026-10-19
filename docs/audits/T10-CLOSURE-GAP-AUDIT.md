@@ -1,5 +1,17 @@
 # T10 Closure Gap Audit — Honsen Procure v1.0
 
+## G1-QA-001 修复交接覆盖记录 — 2026-10-19 — READY_FOR_RECHECK
+
+Integration Owner证据，不是独立验收。本轮从QA `bfa6752ccd64a6b39c36bdab96e1cb4c611ada5d`（含G1 `fbdb14b`）在指定工作树建立 `codex/g1-session-invalidation`；实现为包含本记录的检查点，完整SHA见交付。**G1-QA-001 READY_FOR_RECHECK；G1 OPEN，历史独立FAIL不改写为PASS；Q原矩阵/计数保持历史含义。**
+
+- 根因：同步/授权上下文401只返回错误，local_session仍授权读取；accountId不能区分同账号重登。生产改动仅Rust lib.rs：每次在线登录私有随机generation，请求await前捕获身份/token。Connection、在线身份、sticky失效标记共用mutex；匹配401同锁比较→关闭权限→删session行，SQL失败仍关闭。冲突列表/已知ID同锁校验；迟到响应安全boundary，不锁定新B或同账号新session。ACK/Pull/cursor/授权缓存提交也在锁内查generation。合法密码/CAPTCHA重新认证才恢复，不删业务/outbox/冲突/审计。
+- 新鲜Rust6/6（观察RED→GREEN）、完整65/65/fmt/release-bin；真实PG G1 3/3、API/service19/19、定向store5/5（34筛选）；屏障3/3、desktop11/11、fixtureDOM2/2、lint/typecheck/build/格式/diff通过。完整命令见QA_REPORT最新段。
+- 真实EXE **native-smoke-20261019022252**：另一EXE正常登录撤销当前A后，旧端Pull/列表/已知ID拒绝，denied=true/sourceDisclosed=false；同profile A→B后释放旧Pull req-1p实际HTTP401，B保留自己的完整非空冲突列表和合法Push能力、仍拒绝A；A1→A2后req-28实际401不影响A2本地/在线权限。原恢复/解决/审计/v2/lock/伪造字段断言保留。真实WebView2/Tauri/SQLite/Windows Credential Manager/Fastify HTTPS/隔离PG，无Mock/SQLite写入/HTTP替身。屏障仅测试host，release无新增测试命令；旧NATIVE矩阵未重构。
+- **BLOCKER：** QA-001仍须独立Fixer复现；G1生产冲突视图切换/缓存清理证据仍BLOCKED。未改renderer，不宣称真实敏感UI残留验收通过。
+- **DEFERRED/security：** 独立授权管理list/change/replace401尚未使用此失效路径，作为首个拒绝仍有生命周期缺口，需另行授权G1/G5复核；不能恢复已被本修复失效的会话。屏障错误run/phase释放的负例单测待补；G2/G3/完整订单解决/正式投影未动。无迁移/协议/依赖/Toolbox契约变更。
+
+旧失败...002730、本轮fixture准备失败...021931和成功...022252原件全部保留；仅移除本轮隔离容器/卷，未清理QA/E2E/业务数据。**NATIVE-008 CLOSED；T10、T10-SEC-001、原始P1、Formal hold OPEN。** 交付后停止，下一授权应为QA-001独立复核。
+
 ## G1 独立安全复核覆盖记录 — 2026-10-19 — OPEN / FAIL
 
 本记录优先于下方 READY_FOR_RECHECK 交接；历史 Q 验收矩阵不改写为当前候选 PASS。实际被测应用/执行 HEAD 为 `fbdb14b6afac217688de6cb138514d1bd593cdc8`，父为 `be20d760bdee5f0146dc8f9e3d2ef6fe8de3ff95`。QA 分支 `codex/g1-security-recheck`，指定工作树 `E:/Project/honsen-g1-integration`；最终 QA 检查点仅含测试切片及记录，完整 SHA 由交付给出，生产应用 diff 为空。

@@ -98,6 +98,7 @@ try {
   $env:HONSEN_PROCURE_TEST_PUSH_BARRIER_RELEASE_PATH = if ($Mode -eq 'push-termination-recovery') { $terminationRelease } else { '' }
   $env:HONSEN_PROCURE_TEST_PUSH_BARRIER_PID_PATH = if ($Mode -eq 'push-termination-recovery') { $terminationPidPath } else { '' }
   $env:HONSEN_PROCURE_TEST_RUN_ID = $runId
+  $env:HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX = if ($Mode -eq 'g1-conflict-origin') { Join-Path $qaRoot "$runId-auth.test" } else { '' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
@@ -250,7 +251,7 @@ try {
   }
   if ($Mode -eq 'g1-conflict-origin') {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
-    if ($smoke.mode -ne 'g1-conflict-origin' -or $smoke.coreResult -ne 'PASS' -or $smoke.sameProfileSwitch -ne 'PASS' -or $smoke.ownerRecoveryAndResolution -ne 'PASS') {
+    if ($smoke.mode -ne 'g1-conflict-origin' -or $smoke.coreResult -ne 'PASS' -or $smoke.sameProfileSwitch -ne 'PASS' -or $smoke.ownerRecoveryAndResolution -ne 'PASS' -or !$smoke.revokedSessionAccess.denied -or $smoke.revokedSessionAccess.sourceDisclosed -or $smoke.lateAccountPreserved -ne 'PASS' -or $smoke.lateSameAccountPreserved -ne 'PASS') {
       throw "native G1 command result is invalid: $result"
     }
     Write-Output "PASS native G1 command slice only (UI conflict residue remains BLOCKED): $result"

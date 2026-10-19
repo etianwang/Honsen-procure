@@ -1,5 +1,89 @@
 # Independent QA Report — T08/T10/P1/Formal Combination
 
+## G1-QA-001 Integration Owner repair — 2026-10-19 — READY_FOR_RECHECK
+
+**Builder evidence only: G1-QA-001 is READY_FOR_RECHECK, not independently CLOSED. G1 remains OPEN after the independent FAIL below.** Historical failing evidence is retained. Production conflict-UI lifecycle proof is still BLOCKED. T10, T10-SEC-001, original P1 and Formal hold remain OPEN; NATIVE-008 remains CLOSED.
+
+### Baseline, root cause and scope
+
+- Started at independent QA checkpoint **`bfa6752ccd64a6b39c36bdab96e1cb4c611ada5d`**, containing application **`fbdb14b6afac217688de6cb138514d1bd593cdc8`**. Continued the designated `E:/Project/honsen-g1-integration` worktree on **`codex/g1-session-invalidation`**. Initial tracked tree clean; existing untracked `.honsen-native-qa/` preserved. Fetched `origin/main` (`5139cc8f7d5a70cddb80b3ce5665100a316c9656`, already ancestor), without merging or moving QA/Builder branches. Caller `50378dd` worktree remains untouched.
+- Root cause confirmed before editing: authorization-refresh/Push/Pull 401 returned `NoActiveSession` but left SQLite `local_session` active, so the trusted conflict authorizer still allowed source access. The separate online marker contained only account ID; deleting by account after an await could revoke a replacement session of that account. UI hiding or unconditional logout cannot fix this.
+- Only application file changed: `apps/desktop/src-tauri/src/lib.rs`. No SQLite migration, business/outbox/conflict deletion, shared protocol, dependency, production server route, credential naming, Toolbox identity/contract, G2/G3, formal-number or frozen-snapshot change. Five upstream Toolbox sources were read in required order; documented installer/Runner/manifest/registry/release gaps remain T15, untouched.
+- Implementation SHA is the local checkpoint containing this section and its tested code/tests (parent `bfa6752`); full SHA is supplied in delivery / `git log -1 --format=%H` on this branch. All results below are fresh against that source, not acceptance of main or another worktree.
+
+### Session identity and atomic authority
+
+`OnlineSession { account_id, generation }` is Rust-private; every successful online activation generates a new UUID, even for the same account/time/token. `SyncRequest` snapshots that identity and its OS-vault token before the first await. No renderer-supplied identity/generation is trusted; tokens are not exposed in diagnostics.
+
+`LocalConnection` keeps the SQLite connection, online identity and sticky `session_invalidated` flag under **one connection mutex**. Online activation holds it through vault token installation, the SQLite session transaction and generation publication. Lock/logout/failed reauthentication detach authority under that lock. Launch starts closed; persisted rows or token/cache reload alone cannot reactivate it. Explicit validated password/CAPTCHA offline login retains the existing 24-hour policy and permits local access, not online sync.
+
+Production Push/Pull, including authorization-context preflight, carry the same identity through HTTPS. An actual 401 compares request identity with current identity and SQLite account **under that lock**. A match sets the closed flag and clears online identity before deleting only the session row; a deletion error leaves authority closed. Conflict list/known-ID owner checks hold the same lock: no unlocked interval between invalidating authority and disabling later reads. An already-started read linearizes before this transition; subsequent reads fail. Mismatch returns payload-free `sync_account_boundary`, does not clear a new session/token and is not misreported as the new account requiring reauthentication. ACK, Pull-page/cursor and authorization-cache commits also check captured generation under this lock before their transaction; stale success cannot restore or project under a replacement session.
+
+### Fresh targeted checks
+
+| Command / test | Result | Evidence and limit |
+| --- | --- | --- |
+| Rust filter `rejected_sync_session` | PASS 5/5 | All five behavioral assertions first failed against no-op rejection, then passed: current refusal/no loss; late A→B; same-account new generation with same token; legitimate reauthentication; SQLite DELETE failure closed. Unit fixtures are not native proof. |
+| Rust `failed_reauthentication_detaches_previous_local_conflict_access` | PASS 1/1 | First reproduced source access after failed login; fixed login entry detachment, then passed. |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` | PASS 65/65 | Existing owner, conflict, retry, ACK, cursor/rollback and installation checks retained; six new tests. |
+| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`; `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure` | PASS | No new release test command; existing unused-symbol/linker warnings only. |
+| `src/scripts/native-auth-barrier.test.ts` | PASS 3/3 | Configuration/phase fail-closed, held old request, unblocked new request and bound successful release. No claim of initial RED for this helper. |
+| PostgreSQL `src/sync/g1-origin.integration.test.ts` | PASS 3/3 | Fresh 02:25:21 UTC run; actual Fastify/AuthService/PostgreSQL, trusted identity/origin containment. |
+| `src/sync/api.test.ts` + `src/sync/service.test.ts` | PASS 19/19 | Fresh 02:25:29 UTC run. |
+| Selected `src/sync/postgres-store.test.ts` | PASS 5/5 | Fresh 02:25:30 UTC; prior QA idempotency/origin/quarantine/scope/Pull-order pattern; 34 deliberately filtered, not counted PASS. |
+| `npm run test --workspace @honsen/desktop` | PASS 11/11 | Store/lifecycle regressions. |
+| Focused navigation conflict Playwright DOM | PASS 2/2 | New `test-results/g1-qa001-202610190221`, HTML `playwright-report/g1-qa001-202610190221`; fixture/mock IPC only, not native authority or real conflict UI. |
+| `npm run lint`; `npm run typecheck`; `npm run build --workspace @honsen/desktop` | PASS | Existing App effect and bundle-size warnings retained. |
+| Driver `node --check`, targeted Oxlint/Prettier; new helper/test Prettier; `git diff --check` | PASS | No lockfile change, assertion weakening or unrelated formatting sweep. |
+| Actual EXE `native-smoke-20261019022252` | PASS for QA-001 native command slice | Completed `2026-10-19T02:24:41.003Z`; below. Not full G1/UI acceptance. |
+
+DB batch used disposable Compose `honsen-g1-qa001-20261019`, `.env.test`, loopback 54329 and fresh Node `SELECT 1`; scoped `down --volumes` completed, project `ps -a` empty. Native run's project also empty. Separate normal-user foreground WSL holder used for ENV-002; no production DB, `.env` or deployment credential used.
+
+### Actual EXE evidence — `native-smoke-20261019022252`
+
+Real task-local **debug `HonsenProcure.exe`**, WebView2→registered production Tauri commands, SQLite, Windows Credential Manager, Fastify HTTPS and isolated PostgreSQL. No mock IPC, direct SQLite writes or standalone HTTP sync client. Same profile `native-smoke-20261019022252-account-a.test.sqlite`, installation `32c8c9a8-2657-4340-926b-b43239f4d059`; producer installation `260e3f91-1013-4906-8201-abeeb6902cb7`. A=`...0013`, B=`...0012`. Conflict `2c437b7c-f1fd-4b6e-b40e-0f5625eee43e` comes from real business mutation/outbox/Push/Pull.
+
+1. **Current rejection:** another real EXE normally logs A in, revoking old token. Old Pull returns `reauthentication_required`; its immediate list returns the same denial, **`denied=true, conflictCount=null, sourceDisclosed=false`**. Known-ID resolver also returns `reauthentication_required`; no separate detail-read API was fabricated. Explicit reauthentication recovers original conflict, legitimate resolution, server v2 and SQLite audit/history. Explicit lock also denies list/known ID.
+2. **Late A→B:** HTTPS barrier holds actual A Pull `req-1p`, ready `02:24:25.296Z`. Producer normally logs A in to revoke it; same tested profile locks A and completes B login before release `02:24:30.312Z`. Ordinary AuthService produces actual **HTTP 401**. Old command returns `sync_account_boundary`, not a B logout. B's full nonempty real conflict list stays exactly unchanged, lacks A's source marker, denies A's known ID and can still Push its own pending conflict. `lateAccountPreserved=PASS`.
+3. **Late A1→A2:** actual held Pull `req-28`, ready `02:24:37.279Z`; same profile completes replacement A login before release `02:24:39.856Z`. Actual **401**, old command `sync_account_boundary`; A2 lists authorized state, reads sync status and completes Push authorization preflight. A2 still cannot process B's conflict. `lateSameAccountPreserved=PASS`.
+
+Both held results require one matching run/phase/request-ID observation and actual server401; timeout, synthetic401, failed login or locked replacement cannot count PASS. `consoleErrors=[]`. Existing A→B→A, forged IPC selectors, foreign-dirty Pull, conflict preservation/legal recovery and explicit-lock assertions remain. Same-account Rust test additionally proves identity does not rely on timestamp/token changes.
+
+Untracked artifacts retained: `.honsen-native-qa/native-smoke-20261019022252.test.json`, `...-server-sync.test.jsonl`, profiles/WebView data and `...test.json-late-B.png`; logs `test-results/native-smoke-20261019022252-*`. Do not commit vault/profile data. Initial `native-smoke-20261019021931` already passed current rejection but stopped preparing B's new race fixture: administrator alone correctly lacked cloud project bindings. Final fixture grants both synthetic accounts explicit test project/scope bindings before normal refresh; no production permission/assertion loosened. That failed run and all prior QA evidence remain.
+
+### Test-only boundary, review and remaining issues
+
+- Added `native-auth-barrier.ts` and unit test, imported **only** by `native-test-server.ts`, not production server or desktop Rust. Absolute `.test` prefix/run ID, two armed phases, one request each, 15s deadline below Rust20s timeout, run/phase-bound release. Delays real handler, never manufactures response or bypasses auth. Release adds no switch/IPC; existing release profile guards remain fail-closed.
+- One read-only auxiliary security reviewer: no Critical/Important within this slice; not independent Fixer acceptance. Minor deferred: wrong-run/wrong-phase release unit cases (implementation checks exist; valid release tested).
+- **BLOCKER:** independent Fixer must reproduce QA-001 before accepting/closing it. G1 production conflict-view mount/teardown/stale-data proof still BLOCKED; no renderer change or cache-clear PASS claimed. Home screenshot is not a previously visible source lifecycle test.
+- **DEFERRED / security:** standalone authorization-management list/change/replace HTTPS still return `NoActiveSession` on401 without matching invalidation. A revoked admin invoking one first can retain local permission until sync/context rejection. Cannot restore a session already invalidated here. Concrete remaining G1/G5 lifecycle gap, outside this Push/Pull repair; needs separate authorized scope/recheck. No all-auth-entry-points claim.
+- **DEFERRED:** G2/G3/full resolver/formal projection/parent gates. **WARNING:** full unchanged server/all-DOM and NATIVE002–008 matrix intentionally not rerun; no production conflict UI, native idle-duration or native legacy proof claimed. Existing lint/compiler/bundle warnings remain.
+
+### Independent recheck commands
+
+Use original Windows user PowerShell7, Node24.18.0/committed-lockfile dependencies, ignored disposable `.env.test`, separate foreground normal-user WSL holder (see earlier QA). Review checkpoint Rust diff, then on this branch:
+
+```powershell
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib rejected_sync_session -- --nocapture
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib failed_reauthentication -- --nocapture
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure
+npm run test --workspace @honsen/server -- src/scripts/native-auth-barrier.test.ts
+# Fresh scoped Compose PostgreSQL; TEST_DATABASE_URL from .env.test, not .env.
+npm run test --workspace @honsen/server -- src/sync/g1-origin.integration.test.ts --no-file-parallelism
+npm run test --workspace @honsen/server -- src/sync/api.test.ts src/sync/service.test.ts --no-file-parallelism
+npm run test --workspace @honsen/desktop
+# New output and HTML dirs; these DOM tests use fixture IPC.
+npx playwright test tests/e2e/navigation.spec.ts --grep 'administrator resolves a sync conflict|cross-account conflict resolution' --workers=1 --output=test-results/<new-qa-run>
+npm run lint
+npm run typecheck
+pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode g1-conflict-origin
+git diff --check
+```
+
+Require all three native transitions/source denial, not just coreResult/counts; inspect actual server401 observations. Checkpoint contains only selected repair/tests/records. No push, merge, deploy, business deletion or prior evidence cleanup. **Stop for independent Fixer; do not begin another child.**
+
 ## G1 Independent Security QA — 2026-10-19 — FAIL / OPEN
 
 **G1 must NOT be CLOSED.** The owner boundary passes the exercised tests, but the real EXE still discloses conflict sources after a known server-session rejection. Production conflict-UI residue acceptance is separately BLOCKED. This section supersedes the READY_FOR_RECHECK handoff below; T10, T10-SEC-001, original P1 and Formal hold remain OPEN. NATIVE-008 remains CLOSED.
