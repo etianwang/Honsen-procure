@@ -1,5 +1,13 @@
 # Independent QA Report — T08/T10/P1/Formal Combination
 
+## Current G2 builder handoff — 2026-10-19 — READY_FOR_RECHECK (not independent acceptance)
+
+This development branch starts from production `13b22ff` and carries management checkpoint `25a56af`. That checkpoint's independent FIX2 verdict is **PASS / G1-QA-001 CLOSED on F**, backed by `native-smoke-20261019115437`, Rust management4/4/session5/5 and API/barrier15/15; full signoff/request/session evidence remains in `25a56af:docs/agent-coordination/QA_REPORT.md` and the original worktree. The older READY/FAIL records below are historical, not the current FIX2 status. Auth code is unchanged by G2.
+
+G2's containing local implementation commit is **READY_FOR_RECHECK only**: six formal header/ten frozen owner-line fields, compatible approved/confirmed/legacy-issued progression, immutable replay and frozen serialization order, staged dependencies and atomic page/cursor rollback. New file-SQLite Rust tests12/12 and existing directly related confirmed/cursor/conflict/restart tests3/3 pass. One scoped read-only builder review found three edge cases, reproduced RED then repaired and included in final12/12; this review grants no independent closure. Full commands, final affected Rust gates, evidence and skips: latest `memory.md` and [BUILD-TASKS](../BUILD-TASKS.md#t10-a--g2-implementation-checkpoint--2026-10-19--ready_for_recheck).
+
+No fresh EXE/HTTPS G2 two-client run is claimed. Independent QA must verify the exact new SHA, all16 fields and bounded retry/immutability/cursor protections, using one original issue→Push→Pull proof if needed; do not rerun NATIVE002–008 or begin a broad audit. G2 is not CLOSED. **G1 production UI/T10/T10-SEC-001/P1/Formal hold OPEN; NATIVE-008 CLOSED.** No migration, server trust/registry/number allocation, renderer or Toolbox contract change.
+
 ## G1-QA-001-FIX2 Integration Owner — 2026-10-19 — READY_FOR_RECHECK
 
 **Builder verification, pending independent QA. G1-QA-001 = READY_FOR_RECHECK; G1 = OPEN.** This supersedes readiness status only; the independent failure below and all original evidence remain historical facts. Production conflict UI lifecycle acceptance remains separately BLOCKED. NATIVE-008 stays CLOSED; T10, T10-SEC-001, P1 and Formal hold stay OPEN.

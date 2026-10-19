@@ -1,5 +1,11 @@
 # Fixer Bug Queue
 
+## Current G2 development checkpoint — 2026-10-19
+
+- **G1-QA-001 CLOSED on `13b22ff`**, independently decided in management checkpoint `25a56af`, fresh `native-smoke-20261019115437`. Historical builder READY/QA FAIL sections below are retained, not current status; auth is unchanged here. Full independent signoff remains at `25a56af:docs/agent-coordination/QA_REPORT.md`.
+- **T10-A/G2 READY_FOR_RECHECK, not CLOSED:** containing local implementation commit repairs the previously listed 6-header/10-line Pull loss and formal transition gap using existing columns. Rust G2 12/12 and direct existing regressions3/3 pass; no fresh native G2 acceptance. Review only the bounded [implementation handoff](../BUILD-TASKS.md#t10-a--g2-implementation-checkpoint--2026-10-19--ready_for_recheck), no duplicate task/new number. Next action is independent G2 QA, not additional development.
+- **G1 OPEN**, production conflict UI lifecycle separately unaccepted; **T10/T10-SEC-001/P1/Formal hold OPEN; NATIVE-008 CLOSED**. G3–G10 remain in original owners; no parent closure, push, merge or evidence cleanup.
+
 ## G1-QA-001-FIX2 Integration Owner — 2026-10-19 — READY_FOR_RECHECK
 
 | ID | Current status | Fresh evidence / remaining gate |

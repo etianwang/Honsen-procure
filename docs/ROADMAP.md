@@ -2,6 +2,22 @@
 
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.
 
+## Current delivery path — 2026-10-19
+
+M0–M4 and their original objectives below are preserved; dated progress paragraphs are historical checkpoints, not additional queues. The [current delivery register](BUILD-TASKS.md#current-delivery-register--2026-10-19) owns remaining-task status and G1–G10 mappings; the [v1.0 closure plan](planning/V1-DELIVERY-CLOSURE-PLAN.md) is a short navigation index, not another task master.
+
+- Documentation starts at `50378dd` (H), not the separate unmerged FIX2 candidate `13b22ff` (F). Historical independent QA `b0a6069` failed `85d0565`; F's builder run supported READY_FOR_RECHECK only. Subsequent independent **`native-smoke-20261019115437`** plus fresh-context QA code/evidence signoff gives **PASS / G1-QA-001 CLOSED on F** for the bounded management401 defect. [QA report](agent-coordination/QA_REPORT.md) records exact session/request matching and limits. G1 production conflict UI lifecycle remains open; no candidate implementation is merged/accepted as H/main.
+- NATIVE-008 remains CLOSED within `03f432a`/`be20d76` evidence. T10, T10-SEC-001, original P1 and Formal hold remain OPEN. No milestone checkbox changes this round.
+- Nine original task IDs remain unclosed: T04/T08/T09/T10/T11/T12/T13/T14/T15. Eight require development; T14 is final acceptance evidence, not a duplicate development task. Seven historical foundation acceptances remain bounded to their evidence; account TOTP/governance, live home queues and category maintenance are not proven by foundation acceptance.
+- FIX2 independent recheck is complete; recommended next development is the prepared T10-A/G2 frozen formal Pull scope (6 header fields, 10 owner-line fields, approved→issued progression), then structured sync outcomes and real conflict convergence with remaining T08/T09 business/formal paths. No G2 code/test is changed this round. Complete file ingestion, bilingual PDF/print/Excel, backup/full three-language UI and release implementation using stable interfaces where independently safe. Final closure still follows original prerequisite gates through T14 and T15.
+- Obtain actual T04 deployment authority, legacy-data recovery policy and release decisions separately. Preserve the T09-C/T11 dependency-cycle records; the proposed metadata/file-service/joint-proof boundary awaits approval. An unrelated final gate does not prohibit safe independent implementation.
+
+Execution rule: **IMPLEMENT → TARGETED TEST → INDEPENDENT RECHECK → CLOSE**; one bounded task per turn, relevant tests and valid evidence reuse, no automatic NATIVE expansion or v1.0 scope reduction. Printing, three languages, receiving, payments, backups and Windows distribution remain required.
+
+### T10-A/G2 implementation handoff — 2026-10-19
+
+Production parent `13b22ff`, management checkpoint `25a56af`; independent development branch `codex/t10-g2-formal-pull`. The containing local implementation commit is **READY_FOR_RECHECK**, not G2 CLOSED. The 6 formal header and 10 owner-line fields now persist through validated Pull, approved/confirmed progression, immutable replay and atomic cursor rollback using existing columns/triggers. Scoped Rust G2 tests12/12 and existing projection/cursor regressions3/3 pass; gates, evidence and skips are in `memory.md` and the [G2 implementation handoff](BUILD-TASKS.md#t10-a--g2-implementation-checkpoint--2026-10-19--ready_for_recheck). This supersedes the earlier “no G2 code” checkpoint/next-development wording only. Next action is independent G2 QA, then stop for user ordering; no new child automatically begins. All milestone checkboxes, other v1.0 scope and holds above remain unchanged.
+
 ## Current acceptance and bidirectional task mapping — 2026-10-11
 
 Original milestone objectives below are retained. Their checkboxes concern the complete stated objective, not an implemented subset. The task acceptance register and child items in BUILD-TASKS provide evidence and remaining work; memory.md provides the current handoff. Cross-stage contributions do not redefine milestones or dependencies.

@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod g2_pull_tests;
+
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -676,7 +679,7 @@ pub struct SyncPullPageInput {
     pub next_cursor: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct RemotePurchaseOrderPayload {
     parent_order_id: Option<Uuid>,
@@ -714,10 +717,16 @@ struct RemotePurchaseOrderPayload {
     rejection_reason: Option<String>,
     self_approved: bool,
     supplier_terms_completed_at: Option<i64>,
+    document_type: Option<String>,
+    formal_document_no: Option<String>,
+    formal_installation_id: Option<Uuid>,
+    formal_sequence: Option<String>,
+    formally_issued_at: Option<i64>,
+    formal_snapshot_json: Option<String>,
     lines: Vec<RemotePurchaseOrderLine>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct RemotePurchaseOrderLine {
     id: Uuid,
@@ -735,6 +744,165 @@ struct RemotePurchaseOrderLine {
     sort_order: i64,
     created_at: i64,
     updated_at: i64,
+    owner_quote_source: Option<String>,
+    owner_catalog_price_id: Option<Uuid>,
+    owner_manual_reference_reason: Option<String>,
+    owner_manual_reference_actor_id: Option<Uuid>,
+    owner_manual_reference_at: Option<i64>,
+    owner_source_unit_price_minor: Option<String>,
+    owner_locked_exchange_rate_decimal: Option<String>,
+    owner_converted_reference_unit_minor: Option<String>,
+    owner_markup_json: Option<String>,
+    owner_final_unit_price_minor: Option<String>,
+}
+
+impl RemotePurchaseOrderPayload {
+    fn has_formal_fields(&self) -> bool {
+        self.document_type.is_some()
+            || self.formal_document_no.is_some()
+            || self.formal_installation_id.is_some()
+            || self.formal_sequence.is_some()
+            || self.formally_issued_at.is_some()
+            || self.formal_snapshot_json.is_some()
+    }
+
+    fn formal_snapshot(&self) -> Result<Option<Self>, AuthError> {
+        if !self.has_formal_fields() {
+            return if self.workflow_status == "formally_issued" {
+                Err(AuthError::InvalidInput)
+            } else {
+                Ok(None)
+            };
+        }
+        let sequence = self
+            .formal_sequence
+            .as_deref()
+            .ok_or(AuthError::InvalidInput)?;
+        let parsed_sequence = remote_minor(sequence)?;
+        if self.document_type.as_deref() != Some("OPA")
+            || self.procurement_mode.as_deref() != Some("owner_self_purchase")
+            || self.parent_order_id.is_some()
+            || !matches!(
+                self.workflow_status.as_str(),
+                "formally_issued"
+                    | "receiving"
+                    | "completed"
+                    | "completed_with_conditions"
+                    | "cancelled"
+            )
+            || !self
+                .formal_document_no
+                .as_ref()
+                .is_some_and(|value| valid_required_text(value, 256))
+            || self.formal_installation_id.is_none()
+            || parsed_sequence <= 0
+            || parsed_sequence.to_string() != sequence
+            || self.formally_issued_at.is_none_or(|value| value <= 0)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let snapshot: Self = serde_json::from_str(
+            self.formal_snapshot_json
+                .as_deref()
+                .ok_or(AuthError::InvalidInput)?,
+        )
+        .map_err(|_| AuthError::InvalidInput)?;
+        // A preissue snapshot cannot contain another formal bundle (or recursive snapshot).
+        if snapshot.has_formal_fields()
+            || !matches!(snapshot.workflow_status.as_str(), "approved" | "confirmed")
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        validate_remote_purchase_order(&snapshot)?;
+        let mut expected = snapshot.clone();
+        expected.workflow_status = self.workflow_status.clone();
+        expected.document_type = self.document_type.clone();
+        expected.formal_document_no = self.formal_document_no.clone();
+        expected.formal_installation_id = self.formal_installation_id;
+        expected.formal_sequence = self.formal_sequence.clone();
+        expected.formally_issued_at = self.formally_issued_at;
+        expected.formal_snapshot_json = self.formal_snapshot_json.clone();
+        if expected != *self {
+            return Err(AuthError::InvalidInput);
+        }
+        for line in &self.lines {
+            match line.owner_quote_source.as_deref() {
+                Some("catalog_price")
+                    if line.owner_catalog_price_id.is_some()
+                        && line.owner_manual_reference_reason.is_none()
+                        && line.owner_manual_reference_actor_id.is_none()
+                        && line.owner_manual_reference_at.is_none() => {}
+                Some("manual_reference")
+                    if line.owner_catalog_price_id.is_none()
+                        && line
+                            .owner_manual_reference_reason
+                            .as_ref()
+                            .is_some_and(|v| valid_required_text(v, 1000))
+                        && line.owner_manual_reference_actor_id.is_some()
+                        && line.owner_manual_reference_at.is_some_and(|v| v >= 0) => {}
+                _ => return Err(AuthError::InvalidInput),
+            }
+            let source = remote_minor(
+                line.owner_source_unit_price_minor
+                    .as_deref()
+                    .ok_or(AuthError::InvalidInput)?,
+            )?;
+            let rate = line
+                .owner_locked_exchange_rate_decimal
+                .as_deref()
+                .ok_or(AuthError::InvalidInput)?;
+            let markup: AdjustmentInput = serde_json::from_str(
+                line.owner_markup_json
+                    .as_deref()
+                    .ok_or(AuthError::InvalidInput)?,
+            )
+            .map_err(|_| AuthError::InvalidInput)?;
+            validate_adjustment(&markup)?;
+            // Verify only the frozen inputs; never consult or substitute today's quote/rate.
+            let converted =
+                convert_minor_by_rate(source, &line.currency, &self.primary_currency, rate)?;
+            let final_price = converted
+                .checked_add(as_i64(adjustment_amount(
+                    i128::from(converted),
+                    &markup,
+                    false,
+                )?)?)
+                .ok_or(AuthError::InvalidInput)?;
+            if remote_minor(
+                line.owner_converted_reference_unit_minor
+                    .as_deref()
+                    .ok_or(AuthError::InvalidInput)?,
+            )? != converted
+                || remote_minor(
+                    line.owner_final_unit_price_minor
+                        .as_deref()
+                        .ok_or(AuthError::InvalidInput)?,
+                )? != final_price
+            {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        Ok(Some(snapshot))
+    }
+}
+
+impl RemotePurchaseOrderLine {
+    fn without_owner_pricing(mut self) -> Self {
+        // Repricing also advances this timestamp after approval.
+        self.updated_at = 0;
+        self.supplier_snapshot_json = None;
+        self.owner_quote_source = None;
+        self.owner_catalog_price_id = None;
+        self.owner_manual_reference_reason = None;
+        self.owner_manual_reference_actor_id = None;
+        self.owner_manual_reference_at = None;
+        self.owner_source_unit_price_minor = None;
+        self.owner_locked_exchange_rate_decimal = None;
+        self.owner_converted_reference_unit_minor = None;
+        self.owner_markup_json = None;
+        self.owner_final_unit_price_minor = None;
+        self
+    }
 }
 
 #[derive(Deserialize)]
@@ -7567,22 +7735,107 @@ fn project_remote_purchase_order_change(
     if change.entity_type != "purchase_order" {
         return Ok(true);
     }
-    let existing_workflow_status: Option<String> = transaction
+    // Old staged rows are replayed on every page too, including pages for other entities.
+    let pending: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL)",
+        [change.entity_id.to_string()], |row| row.get(0),
+    ).map_err(|_| AuthError::Database)?;
+    if pending {
+        return Ok(true);
+    }
+    let existing: Option<(String, i64, Option<i64>)> = transaction
         .query_row(
-            "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT workflow_status, version, formally_issued_at FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
             [change.entity_id.to_string()],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .map_err(|_| AuthError::Database)?;
-    if existing_workflow_status
-        .as_deref()
-        .is_some_and(|status| !matches!(status, "draft" | "pending_confirmation" | "rejected"))
+    if existing
+        .as_ref()
+        .is_some_and(|(_, version, _)| *version > change.version)
     {
-        if change.operation == "upsert" {
-            let order: RemotePurchaseOrderPayload = serde_json::from_value(change.payload.clone())
-                .map_err(|_| AuthError::InvalidInput)?;
-            validate_remote_purchase_order(&order)?;
+        return Ok(true);
+    }
+    let order = if change.operation == "upsert" {
+        let order: RemotePurchaseOrderPayload =
+            serde_json::from_value(change.payload.clone()).map_err(|_| AuthError::InvalidInput)?;
+        validate_remote_purchase_order(&order)?;
+        Some(order)
+    } else {
+        None
+    };
+    let is_formal = order
+        .as_ref()
+        .is_some_and(|order| order.formally_issued_at.is_some());
+    if is_formal {
+        let order = order.as_ref().ok_or(AuthError::InvalidInput)?;
+        if !remote_order_references_exist(transaction, order)? {
+            return Ok(false);
+        }
+        validate_remote_formal_number(transaction, order)?;
+        if let Some((status, version, issued_at)) = &existing {
+            let mut current: RemotePurchaseOrderPayload =
+                serde_json::from_str(&order_sync_payload(transaction, change.entity_id)?)
+                    .map_err(|_| AuthError::Database)?;
+            if !formal_workflow_can_advance(status, &order.workflow_status) {
+                return Err(AuthError::InvalidInput);
+            }
+            if issued_at.is_some() {
+                current.workflow_status = order.workflow_status.clone();
+                if current != *order
+                    || (*version == change.version && status != &order.workflow_status)
+                {
+                    return Err(AuthError::InvalidInput);
+                }
+                // No line UPDATE on replay: the immutable trigger also rejects identical writes.
+                transaction.execute("UPDATE local_purchase_orders SET workflow_status = ?2, version = ?3, updated_at = ?4 WHERE id = ?1 AND version < ?3",
+                    params![change.entity_id.to_string(), order.workflow_status, change.version, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                return Ok(true);
+            }
+            if !matches!(
+                status.as_str(),
+                "draft" | "pending_confirmation" | "rejected"
+            ) {
+                let mut snapshot = order.formal_snapshot()?.ok_or(AuthError::InvalidInput)?;
+                current.workflow_status = snapshot.workflow_status.clone();
+                if current.procurement_mode.is_none() {
+                    let has_execution: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_rfqs WHERE source_order_id = ?1) OR EXISTS(SELECT 1 FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL)", [change.entity_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+                    if has_execution {
+                        return Err(AuthError::InvalidInput);
+                    }
+                    current.procurement_mode = snapshot.procurement_mode.clone();
+                }
+                // Approved legacy projectors omitted owner pricing; only those fields may be filled.
+                current.lines = current
+                    .lines
+                    .into_iter()
+                    .map(RemotePurchaseOrderLine::without_owner_pricing)
+                    .collect();
+                snapshot.lines = snapshot
+                    .lines
+                    .into_iter()
+                    .map(RemotePurchaseOrderLine::without_owner_pricing)
+                    .collect();
+                current.lines.sort_by_key(|line| (line.sort_order, line.id));
+                snapshot
+                    .lines
+                    .sort_by_key(|line| (line.sort_order, line.id));
+                if current != snapshot {
+                    return Err(AuthError::InvalidInput);
+                }
+            }
+        }
+    }
+    if !is_formal
+        && existing.as_ref().is_some_and(|(status, _, _)| {
+            !matches!(
+                status.as_str(),
+                "draft" | "pending_confirmation" | "rejected"
+            )
+        })
+    {
+        if let Some(order) = &order {
             if order.procurement_mode.as_deref() == Some("owner_self_purchase") {
                 transaction.execute(
                     "UPDATE local_purchase_orders SET procurement_mode = 'owner_self_purchase', version = ?2, updated_at = ?3 WHERE id = ?1 AND version < ?2 AND procurement_mode IS NULL AND parent_order_id IS NULL AND workflow_status IN ('confirmed', 'approved') AND country_id = ?4 AND project_id = ?5 AND NOT EXISTS (SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL) AND NOT EXISTS (SELECT 1 FROM local_rfqs WHERE source_order_id = ?1) AND NOT EXISTS (SELECT 1 FROM local_purchase_orders child WHERE child.parent_order_id = ?1 AND child.deleted_at IS NULL)",
@@ -7604,9 +7857,7 @@ fn project_remote_purchase_order_change(
     if change.operation != "upsert" {
         return Err(AuthError::InvalidInput);
     }
-    let order: RemotePurchaseOrderPayload =
-        serde_json::from_value(change.payload.clone()).map_err(|_| AuthError::InvalidInput)?;
-    validate_remote_purchase_order(&order)?;
+    let order = order.ok_or(AuthError::InvalidInput)?;
     if !remote_order_references_exist(transaction, &order)? {
         return Ok(false);
     }
@@ -7625,7 +7876,13 @@ fn project_remote_purchase_order_change(
     let is_mutable = matches!(
         order.workflow_status.as_str(),
         "draft" | "pending_confirmation" | "rejected"
-    );
+    ) || (is_formal
+        && existing.as_ref().is_some_and(|(status, _, _)| {
+            matches!(
+                status.as_str(),
+                "draft" | "pending_confirmation" | "rejected"
+            )
+        }));
     if is_mutable {
         transaction
             .execute(
@@ -7642,7 +7899,11 @@ fn project_remote_purchase_order_change(
             params![change.entity_id.to_string(), order.parent_order_id.map(|value| value.to_string()), order.display_no, order.country_id.to_string(), order.project_id.to_string(), order.site, order.department_id.to_string(), order.team_id.to_string(), order.applicant_id.to_string(), order.supplier_id.map(|value| value.to_string()), order.supplier_snapshot_json, order.currency, order.primary_currency, order.locked_exchange_rate_decimal, order.language_pair, order.status, order.workflow_status, order.urgency, order.urgency_reason, order.order_date, order.delivery_address, order.expected_delivery_date, order.notes, remote_minor(&order.subtotal_minor)?, remote_minor(&order.line_discount_minor)?, remote_minor(&order.order_discount_minor)?, remote_minor(&order.freight_minor)?, order.tax_rate_basis_points, remote_minor(&order.tax_minor)?, remote_minor(&order.total_minor)?, change.version, unix_seconds(now), unix_seconds(now), order.confirmed_by.map(|value| value.to_string()), order.confirmed_at, order.rejection_reason, order.self_approved as i64, order.supplier_terms_completed_at],
         )
         .map_err(|_| AuthError::Database)?;
-    for line in order.lines {
+    for line in &order.lines {
+        let belongs_elsewhere: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items WHERE id = ?1 AND order_id <> ?2)", params![line.id.to_string(), change.entity_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if belongs_elsewhere {
+            return Err(AuthError::InvalidInput);
+        }
         transaction
             .execute(
                 "INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at)
@@ -7651,6 +7912,10 @@ fn project_remote_purchase_order_change(
                 params![line.id.to_string(), change.entity_id.to_string(), line.material_id.map(|value| value.to_string()), line.material_snapshot_json, line.supplier_snapshot_json, line.currency, line.quantity, line.unit, remote_minor(&line.unit_price_minor)?, line.line_discount_json, line.line_freight_json, line.freight_included as i64, remote_minor(&line.line_total_minor)?, line.sort_order, line.created_at, line.updated_at],
             )
             .map_err(|_| AuthError::Database)?;
+        transaction.execute(
+            "UPDATE local_purchase_order_items SET owner_quote_source = ?2, owner_catalog_price_id = ?3, owner_manual_reference_reason = ?4, owner_manual_reference_actor_id = ?5, owner_manual_reference_at = ?6, owner_source_unit_price_minor = ?7, owner_locked_exchange_rate_decimal = ?8, owner_converted_reference_unit_minor = ?9, owner_markup_json = ?10, owner_final_unit_price_minor = ?11 WHERE id = ?1 AND order_id = ?12",
+            params![line.id.to_string(), line.owner_quote_source, line.owner_catalog_price_id.map(|id| id.to_string()), line.owner_manual_reference_reason, line.owner_manual_reference_actor_id.map(|id| id.to_string()), line.owner_manual_reference_at, line.owner_source_unit_price_minor.as_deref().map(remote_minor).transpose()?, line.owner_locked_exchange_rate_decimal, line.owner_converted_reference_unit_minor.as_deref().map(remote_minor).transpose()?, line.owner_markup_json, line.owner_final_unit_price_minor.as_deref().map(remote_minor).transpose()?, change.entity_id.to_string()],
+        ).map_err(|_| AuthError::Database)?;
     }
     transaction
         .execute(
@@ -7662,7 +7927,50 @@ fn project_remote_purchase_order_change(
             ],
         )
         .map_err(|_| AuthError::Database)?;
+    if is_formal {
+        // Freeze only after lines are complete; both operations and the cursor share the page transaction.
+        transaction.execute("UPDATE local_purchase_orders SET document_type = ?2, formal_document_no = ?3, formal_installation_id = ?4, formal_sequence = ?5, formally_issued_at = ?6, formal_snapshot_json = ?7 WHERE id = ?1 AND formally_issued_at IS NULL",
+            params![change.entity_id.to_string(), order.document_type, order.formal_document_no, order.formal_installation_id.map(|id| id.to_string()), order.formal_sequence.as_deref().map(remote_minor).transpose()?, order.formally_issued_at, order.formal_snapshot_json]).map_err(|_| AuthError::Database)?;
+    }
     Ok(true)
+}
+
+fn formal_workflow_can_advance(previous: &str, next: &str) -> bool {
+    match previous {
+        "draft"
+        | "pending_confirmation"
+        | "rejected"
+        | "approved"
+        | "confirmed"
+        | "formally_issued" => true,
+        "receiving" => next != "formally_issued",
+        _ => previous == next,
+    }
+}
+
+fn validate_remote_formal_number(
+    transaction: &Transaction<'_>,
+    order: &RemotePurchaseOrderPayload,
+) -> Result<(), AuthError> {
+    let (country, project): (String, String) = transaction.query_row("SELECT c.business_code, p.business_code FROM local_countries c JOIN local_projects p ON p.country_id = c.id WHERE c.id = ?1 AND p.id = ?2",
+        params![order.country_id.to_string(),order.project_id.to_string()], |row| Ok((row.get(0)?,row.get(1)?))).map_err(|_| AuthError::InvalidInput)?;
+    let expected = format!(
+        "{country}-{project}-{}-OPA-{}-{}",
+        order.order_date.replace('-', ""),
+        installation_short_code(
+            order
+                .formal_installation_id
+                .ok_or(AuthError::InvalidInput)?
+        ),
+        order
+            .formal_sequence
+            .as_deref()
+            .ok_or(AuthError::InvalidInput)?
+    );
+    if order.formal_document_no.as_deref() != Some(expected.as_str()) {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok(())
 }
 
 fn project_staged_purchase_orders(
@@ -7892,10 +8200,15 @@ fn remote_order_references_exist(
         ("local_departments", order.department_id),
         ("local_teams", order.team_id),
     ] {
-        let query =
-            format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?1 AND deleted_at IS NULL)");
+        let query = format!(
+            "SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?1 AND (deleted_at IS NULL OR ?2))"
+        );
         let exists: bool = transaction
-            .query_row(&query, [id.to_string()], |row| row.get(0))
+            .query_row(
+                &query,
+                params![id.to_string(), order.formally_issued_at.is_some()],
+                |row| row.get(0),
+            )
             .map_err(|_| AuthError::Database)?;
         if !exists {
             return Ok(false);
@@ -7904,8 +8217,8 @@ fn remote_order_references_exist(
     if let Some(supplier_id) = order.supplier_id {
         let exists: bool = transaction
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM local_suppliers WHERE id = ?1 AND deleted_at IS NULL)",
-                [supplier_id.to_string()],
+                "SELECT EXISTS(SELECT 1 FROM local_suppliers WHERE id = ?1 AND (deleted_at IS NULL OR ?2))",
+                params![supplier_id.to_string(), order.formally_issued_at.is_some()],
                 |row| row.get(0),
             )
             .map_err(|_| AuthError::Database)?;
@@ -7916,8 +8229,24 @@ fn remote_order_references_exist(
     for material_id in order.lines.iter().filter_map(|line| line.material_id) {
         let exists: bool = transaction
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM local_materials WHERE id = ?1 AND deleted_at IS NULL)",
-                [material_id.to_string()],
+                "SELECT EXISTS(SELECT 1 FROM local_materials WHERE id = ?1 AND (deleted_at IS NULL OR ?2))",
+                params![material_id.to_string(), order.formally_issued_at.is_some()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        if !exists {
+            return Ok(false);
+        }
+    }
+    for price in order
+        .lines
+        .iter()
+        .filter_map(|line| line.owner_catalog_price_id)
+    {
+        let exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_material_prices WHERE id = ?1)",
+                [price.to_string()],
                 |row| row.get(0),
             )
             .map_err(|_| AuthError::Database)?;
@@ -8022,7 +8351,38 @@ fn validate_remote_purchase_order(order: &RemotePurchaseOrderPayload) -> Result<
             serde_json::from_str(&line.line_freight_json).map_err(|_| AuthError::InvalidInput)?;
         validate_adjustment(&line_discount)?;
         validate_adjustment(&line_freight)?;
+        if line
+            .owner_quote_source
+            .as_ref()
+            .is_some_and(|source| !matches!(source.as_str(), "catalog_price" | "manual_reference"))
+            || line
+                .owner_locked_exchange_rate_decimal
+                .as_ref()
+                .is_some_and(|value| !valid_non_zero_decimal_rate(value))
+            || !valid_optional_text(&line.owner_manual_reference_reason, 1000)
+            || line
+                .owner_manual_reference_at
+                .is_some_and(|value| value < 0)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        for value in [
+            &line.owner_source_unit_price_minor,
+            &line.owner_converted_reference_unit_minor,
+            &line.owner_final_unit_price_minor,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            remote_minor(value)?;
+        }
+        if let Some(value) = &line.owner_markup_json {
+            let markup: AdjustmentInput =
+                serde_json::from_str(value).map_err(|_| AuthError::InvalidInput)?;
+            validate_adjustment(&markup)?;
+        }
     }
+    order.formal_snapshot()?;
     Ok(())
 }
 
@@ -8644,6 +9004,30 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
         .map_err(|_| AuthError::Database)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| AuthError::Database)?;
+    // The registry freezes array order too; use the snapshot order, not SQL display order.
+    let lines = if let Some(snapshot) = header["formalSnapshotJson"].as_str() {
+        let snapshot: RemotePurchaseOrderPayload =
+            serde_json::from_str(snapshot).map_err(|_| AuthError::Database)?;
+        let mut by_id = lines
+            .into_iter()
+            .map(|line| {
+                let id = line["id"].as_str().ok_or(AuthError::Database)?;
+                let id = Uuid::parse_str(id).map_err(|_| AuthError::Database)?;
+                Ok((id, line))
+            })
+            .collect::<Result<std::collections::HashMap<_, _>, AuthError>>()?;
+        let ordered = snapshot
+            .lines
+            .iter()
+            .map(|line| by_id.remove(&line.id).ok_or(AuthError::Database))
+            .collect::<Result<Vec<_>, _>>()?;
+        if !by_id.is_empty() {
+            return Err(AuthError::Database);
+        }
+        ordered
+    } else {
+        lines
+    };
     let mut payload = header.as_object().cloned().ok_or(AuthError::Database)?;
     payload.insert("lines".into(), serde_json::Value::Array(lines));
     serde_json::to_string(&serde_json::Value::Object(payload)).map_err(|_| AuthError::Database)

@@ -1,5 +1,13 @@
 # T10 Closure Gap Audit — Honsen Procure v1.0
 
+## G2 定向实现交接 — 2026-10-19（不是重新审计或独立关闭）
+
+管理检查点 `25a56af` 已独立确认 FIX2 `13b22ff` 的 G1-QA-001 CLOSED（新鲜 `native-smoke-20261019115437`）；下方旧 READY/FAIL 和矩阵保持历史含义。当前 G2 开发以 F 为生产父提交、以该管理检查点为范围依据，完整证据和独立判定保留在原 Git 对象/工作树，不覆写。
+
+包含本记录的 G2 本地候选只补既定6个正式头字段/10个业主行冻结字段及 approved/confirmed、幂等、冻结顺序和原子 cursor。新鲜文件 SQLite/Rust G2 12/12、既有直接回归3/3通过，状态 **READY_FOR_RECHECK，不是 G2 CLOSED**；命令/门禁/跳过项见最新 memory 和 BUILD-TASKS 实现段。无迁移、服务端 registry/身份/出号契约改动；没有本轮真实 EXE 双端 G2 证明。最小下一步是独立 QA 的 exact-SHA 定向复核，不是新矩阵/新任务或 G3 开发。
+
+**G1 生产冲突 UI 生命周期仍独立未验收；G1/T10/T10-SEC-001/原始 P1/Formal hold OPEN；NATIVE-008 CLOSED。** 不复算原45项历史审计矩阵，不改变原始 v1.0 范围或验收标准。
+
 ## G1-QA-001-FIX2 修复覆盖记录 — 2026-10-19 — READY_FOR_RECHECK
 
 本记录只更新修复交接状态，不改写下方独立 FAIL 和历史 Q 矩阵。基线 QA `b0a6069e1439203fd9259b8cc3e619ac6eb70c2c`，生产实现 `85d0565a5b695a94da7bd5aa861178bfcbc77a52`；任务分支 `codex/g1-qa001-fix2`，修复 SHA 为包含本记录的本地提交，完整值见交付。**G1-QA-001 = READY_FOR_RECHECK；G1 = OPEN**。
