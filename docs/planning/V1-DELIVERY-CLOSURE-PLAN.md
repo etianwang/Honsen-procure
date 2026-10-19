@@ -6,6 +6,8 @@
 
 必须交付账号/权限/启用后的 TOTP、主数据/分类、采购单创建编辑审批及历史、OPA/HPA/SPO、离线保存同步和冲突解决、正式编号/冻结快照、RFQ/收货/付款/附件、双语 PDF/打印/Excel、完整三语言 UI、备份恢复、Windows 发布及最终验收。不建议将任何这些项目移到 v1.1。
 
+**当前统一候选：** 包含本段的本地集成提交，父提交为独立 G2 QA `ff7bff6f421cb71448deff017bba7a8f0485070a` 与管理基线 `e5e46362e51966d3fb3da1e040c42f866ff0a40e`；已继承完整 FIX2 `13b22ff` → G2 `6e0a2a6`，不重复 cherry-pick。生产/测试源码与 QA HEAD 相同，仅整合文档历史与当前导航；以下分支/“本轮不合并”描述保留为先前轮次背景，不表示本集成缺少实现。定向回归、构建和完整 SHA 见最新 [memory](../../memory.md) 交接；签署的 QA 原文不改，不合并 main。
+
 历史文档起点 H=`50378dd`；未合并 FIX2 候选 F=`13b22ff`。G2 实现 `6e0a2a61fdf0967d75dc5edec3eed5e350056ef5` 以 F 为生产父提交，管理依据 `25a56af`；当前独立 QA 树基于6e0a2a6，QA 文档检查点为包含本次签署的本地提交。F/G2 均未合并 main，不能把结果算作 H/main 已验收。QA 文件在 H 不存在；完整历史可用 `git show b0a6069:docs/agent-coordination/QA_REPORT.md`、同 SHA 的 `BUG_QUEUE.md`、F 及 `25a56af` 版本核对。
 
 ## 已完成且证据有效的内容

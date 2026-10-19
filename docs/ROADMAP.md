@@ -6,6 +6,8 @@ The authoritative execution order and mandatory per-task DOM testing gate are in
 
 M0–M4 and their original objectives below are preserved; dated progress paragraphs are historical checkpoints, not additional queues. The [current delivery register](BUILD-TASKS.md#current-delivery-register--2026-10-19) owns remaining-task status and G1–G10 mappings; the [v1.0 closure plan](planning/V1-DELIVERY-CLOSURE-PLAN.md) is a short navigation index, not another task master.
 
+**Current local integration:** the containing checkpoint merges QA HEAD `ff7bff6f421cb71448deff017bba7a8f0485070a` with management `e5e46362e51966d3fb3da1e040c42f866ff0a40e`; it already inherits FIX2 `13b22ff` and G2 `6e0a2a6`. No production change or repeated cherry-pick; current test evidence is in [memory](../memory.md). The source-branch descriptions below are historical. FIX2/G2/NATIVE-008 CLOSED and G1/T10/T10-SEC-001/P1/Formal hold OPEN remain unchanged; no merge into main or new development is authorized.
+
 - Documentation starts at `50378dd` (H), not the separate unmerged FIX2 candidate `13b22ff` (F). Historical independent QA `b0a6069` failed `85d0565`; F's builder run supported READY_FOR_RECHECK only. Subsequent independent **`native-smoke-20261019115437`** plus fresh-context QA code/evidence signoff gives **PASS / G1-QA-001 CLOSED on F** for the bounded management401 defect. [QA report](agent-coordination/QA_REPORT.md) records exact session/request matching and limits. G1 production conflict UI lifecycle remains open; no candidate implementation is merged/accepted as H/main.
 - NATIVE-008 remains CLOSED within `03f432a`/`be20d76` evidence. T10, T10-SEC-001, original P1 and Formal hold remain OPEN. No milestone checkbox changes this round.
 - Nine original task IDs remain unclosed: T04/T08/T09/T10/T11/T12/T13/T14/T15. Eight require development; T14 is final acceptance evidence, not a duplicate development task. Seven historical foundation acceptances remain bounded to their evidence; account TOTP/governance, live home queues and category maintenance are not proven by foundation acceptance.
@@ -153,7 +155,7 @@ M0 item tracking (all seven original objectives, in order):
 
 ## Current next-task recommendation
 
-Obtain authority for T04 authorized initial-record acceptance, then complete the remaining T08/T09 prerequisites before T10 final acceptance. See independently tracked child tasks in BUILD-TASKS. No new feature implementation is authorized by this progress update.
+Follow the current delivery path above and the single remaining-work register in BUILD-TASKS. FIX2 and bounded G2 are independently CLOSED and integrated locally; recommended next development is existing T10-B/D / G3, only after user ordering. T04 authorized deployment and original final dependencies remain mandatory for closure. This integration starts no implementation or repeat native matrix.
 
 ## Approved / planned: Admin Master Data Management
 
@@ -199,6 +201,10 @@ An unreleased-profile migration compatibility repair now recognizes the exact ol
 
 ## Original foundation instruction (retained; not current progress)
 
+Historical FIX2 builder checkpoint (superseded by independent QA above):
+
 G1 (2026-10-19) stays OPEN. Independent QA `b0a6069` verified the bounded Push/Pull invalidation at `85d0565` and retained management401 as OPEN/FAIL. **G1-QA-001-FIX2 is READY_FOR_RECHECK**, not independently accepted: all management requests now capture private generation/token and reuse the atomic invalidator; context/history/scope-cache access shares its lock. Fresh Rust management4/4/full69/69, targeted API/barrier/store/DOM and quality checks PASS. Final actual EXE native-smoke-20261019112134 denies current management401 context/known-selection/source access for GET/PUT/DELETE/PATCH and preserves B/replacement-A after held old-management401. Independent Fixer recheck remains BLOCKER; production conflict-view lifecycle proof remains a separate BLOCKED G1 item. Exact retained evidence/history in QA_REPORT/BUG_QUEUE/memory/audit. No G2/G3/formal changes. T10/SEC-001/P1/Formal/M3 OPEN; NATIVE-008 CLOSED; parent criteria unchanged.
+
+The following instruction applied to the original foundation stage only; it does not override the current approved v1.0 scope or Delivery-First path.
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.

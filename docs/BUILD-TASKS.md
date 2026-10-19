@@ -22,6 +22,7 @@ This is the single active remaining-work view; dated checkpoints below remain hi
 
 ### Baseline and evidence boundaries
 
+- **Unified local integration — 2026-10-19:** the containing merge checkpoint joins independently signed QA HEAD `ff7bff6f421cb71448deff017bba7a8f0485070a` with management baseline `e5e46362e51966d3fb3da1e040c42f866ff0a40e`. Production ancestry is `13b22ffe8aa294535f9036eda32d7cfc81f6481f` → `6e0a2a61fdf0967d75dc5edec3eed5e350056ef5` → QA HEAD; no duplicate cherry-pick. The following H/F branch statements retain their historical context, not this integrated branch's current contents. FIX2/G2/NATIVE-008 stay CLOSED within their signed scopes; G1/T10/T10-SEC-001/original P1/Formal hold stay OPEN. Integration evidence and exact containing SHA are recorded in the latest memory handoff; signed QA text is unchanged.
 - **G2 implementation provenance:** branch `codex/t10-g2-formal-pull`, production parent F (`13b22ff`), management checkpoint `25a56af0aef635be7e1ab0a878784c53a87fac49`. Candidate **`6e0a2a61fdf0967d75dc5edec3eed5e350056ef5` is independently PASS / G2 CLOSED** for the approved16-field formal Pull scope; latest QA signoff below. Approved Delivery-First register/preparation and original task/dependency history remain. H/F documentation statements below are historical, not this QA tree's production parent or whole-project acceptance.
 - Documentation starting HEAD **H = `50378ddc0f52bcf2432199f0a6c6c38bf61dcb0c`**, fetched main `5139cc8f7d5a70cddb80b3ce5665100a316c9656`; this docs branch does not import production changes. Candidate **F = `13b22ffe8aa294535f9036eda32d7cfc81f6481f`** is in the separate `codex/g1-qa001-fix2` worktree. H and F diverge at `74365f0`; F is not H/main acceptance. H/main has 24 unmerged commits; F/main has 98, with overlap, not 122 distinct tasks. An older integration worktree at `0a42ebe` has four unresolved tracked conflicts and is not the clean candidate.
 - Independent G1 QA at management baseline was **`b0a6069e1439203fd9259b8cc3e619ac6eb70c2c`**, tested implementation **`85d0565a5b695a94da7bd5aa861178bfcbc77a52`**, run **`native-smoke-20261019090425`**: **G1-QA-001 OPEN / FAIL** for management-command 401 retaining local authorization cache. This historical failure remains evidence, not current candidate readiness.
@@ -162,7 +163,7 @@ The stage-4 PR candidate replays the two mapped execution/receipt commits on cur
 ## Explicit boundaries
 
 - T00–T14 must not invent `appId`, EXE name, install location, Runner arguments, registry entries or update URL.
-- T15 remains blocked until the permanent Toolbox identity is approved, even though automatic update is required for internal distribution.
+- T15 requires approved permanent Toolbox identity. That approval is already recorded; T14 and implementation/release acceptance still block closure. Do not invent a second identity or treat this satisfied condition as a fresh blocker.
 - COS/PostgreSQL secret values remain outside Git and are never copied into tests, screenshots or task notes.
 - Each task may use fixtures only; no real supplier contacts, prices, account credentials or production attachments.
 
@@ -293,7 +294,7 @@ Attachment boundary proposal (approval required; no dependency or acceptance sta
 1. ROADMAP owns milestone-level progress and original objectives; this file owns task/child acceptance, original dependencies and evidence; memory owns the current handoff, blockers and next action.
 2. After an entire task passes all required gates, update all three files in the same change with commands/results, evidence location, skips and limitations. Partial implementation remains unchecked. A milestone is checked only when every original milestone objective passes, not merely when one contributing task passes.
 3. Preserve historical logs; explicitly label stale completion statements as historical. Committed source, executed results and durable artifacts outrank old checkbox claims. A pipeline definition or fixture is not a successful CI/production run.
-4. Do not erase original objectives or rewrite dependencies to make progress appear consistent. Historical T05–T10 work was started with incomplete prerequisites; suspend further dependent development until their gates and dependency-boundary decisions are resolved.
+4. Do not erase original objectives or rewrite dependencies to make progress appear consistent. Classify prerequisites using the current delivery register: unresolved technical/security/authority conditions block the affected slice; open final gates prevent closure but do not suspend all safe independent development. Disputed boundaries remain pending approval.
 5. M1's original admin-password wording remains preserved in ROADMAP. Apply the confirmed personal-account/role model; do not invent a separate shared-password bypass. Any conflicting interpretation requires confirmation.
 
 ## Owner-self-purchase first implementation slices
@@ -311,6 +312,6 @@ This is a sequencing plan only; it does not change any task or milestone status.
 
 ## Suggested immediate next task
 
-Obtain authority for **T04-A/B/C**, then complete T08/T09 prerequisite acceptance. T10 then verifies server registration, idempotency and formal-document conflicts without rewriting local issued snapshots. T11–T15 remain in their original sequence.
+FIX2 and the bounded T10-A/G2 slice are independently CLOSED and now share the local integration baseline above; do not repeat their development or full native matrices. Recommended next development is existing **T10-B/D / G3 structured errors and permanent-failure handling**, after user confirmation. Obtain T04 deployment authority and the T09-C/T11 boundary decision separately; they do not block every safe implementation. Original final acceptance dependencies remain unchanged. This integration starts no next task.
 
 The original initial recommendation was to start T00 to establish repository shape, CI gates and an automated DOM harness without production behavior or packaging identity. That foundation is now accepted; it is not the current next task.
