@@ -1,6 +1,12 @@
 # Honsen采购管理系统（HONSEN Procure）— Development Memory
 
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-20
+
+## G3 integration and T10-D preparation — 2026-10-20
+
+- **Unified local candidate:** this integration branch starts at independent QA checkpoint `9e6c6457de755a2afc3c81dda0391dc1664da67b`, a direct child of accepted implementation `35b9f60c0b9c5df0d4283649455f1a7d5d991631`, itself a direct child of baseline `7b2d29cc61f7f67eb366d01de61c98f3bccf2995`. No cherry-pick or production-source reconciliation was needed. `9e6c645` changes only QA/status documents; G3 source is therefore exactly the independently tested source. G2 remains an ancestor of the baseline; FIX2 remains present through the baseline's accepted management parent. The G3 diff changes only acknowledgement/error paths and tests, not the locked 401 invalidation path or G2 Pull projector.
+- **T10-D gap, not implementation:** the server already detects stale `baseVersion`, persists both payloads and returns `VERSION_CONFLICT` with server version/payload/operation; desktop stores both payloads in `local_sync_conflicts`. The only renderer is a fixture route, and the generic trusted resolver deliberately excludes `purchase_order`. No production purchase-order comparison, administrator-only resolution flow, replacement draft/outbox creation, resolved-conflict audit link, or two-device convergence proof exists. The next slice must keep draft-order resolution separate from generic overwrite: show both versions and required reason, explicitly choose server or create a replacement draft from the local version against the selected server base; retain the original conflict/outbox evidence. Formal issued/cancelled orders must instead remain immutable and use the existing cancelled/closed-plus-new-revision rule. This is existing T10-D/G4 scope; no migration or protocol change is identified before implementation.
+- **Holds:** G3 is CLOSED only for structured-error/permanent-failure retention. G1, T10, T10-SEC-001, original P1 and Formal hold remain OPEN; FIX2, G2 and NATIVE-008 retain CLOSED status. **DEFERRED:** choose and implement the bounded T10-D production draft-order resolver only after user confirmation. **WARNING:** no full NATIVE matrix or fresh two-EXE conflict test ran during this integration planning checkpoint.
 
 ## T10-B/D G3 structured errors and permanent failures — CLOSED (independent QA 2026-10-20)
 
