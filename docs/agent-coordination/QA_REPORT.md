@@ -1,5 +1,15 @@
 # Independent QA Report — T08/T10/P1/Formal Combination
 
+## T10-B/D G3 independent acceptance — 2026-10-20 — PASS / CLOSED
+
+**Independent QA closes only the G3 structured-error/permanent-failure slice on implementation `35b9f60c0b9c5df0d4283649455f1a7d5d991631`.** QA HEAD is the containing `codex/qa-t10-bd-independent-35b9f60` documentation checkpoint. No production source was changed. This does not close parent T10, the remaining T10-B reconnect/status evidence, T10-D production conflict resolution, G1 production UI, T10-SEC-001/P1 or Formal hold. FIX2, G2 and NATIVE-008 retain their recorded CLOSED boundaries.
+
+- Candidate is a direct child of the approved baseline `7b2d29cc61f7f67eb366d01de61c98f3bccf2995`; the QA worktree was clean and independent on E:. Shared schema has optional `errorCode`, `serverPayload` and `serverOperation`; source review and server Vitest confirm `FORBIDDEN`, `VALIDATION_REJECTED` and `VERSION_CONFLICT` classification.
+- Fresh E:-target Rust: permanent/retry/structured conflict 1/1 PASS; existing unstructured conflict remains pending 1/1 PASS; FIX2 session rejection 1/1 PASS; Pull failure/replay/restart cursor 1/1 PASS. The SQL assertions show permanent `superseded_at` plus `INVALID_PAYLOAD`, structured conflict `VERSION_CONFLICT` plus preserved server payload, and later retryable Outbox work remains pending.
+- Fresh server/shared checks: `service.test.ts` 16/16 PASS; shared/server strict typecheck and changed-file Prettier PASS. `cargo fmt --check`, `cargo clippy -j 1 --lib --tests` and release `cargo check -j 1 --release --bin HonsenProcure` exit0 (pre-existing warnings only).
+- Minimal real database proof: disposable WSL2 PostgreSQL16, loopback-only Compose project, `postgres-store.test.ts` 39/39 PASS. QA-only direct store check proves a conflict's original and duplicate eventId replay each return `{ serverPayload: { nameZh: 'initial' }, serverOperation: 'upsert' }`, while the persisted entity remains `initial`; a service check returns `VALIDATION_REJECTED`. Compose resources are removed after this checkpoint.
+- **Verdict:** PASS / CLOSED for this bounded G3 slice. No migration, production database, EXE matrix, NATIVE-002–008 rerun, push or merge. **DEFERRED:** full T10-B/T10-D acceptance requirements above.
+
 ## T10-A/G2 independent acceptance — 2026-10-19 — PASS / CLOSED
 
 **Independent QA signs G2 CLOSED on implementation `6e0a2a61fdf0967d75dc5edec3eed5e350056ef5` only.** The approved16-field formal Pull scope, compatible preissue progression, frozen replay, rollback/cursor and existing Outbox/conflict retention now have fresh directed and real Windows dual-EXE evidence. This does not close all of T10-A/E, G1 production conflict UI, T10, T10-SEC-001, original P1 or Formal hold; those boundaries remain OPEN. NATIVE-008 remains CLOSED. Older builder READY and independent FIX2 records below remain historical.
@@ -94,18 +104,18 @@ List results are generation-checked again after awaited JSON decoding. Successfu
 
 ### Fresh checks on final code
 
-| Command / scope | Result | Evidence / limit |
-| --- | --- | --- |
-| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib management_ -- --nocapture` | PASS 4/4 | Current401, known context selection, source denial/data retention; late A→B and A1→A2 with same token/time; nonauth400/403/409/500; DELETE-trigger failure retains row but denies cache/scope/history entry. |
-| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` | PASS 69/69 | Fresh rerun after final cache-guard repair; existing offline, owner, migration, cursor/retry and snapshot tests retained. |
-| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check` | PASS | Final code. |
-| `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure -j 2` | PASS | Final check exit0. Cold unrestricted compilation first failed in `aws-lc-sys`/`cl.exe` exit2; bounded two-job retry passed, then final check passed again. Temporary compiler output redirected to task-local E: directory; no cache/evidence cleanup. Existing unused-symbol/linker warnings remain. |
-| Server `src/auth/service.test.ts src/authorization/service.test.ts src/scripts/native-auth-barrier.test.ts` | PASS 15/15 | Existing management API/service tests plus barrier6/6, including both new management phases. Production AuthService/routes unchanged. |
-| `npm run test --workspace @honsen/desktop` | PASS 11/11 | Existing store/lifecycle regressions. |
-| Focused navigation Playwright: cached scope switching + administrator binding management | PASS 2/2 | `test-results/g1-fix2-20261019`, HTML `playwright-report/g1-fix2-20261019`; fixture IPC DOM only, not native authorization or production conflict UI. |
-| `npm run lint`; `npm run typecheck`; `npm run build --workspace @honsen/desktop` | PASS | Existing App effect and bundle-size warnings remain. |
-| Driver `node --check`/Oxlint; changed driver/barrier/test Prettier; `git diff --check` | PASS | No unrelated formatting sweep. |
-| Actual EXE G1 mode, final **`native-smoke-20261019112134`** | PASS | Completed `2026-10-19T11:24:07.111Z`; details below. |
+| Command / scope                                                                                             | Result     | Evidence / limit                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib management_ -- --nocapture`             | PASS 4/4   | Current401, known context selection, source denial/data retention; late A→B and A1→A2 with same token/time; nonauth400/403/409/500; DELETE-trigger failure retains row but denies cache/scope/history entry.                                                                                          |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib`                                        | PASS 69/69 | Fresh rerun after final cache-guard repair; existing offline, owner, migration, cursor/retry and snapshot tests retained.                                                                                                                                                                             |
+| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`                                       | PASS       | Final code.                                                                                                                                                                                                                                                                                           |
+| `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure -j 2`          | PASS       | Final check exit0. Cold unrestricted compilation first failed in `aws-lc-sys`/`cl.exe` exit2; bounded two-job retry passed, then final check passed again. Temporary compiler output redirected to task-local E: directory; no cache/evidence cleanup. Existing unused-symbol/linker warnings remain. |
+| Server `src/auth/service.test.ts src/authorization/service.test.ts src/scripts/native-auth-barrier.test.ts` | PASS 15/15 | Existing management API/service tests plus barrier6/6, including both new management phases. Production AuthService/routes unchanged.                                                                                                                                                                 |
+| `npm run test --workspace @honsen/desktop`                                                                  | PASS 11/11 | Existing store/lifecycle regressions.                                                                                                                                                                                                                                                                 |
+| Focused navigation Playwright: cached scope switching + administrator binding management                    | PASS 2/2   | `test-results/g1-fix2-20261019`, HTML `playwright-report/g1-fix2-20261019`; fixture IPC DOM only, not native authorization or production conflict UI.                                                                                                                                                 |
+| `npm run lint`; `npm run typecheck`; `npm run build --workspace @honsen/desktop`                            | PASS       | Existing App effect and bundle-size warnings remain.                                                                                                                                                                                                                                                  |
+| Driver `node --check`/Oxlint; changed driver/barrier/test Prettier; `git diff --check`                      | PASS       | No unrelated formatting sweep.                                                                                                                                                                                                                                                                        |
+| Actual EXE G1 mode, final **`native-smoke-20261019112134`**                                                 | PASS       | Completed `2026-10-19T11:24:07.111Z`; details below.                                                                                                                                                                                                                                                  |
 
 Initial `native-smoke-20261019111146` stopped at an existing UI auto-Push/manual-Push race: server had already accepted the event before explicit Push returned0. It is not counted as a security RED or PASS. Controlled fixture/recovery steps now use real password/CAPTCHA `online_login` while renderer remains logged out, avoiding the scheduler race without weakening the acceptedCount assertion. The actual security RED `...111346`, intermediate PASS `...111646` (before the reviewer cache-guard addition), and final PASS `...112134` are all retained. Only the final run accepts the final code.
 
@@ -113,12 +123,12 @@ Initial `native-smoke-20261019111146` stopped at an existing UI auto-Push/manual
 
 Actual debug `HonsenProcure.exe` PIDs **`44004` (producer), `36052` (tested profile)**; real WebView2 → registered production Rust/Tauri commands, SQLite, Windows Credential Manager, Fastify HTTPS and isolated PostgreSQL. Shared tested profile is `native-smoke-20261019112134-account-a.test.sqlite`, installation **`b6c8c06b-4adc-4b90-bed2-904b78b1e2b8`**. No Mock IPC, direct SQLite writes or HTTP sync-client substitution. PostgreSQL writes are limited to initial synthetic account/scope fixture setup; the app generates all business/outbox/conflict state. Session evidence below comes from read-only lookup by the actual bearer hash; no token/hash/password is logged.
 
-| Current rejected request | Actual request ID | Revoked session ID | Immediate local result |
-| --- | --- | --- | --- |
-| GET / bindings (list) | `req-2a` | `96d7619e-83aa-4bfb-9be6-4a3e255d84e7` | 401; context get/list, known-scope selection and conflict list/known-ID resolver all `reauthentication_required`; sourceDisclosed=false. |
-| PUT / bindings (grant) | `req-2g` | `0f56bb0e-b91c-493e-9072-dfe2e2869c97` | Same denial after real401. |
-| DELETE / bindings (revoke) | `req-2m` | `acef2005-2690-4bff-bd87-c6779753e2ef` | Same denial after real401. |
-| PATCH / bindings (replace) | `req-2s` | `39693f76-edde-4d8e-b97e-843d1fa2b8a7` | Same denial after real401. |
+| Current rejected request   | Actual request ID | Revoked session ID                     | Immediate local result                                                                                                                   |
+| -------------------------- | ----------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| GET / bindings (list)      | `req-2a`          | `96d7619e-83aa-4bfb-9be6-4a3e255d84e7` | 401; context get/list, known-scope selection and conflict list/known-ID resolver all `reauthentication_required`; sourceDisclosed=false. |
+| PUT / bindings (grant)     | `req-2g`          | `0f56bb0e-b91c-493e-9072-dfe2e2869c97` | Same denial after real401.                                                                                                               |
+| DELETE / bindings (revoke) | `req-2m`          | `acef2005-2690-4bff-bd87-c6779753e2ef` | Same denial after real401.                                                                                                               |
+| PATCH / bindings (replace) | `req-2s`          | `39693f76-edde-4d8e-b97e-843d1fa2b8a7` | Same denial after real401.                                                                                                               |
 
 Each is the first rejected request after a normal second-EXE login revokes the tested B session; pre-rejection local contexts and B's real nonempty conflict list were verified. The driver requires exactly one matching method/route/session observation and actual401, then checks every denial before recording PASS.
 
@@ -169,21 +179,21 @@ Production Push/Pull, including authorization-context preflight, carry the same 
 
 ### Fresh targeted checks
 
-| Command / test | Result | Evidence and limit |
-| --- | --- | --- |
-| Rust filter `rejected_sync_session` | PASS 5/5 | All five behavioral assertions first failed against no-op rejection, then passed: current refusal/no loss; late A→B; same-account new generation with same token; legitimate reauthentication; SQLite DELETE failure closed. Unit fixtures are not native proof. |
-| Rust `failed_reauthentication_detaches_previous_local_conflict_access` | PASS 1/1 | First reproduced source access after failed login; fixed login entry detachment, then passed. |
-| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` | PASS 65/65 | Existing owner, conflict, retry, ACK, cursor/rollback and installation checks retained; six new tests. |
-| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`; `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure` | PASS | No new release test command; existing unused-symbol/linker warnings only. |
-| `src/scripts/native-auth-barrier.test.ts` | PASS 3/3 | Configuration/phase fail-closed, held old request, unblocked new request and bound successful release. No claim of initial RED for this helper. |
-| PostgreSQL `src/sync/g1-origin.integration.test.ts` | PASS 3/3 | Fresh 02:25:21 UTC run; actual Fastify/AuthService/PostgreSQL, trusted identity/origin containment. |
-| `src/sync/api.test.ts` + `src/sync/service.test.ts` | PASS 19/19 | Fresh 02:25:29 UTC run. |
-| Selected `src/sync/postgres-store.test.ts` | PASS 5/5 | Fresh 02:25:30 UTC; prior QA idempotency/origin/quarantine/scope/Pull-order pattern; 34 deliberately filtered, not counted PASS. |
-| `npm run test --workspace @honsen/desktop` | PASS 11/11 | Store/lifecycle regressions. |
-| Focused navigation conflict Playwright DOM | PASS 2/2 | New `test-results/g1-qa001-202610190221`, HTML `playwright-report/g1-qa001-202610190221`; fixture/mock IPC only, not native authority or real conflict UI. |
-| `npm run lint`; `npm run typecheck`; `npm run build --workspace @honsen/desktop` | PASS | Existing App effect and bundle-size warnings retained. |
-| Driver `node --check`, targeted Oxlint/Prettier; new helper/test Prettier; `git diff --check` | PASS | No lockfile change, assertion weakening or unrelated formatting sweep. |
-| Actual EXE `native-smoke-20261019022252` | PASS for QA-001 native command slice | Completed `2026-10-19T02:24:41.003Z`; below. Not full G1/UI acceptance. |
+| Command / test                                                                                                                                                       | Result                               | Evidence and limit                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rust filter `rejected_sync_session`                                                                                                                                  | PASS 5/5                             | All five behavioral assertions first failed against no-op rejection, then passed: current refusal/no loss; late A→B; same-account new generation with same token; legitimate reauthentication; SQLite DELETE failure closed. Unit fixtures are not native proof. |
+| Rust `failed_reauthentication_detaches_previous_local_conflict_access`                                                                                               | PASS 1/1                             | First reproduced source access after failed login; fixed login entry detachment, then passed.                                                                                                                                                                    |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib`                                                                                                 | PASS 65/65                           | Existing owner, conflict, retry, ACK, cursor/rollback and installation checks retained; six new tests.                                                                                                                                                           |
+| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`; `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure` | PASS                                 | No new release test command; existing unused-symbol/linker warnings only.                                                                                                                                                                                        |
+| `src/scripts/native-auth-barrier.test.ts`                                                                                                                            | PASS 3/3                             | Configuration/phase fail-closed, held old request, unblocked new request and bound successful release. No claim of initial RED for this helper.                                                                                                                  |
+| PostgreSQL `src/sync/g1-origin.integration.test.ts`                                                                                                                  | PASS 3/3                             | Fresh 02:25:21 UTC run; actual Fastify/AuthService/PostgreSQL, trusted identity/origin containment.                                                                                                                                                              |
+| `src/sync/api.test.ts` + `src/sync/service.test.ts`                                                                                                                  | PASS 19/19                           | Fresh 02:25:29 UTC run.                                                                                                                                                                                                                                          |
+| Selected `src/sync/postgres-store.test.ts`                                                                                                                           | PASS 5/5                             | Fresh 02:25:30 UTC; prior QA idempotency/origin/quarantine/scope/Pull-order pattern; 34 deliberately filtered, not counted PASS.                                                                                                                                 |
+| `npm run test --workspace @honsen/desktop`                                                                                                                           | PASS 11/11                           | Store/lifecycle regressions.                                                                                                                                                                                                                                     |
+| Focused navigation conflict Playwright DOM                                                                                                                           | PASS 2/2                             | New `test-results/g1-qa001-202610190221`, HTML `playwright-report/g1-qa001-202610190221`; fixture/mock IPC only, not native authority or real conflict UI.                                                                                                       |
+| `npm run lint`; `npm run typecheck`; `npm run build --workspace @honsen/desktop`                                                                                     | PASS                                 | Existing App effect and bundle-size warnings retained.                                                                                                                                                                                                           |
+| Driver `node --check`, targeted Oxlint/Prettier; new helper/test Prettier; `git diff --check`                                                                        | PASS                                 | No lockfile change, assertion weakening or unrelated formatting sweep.                                                                                                                                                                                           |
+| Actual EXE `native-smoke-20261019022252`                                                                                                                             | PASS for QA-001 native command slice | Completed `2026-10-19T02:24:41.003Z`; below. Not full G1/UI acceptance.                                                                                                                                                                                          |
 
 DB batch used disposable Compose `honsen-g1-qa001-20261019`, `.env.test`, loopback 54329 and fresh Node `SELECT 1`; scoped `down --volumes` completed, project `ps -a` empty. Native run's project also empty. Separate normal-user foreground WSL holder used for ENV-002; no production DB, `.env` or deployment credential used.
 
@@ -247,20 +257,20 @@ Require all three native transitions/source denial, not just coreResult/counts; 
 
 ### Fresh independent results (execution HEAD `fbdb14b`)
 
-| Command / acceptance | Fresh result | Scope / evidence |
-| --- | --- | --- |
-| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib conflict_ -- --nocapture` | PASS 5/5 | Owner/NULL containment, source list isolation, forged input, competing-login lock, RFQ conflict preservation; 54 name-filtered. Unit fixtures insert conflict rows; not native business proof. |
-| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` | PASS 59/59 | Owner/cursor/rollback/retry/account guards, idle/disabled sync sessions and catalog resolution retained. Not proof of invalidation after an actual server 401. |
-| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`; `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure` | PASS | Existing linker/release unused-symbol warnings only. No Rust changes this round. |
-| PostgreSQL `src/sync/g1-origin.integration.test.ts` | PASS 3/3, 00:16:16 UTC start | Actual PostgreSQL/Fastify/AuthService/store; foreign source/forged selectors, same-installation different account, replacement installation/new event plus revoked old token. Sessions created by fixture, not password-login tests. |
-| `src/sync/api.test.ts` + `src/sync/service.test.ts` | PASS 19/19, 00:16:31 UTC | API/service authorization and protocol checks. |
-| Selected `src/sync/postgres-store.test.ts` | PASS 5/5, 00:16:32 UTC | Pattern `is.idempotent.and.records|does.not.return.an.event.result|quarantined.legacy|bound.countries|does.not.skip.a.pending.Push`; 34 deliberately name-filtered, not counted PASS. |
-| `npm run test --workspace @honsen/desktop` | PASS 11/11 | Relevant store/lifecycle tests. |
-| `npx playwright test tests/e2e/navigation.spec.ts --grep 'administrator resolves a sync conflict|cross-account conflict resolution' --workers=1 --output=test-results/g1-securityqa-20261019` | PASS 2/2 | Fresh fixture/mock IPC DOM only. HTML output `playwright-report/g1-securityqa-20261019`; no prior evidence output directory reused. Does not exercise account switch or native authorization. |
-| `npm run lint`; `npm run typecheck`; `npm run build --workspace @honsen/desktop` | PASS | Existing `App.tsx:242` effect warning and bundle-size warning retained. |
-| New driver `node --check`, targeted Oxlint/Prettier; `git diff --check` | PASS | Test-only harness syntax/style; no safety assertion weakened. |
-| Actual EXE command/account-switch slice `native-smoke-20261019002504` | PASS for bounded A–D / explicit lock | Real WebView2, production Tauri IPC, Windows Credential Manager, SQLite, Fastify HTTPS and disposable PostgreSQL. **Not full G1 PASS.** |
-| Extended actual EXE `native-smoke-20261019002730` | **FAIL** | Second real A login revokes old A session; old Pull rejects, but old conflict-list source read succeeds. Assertion kept RED. UI-conflict residue remains BLOCKED. |
+| Command / acceptance                                                                                                                                                 | Fresh result                                                                                 | Scope / evidence                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib conflict_ -- --nocapture`                                                                        | PASS 5/5                                                                                     | Owner/NULL containment, source list isolation, forged input, competing-login lock, RFQ conflict preservation; 54 name-filtered. Unit fixtures insert conflict rows; not native business proof.                                       |
+| `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib`                                                                                                 | PASS 59/59                                                                                   | Owner/cursor/rollback/retry/account guards, idle/disabled sync sessions and catalog resolution retained. Not proof of invalidation after an actual server 401.                                                                       |
+| `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`; `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --release --bin HonsenProcure` | PASS                                                                                         | Existing linker/release unused-symbol warnings only. No Rust changes this round.                                                                                                                                                     |
+| PostgreSQL `src/sync/g1-origin.integration.test.ts`                                                                                                                  | PASS 3/3, 00:16:16 UTC start                                                                 | Actual PostgreSQL/Fastify/AuthService/store; foreign source/forged selectors, same-installation different account, replacement installation/new event plus revoked old token. Sessions created by fixture, not password-login tests. |
+| `src/sync/api.test.ts` + `src/sync/service.test.ts`                                                                                                                  | PASS 19/19, 00:16:31 UTC                                                                     | API/service authorization and protocol checks.                                                                                                                                                                                       |
+| Selected `src/sync/postgres-store.test.ts`                                                                                                                           | PASS 5/5, 00:16:32 UTC                                                                       | Pattern `is.idempotent.and.records                                                                                                                                                                                                   | does.not.return.an.event.result                                                                                                                                                               | quarantined.legacy | bound.countries | does.not.skip.a.pending.Push`; 34 deliberately name-filtered, not counted PASS. |
+| `npm run test --workspace @honsen/desktop`                                                                                                                           | PASS 11/11                                                                                   | Relevant store/lifecycle tests.                                                                                                                                                                                                      |
+| `npx playwright test tests/e2e/navigation.spec.ts --grep 'administrator resolves a sync conflict                                                                     | cross-account conflict resolution' --workers=1 --output=test-results/g1-securityqa-20261019` | PASS 2/2                                                                                                                                                                                                                             | Fresh fixture/mock IPC DOM only. HTML output `playwright-report/g1-securityqa-20261019`; no prior evidence output directory reused. Does not exercise account switch or native authorization. |
+| `npm run lint`; `npm run typecheck`; `npm run build --workspace @honsen/desktop`                                                                                     | PASS                                                                                         | Existing `App.tsx:242` effect warning and bundle-size warning retained.                                                                                                                                                              |
+| New driver `node --check`, targeted Oxlint/Prettier; `git diff --check`                                                                                              | PASS                                                                                         | Test-only harness syntax/style; no safety assertion weakened.                                                                                                                                                                        |
+| Actual EXE command/account-switch slice `native-smoke-20261019002504`                                                                                                | PASS for bounded A–D / explicit lock                                                         | Real WebView2, production Tauri IPC, Windows Credential Manager, SQLite, Fastify HTTPS and disposable PostgreSQL. **Not full G1 PASS.**                                                                                              |
+| Extended actual EXE `native-smoke-20261019002730`                                                                                                                    | **FAIL**                                                                                     | Second real A login revokes old A session; old Pull rejects, but old conflict-list source read succeeds. Assertion kept RED. UI-conflict residue remains BLOCKED.                                                                    |
 
 Node `v24.18.0`. WSL2 normal user `honsen-dev`; Docker 29.9.0 / Compose 5.6.0 / Buildx 0.38.0 verified. Focused DB batch used disposable project `honsen-g1-securityqa-20261019`, verified Node `SELECT 1` before suites, and ran scoped `down --volumes`. Native runs likewise used separate run-named projects, certificates and new profiles; final project checks are empty. No existing QA/E2E/DB evidence was removed.
 
@@ -280,7 +290,7 @@ Run **`native-smoke-20261019002504`**, completed `2026-10-19T00:26:17.061Z`:
 Run **`native-smoke-20261019002730`** preserves the same assertions and additionally uses the second real EXE to **normally log into A**, revoking the first token through `PostgresAuthStore.createSession`. No direct session-table mutation or clock mock. The first EXE's `pull_sync` returns `{code:"reauthentication_required"}`. Immediately afterward its real `list_sync_conflicts` succeeds:
 
 ```json
-{"denied":false,"conflictCount":1,"sourceDisclosed":true}
+{ "denied": false, "conflictCount": 1, "sourceDisclosed": true }
 ```
 
 The harness subsequently explicitly locks/re-authenticates A, verifies legal resolution/audit/v2 and explicit-lock denial, then **fails** the retained security assertion `G1 revoked session can still read conflict source after server authentication rejection`. Native exit status is 1, with `coreResult:"FAIL"`. Evidence: `.honsen-native-qa/native-smoke-20261019002730.test.json` (`revokedSessionAccess`, 12 safe denials, `consoleErrors:[]`) and `test-results/native-smoke-20261019002730-client.log`. **The earlier bounded PASS does not override this final FAIL.** This is known online revocation after an authenticated rejection, not ordinary permitted offline sign-in within 24 hours.
@@ -491,13 +501,13 @@ Focused validation: server typecheck PASS; Rust TLS trust-boundary unit test PAS
 
 This narrow follow-up extends the existing test-only controlled host without attempting Computer Use or substituting Playwright, a mock, or an independent HTTP client. The compiled `HonsenProcure.exe` opens two separately seeded absolute `.test.sqlite` profiles (and therefore two independently derived test credential-vault namespaces/installations) and calls the production local CAPTCHA, cloud CAPTCHA, `online_login`, `lock`, secure credential-vault and HTTPS authorization-refresh paths.
 
-| Scenario | Result | Actual assertion |
-| --- | --- | --- |
-| Profile A login as `engineer-a` | PASS | Real local/cloud CAPTCHA and `online_login` completed through the isolated Fastify HTTPS server. |
-| Profile B login as `engineer-b` | PASS | A second independently seeded SQLite profile authenticated with its own installation identity. |
-| B switches to `engineer-a` | PASS | A new server session was created through the production Rust client flow. |
-| A's replaced token | PASS | `refresh_authorization_https` on profile A returned `AuthError::NoActiveSession` after B's A-login revoked the earlier server session. |
-| B logout/session guard | PASS | After `lock`, B's `refresh_authorization_https` returned `AuthError::NoActiveSession`; no protected request was sent with a retained online session. |
+| Scenario                        | Result | Actual assertion                                                                                                                                     |
+| ------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Profile A login as `engineer-a` | PASS   | Real local/cloud CAPTCHA and `online_login` completed through the isolated Fastify HTTPS server.                                                     |
+| Profile B login as `engineer-b` | PASS   | A second independently seeded SQLite profile authenticated with its own installation identity.                                                       |
+| B switches to `engineer-a`      | PASS   | A new server session was created through the production Rust client flow.                                                                            |
+| A's replaced token              | PASS   | `refresh_authorization_https` on profile A returned `AuthError::NoActiveSession` after B's A-login revoked the earlier server session.               |
+| B logout/session guard          | PASS   | After `lock`, B's `refresh_authorization_https` returned `AuthError::NoActiveSession`; no protected request was sent with a retained online session. |
 
 The harness first exposed a test-infrastructure isolation defect: the two test SQLite profiles used one OS credential-vault service and the same account ID would overwrite the other profile's test token. Commit `028ed6fbfa9df220010eb0c3271de7e75b7419b9` scopes test credential services to the SHA-256 of the absolute `.test.sqlite` path, while retaining the production service names and clearing the former legacy test names. This is needed for a valid multi-profile assertion; it does not relax TLS, authentication, installation ID, transaction, cursor, approval, soft-delete, or snapshot rules.
 
@@ -523,13 +533,13 @@ Focused checks: `cargo fmt --check` PASS, `cargo test --lib` PASS (54/54), `carg
 
 This batch extended the existing controlled, real-client harness only. It invokes the compiled debug `HonsenProcure.exe`, two fresh absolute test-profile SQLite files, the OS credential vault, the production Rust local-auth/sync functions, an isolated PostgreSQL Fastify HTTPS service, and the test-profile PEM trust path. It does not use Playwright, a mocked Tauri command, or a standalone HTTP client.
 
-| Scenario | Result | Evidence |
-| --- | --- | --- |
-| A/B independently seeded installations | BLOCKED | The harness asserts different SQLite installation UUIDs before sync; execution reached both native logins but could not retain A's credential-vault token after B login. |
-| Forged `deviceId` retains authenticated origin | BLOCKED | The harness changes only A's test SQLite `installation_id`, then checks the server-recorded `origin_installation_id` response header after an actual Rust Push. It was not reached. |
-| A/B Push/Pull isolation | BLOCKED | A's project binding and B's zero-binding Pull assertion were prepared but not reached. |
-| A/B conflict-query isolation | BLOCKED | The actual purchaser stale-Push/local-conflict path was prepared but not reached. |
-| Post-commit failure, replay and idempotency | BLOCKED | The HTTPS test server is configured to return a single 503 only after its real Push handler commits, then accepts the same Rust outbox event on retry; the native client did not reach Push. |
+| Scenario                                       | Result  | Evidence                                                                                                                                                                                     |
+| ---------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A/B independently seeded installations         | BLOCKED | The harness asserts different SQLite installation UUIDs before sync; execution reached both native logins but could not retain A's credential-vault token after B login.                     |
+| Forged `deviceId` retains authenticated origin | BLOCKED | The harness changes only A's test SQLite `installation_id`, then checks the server-recorded `origin_installation_id` response header after an actual Rust Push. It was not reached.          |
+| A/B Push/Pull isolation                        | BLOCKED | A's project binding and B's zero-binding Pull assertion were prepared but not reached.                                                                                                       |
+| A/B conflict-query isolation                   | BLOCKED | The actual purchaser stale-Push/local-conflict path was prepared but not reached.                                                                                                            |
+| Post-commit failure, replay and idempotency    | BLOCKED | The HTTPS test server is configured to return a single 503 only after its real Push handler commits, then accepts the same Rust outbox event on retry; the native client did not reach Push. |
 
 The actual reproducible run was:
 
@@ -559,12 +569,12 @@ Fresh focused checks: `cargo fmt --check` PASS; credential-service isolation and
 
 ## Integration Owner Windows keyring investigation — 2026-10-17
 
-| Check | Result | Evidence |
-| --- | --- | --- |
-| Test-profile keyring target/service A/B round trip | PASS | `honsen-procure-test-profile.exe vault-probe` writes, reads, distinguishes and deletes two synthetic 43-character base64url-shaped tokens using the same `S-<profile SHA>` services and fixed account UUID. |
-| Real `HonsenProcure.exe` A login token readback | FAIL | Run `native-smoke-20261017094219` fails immediately after A login, before B opens: local session, in-memory online account and `last_authenticated_user_id` are all A, while `load_sync_token(A)` returns `None`. |
-| B overwrite / test cleanup / server revocation | NOT CAUSAL | The failure occurs before B login, `clear_test_profile` invocation, protected request, or server-session validation. |
-| Explicit profile-first keyring target experiment | FAIL / reverted | A test-only `Entry::new_with_target` target with profile hash first reproduced the same native A failure. It was not retained as a product or harness semantic change. |
+| Check                                              | Result          | Evidence                                                                                                                                                                                                          |
+| -------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Test-profile keyring target/service A/B round trip | PASS            | `honsen-procure-test-profile.exe vault-probe` writes, reads, distinguishes and deletes two synthetic 43-character base64url-shaped tokens using the same `S-<profile SHA>` services and fixed account UUID.       |
+| Real `HonsenProcure.exe` A login token readback    | FAIL            | Run `native-smoke-20261017094219` fails immediately after A login, before B opens: local session, in-memory online account and `last_authenticated_user_id` are all A, while `load_sync_token(A)` returns `None`. |
+| B overwrite / test cleanup / server revocation     | NOT CAUSAL      | The failure occurs before B login, `clear_test_profile` invocation, protected request, or server-session validation.                                                                                              |
+| Explicit profile-first keyring target experiment   | FAIL / reverted | A test-only `Entry::new_with_target` target with profile hash first reproduced the same native A failure. It was not retained as a product or harness semantic change.                                            |
 
 The minimum root-cause evidence is therefore: `cache_sync_access_token(A, accessToken)` returned success and updated SQLite `last_authenticated_user_id=A`; an immediate vault read by the same live `HonsenProcure.exe` returned `NoEntry`. The same process's profile, account, token shape and default keyring naming were independently successful in the test-profile executable. There is no application call site that deletes a sync credential between those two operations. The remaining differentiation is executable/process-specific Windows Credential Manager behavior, not a service/account/target collision and not an expected server revocation.
 
@@ -587,13 +597,13 @@ Fresh local validation: `cargo fmt --check` PASS; `cargo test --lib` PASS (55/55
 
 ## Independent Fixer Windows Credential Manager readback diagnosis — 2026-10-17
 
-| Check | Result | Evidence |
-| --- | --- | --- |
-| Real `HonsenProcure.exe`: same Entry write/read | PASS | Test-profile-only `vault-readback` wrote and read a controlled synthetic token through one `keyring::Entry`. |
-| Real `HonsenProcure.exe`: recreated Entry read | FAIL | The identical target immediately returned `NoEntry` after recreating `Entry`; final result is `.honsen-native-qa/native-vault-readback-final-20261017151305.test.json`. |
-| Production wrapper write/read | FAIL | `cache_sync_access_token` returned success, then `load_sync_token` (which creates a fresh Entry) returned absent in the same EXE/process. |
-| Console probe with recreated Entries | FAIL | `test-results/native-vault-probe-final-20261017151306-client.log` records `No matching entry found in secure storage`; the earlier probe had only proved same-object reads. |
-| Credential Manager metadata | FAIL | Read-only `cmdkey /list:<controlled-target>` found no stored credential after the controlled failed run. No existing credential was queried or deleted. |
+| Check                                           | Result | Evidence                                                                                                                                                                    |
+| ----------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Real `HonsenProcure.exe`: same Entry write/read | PASS   | Test-profile-only `vault-readback` wrote and read a controlled synthetic token through one `keyring::Entry`.                                                                |
+| Real `HonsenProcure.exe`: recreated Entry read  | FAIL   | The identical target immediately returned `NoEntry` after recreating `Entry`; final result is `.honsen-native-qa/native-vault-readback-final-20261017151305.test.json`.     |
+| Production wrapper write/read                   | FAIL   | `cache_sync_access_token` returned success, then `load_sync_token` (which creates a fresh Entry) returned absent in the same EXE/process.                                   |
+| Console probe with recreated Entries            | FAIL   | `test-results/native-vault-probe-final-20261017151306-client.log` records `No matching entry found in secure storage`; the earlier probe had only proved same-object reads. |
+| Credential Manager metadata                     | FAIL   | Read-only `cmdkey /list:<controlled-target>` found no stored credential after the controlled failed run. No existing credential was queried or deleted.                     |
 
 The corrected minimum root cause is not an A/B collision, application deletion, session revocation, TLS, or a Tauri-specific target difference. In this Windows user/session, `keyring` 3.6.3 reports successful `CredWriteW` for a controlled Generic credential, but a fresh `CredReadW` for the same exact `account.service` target returns `NoEntry`. `keyring` maps that result from Win32 `ERROR_NOT_FOUND` (1168). The test uses only a fixed synthetic account, a synthetic token whose SHA-256 prefix (not its value) is emitted, a new absolute `.test.sqlite` profile, and a hashed process-context marker.
 
@@ -621,10 +631,10 @@ The test host now waits for an observed Node `aborted`, request `close` or socke
 
 Actual isolated QA `HEAD`, implementation SHA and QA checkpoint are `ed9505953f803f8abc859ab402bbc30f896d8035` (`git merge-base --is-ancestor` PASS); it is not reachable from the caller worktree's former `74365f0` or `origin/main`. The registered mode is `push-termination-recovery` with boundaries `before-commit` and `after-commit`.
 
-| Scenario | Fresh run | Result | Evidence |
-| --- | --- | --- | --- |
-| A pre-handler / pre-commit | `native-smoke-20261018115728` | BLOCKED | Force-terminated real `HonsenProcure.exe` PID 18540; same profile/account/installation/event `7c0fc20e-727d-4dd2-8e5d-02fff84d6223` restarted. JSONL shows barrier, `499` with no origin, then one `accepted@1`; outbox `1→0`, Pull one/cursor `0→1`, replay 0. |
-| B onSend / post-commit, pre-ACK | `native-smoke-20261018115952` | BLOCKED | Force-terminated real EXE PID 26628; same profile/account/installation/event `72351df2-04af-421c-89af-f140bc8e3467` restarted. Both server observations read the same `accepted@1`; outbox `1→0`, Pull one/cursor `0→1`, replay 0. |
+| Scenario                        | Fresh run                     | Result  | Evidence                                                                                                                                                                                                                                                        |
+| ------------------------------- | ----------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A pre-handler / pre-commit      | `native-smoke-20261018115728` | BLOCKED | Force-terminated real `HonsenProcure.exe` PID 18540; same profile/account/installation/event `7c0fc20e-727d-4dd2-8e5d-02fff84d6223` restarted. JSONL shows barrier, `499` with no origin, then one `accepted@1`; outbox `1→0`, Pull one/cursor `0→1`, replay 0. |
+| B onSend / post-commit, pre-ACK | `native-smoke-20261018115952` | BLOCKED | Force-terminated real EXE PID 26628; same profile/account/installation/event `72351df2-04af-421c-89af-f140bc8e3467` restarted. Both server observations read the same `accepted@1`; outbox `1→0`, Pull one/cursor `0→1`, replay 0.                              |
 
 `preHandler` is before the Push route/`SyncService.push`; `onSend` is after the handler awaits it and before response release. The host permits only loopback `test` databases and absolute `.signal` paths; desktop is test-profile/debug-only and release selects a fail-closed stub. The fault boundary uses ready/release conditions, not a fixed sleep.
 
@@ -634,10 +644,10 @@ NATIVE-008 remains **OPEN**: A releases then immediately samples `request.raw.de
 
 Actual QA `HEAD` and tested implementation are `2c8c768e25903cc4ab639761f40c29e94dc6bd70`; it contains `ed9505953f803f8abc859ab402bbc30f896d8035` and the prior QA checkpoint `cb6cddb96ea26aeb7fcc61c44b5cf16d0f430c75`. The Harness whitelist registers `push-termination-recovery`, with actual `before-commit` and `after-commit` boundaries. It uses real `HonsenProcure.exe`, production Rust Push/Pull, test SQLite profiles, Windows Credential Manager, disposable PostgreSQL and loopback Fastify HTTPS; no Mock, Playwright, standalone HTTP or direct SQLite operation was used.
 
-| Scenario | Fresh run | Native result | Evidence |
-| --- | --- | --- | --- |
-| A `preHandler` / before commit | `native-smoke-20261018141717` | BLOCKED | Real EXE PID `32912` was force-terminated after the barrier. Same profile `...141717-account-a.test.sqlite`, installation `588d451b-7001-4587-abec-88492d7709bc` and event `d5aae432-8fbf-4117-b117-3d72aef15cb3` restarted. Authoritative PostgreSQL snapshots are `0/0/0` with handler false before recovery and `1/1/1` after; Outbox `1→0`, Pull one at cursor `0→1`, replay 0. |
-| B `onSend` / after commit, before ACK | `native-smoke-20261018141758` | BLOCKED | Real EXE PID `18480` was force-terminated at the onSend barrier. Same profile `...141758-account-a.test.sqlite`, installation `cb17a5b0-bfcd-47d0-826d-db96317f79ca` and event `625ca06a-ef85-42af-8c9d-d68c3ef4d219` restarted. Authoritative snapshots remain `1/1/1` before/after replay, handler true; Outbox `1→0`, Pull one at cursor `0→1`, replay 0. |
+| Scenario                              | Fresh run                     | Native result | Evidence                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------- | ----------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A `preHandler` / before commit        | `native-smoke-20261018141717` | BLOCKED       | Real EXE PID `32912` was force-terminated after the barrier. Same profile `...141717-account-a.test.sqlite`, installation `588d451b-7001-4587-abec-88492d7709bc` and event `d5aae432-8fbf-4117-b117-3d72aef15cb3` restarted. Authoritative PostgreSQL snapshots are `0/0/0` with handler false before recovery and `1/1/1` after; Outbox `1→0`, Pull one at cursor `0→1`, replay 0. |
+| B `onSend` / after commit, before ACK | `native-smoke-20261018141758` | BLOCKED       | Real EXE PID `18480` was force-terminated at the onSend barrier. Same profile `...141758-account-a.test.sqlite`, installation `cb17a5b0-bfcd-47d0-826d-db96317f79ca` and event `625ca06a-ef85-42af-8c9d-d68c3ef4d219` restarted. Authoritative snapshots remain `1/1/1` before/after replay, handler true; Outbox `1→0`, Pull one at cursor `0→1`, replay 0.                        |
 
 The previous immediate `request.raw.destroyed` read is gone and PostgreSQL count/version/entityVersion snapshots are now queried directly from `sync_events`/`sync_entities` before Compose teardown. `preHandler` precedes Push business execution; `onSend` runs after the route commit and before payload delivery. The barrier uses ready/release conditions plus a 10-second failure timeout, not a fixed sleep. Test controls remain test-host/test-profile-only and release fail-closed.
 
@@ -667,13 +677,13 @@ However, the new unit tests only prove ordinary `IncomingMessage.close` and post
 
 The repair adds that required real Rust Pull before the conflict assertion and tightens the checks: stale B Push must remain pending, Pull must advance the cursor and apply exactly one remote change, B must have exactly one local conflict for the shared order, and A must still have zero local conflicts. The test-only Fastify host now records only non-secret Push metadata (event UUID, status/version, trusted actor/origin installation, and the small response body) in an ignored `.test.jsonl` file. No production SyncService, Postgres filtering, authentication, TLS, keyring naming or SQLite schema changed.
 
-| Check | Result | Evidence |
-| --- | --- | --- |
-| A/B profiles and installations | PASS | Result records A installation `87a280de-8a3b-454c-9007-b43d805d0c29` and B installation `e39814fc-ffa2-4926-bbd5-fca28da03aef`; profiles are distinct absolute `.test.sqlite` files. |
-| Forged client `deviceId` | PASS | A's locally forged ID `a50ab94f-4e56-4e9a-948a-94d9ac991124` differs from the server's trusted A origin installation above. |
-| A Push post-commit retry | PASS | Diagnostic records one injected 503 after accepted commit and the same A event replayed as accepted at version 1. |
-| A/B Pull isolation | PASS | B's pre-purchaser Pull remains cursor `0` with zero A changes; after B switches to purchaser, its authorized Pull receives A's one remote entity and cursor advances `0→1`. |
-| B stale Push and conflict ownership | PASS | Raw B response is `status=conflict`, version 1, with actor/origin account `10000000-0000-4000-8000-000000000013` and B installation. The resulting B SQLite state contains one conflict for entity `7ded78e2-f21f-47ae-9c38-b8a6fbd1042d`, server version 1; A has zero conflicts. |
+| Check                               | Result | Evidence                                                                                                                                                                                                                                                                           |
+| ----------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A/B profiles and installations      | PASS   | Result records A installation `87a280de-8a3b-454c-9007-b43d805d0c29` and B installation `e39814fc-ffa2-4926-bbd5-fca28da03aef`; profiles are distinct absolute `.test.sqlite` files.                                                                                               |
+| Forged client `deviceId`            | PASS   | A's locally forged ID `a50ab94f-4e56-4e9a-948a-94d9ac991124` differs from the server's trusted A origin installation above.                                                                                                                                                        |
+| A Push post-commit retry            | PASS   | Diagnostic records one injected 503 after accepted commit and the same A event replayed as accepted at version 1.                                                                                                                                                                  |
+| A/B Pull isolation                  | PASS   | B's pre-purchaser Pull remains cursor `0` with zero A changes; after B switches to purchaser, its authorized Pull receives A's one remote entity and cursor advances `0→1`.                                                                                                        |
+| B stale Push and conflict ownership | PASS   | Raw B response is `status=conflict`, version 1, with actor/origin account `10000000-0000-4000-8000-000000000013` and B installation. The resulting B SQLite state contains one conflict for entity `7ded78e2-f21f-47ae-9c38-b8a6fbd1042d`, server version 1; A has zero conflicts. |
 
 Reproducible command:
 
@@ -703,14 +713,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-http
 
 Fresh run `native-smoke-20261017153900` exited 0 after building/running real debug `HonsenProcure.exe`, two newly seeded absolute SQLite test profiles, Windows Credential Manager, ephemeral test-profile TLS trust, Fastify HTTPS and disposable PostgreSQL. It is not a Playwright, Mock or standalone HTTP-client result.
 
-| Item | Result | Independent evidence |
-| --- | --- | --- |
-| Baseline / profile / installation separation | PASS | A installation `d1e9ba9f-5762-4072-be1d-fb940ecff600` and B installation `93872dc5-b614-4596-9603-177d0359bc6d` differ in the fresh result. |
-| Trusted source despite forged client device ID | PASS | Forged A client ID differs from the Fastify-recorded trusted A installation in the sanitized Push record. |
-| Post-commit fault and replay | PASS | One injected 503 carries an accepted server commit; retry of the exact event returns accepted version 1. |
-| B Push/Pull visibility isolation | PASS | B begins with no A project data; the authorized purchaser phase Pull advances only after B's own stale event is pending. |
-| Conflict projection account boundary | PASS | Raw B result is `conflict@1`, with B purchaser account/installation as origin. The test requires `accepted_count=0`, `pending_count=1`, Pull `applied_count=1`, nonzero cursor, B local conflict count 1/entity match, and A conflict count 0. |
-| Server/client errors | PASS | Client and server-error logs are zero bytes; Compose report contains normal create/healthy lifecycle output only. |
+| Item                                           | Result | Independent evidence                                                                                                                                                                                                                           |
+| ---------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Baseline / profile / installation separation   | PASS   | A installation `d1e9ba9f-5762-4072-be1d-fb940ecff600` and B installation `93872dc5-b614-4596-9603-177d0359bc6d` differ in the fresh result.                                                                                                    |
+| Trusted source despite forged client device ID | PASS   | Forged A client ID differs from the Fastify-recorded trusted A installation in the sanitized Push record.                                                                                                                                      |
+| Post-commit fault and replay                   | PASS   | One injected 503 carries an accepted server commit; retry of the exact event returns accepted version 1.                                                                                                                                       |
+| B Push/Pull visibility isolation               | PASS   | B begins with no A project data; the authorized purchaser phase Pull advances only after B's own stale event is pending.                                                                                                                       |
+| Conflict projection account boundary           | PASS   | Raw B result is `conflict@1`, with B purchaser account/installation as origin. The test requires `accepted_count=0`, `pending_count=1`, Pull `applied_count=1`, nonzero cursor, B local conflict count 1/entity match, and A conflict count 0. |
+| Server/client errors                           | PASS   | Client and server-error logs are zero bytes; Compose report contains normal create/healthy lifecycle output only.                                                                                                                              |
 
 Artifacts:
 
@@ -726,7 +736,7 @@ Artifacts:
 
 ## Native Pull transport interruption / restart recovery — 2026-10-17
 
-The native harness now has a deliberately narrow `pull-recovery` mode.  In the isolated Fastify HTTPS test host only, `HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE=1` changes the first real `GET /api/sync/pull` response to HTTP 503 after the normal route has run.  The actual debug `HonsenProcure.exe` still calls production `LocalAuthService::pull_sync_https`; neither the harness nor the host writes the profile SQLite database or simulates a Rust response.  The mode is compiled only with `debug_assertions`, requires the existing absolute test-profile database guard, and the release binary returns unavailable.
+The native harness now has a deliberately narrow `pull-recovery` mode. In the isolated Fastify HTTPS test host only, `HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE=1` changes the first real `GET /api/sync/pull` response to HTTP 503 after the normal route has run. The actual debug `HonsenProcure.exe` still calls production `LocalAuthService::pull_sync_https`; neither the harness nor the host writes the profile SQLite database or simulates a Rust response. The mode is compiled only with `debug_assertions`, requires the existing absolute test-profile database guard, and the release binary returns unavailable.
 
 Fresh run command:
 
@@ -736,12 +746,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-http
 
 Fresh real-native run `native-smoke-20261017154749` exited 0 using an ephemeral loopback PostgreSQL database, Fastify HTTPS with per-run test-profile certificate trust, Windows Credential Manager and the same absolute A SQLite profile for both EXE processes.
 
-| Pull phase | Result | Evidence |
-| --- | --- | --- |
-| First real Pull after accepted Push | PASS | Server JSONL records `GET /api/sync/pull`, requested cursor `0`, injected HTTP `503`; the first EXE result requires `SyncTransport`, zero projections and durable cursor `0→0`. |
-| Exit then restart same EXE/profile | PASS | The second real `HonsenProcure.exe` opens the same profile and credentials, executes production Pull at cursor `0`, projects exactly one entity and persists cursor `0→1`. |
-| Repeated real Pull | PASS | Server sees cursor `1`; the result requires zero new projections, cursor remains `1`, and the already-projected entity remains server version `1`. |
-| Existing A/B native safety regression | PASS | `native-smoke-20261017154824` retains different installations, trusted-origin protection for forged device ID, post-commit 503 idempotent replay, Push/Pull account isolation and B-only conflict projection. |
+| Pull phase                            | Result | Evidence                                                                                                                                                                                                      |
+| ------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First real Pull after accepted Push   | PASS   | Server JSONL records `GET /api/sync/pull`, requested cursor `0`, injected HTTP `503`; the first EXE result requires `SyncTransport`, zero projections and durable cursor `0→0`.                               |
+| Exit then restart same EXE/profile    | PASS   | The second real `HonsenProcure.exe` opens the same profile and credentials, executes production Pull at cursor `0`, projects exactly one entity and persists cursor `0→1`.                                    |
+| Repeated real Pull                    | PASS   | Server sees cursor `1`; the result requires zero new projections, cursor remains `1`, and the already-projected entity remains server version `1`.                                                            |
+| Existing A/B native safety regression | PASS   | `native-smoke-20261017154824` retains different installations, trusted-origin protection for forged device ID, post-commit 503 idempotent replay, Push/Pull account isolation and B-only conflict projection. |
 
 Artifacts (ignored, non-secret test evidence):
 
@@ -766,14 +776,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-http
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode ab-sync-security
 ```
 
-| Item | Result | Independent evidence |
-| --- | --- | --- |
-| Test-only fault boundary | PASS | `native-test-server.ts` returns one 503 only when `HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE=1`; it does not write profile SQLite. Release `cargo check --release --bin HonsenProcure` passes with the debug-only smoke entry unavailable. |
-| First real Pull and cursor preservation | PASS | `native-smoke-20261017155533` records `pullFailure=PASS`, zero projected changes and cursor `0→0`; sanitized HTTPS JSONL records `GET /api/sync/pull`, cursor `0`, status `503`, `injectedTransportFault=true`. |
-| Actual EXE exit / restart, not in-process reuse | PASS | The script synchronously invokes `HonsenProcure.exe` once, fails on any nonzero exit, then invokes it a second time only after the first result file is read. The second result uses the same profile/account/installation, starts at cursor `0`, projects exactly one remote entity and persists `0→1`. |
-| Real replay without duplicate/rollback | PASS | The third production Pull is recorded at cursor `1`; the recovered result requires zero new projections and cursor `1→1` while the entity remains server version 1. |
-| Existing A/B safety assertions | PASS | Fresh `native-smoke-20261017155623` records different A/B installations, forged A device ID different from trusted A origin, same-event post-commit 503 replay, B trusted conflict origin, exactly one B SQLite conflict and zero A conflicts. |
-| Focused release/server guards | PASS | `cargo fmt --check`, release `cargo check --bin HonsenProcure`, server lint and server typecheck all pass. The release check has only pre-existing debug-test unused-symbol warnings. |
+| Item                                            | Result | Independent evidence                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Test-only fault boundary                        | PASS   | `native-test-server.ts` returns one 503 only when `HONSEN_PROCURE_TEST_FAIL_FIRST_PULL_RESPONSE=1`; it does not write profile SQLite. Release `cargo check --release --bin HonsenProcure` passes with the debug-only smoke entry unavailable.                                                            |
+| First real Pull and cursor preservation         | PASS   | `native-smoke-20261017155533` records `pullFailure=PASS`, zero projected changes and cursor `0→0`; sanitized HTTPS JSONL records `GET /api/sync/pull`, cursor `0`, status `503`, `injectedTransportFault=true`.                                                                                          |
+| Actual EXE exit / restart, not in-process reuse | PASS   | The script synchronously invokes `HonsenProcure.exe` once, fails on any nonzero exit, then invokes it a second time only after the first result file is read. The second result uses the same profile/account/installation, starts at cursor `0`, projects exactly one remote entity and persists `0→1`. |
+| Real replay without duplicate/rollback          | PASS   | The third production Pull is recorded at cursor `1`; the recovered result requires zero new projections and cursor `1→1` while the entity remains server version 1.                                                                                                                                      |
+| Existing A/B safety assertions                  | PASS   | Fresh `native-smoke-20261017155623` records different A/B installations, forged A device ID different from trusted A origin, same-event post-commit 503 replay, B trusted conflict origin, exactly one B SQLite conflict and zero A conflicts.                                                           |
+| Focused release/server guards                   | PASS   | `cargo fmt --check`, release `cargo check --bin HonsenProcure`, server lint and server typecheck all pass. The release check has only pre-existing debug-test unused-symbol warnings.                                                                                                                    |
 
 Artifacts:
 
@@ -795,15 +805,15 @@ The native harness now has one additional debug/test-profile-only `offline-push-
 
 The fresh full run used a new disposable PostgreSQL/Fastify HTTPS instance and `native-smoke-20261017161207` profile. The runner verified that port 3443 was no longer listening before releasing the offline EXE. The same A profile and installation then crossed the restart boundary.
 
-| Step | Result | Evidence |
-| --- | --- | --- |
-| Online A baseline | PASS | Real HTTPS Pull applied 0 at cursor `0`; baseline account/installation are recorded in the offline result. |
-| Offline business mutation | PASS | Real Rust draft save leaves local purchase order status `draft` and exactly one pending `purchase_order` outbox event. |
-| Disconnected Push | PASS | With the loopback HTTPS host stopped, production Push returns `SyncTransport`; event remains unacknowledged/pending `1`, cursor stays `0`. |
-| Exit/restart retention | PASS | A new real EXE on the same profile retains the exact event, local draft and pending count. |
-| Reconnected Push/replay | PASS | Real Push accepts one event then reports pending `0`; a second Push sends no event. Sanitized server JSONL contains exactly one accepted POST for the event, trusted A account and original installation. |
-| Authoritative Pull | PASS | Real Pull projects one change, local status remains `draft`, remote version is 1 and cursor advances `0→1`. |
-| Existing A/B regression | PASS | Fresh `native-smoke-20261017161438` retains independent installations, forged-device trusted origin, post-commit replay, account isolation and B-only conflict checks. |
+| Step                      | Result | Evidence                                                                                                                                                                                                  |
+| ------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Online A baseline         | PASS   | Real HTTPS Pull applied 0 at cursor `0`; baseline account/installation are recorded in the offline result.                                                                                                |
+| Offline business mutation | PASS   | Real Rust draft save leaves local purchase order status `draft` and exactly one pending `purchase_order` outbox event.                                                                                    |
+| Disconnected Push         | PASS   | With the loopback HTTPS host stopped, production Push returns `SyncTransport`; event remains unacknowledged/pending `1`, cursor stays `0`.                                                                |
+| Exit/restart retention    | PASS   | A new real EXE on the same profile retains the exact event, local draft and pending count.                                                                                                                |
+| Reconnected Push/replay   | PASS   | Real Push accepts one event then reports pending `0`; a second Push sends no event. Sanitized server JSONL contains exactly one accepted POST for the event, trusted A account and original installation. |
+| Authoritative Pull        | PASS   | Real Pull projects one change, local status remains `draft`, remote version is 1 and cursor advances `0→1`.                                                                                               |
+| Existing A/B regression   | PASS   | Fresh `native-smoke-20261017161438` retains independent installations, forged-device trusted origin, post-commit replay, account isolation and B-only conflict checks.                                    |
 
 Reproducible command (the current interactive PowerShell command remains supported):
 
@@ -825,7 +835,7 @@ Focused quality checks: Rust `cargo fmt --check`, `cargo test --lib` (55/55), `c
 
 ## Independent Fixer recheck: NATIVE-004 — 2026-10-17
 
-Reviewed baseline: actual `HEAD` was `b16f3061ce28d43b2b82ff8cbdd4f6d59c1ae91e`; `git merge-base --is-ancestor b16f306 HEAD` returned 0.  Before the rerun, the only worktree entry was the preserved ignored `.honsen-native-qa/` evidence directory.  The Fixer made no business-code change.
+Reviewed baseline: actual `HEAD` was `b16f3061ce28d43b2b82ff8cbdd4f6d59c1ae91e`; `git merge-base --is-ancestor b16f306 HEAD` returned 0. Before the rerun, the only worktree entry was the preserved ignored `.honsen-native-qa/` evidence directory. The Fixer made no business-code change.
 
 The Fixer independently executed the real native scenario using a fresh disposable PostgreSQL/Fastify HTTPS instance, a newly generated test-profile certificate, a new absolute SQLite profile and Windows Credential Manager:
 
@@ -833,16 +843,16 @@ The Fixer independently executed the real native scenario using a fresh disposab
 pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smoke.ps1 -Mode offline-push-recovery
 ```
 
-Fresh run `native-smoke-20261017161819` completed successfully.  It builds and starts the debug `HonsenProcure.exe` twice; it is neither a standalone HTTP client nor a Mock/Playwright result.  The actual loopback HTTPS process is stopped before the first EXE creates its draft, then a second EXE opens the same profile only after the HTTPS service is restarted.
+Fresh run `native-smoke-20261017161819` completed successfully. It builds and starts the debug `HonsenProcure.exe` twice; it is neither a standalone HTTP client nor a Mock/Playwright result. The actual loopback HTTPS process is stopped before the first EXE creates its draft, then a second EXE opens the same profile only after the HTTPS service is restarted.
 
-| Boundary | Result | Fresh evidence |
-| --- | --- | --- |
-| Profile/session continuity | PASS | Offline and recovered results have the same A account, installation, profile path, entity and event UUIDs. |
-| Offline SQLite mutation and failed Push | PASS | The first real EXE records local `draft`, outbox pending `1→1`, cursor `0→0`, and Rust `SyncTransport` after the script confirmed port 3443 was unavailable. The debug-only read-only rusqlite assertions check the actual local order/outbox; no direct SQLite write exists in the harness. |
-| Process exit/restart retention | PASS | The recovery phase is a new EXE process and requires the same pending event/local draft before any Push. |
-| Recovered Push and idempotency | PASS | The recovery EXE acknowledges the retained event (`1→0`); its second production Push sends no event. Sanitized server JSONL contains exactly one HTTP 200 Push for that event. |
-| Trusted server event / authority convergence | PASS | The sole server event records A's matching account and installation, `accepted` version 1; real Pull projects one change, keeps local `draft`, and persists cursor `0→1`. |
-| Test-only and release boundary | PASS | `HONSEN_PROCURE_TEST_FAIL_FIRST_{PUSH,PULL}_RESPONSE` is read only by `apps/server/src/scripts/native-test-server.ts`; this mode sets both to `0` and obtains its offline failure by stopping the isolated host. The native test entry and state accessors are `debug_assertions`-only; release `cargo check --release --bin HonsenProcure` passes. |
+| Boundary                                     | Result | Fresh evidence                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Profile/session continuity                   | PASS   | Offline and recovered results have the same A account, installation, profile path, entity and event UUIDs.                                                                                                                                                                                                                                          |
+| Offline SQLite mutation and failed Push      | PASS   | The first real EXE records local `draft`, outbox pending `1→1`, cursor `0→0`, and Rust `SyncTransport` after the script confirmed port 3443 was unavailable. The debug-only read-only rusqlite assertions check the actual local order/outbox; no direct SQLite write exists in the harness.                                                        |
+| Process exit/restart retention               | PASS   | The recovery phase is a new EXE process and requires the same pending event/local draft before any Push.                                                                                                                                                                                                                                            |
+| Recovered Push and idempotency               | PASS   | The recovery EXE acknowledges the retained event (`1→0`); its second production Push sends no event. Sanitized server JSONL contains exactly one HTTP 200 Push for that event.                                                                                                                                                                      |
+| Trusted server event / authority convergence | PASS   | The sole server event records A's matching account and installation, `accepted` version 1; real Pull projects one change, keeps local `draft`, and persists cursor `0→1`.                                                                                                                                                                           |
+| Test-only and release boundary               | PASS   | `HONSEN_PROCURE_TEST_FAIL_FIRST_{PUSH,PULL}_RESPONSE` is read only by `apps/server/src/scripts/native-test-server.ts`; this mode sets both to `0` and obtains its offline failure by stopping the isolated host. The native test entry and state accessors are `debug_assertions`-only; release `cargo check --release --bin HonsenProcure` passes. |
 
 Artifacts:
 
@@ -859,16 +869,16 @@ Independent focused verification: `cargo test --lib` PASS (55/55), `cargo check 
 
 ### T10 reliability matrix
 
-| Failure boundary | Native evidence | Status |
-| --- | --- | --- |
-| Request cannot reach service before Push | NATIVE-004: actual loopback HTTPS host stopped; retained draft/outbox then restart recovery. | COVERED |
-| Service commits but Push response is lost | NATIVE-002: test-host post-commit 503 and same-event replay. | COVERED |
-| One Push batch has accepted and conflict results | NATIVE-005 independently closed. | COVERED |
-| First Pull transport failure / restart | NATIVE-003: 503, cursor unchanged, process restart, one projection. | COVERED |
-| Pull after a full 500-change page then transport failure | NATIVE-006 independently closed. | COVERED |
-| Local cursor persistence write fails | Atomic SQLite unit coverage exists; no sanctioned real-disk fault injection in the native harness. | NOT COVERED |
-| EXE terminates during an in-flight request | Not covered; existing tests terminate only after a completed failed/successful operation boundary. | NOT COVERED |
-| Duplicate-event idempotency | NATIVE-002/NATIVE-004 cover accepted replay; NATIVE-005 covers retained conflict replay. | COVERED for these bounded forms |
+| Failure boundary                                         | Native evidence                                                                                    | Status                          |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------- |
+| Request cannot reach service before Push                 | NATIVE-004: actual loopback HTTPS host stopped; retained draft/outbox then restart recovery.       | COVERED                         |
+| Service commits but Push response is lost                | NATIVE-002: test-host post-commit 503 and same-event replay.                                       | COVERED                         |
+| One Push batch has accepted and conflict results         | NATIVE-005 independently closed.                                                                   | COVERED                         |
+| First Pull transport failure / restart                   | NATIVE-003: 503, cursor unchanged, process restart, one projection.                                | COVERED                         |
+| Pull after a full 500-change page then transport failure | NATIVE-006 independently closed.                                                                   | COVERED                         |
+| Local cursor persistence write fails                     | Atomic SQLite unit coverage exists; no sanctioned real-disk fault injection in the native harness. | NOT COVERED                     |
+| EXE terminates during an in-flight request               | Not covered; existing tests terminate only after a completed failed/successful operation boundary. | NOT COVERED                     |
+| Duplicate-event idempotency                              | NATIVE-002/NATIVE-004 cover accepted replay; NATIVE-005 covers retained conflict replay.           | COVERED for these bounded forms |
 
 The selected smallest high-risk gap is partial Push acknowledgement: the protocol permits a batch to contain safe accepted and retained conflict results, and the client must never acknowledge every local event merely because the HTTP request returned 200.
 
@@ -882,13 +892,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smok
 
 Fresh run `native-smoke-20261017162543` builds/runs real debug `HonsenProcure.exe`, isolated PostgreSQL, Fastify HTTPS, two newly seeded absolute SQLite profiles and Windows Credential Manager. A first A event establishes server version 1. Purchaser B then creates a valid new draft followed by a stale copy of A's entity, and sends both with one real production Push request.
 
-| Assertion | Result | Fresh evidence |
-| --- | --- | --- |
-| Partial server result is genuine | PASS | The one B Push request has two event IDs; Fastify's actual SyncService response is `accepted@1` for B's new order and `conflict@1` for B's stale event. |
-| Client acknowledgement is selective | PASS | Real Rust result is accepted `1`, pending `1`; debug-only read-only checks require the accepted outbox record acknowledged and the conflict record unacknowledged. |
-| Pull preserves conflict evidence | PASS | B's real Pull applies two remote changes, cursor `0→2`, projects the accepted order at version 1 and creates exactly one local conflict for the stale event. |
-| Retained conflict replay | PASS | A repeated production Push sends only the stale event and returns accepted `0`, pending `1`; it is not silently discarded. |
-| Test/release boundary and cleanup | PASS | No fault-response variable is enabled; the test uses service validation, not a response Mock. `cargo check --release --bin HonsenProcure` passes and release smoke entry returns unavailable. The disposable Compose project and loopback listeners were absent after completion. |
+| Assertion                           | Result | Fresh evidence                                                                                                                                                                                                                                                                    |
+| ----------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Partial server result is genuine    | PASS   | The one B Push request has two event IDs; Fastify's actual SyncService response is `accepted@1` for B's new order and `conflict@1` for B's stale event.                                                                                                                           |
+| Client acknowledgement is selective | PASS   | Real Rust result is accepted `1`, pending `1`; debug-only read-only checks require the accepted outbox record acknowledged and the conflict record unacknowledged.                                                                                                                |
+| Pull preserves conflict evidence    | PASS   | B's real Pull applies two remote changes, cursor `0→2`, projects the accepted order at version 1 and creates exactly one local conflict for the stale event.                                                                                                                      |
+| Retained conflict replay            | PASS   | A repeated production Push sends only the stale event and returns accepted `0`, pending `1`; it is not silently discarded.                                                                                                                                                        |
+| Test/release boundary and cleanup   | PASS   | No fault-response variable is enabled; the test uses service validation, not a response Mock. `cargo check --release --bin HonsenProcure` passes and release smoke entry returns unavailable. The disposable Compose project and loopback listeners were absent after completion. |
 
 Artifacts:
 
@@ -914,15 +924,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smok
 
 Fresh run `native-smoke-20261017162947` completed without using the Builder's prior result. The native result contains distinct profiles and B installation `5b3239a9-c8cd-44e2-bc2f-5b7c651f1fff`; server/client error logs are zero bytes and no loopback listener or Compose project remained after cleanup.
 
-| Boundary | Result | Independent evidence |
-| --- | --- | --- |
-| A establishes authoritative remote record | PASS | First A Push event `08ed1564-8f42-47f3-a71f-e6ae29770a74` is accepted at server version 1. |
-| One real B batch contains two different events | PASS | The single B POST contains `00699ad8-4fc2-46c5-ae04-637cb4a99a92` and `8500243f-ed29-415b-b551-22a434a59778`. |
-| Actual mixed server response | PASS | Fastify JSONL records HTTP 200 with the first event `accepted@1` and the second `conflict@1`; no fault-response variable was enabled. |
-| Selective outbox acknowledgement | PASS | Real Rust result is accepted `1`, pending `1`; debug-only read-only rusqlite checks require accepted acknowledged and conflict unacknowledged. |
-| Authoritative Pull and cursor | PASS | Real Pull applies 2 changes and persists B cursor `0→2`; it retains exactly one local conflict. |
-| Conflict-only replay | PASS | The final POST has only `8500243f-ed29-415b-b551-22a434a59778`, returns conflict, and reports accepted `0`, pending `1`; the accepted event is not resent. |
-| Release/test boundary | PASS | Release `cargo check --release --bin HonsenProcure` passes; test entry is unavailable outside `debug_assertions`. |
+| Boundary                                       | Result | Independent evidence                                                                                                                                       |
+| ---------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A establishes authoritative remote record      | PASS   | First A Push event `08ed1564-8f42-47f3-a71f-e6ae29770a74` is accepted at server version 1.                                                                 |
+| One real B batch contains two different events | PASS   | The single B POST contains `00699ad8-4fc2-46c5-ae04-637cb4a99a92` and `8500243f-ed29-415b-b551-22a434a59778`.                                              |
+| Actual mixed server response                   | PASS   | Fastify JSONL records HTTP 200 with the first event `accepted@1` and the second `conflict@1`; no fault-response variable was enabled.                      |
+| Selective outbox acknowledgement               | PASS   | Real Rust result is accepted `1`, pending `1`; debug-only read-only rusqlite checks require accepted acknowledged and conflict unacknowledged.             |
+| Authoritative Pull and cursor                  | PASS   | Real Pull applies 2 changes and persists B cursor `0→2`; it retains exactly one local conflict.                                                            |
+| Conflict-only replay                           | PASS   | The final POST has only `8500243f-ed29-415b-b551-22a434a59778`, returns conflict, and reports accepted `0`, pending `1`; the accepted event is not resent. |
+| Release/test boundary                          | PASS   | Release `cargo check --release --bin HonsenProcure` passes; test entry is unavailable outside `debug_assertions`.                                          |
 
 Artifacts:
 
@@ -949,14 +959,14 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smok
 
 `native-smoke-20261018010425` used a new disposable PostgreSQL/Fastify HTTPS host, generated test certificate, two absolute test SQLite profiles, and Windows Credential Manager. A real B EXE created 501 purchase-order drafts and production Push accepted all 501 with no retained outbox row. A separate real A EXE used production Pull: the first HTTP page at cursor `0` returned 500 changes/next cursor `500` and committed 500 local remote entities. The test host then returned its single 503 only for A's real second request at cursor `500`; the production Pull returned `SyncTransport`, while the already committed boundary remained cursor `500`, projection count 500, and A outbox 0. That EXE exited. A new A EXE using exactly the same profile/installation recovered over HTTPS, projected the final one change and persisted cursor `500→501`; a final Pull returned 0 changes and left both cursor and local entity count at 501.
 
-| Boundary | Result | Evidence |
-| --- | --- | --- |
-| B production creation/Push of 501 events | PASS | B account `...0013`, distinct installation/profile; accepted `501`, pending outbox `0`. |
-| A page 1 production Pull | PASS | HTTPS GET `cursor=0`: 200, 500 changes, next cursor `500`; local cursor/projection `0→500`. |
-| A page 2 deterministic transport fault | PASS | HTTPS GET `cursor=500`: one test-host 503; Rust `SyncTransport`; local cursor/projection remain `500`/500. |
-| Same-profile A EXE restart/recovery | PASS | HTTPS GET `cursor=500`: 200, one change, next cursor `501`; local cursor `500→501`, 501 entities. |
-| Replay | PASS | HTTPS GET `cursor=501`: 200, zero changes, cursor/entity count remain 501. |
-| Outbox and partial commit safety | PASS | A outbox is 0 before/after interruption/recovery; page 1 is the established production transaction boundary, not a speculative rollback target. |
+| Boundary                                 | Result | Evidence                                                                                                                                        |
+| ---------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| B production creation/Push of 501 events | PASS   | B account `...0013`, distinct installation/profile; accepted `501`, pending outbox `0`.                                                         |
+| A page 1 production Pull                 | PASS   | HTTPS GET `cursor=0`: 200, 500 changes, next cursor `500`; local cursor/projection `0→500`.                                                     |
+| A page 2 deterministic transport fault   | PASS   | HTTPS GET `cursor=500`: one test-host 503; Rust `SyncTransport`; local cursor/projection remain `500`/500.                                      |
+| Same-profile A EXE restart/recovery      | PASS   | HTTPS GET `cursor=500`: 200, one change, next cursor `501`; local cursor `500→501`, 501 entities.                                               |
+| Replay                                   | PASS   | HTTPS GET `cursor=501`: 200, zero changes, cursor/entity count remain 501.                                                                      |
+| Outbox and partial commit safety         | PASS   | A outbox is 0 before/after interruption/recovery; page 1 is the established production transaction boundary, not a speculative rollback target. |
 
 Artifacts:
 
@@ -983,14 +993,14 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smok
 
 Fresh run `native-smoke-20261018112034` started the real debug `HonsenProcure.exe` three times with a new disposable PostgreSQL/Fastify HTTPS endpoint, generated test certificate, new A/B absolute SQLite profiles, and Windows Credential Manager. It is not a standalone HTTP, Mock, Playwright, or prior-result replay.
 
-| Check | Result | Fresh evidence |
-| --- | --- | --- |
-| B production Push | PASS | B account `...0013` accepted 501 real outbox events, pending 0; JSONL has six accepted Push batches totaling 501 events. |
-| A page 1 | PASS | HTTPS GET `cursor=0` returned 200 / 500 changes / next `500`; A durable cursor and projections are both 500. |
-| A page 2 fault | PASS | Actual HTTPS GET `cursor=500` received the only injected 503; Rust returned `SyncTransport`, while A remains cursor 500, 500 projected, outbox 0. |
-| A restart recovery | PASS | New A EXE retains the same profile and installation, then GET `cursor=500` projects 1 / advances to 501. |
-| Replay | PASS | GET `cursor=501` returns zero changes; cursor and entity count both remain 501. |
-| Production safety guards | PASS | Fault env is consumed only by `native-test-server.ts`; test entry/accessors are `debug_assertions`; release build uses the fail-closed smoke implementation. Cursor/account/projection assertions remain strict. |
+| Check                    | Result | Fresh evidence                                                                                                                                                                                                   |
+| ------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B production Push        | PASS   | B account `...0013` accepted 501 real outbox events, pending 0; JSONL has six accepted Push batches totaling 501 events.                                                                                         |
+| A page 1                 | PASS   | HTTPS GET `cursor=0` returned 200 / 500 changes / next `500`; A durable cursor and projections are both 500.                                                                                                     |
+| A page 2 fault           | PASS   | Actual HTTPS GET `cursor=500` received the only injected 503; Rust returned `SyncTransport`, while A remains cursor 500, 500 projected, outbox 0.                                                                |
+| A restart recovery       | PASS   | New A EXE retains the same profile and installation, then GET `cursor=500` projects 1 / advances to 501.                                                                                                         |
+| Replay                   | PASS   | GET `cursor=501` returns zero changes; cursor and entity count both remain 501.                                                                                                                                  |
+| Production safety guards | PASS   | Fault env is consumed only by `native-test-server.ts`; test entry/accessors are `debug_assertions`; release build uses the fail-closed smoke implementation. Cursor/account/projection assertions remain strict. |
 
 Fresh quality checks: Rust `cargo fmt --check`, `cargo test --lib` (55/55), `cargo check --release --bin HonsenProcure`, server lint/typecheck and `git diff --check` PASS. Release check reports only the existing debug-test unused-symbol warnings. The scoped Compose project was removed; ports 3443/54329 had no listener afterward.
 
@@ -1017,15 +1027,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smok
 
 Run `native-smoke-20261018112716` used a new disposable PostgreSQL/Fastify HTTPS endpoint, generated test certificate, Windows Credential Manager, and distinct A/B absolute test SQLite profiles. A real B `HonsenProcure.exe` created the source requisition and production Push accepted exactly one event. A first real A EXE received the actual HTTPS Pull page `cursor=0`, then the cursor-boundary injection fired; Rust returned `AuthError::Database`, while read-only native checks report cursor `0→0`, remote projection `0→0`, and pending outbox `0`. That EXE exited. A second real A EXE with the same profile and installation performed production Pull, projected one event and persisted cursor `0→1`; its replay Pull projected zero and left cursor/entity count at `1`.
 
-| Boundary | Result | Evidence |
-| --- | --- | --- |
-| B production source event | PASS | One accepted production Push; B account/profile/installation differ from A. |
-| A cursor-write failure | PASS | Real HTTPS `GET cursor=0` completed; debug hook confirms it triggered; Rust result is `Database`. |
-| Atomicity | PASS | Before/after failure: A cursor 0, projected entities 0, pending outbox 0. Cursor cannot be ahead of durable projection. |
-| Same-profile EXE restart | PASS | New A EXE pulls one event/cursor `0→1`; no SQL file mutation or test HTTP client is used. |
-| Replay stability | PASS | HTTPS `GET cursor=1` returns zero changes; cursor and entity count stay 1. |
-| Release/test boundary | PASS | `cargo check --release` compiles no injection state and resolves the native test entry to fail-closed. |
-| Existing A/B security regression | PASS | Fresh `native-smoke-20261018112931` retains separate installations, trusted forged-device origin, account/conflict isolation and Push replay idempotency. |
+| Boundary                         | Result | Evidence                                                                                                                                                  |
+| -------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B production source event        | PASS   | One accepted production Push; B account/profile/installation differ from A.                                                                               |
+| A cursor-write failure           | PASS   | Real HTTPS `GET cursor=0` completed; debug hook confirms it triggered; Rust result is `Database`.                                                         |
+| Atomicity                        | PASS   | Before/after failure: A cursor 0, projected entities 0, pending outbox 0. Cursor cannot be ahead of durable projection.                                   |
+| Same-profile EXE restart         | PASS   | New A EXE pulls one event/cursor `0→1`; no SQL file mutation or test HTTP client is used.                                                                 |
+| Replay stability                 | PASS   | HTTPS `GET cursor=1` returns zero changes; cursor and entity count stay 1.                                                                                |
+| Release/test boundary            | PASS   | `cargo check --release` compiles no injection state and resolves the native test entry to fail-closed.                                                    |
+| Existing A/B security regression | PASS   | Fresh `native-smoke-20261018112931` retains separate installations, trusted forged-device origin, account/conflict isolation and Push replay idempotency. |
 
 Artifacts:
 
@@ -1052,15 +1062,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tests/native/run-native-https-smok
 
 `native-smoke-20261018114610` created a fresh disposable PostgreSQL/Fastify HTTPS endpoint, generated local certificate, two new absolute SQLite profiles, and used Windows Credential Manager plus three separate real debug `HonsenProcure.exe` processes. B's production draft/Push made one accepted event (trusted B installation). A's first real `GET /api/sync/pull?cursor=0` completed with one change, then the debug-only transaction-internal NOT NULL write fired immediately before the production cursor upsert. The native fault result records `faultTriggered=true`, `AuthError::Database`, cursor `0→0`, projection `0→0`, outbox `0`. The original A EXE exited; a separate A EXE using exactly that A profile/installation pulled the event once/cursor `0→1`, then replayed zero changes/cursor `1→1`.
 
-| Check | Result | Fresh evidence |
-| --- | --- | --- |
-| B real Push creates source | PASS | One server HTTP 200 `accepted@1`, B account `...0013`, B installation `b580e5c5-…`. |
-| A real Pull + Cursor-boundary fault | PASS | Two actual HTTPS GETs at cursor 0; fault result records `faultTriggered=true` and complete transaction rollback. |
-| Atomic Cursor/projection/outbox state | PASS | At failure, Cursor 0, remote entities 0, A outbox 0; no Cursor advance or partial projection. |
-| Exit / same-profile restart recovery | PASS | New A EXE retains installation `6a622c7d-…`, projects exactly 1 and advances 0→1. |
-| Replay | PASS | GET cursor 1 returns zero; Cursor and entity count stay 1. |
-| A/B security regression | PASS | Fresh `native-smoke-20261018114720`: separate installations, forged-device trusted origin, account/conflict isolation and Push replay idempotency all PASS. |
-| Production-release guard | PASS | `cargo check --release --bin HonsenProcure` compiles the non-debug fail-closed smoke function; injection fields/methods are `cfg(debug_assertions)`. |
+| Check                                 | Result | Fresh evidence                                                                                                                                              |
+| ------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B real Push creates source            | PASS   | One server HTTP 200 `accepted@1`, B account `...0013`, B installation `b580e5c5-…`.                                                                         |
+| A real Pull + Cursor-boundary fault   | PASS   | Two actual HTTPS GETs at cursor 0; fault result records `faultTriggered=true` and complete transaction rollback.                                            |
+| Atomic Cursor/projection/outbox state | PASS   | At failure, Cursor 0, remote entities 0, A outbox 0; no Cursor advance or partial projection.                                                               |
+| Exit / same-profile restart recovery  | PASS   | New A EXE retains installation `6a622c7d-…`, projects exactly 1 and advances 0→1.                                                                           |
+| Replay                                | PASS   | GET cursor 1 returns zero; Cursor and entity count stay 1.                                                                                                  |
+| A/B security regression               | PASS   | Fresh `native-smoke-20261018114720`: separate installations, forged-device trusted origin, account/conflict isolation and Push replay idempotency all PASS. |
+| Production-release guard              | PASS   | `cargo check --release --bin HonsenProcure` compiles the non-debug fail-closed smoke function; injection fields/methods are `cfg(debug_assertions)`.        |
 
 Artifacts:
 
@@ -1102,15 +1112,15 @@ Root cause: desktop declared `keyring = "3.6.3"` with only its empty default fea
 
 The minimal repair is `keyring = { version = "3.6.3", features = ["windows-native"] }`. It retains the existing `account.service` target, Generic credential type, Enterprise persistence, username, production service names and token encoding; it only enables keyring's documented Windows Credential Manager backend. No Windows policy, TLS behavior, database, or authentication rule changed.
 
-| Scenario | Result | Evidence |
-| --- | --- | --- |
-| Direct Win32 Generic, Enterprise persistence | PASS | Same-process and child-process `CredReadW` read the same SHA-256 digest after `CredWriteW`, Type=1, Persist=3, Win32 status=0. |
-| Direct Win32 keyring-shaped credential | PASS | Exact UTF-16 blob, `account.service` target, UUID username and `keyring v3.6.3` comment pass same/cross-process read. |
-| Direct Win32 LocalMachine control | PASS | Persist=2 same/cross-process control also passes; no policy was changed or adopted by production code. |
-| Corrected keyring `vault-probe` | PASS | New Entry reads both independent profile targets after write. |
-| Real `HonsenProcure.exe` immediate readback | PASS | `vault-readback` direct/reopened/wrapped write/read all pass. |
-| Real EXE exit/restart readback | PASS | One EXE writes a runtime-generated synthetic token; a second EXE reads it from the same absolute test profile; a third EXE deletes only that controlled target. |
-| A/B profile isolation harness | BLOCKED / new failure | The existing real HTTPS harness now passes the former credential barrier but fails later at `account B conflict query did not contain only its own stale event`. No sync assertion is accepted from that run. |
+| Scenario                                     | Result                | Evidence                                                                                                                                                                                                      |
+| -------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Direct Win32 Generic, Enterprise persistence | PASS                  | Same-process and child-process `CredReadW` read the same SHA-256 digest after `CredWriteW`, Type=1, Persist=3, Win32 status=0.                                                                                |
+| Direct Win32 keyring-shaped credential       | PASS                  | Exact UTF-16 blob, `account.service` target, UUID username and `keyring v3.6.3` comment pass same/cross-process read.                                                                                         |
+| Direct Win32 LocalMachine control            | PASS                  | Persist=2 same/cross-process control also passes; no policy was changed or adopted by production code.                                                                                                        |
+| Corrected keyring `vault-probe`              | PASS                  | New Entry reads both independent profile targets after write.                                                                                                                                                 |
+| Real `HonsenProcure.exe` immediate readback  | PASS                  | `vault-readback` direct/reopened/wrapped write/read all pass.                                                                                                                                                 |
+| Real EXE exit/restart readback               | PASS                  | One EXE writes a runtime-generated synthetic token; a second EXE reads it from the same absolute test profile; a third EXE deletes only that controlled target.                                               |
+| A/B profile isolation harness                | BLOCKED / new failure | The existing real HTTPS harness now passes the former credential barrier but fails later at `account B conflict query did not contain only its own stale event`. No sync assertion is accepted from that run. |
 
 Commands and evidence:
 
