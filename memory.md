@@ -2,6 +2,11 @@
 
 **Last updated:** 2026-10-20
 
+## T10-D/G4 independent QA handoff — QA_BLOCKED (2026-10-20)
+
+- QA branch `codex/qa-t10d-g4-b190a82` is an isolated worktree at exact candidate `b190a82cf528fcd654b268abba3de6f139b42dee`, direct parent `c3eca9b57e4a9b6d4438cb548d3fdf4b01bcbc45`; no production source changed. `native-smoke-20261020120000` reached real disposable WSL2 PostgreSQL, Fastify HTTPS and two test-profile `HonsenProcure.exe` instances. Server diagnostics and read-only SQLite show a real `VERSION_CONFLICT` with both payloads, operation/version and a superseded rejected Outbox; B cursor stayed `0`.
+- The existing `ab-sync-security` Harness then failed its stale expectation that a structured conflict remains pending. G3 correctly produces zero pending work after it persists/supersedes the conflict event, so this is a Harness compatibility gap, not a candidate data-loss finding. No resolver mode exists; QA-02 through QA-06 are NOT RUN. **BLOCKER:** add a test-only WebView2/Tauri IPC T10-D driver for administrator choices/restart/Pull proof and update the G3-stale pending assertion; preserve production source. Candidate remains READY_FOR_RECHECK; no closure/status change for G1, T10, T10-SEC-001, P1, Formal, FIX2, G2, G3 or NATIVE-008.
+
 ## T10-D / G4 production draft-order conflict resolver — READY_FOR_RECHECK (2026-10-20)
 
 - **Scope and implementation:** on isolated branch `codex/t10d-g4-order-conflicts` from `c3eca9b57e4a9b6d4438cb548d3fdf4b01bcbc45`, the real administrator/super-administrator shell now mounts `SyncConflictPanel`; it displays local/server payloads, server version and operation, requires a reason, and invokes a new trusted `resolve_purchase_order_conflict` command. The generic resolver still excludes `purchase_order`. The dedicated command accepts only an owned, unresolved draft `upsert` conflict whose local and server workflow states are both `draft`: `use_server` reuses the existing Pull projector; `replace_draft` supersedes the rejected Outbox event, persists the selected server version, creates one new Outbox event against it, and appends the reason/payload audit. The original conflict and rejected Outbox remain. Repeated resolution finds no unresolved conflict and creates no duplicate event. Cancelled/formal/non-draft orders are rejected before any mutation. No migration or protocol/toolbox-contract change.

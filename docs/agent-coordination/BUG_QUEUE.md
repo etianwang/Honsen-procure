@@ -1,5 +1,9 @@
 # Fixer Bug Queue
 
+## T10-D/G4 QA harness compatibility — 2026-10-20 — BLOCKED (test evidence only)
+
+`native-smoke-20261020120000` ran the candidate's real PostgreSQL/HTTPS/two-profile EXE path. The old `ab-sync-security` assertion expects a structured purchase-order conflict to remain pending after Push. Candidate `b190a82` correctly applies the independently accepted G3 rule instead: it preserves and supersedes the rejected Outbox, records `VERSION_CONFLICT` with server payload/operation, and reports pending zero. The resulting Harness exit is not evidence of lost data. No T10-D resolver scenario exists in the Harness, so administrator resolution and two-device convergence remain unverified. Add only a QA-side WebView2/Tauri IPC driver and update this stale test assertion; do not modify production conflict semantics to satisfy the old mode.
+
 ## T10-B/D G3 — CLOSED (Independent QA, 2026-10-20)
 
 - Tested `35b9f60c0b9c5df0d4283649455f1a7d5d991631` in separate `codex/qa-t10-bd-independent-35b9f60` worktree. Rust permanent/retry/conflict, unstructured conflict, FIX2 and cursor regressions PASS; server structured-error 16/16 and disposable PostgreSQL store 39/39 PASS. Direct database replay proof retains server payload/operation and does not overwrite the entity.
