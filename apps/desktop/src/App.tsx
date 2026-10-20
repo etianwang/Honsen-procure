@@ -399,11 +399,11 @@ function App() {
                   ? '采购申请单'
                   : page === 'execution'
                     ? '采购执行'
-                      : page === 'conflicts'
-                        ? '同步冲突'
-                    : page === 'authorization'
-                      ? '在线授权管理'
-                      : '基础资料管理'
+                    : page === 'conflicts'
+                      ? '同步冲突'
+                      : page === 'authorization'
+                        ? '在线授权管理'
+                        : '基础资料管理'
           }
           role={session ? role : 'purchaser'}
           onNavigate={setPage}

@@ -25,14 +25,14 @@ G2 历史 CLOSED 与“当前分支/main 尚未集成 G2”不矛盾。前者是
 
 实现 commit 为 **`6e0a2a61fdf0967d75dc5edec3eed5e350056ef5`**：
 
-| 要求 | 实现位置 | 结论 |
-| --- | --- | --- |
-| 6 个正式头字段 | `apps/desktop/src-tauri/src/lib.rs:684-725` (`RemotePurchaseOrderPayload`)；`7730-7933` (projector) | 已实现：`document_type`、`formal_document_no`、`formal_installation_id`、`formal_sequence`、`formally_issued_at`、`formal_snapshot_json` |
-| 10 个 owner 行冻结字段 | `apps/desktop/src-tauri/src/lib.rs:747-894`（remote line validation）与 `7916-7917`（SQLite update） | 已实现：quote source、catalog price id、manual reason/actor/time、source price、locked rate、converted reference、markup JSON、final price |
-| approved / confirmed → issued | `apps/desktop/src-tauri/src/lib.rs:759-894`、`7730-7933` | 已实现并验证 editable order 向 issued 的一次性冻结推进；已 issued 重放不会改写冻结行 |
-| 空库 / 已有订单 Pull | `apps/desktop/src-tauri/src/g2_pull_tests.rs:168-231,358-415` | 已覆盖 cold file、existing approved/confirmed、first issue replacement、replay/restart |
-| 错误页 cursor 原子性 | `apps/desktop/src-tauri/src/g2_pull_tests.rs:272-332,481-534`；page transaction 位于 `lib.rs:5393-...` | 无效 DTO、SQLite collision/cursor fault、divergent issued payload 都回滚且不前进 cursor |
-| 目录/报价/汇率不改正式快照 | `apps/desktop/src-tauri/src/g2_pull_tests.rs:67,142,236-268` | 用失效的 current CNY quote `999999` 验证 staged formal snapshot；QA native proof 另将当前 quote 改为 `9999`，原 source/rate/converted/markup/final 保持不变 |
+| 要求                          | 实现位置                                                                                               | 结论                                                                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 6 个正式头字段                | `apps/desktop/src-tauri/src/lib.rs:684-725` (`RemotePurchaseOrderPayload`)；`7730-7933` (projector)    | 已实现：`document_type`、`formal_document_no`、`formal_installation_id`、`formal_sequence`、`formally_issued_at`、`formal_snapshot_json`                    |
+| 10 个 owner 行冻结字段        | `apps/desktop/src-tauri/src/lib.rs:747-894`（remote line validation）与 `7916-7917`（SQLite update）   | 已实现：quote source、catalog price id、manual reason/actor/time、source price、locked rate、converted reference、markup JSON、final price                  |
+| approved / confirmed → issued | `apps/desktop/src-tauri/src/lib.rs:759-894`、`7730-7933`                                               | 已实现并验证 editable order 向 issued 的一次性冻结推进；已 issued 重放不会改写冻结行                                                                        |
+| 空库 / 已有订单 Pull          | `apps/desktop/src-tauri/src/g2_pull_tests.rs:168-231,358-415`                                          | 已覆盖 cold file、existing approved/confirmed、first issue replacement、replay/restart                                                                      |
+| 错误页 cursor 原子性          | `apps/desktop/src-tauri/src/g2_pull_tests.rs:272-332,481-534`；page transaction 位于 `lib.rs:5393-...` | 无效 DTO、SQLite collision/cursor fault、divergent issued payload 都回滚且不前进 cursor                                                                     |
+| 目录/报价/汇率不改正式快照    | `apps/desktop/src-tauri/src/g2_pull_tests.rs:67,142,236-268`                                           | 用失效的 current CNY quote `999999` 验证 staged formal snapshot；QA native proof 另将当前 quote 改为 `9999`，原 source/rate/converted/markup/final 保持不变 |
 
 G2 测试文件共有 12 个有名场景，涵盖正式字段完整性、replay/restart、approved/confirmed 进展、staging、无效 DTO、post-approval price timestamp、首签发、line order、legacy backfill、跨 profile issue、SQLite collision/cursor rollback、divergent snapshot 与 dirty local conflict。
 

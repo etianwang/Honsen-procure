@@ -23,7 +23,8 @@ export function SyncConflictPanel({ api }: { api: SyncApi }) {
       if (item.entityType === 'purchase_order') {
         await api.resolvePurchaseOrderConflict({
           conflictId: item.id,
-          resolution: resolution === 'keep_local' ? 'replace_draft' : 'use_server',
+          resolution:
+            resolution === 'keep_local' ? 'replace_draft' : 'use_server',
           reason,
         })
       } else {
@@ -80,7 +81,9 @@ export function SyncConflictPanel({ api }: { api: SyncApi }) {
                 type="button"
                 onClick={() => void resolve(item, 'keep_local')}
               >
-                {item.entityType === 'purchase_order' ? '创建替代草稿' : '保留本地'}
+                {item.entityType === 'purchase_order'
+                  ? '创建替代草稿'
+                  : '保留本地'}
               </button>{' '}
               <button
                 className="primary-button"

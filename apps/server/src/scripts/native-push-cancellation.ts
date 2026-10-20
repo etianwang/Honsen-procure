@@ -33,10 +33,14 @@ export function observeNativePushCancellation({
 }) {
   let barrierReleasedAt: string | null = null
   let acceptedCancellation: NativePushCancellationObservation | undefined
-  let resolveCancellation: (observation: NativePushCancellationObservation) => void
-  const cancellation = new Promise<NativePushCancellationObservation>((resolve) => {
-    resolveCancellation = resolve
-  })
+  let resolveCancellation: (
+    observation: NativePushCancellationObservation,
+  ) => void
+  const cancellation = new Promise<NativePushCancellationObservation>(
+    (resolve) => {
+      resolveCancellation = resolve
+    },
+  )
   const observe = (cancellationSource: NativePushCancellationSource) => {
     const observation = {
       cancellationSource,
@@ -46,7 +50,8 @@ export function observeNativePushCancellation({
       socketDestroyed: Boolean(raw.socket?.destroyed),
       accepted: false,
     }
-    observation.accepted = observation.barrierReleasedAt === null && !observation.responseCompleted
+    observation.accepted =
+      observation.barrierReleasedAt === null && !observation.responseCompleted
     onObservation(observation)
     if (observation.accepted) {
       acceptedCancellation = observation
