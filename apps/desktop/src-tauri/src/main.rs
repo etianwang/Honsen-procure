@@ -157,6 +157,7 @@ fn main() {
             commands::sync_status,
             commands::list_sync_conflicts,
             commands::resolve_sync_conflict,
+            commands::resolve_purchase_order_conflict,
             commands::create_rfq,
             commands::list_rfqs,
             commands::send_rfq,

@@ -24,6 +24,7 @@ export function SyncConflictFixturePage() {
               throw { code: 'sync_account_boundary' }
             }
           },
+          resolvePurchaseOrderConflict: async () => {},
         }}
       />
     </main>

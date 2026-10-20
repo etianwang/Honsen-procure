@@ -26,6 +26,8 @@ import { SupplierChildTermsFixturePage } from './pages/SupplierChildTermsFixture
 import { RfqFixturePage } from './pages/RfqFixturePage'
 import { ReceiptFixturePage } from './pages/ReceiptFixturePage'
 import { SyncConflictFixturePage } from './pages/SyncConflictFixturePage'
+import { SyncConflictPanel } from './components/SyncConflictPanel'
+import { tauriSyncApi } from './lib/sync-api'
 import { ProcurementExecutionPage } from './pages/ProcurementExecutionPage'
 import { AuthorizationManagementPage } from './pages/AuthorizationManagementPage'
 import {
@@ -397,6 +399,8 @@ function App() {
                   ? '采购申请单'
                   : page === 'execution'
                     ? '采购执行'
+                      : page === 'conflicts'
+                        ? '同步冲突'
                     : page === 'authorization'
                       ? '在线授权管理'
                       : '基础资料管理'
@@ -507,6 +511,10 @@ function App() {
                 session?.user_id ?? previewRequisitionContext.applicantId
               }
             />
+          ) : page === 'conflicts' &&
+            session &&
+            (role === 'administrator' || role === 'super_administrator') ? (
+            <SyncConflictPanel api={tauriSyncApi} />
           ) : page === 'authorization' &&
             session &&
             (role === 'administrator' || role === 'super_administrator') ? (

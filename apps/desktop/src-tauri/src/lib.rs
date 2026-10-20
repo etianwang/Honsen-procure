@@ -664,6 +664,14 @@ pub struct ResolveSyncConflictInput {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolvePurchaseOrderConflictInput {
+    pub conflict_id: Uuid,
+    pub resolution: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncPullChangeInput {
     pub cursor: String,
@@ -5572,6 +5580,70 @@ impl LocalAuthService {
         transaction.commit().map_err(|_| AuthError::Database)
     }
 
+    pub fn resolve_purchase_order_conflict(
+        &self,
+        input: ResolvePurchaseOrderConflictInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let actor_id = Self::require_conflict_resolution(&connection, now)?;
+        if !matches!(input.resolution.as_str(), "use_server" | "replace_draft")
+            || !valid_required_text(&input.reason, 1000)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let row: (String, String, String, i64, String, String, String) = transaction.query_row("SELECT c.entity_type, c.entity_id, c.event_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE c.id = ?1 AND c.resolved_at IS NULL AND o.owner_account_id = ?2 AND o.owner_account_id = (SELECT user_id FROM local_session)", params![input.conflict_id.to_string(), actor_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::SyncAccountBoundary)?;
+        if row.0 != "purchase_order" || row.6 != "upsert" {
+            return Err(AuthError::InvalidInput);
+        }
+        let entity_id = Uuid::parse_str(&row.1).map_err(|_| AuthError::Database)?;
+        let local_status: String = transaction.query_row(
+            "SELECT workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            [entity_id.to_string()],
+            |row| row.get(0),
+        ).map_err(|_| AuthError::Database)?;
+        let server_payload: serde_json::Value =
+            serde_json::from_str(&row.5).map_err(|_| AuthError::InvalidInput)?;
+        let server_status = server_payload
+            .get("workflowStatus")
+            .and_then(serde_json::Value::as_str);
+        if local_status != "draft" || server_status != Some("draft") {
+            return Err(AuthError::InvalidInput);
+        }
+        transaction.execute("UPDATE local_sync_outbox SET superseded_at = ?2, last_error = 'resolved_by_administrator' WHERE event_id = ?1", params![row.2, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES ('purchase_order', ?1, ?2) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![row.1, row.3]).map_err(|_| AuthError::Database)?;
+        if input.resolution == "use_server" {
+            let change = SyncPullChangeInput {
+                cursor: "0".into(),
+                entity_type: "purchase_order".into(),
+                entity_id,
+                operation: row.6.clone(),
+                version: row.3,
+                payload: server_payload,
+                changed_at: "resolved".into(),
+            };
+            if !project_remote_purchase_order_change(&transaction, &change, now)? {
+                return Err(AuthError::InvalidInput);
+            }
+        } else {
+            let payload = order_sync_payload(&transaction, entity_id)?;
+            insert_local_sync_outbox(&transaction, "purchase_order", entity_id, &payload, now)?;
+            append_order_audit(
+                &transaction,
+                entity_id,
+                actor_id,
+                "sync_conflict_draft_replaced",
+                Some(&input.reason),
+                Some(&row.5),
+                Some(&payload),
+                now,
+            )?;
+        }
+        transaction.execute("UPDATE local_sync_conflicts SET resolved_at = ?2, resolved_by = ?3, resolution_reason = ?4 WHERE id = ?1", params![input.conflict_id.to_string(), unix_seconds(now), actor_id.to_string(), input.reason]).map_err(|_| AuthError::Database)?;
+        transaction.commit().map_err(|_| AuthError::Database)
+    }
+
     fn activate_online_session(
         &self,
         account_id: Uuid,
@@ -6416,6 +6488,15 @@ pub mod commands {
         input: super::ResolveSyncConflictInput,
     ) -> Result<(), CommandError> {
         auth.resolve_sync_conflict(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn resolve_purchase_order_conflict(
+        auth: State<'_, LocalAuthService>,
+        input: super::ResolvePurchaseOrderConflictInput,
+    ) -> Result<(), CommandError> {
+        auth.resolve_purchase_order_conflict(input, SystemTime::now())
             .map_err(Into::into)
     }
 
@@ -10770,6 +10851,271 @@ mod tests {
             )
             .unwrap();
         assert_eq!(legacy_unchanged, (None, None));
+    }
+
+    #[test]
+    fn administrator_replaces_a_draft_purchase_order_conflict_without_erasing_evidence() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let administrator = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: administrator,
+                    username: "order-conflict-admin".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "order-conflict-admin",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let country = Uuid::new_v4();
+        let project = Uuid::new_v4();
+        let department = Uuid::new_v4();
+        let team = Uuid::new_v4();
+        let order = Uuid::new_v4();
+        let event = Uuid::new_v4();
+        let conflict = Uuid::new_v4();
+        {
+            let connection = service.connection.lock().unwrap();
+            connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, 'CI', 'country', 'Africa/Abidjan', 1, 1)", [country.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, 'P', 'project', 'site', 'department', 'XOF', 'zh_fr', 1, 1)", params![project.to_string(), country.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES (?1, 'D', 'department', 1, 1)", [department.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, 'T', 'team', 1, 1)", params![team.to_string(), department.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'ORDER-CONFLICT', ?2, ?3, 'site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'draft', 'draft', 'normal', '2026-10-20', 'address', 0, 0, 0, 0, 0, 0, 0, 1, 1, 1)", params![order.to_string(), country.to_string(), project.to_string(), department.to_string(), team.to_string(), administrator.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_snapshot_json, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at, currency) VALUES (?1, ?2, '{}', '1', 'pcs', 0, 0, 0, 0, 0, 'XOF')", params![Uuid::new_v4().to_string(), order.to_string()]).unwrap();
+            let payload = {
+                let transaction = connection.unchecked_transaction().unwrap();
+                let payload = order_sync_payload(&transaction, order).unwrap();
+                transaction.commit().unwrap();
+                payload
+            };
+            let server_payload = payload.replace("\"notes\":null", "\"notes\":\"server draft\"");
+            connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'purchase_order', ?2, 'upsert', 1, ?3, 1, ?4)", params![event.to_string(), order.to_string(), payload, administrator.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) VALUES (?1, ?2, 'purchase_order', ?3, 1, 2, (SELECT payload_json FROM local_sync_outbox WHERE event_id = ?2), ?4, 'upsert', 2)", params![conflict.to_string(), event.to_string(), order.to_string(), server_payload]).unwrap();
+        }
+
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'cancelled' WHERE id = ?1",
+                [order.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            service.resolve_purchase_order_conflict(
+                ResolvePurchaseOrderConflictInput {
+                    conflict_id: conflict,
+                    resolution: "replace_draft".into(),
+                    reason: "must not overwrite cancelled order".into(),
+                },
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        let rejected_state: (Option<i64>, Option<i64>) = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT o.superseded_at, c.resolved_at FROM local_sync_outbox o JOIN local_sync_conflicts c ON c.event_id = o.event_id WHERE c.id = ?1",
+                [conflict.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rejected_state, (None, None));
+        assert_eq!(
+            service.resolve_purchase_order_conflict(
+                ResolvePurchaseOrderConflictInput {
+                    conflict_id: conflict,
+                    resolution: "replace_draft".into(),
+                    reason: "   ".into(),
+                },
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_purchase_orders SET workflow_status = 'draft' WHERE id = ?1",
+                [order.to_string()],
+            )
+            .unwrap();
+
+        service
+            .resolve_purchase_order_conflict(
+                ResolvePurchaseOrderConflictInput {
+                    conflict_id: conflict,
+                    resolution: "replace_draft".into(),
+                    reason: "retain local draft after comparing server version".into(),
+                },
+                now,
+            )
+            .unwrap();
+
+        let connection = service.connection.lock().unwrap();
+        let old_event: (Option<i64>, String) = connection
+            .query_row(
+                "SELECT superseded_at, last_error FROM local_sync_outbox WHERE event_id = ?1",
+                [event.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(old_event.0.is_some());
+        assert_eq!(old_event.1, "resolved_by_administrator");
+        let replacement: (i64, String) = connection
+            .query_row("SELECT base_version, payload_json FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND event_id != ?2", params![order.to_string(), event.to_string()], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap();
+        assert_eq!(replacement.0, 2);
+        assert!(replacement.1.contains("ORDER-CONFLICT"));
+        let audit: (String, String) = connection
+            .query_row(
+                "SELECT resolved_by, resolution_reason FROM local_sync_conflicts WHERE id = ?1",
+                [conflict.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            audit,
+            (
+                administrator.to_string(),
+                "retain local draft after comparing server version".into()
+            )
+        );
+        drop(connection);
+        assert_eq!(
+            service.resolve_purchase_order_conflict(
+                ResolvePurchaseOrderConflictInput {
+                    conflict_id: conflict,
+                    resolution: "replace_draft".into(),
+                    reason: "duplicate request must not create another event".into(),
+                },
+                now,
+            ),
+            Err(AuthError::SyncAccountBoundary)
+        );
+        let connection = service.connection.lock().unwrap();
+        let replacement_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND event_id != ?2",
+                params![order.to_string(), event.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(replacement_count, 1);
+        let replacement_event: String = connection
+            .query_row(
+                "SELECT event_id FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND event_id != ?2",
+                params![order.to_string(), event.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE local_sync_outbox SET acknowledged_at = 3 WHERE event_id = ?1",
+                [replacement_event],
+            )
+            .unwrap();
+        let server_payload: String = connection
+            .query_row(
+                "SELECT server_payload_json FROM local_sync_conflicts WHERE id = ?1",
+                [conflict.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let use_server_event = Uuid::new_v4();
+        let use_server_conflict = Uuid::new_v4();
+        connection
+            .execute(
+                "INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'purchase_order', ?2, 'upsert', 2, ?3, 3, ?4)",
+                params![use_server_event.to_string(), order.to_string(), server_payload, administrator.to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO local_sync_conflicts (id, event_id, entity_type, entity_id, base_version, server_version, local_payload_json, server_payload_json, server_operation, created_at) VALUES (?1, ?2, 'purchase_order', ?3, 2, 3, ?4, ?4, 'upsert', 3)",
+                params![use_server_conflict.to_string(), use_server_event.to_string(), order.to_string(), server_payload],
+            )
+            .unwrap();
+        drop(connection);
+        service
+            .resolve_purchase_order_conflict(
+                ResolvePurchaseOrderConflictInput {
+                    conflict_id: use_server_conflict,
+                    resolution: "use_server".into(),
+                    reason: "adopt the server draft after comparison".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let adopted: (Option<String>, i64, Option<i64>) = connection
+            .query_row(
+                "SELECT notes, version, (SELECT superseded_at FROM local_sync_outbox WHERE event_id = ?2) FROM local_purchase_orders WHERE id = ?1",
+                params![order.to_string(), use_server_event.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(adopted.0, Some("server draft".into()));
+        assert_eq!(adopted.1, 3);
+        assert!(adopted.2.is_some());
+    }
+
+    #[test]
+    fn non_administrator_cannot_resolve_purchase_order_conflicts() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: Uuid::new_v4(),
+                    username: "order-conflict-purchaser".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "order-conflict-purchaser",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.resolve_purchase_order_conflict(
+                ResolvePurchaseOrderConflictInput {
+                    conflict_id: Uuid::new_v4(),
+                    resolution: "use_server".into(),
+                    reason: "unauthorized attempt".into(),
+                },
+                now,
+            ),
+            Err(AuthError::Forbidden)
+        );
     }
 
     #[test]

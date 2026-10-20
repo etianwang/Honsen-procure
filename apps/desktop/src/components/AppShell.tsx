@@ -13,6 +13,7 @@ export type AppPage =
   | 'materials'
   | 'requisition'
   | 'execution'
+  | 'conflicts'
   | 'master-data'
   | 'authorization'
 
@@ -107,6 +108,16 @@ export function AppShell({
             <Settings size={17} aria-hidden="true" />
             基础资料管理
           </button>
+          {(role === 'administrator' || role === 'super_administrator') && (
+            <button
+              className={`nav-button ${page === 'conflicts' ? 'active' : ''}`}
+              type="button"
+              onClick={() => onNavigate('conflicts')}
+            >
+              <Settings size={17} aria-hidden="true" />
+              同步冲突
+            </button>
+          )}
           {(role === 'administrator' || role === 'super_administrator') && (
             <button
               className={`nav-button ${page === 'authorization' ? 'active' : ''}`}

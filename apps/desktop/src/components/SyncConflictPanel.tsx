@@ -13,14 +13,26 @@ export function SyncConflictPanel({ api }: { api: SyncApi }) {
   }, [api])
   async function resolve(
     item: SyncConflictView,
-    resolution: 'keep_local' | 'use_server',
+    resolution: 'keep_local' | 'use_server' | 'replace_draft',
   ) {
     if (!reason.trim()) {
       setMessage('请填写处理原因。')
       return
     }
     try {
-      await api.resolveSyncConflict({ conflictId: item.id, resolution, reason })
+      if (item.entityType === 'purchase_order') {
+        await api.resolvePurchaseOrderConflict({
+          conflictId: item.id,
+          resolution: resolution === 'keep_local' ? 'replace_draft' : 'use_server',
+          reason,
+        })
+      } else {
+        await api.resolveSyncConflict({
+          conflictId: item.id,
+          resolution: resolution as 'keep_local' | 'use_server',
+          reason,
+        })
+      }
       setItems((current) => current.filter(({ id }) => id !== item.id))
       setMessage('冲突已解决，并保留审计记录。')
     } catch (error) {
@@ -56,12 +68,19 @@ export function SyncConflictPanel({ api }: { api: SyncApi }) {
               <p>
                 云端版本 {item.serverVersion} · {item.serverOperation}
               </p>
+              <details>
+                <summary>比较本地与云端内容</summary>
+                <p>本地</p>
+                <pre>{item.localPayloadJson}</pre>
+                <p>云端</p>
+                <pre>{item.serverPayloadJson}</pre>
+              </details>
               <button
                 className="secondary-button"
                 type="button"
                 onClick={() => void resolve(item, 'keep_local')}
               >
-                保留本地
+                {item.entityType === 'purchase_order' ? '创建替代草稿' : '保留本地'}
               </button>{' '}
               <button
                 className="primary-button"
