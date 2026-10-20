@@ -590,11 +590,20 @@ fn run_native_ab_sync_security_smoke(
     account_b
         .save_requisition_draft(native_sync_draft(order_id, account_a_session.user_id), now)
         .map_err(|error| error.to_string())?;
+    let conflict_event_id = account_b
+        .pending_sync_events(1, now)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .next()
+        .ok_or("account B did not create a stale purchase-order event")?
+        .event_id;
     let conflict_push = tauri::async_runtime::block_on(account_b.push_pending_https(now))
         .map_err(|error| error.to_string())?;
-    if conflict_push.accepted_count != 0 || conflict_push.pending_count != 1 {
+    // G3 quarantines a structured conflict: the immutable event remains auditable but
+    // is no longer pending for automatic retransmission.
+    if conflict_push.accepted_count != 0 || conflict_push.pending_count != 0 {
         return Err(format!(
-            "stale account B Push was not retained for conflict projection: {conflict_push:?}"
+            "stale account B Push was not quarantined for conflict projection: {conflict_push:?}"
         ));
     }
     let conflict_pull = tauri::async_runtime::block_on(account_b.pull_sync_https(now))
@@ -648,6 +657,7 @@ fn run_native_ab_sync_security_smoke(
                 "localConflictCount": account_b_status.conflict_count,
                 "localConflictEntityIds": conflicts.iter().map(|conflict| conflict.entity_id).collect::<Vec<_>>(),
                 "localConflictServerVersions": conflicts.iter().map(|conflict| conflict.server_version).collect::<Vec<_>>(),
+                "conflictEventId": conflict_event_id,
             },
         })
         .to_string(),

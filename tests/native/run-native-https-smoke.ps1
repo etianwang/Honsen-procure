@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('g2-formal-pull', 'g1-conflict-origin', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [ValidateSet('g2-formal-pull', 'g1-conflict-origin', 't10d-order-conflict', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security',
   [ValidateSet('before-commit', 'after-commit')]
   [string]$TerminationBoundary = 'before-commit',
@@ -144,6 +144,11 @@ try {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
       node (Join-Path $repo 'tests/native/g1-conflict-origin.mjs') *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native G1 command/UI driver failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 't10d-order-conflict') {
+      Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
+      node (Join-Path $repo 'tests/native/t10d-order-conflict.mjs') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native T10-D order-conflict driver failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'ab-sync-security') {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
       & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
@@ -270,6 +275,12 @@ try {
       throw "native G1 management invalidation result is invalid: $result"
     }
     Write-Output "PASS native G1 command slice only (UI conflict residue remains BLOCKED): $result"
+  } elseif ($Mode -eq 't10d-order-conflict') {
+    $smoke = Get-Content -Raw $result | ConvertFrom-Json
+    if ($smoke.mode -ne 't10d-order-conflict' -or $smoke.useServer -ne 'PASS' -or $smoke.replaceDraft -ne 'PASS' -or $smoke.authorization -ne 'PASS' -or $smoke.restartAndReplay -ne 'PASS' -or @($smoke.exePids).Count -lt 2) {
+      throw "native T10-D order-conflict result is invalid: $result"
+    }
+    Write-Output "PASS native T10-D draft order conflict resolver: $result"
   } elseif ($Mode -eq 'ab-sync-security') {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
     if ($smoke.mode -ne 'ab-sync-security' -or $smoke.independentInstallations -ne 'PASS' -or $smoke.forgedDeviceIdTrustedOrigin -ne 'PASS' -or $smoke.accountIsolation -ne 'PASS' -or $smoke.conflictIsolation -ne 'PASS' -or $smoke.pushReplayIdempotency -ne 'PASS') {
