@@ -78,6 +78,44 @@ function purchaseOrderEvent(applicantId = engineer.id) {
 }
 
 describe('SyncService', () => {
+  it('rejects whitespace in category codes without changing their case', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const id = randomUUID()
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'material_category' as const,
+      entityId: id,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        id,
+        businessCode: ' Cat-1 ',
+        name: 'Fixture',
+        isActive: true,
+        version: 1,
+      },
+    }
+    const actor = { ...engineer, roles: ['administrator'] as const }
+    const rejected = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [event],
+    })
+    expect(rejected.results[0]?.status).toBe('validation_error')
+    expect(store.pushed).toBe(0)
+    const accepted = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, businessCode: 'Cat-1' },
+        },
+      ],
+    })
+    expect(accepted.results[0]?.status).toBe('accepted')
+    expect(store.lastPush?.event.payload.businessCode).toBe('Cat-1')
+  })
   it('rejects purchaser category writes and malformed administrator category writes', async () => {
     const store = new FixtureStore()
     const service = new SyncService(store)
