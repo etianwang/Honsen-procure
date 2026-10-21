@@ -5456,6 +5456,16 @@ impl LocalAuthService {
                 params![acknowledgement.event_id.to_string(), account_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional().map_err(|_| AuthError::Database)?;
             if let Some((entity_type, entity_id)) = entity {
+                if entity_type == "material_category"
+                    && acknowledgement.error_code.as_deref() == Some("CATEGORY_CODE_CONFLICT")
+                    && matches!(
+                        acknowledgement.status.as_str(),
+                        "conflict" | "validation_error"
+                    )
+                {
+                    transaction.execute("UPDATE local_sync_outbox SET last_error = 'CATEGORY_CODE_CONFLICT' WHERE event_id = ?1", [acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                    continue;
+                }
                 match acknowledgement.status.as_str() {
                     "accepted" if acknowledgement.server_version.unwrap_or(-1) >= 1 => {
                         transaction.execute("UPDATE local_sync_outbox SET acknowledged_at = ?2, last_error = NULL WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
@@ -17395,6 +17405,60 @@ mod tests {
         drop(connection);
         drop(service);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn category_code_conflict_keeps_outbox_recoverable() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let user = account();
+        service
+            .cache_verified_account(user.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &user.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let event_id = Uuid::new_v4();
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let tx = connection.transaction().unwrap();
+            insert_local_sync_outbox(
+                &tx,
+                "material_category",
+                Uuid::new_v4(),
+                "{\"businessCode\":\"CAT-1\"}",
+                now,
+            )
+            .unwrap();
+            tx.execute("UPDATE local_sync_outbox SET event_id = ?1 WHERE rowid = (SELECT MAX(rowid) FROM local_sync_outbox)", [event_id.to_string()]).unwrap();
+            tx.commit().unwrap();
+        }
+        service
+            .apply_sync_acknowledgements(
+                vec![SyncAcknowledgementInput {
+                    event_id,
+                    status: "validation_error".into(),
+                    server_version: None,
+                    error_code: Some("CATEGORY_CODE_CONFLICT".into()),
+                    server_payload: None,
+                    server_operation: None,
+                }],
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let row: (Option<i64>, Option<i64>, Option<String>) = connection.query_row(
+            "SELECT acknowledged_at, superseded_at, last_error FROM local_sync_outbox WHERE event_id = ?1",
+            [event_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(row, (None, None, Some("CATEGORY_CODE_CONFLICT".into())));
     }
 
     #[test]
