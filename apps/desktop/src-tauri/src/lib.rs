@@ -2935,6 +2935,101 @@ impl LocalAuthService {
         self.save_requisition(draft, None, now)
     }
 
+    pub fn ingest_order_attachment(
+        &self,
+        order_id: Uuid,
+        source_path: String,
+        now: SystemTime,
+    ) -> Result<RequisitionAttachmentView, AuthError> {
+        const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
+        const MAX_ORDER_ATTACHMENT_BYTES: i64 = 200 * 1024 * 1024;
+
+        let privileged = self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(order_id, now)?;
+        let actor_id = self.active_session_user_id()?;
+        let source = PathBuf::from(source_path);
+        if !source.is_absolute() {
+            return Err(AuthError::InvalidInput);
+        }
+        let metadata = fs::metadata(&source).map_err(|_| AuthError::InvalidInput)?;
+        if !metadata.is_file() || metadata.len() > MAX_ATTACHMENT_BYTES {
+            return Err(AuthError::InvalidInput);
+        }
+        let original_name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| valid_required_text(value, 255))
+            .ok_or(AuthError::InvalidInput)?
+            .to_owned();
+        let content_type = attachment_content_type(&source).ok_or(AuthError::InvalidInput)?;
+        let attachment_id = Uuid::new_v4();
+        let directory = self
+            .media_directory
+            .join("order-attachments")
+            .join(order_id.to_string());
+        fs::create_dir_all(&directory).map_err(|_| AuthError::Database)?;
+        let final_path = directory.join(attachment_id.to_string());
+        let temporary_path = directory.join(format!("{}.part", attachment_id));
+        if fs::copy(&source, &temporary_path).is_err() {
+            let _ = fs::remove_file(&temporary_path);
+            return Err(AuthError::Database);
+        }
+        let copied = (|| -> Result<RequisitionAttachmentView, AuthError> {
+            let bytes = fs::read(&temporary_path).map_err(|_| AuthError::Database)?;
+            if bytes.len() as u64 != metadata.len() {
+                return Err(AuthError::Database);
+            }
+            let checksum = format!("{:x}", Sha256::digest(&bytes));
+            let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+            let applicant_id: String = transaction
+                .query_row(
+                    "SELECT applicant_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+                    [order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Forbidden)?;
+            if !privileged && applicant_id != actor_id.to_string() {
+                return Err(AuthError::Forbidden);
+            }
+            let existing_bytes: i64 = transaction
+                .query_row(
+                    "SELECT COALESCE(SUM(byte_length), 0) FROM local_order_attachments WHERE order_id = ?1 AND deleted_at IS NULL",
+                    [order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Database)?;
+            let byte_length = i64::try_from(metadata.len()).map_err(|_| AuthError::InvalidInput)?;
+            if existing_bytes > MAX_ORDER_ATTACHMENT_BYTES - byte_length {
+                return Err(AuthError::InvalidInput);
+            }
+            fs::rename(&temporary_path, &final_path).map_err(|_| AuthError::Database)?;
+            let result = transaction.execute(
+                "INSERT INTO local_order_attachments (id, order_id, original_name, content_type, byte_length, local_path, upload_state, checksum, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending_upload', ?7, ?8)",
+                params![attachment_id.to_string(), order_id.to_string(), original_name, content_type, byte_length, final_path.to_string_lossy(), checksum, unix_seconds(now)],
+            );
+            if result.is_err() {
+                let _ = fs::remove_file(&final_path);
+                return Err(AuthError::Database);
+            }
+            if transaction.commit().is_err() {
+                let _ = fs::remove_file(&final_path);
+                return Err(AuthError::Database);
+            }
+            Ok(RequisitionAttachmentView {
+                id: attachment_id,
+                original_name,
+                content_type: content_type.into(),
+                byte_length,
+                upload_state: "pending_upload".into(),
+            })
+        })();
+        if copied.is_err() {
+            let _ = fs::remove_file(&temporary_path);
+        }
+        copied
+    }
+
     pub fn revise_confirmed_requisition(
         &self,
         draft: RequisitionDraftInput,
@@ -6403,6 +6498,16 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn ingest_order_attachment(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+        source_path: String,
+    ) -> Result<super::RequisitionAttachmentView, CommandError> {
+        auth.ingest_order_attachment(order_id, source_path, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn list_requisition_history(
         auth: State<'_, LocalAuthService>,
         cursor: Option<super::RequisitionHistoryCursor>,
@@ -8503,6 +8608,23 @@ fn valid_json_object(value: &str) -> bool {
         && serde_json::from_str::<serde_json::Value>(value)
             .map(|parsed| parsed.is_object())
             .unwrap_or(false)
+}
+
+fn attachment_content_type(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "pdf" => Some("application/pdf"),
+        "doc" => Some("application/msword"),
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "xls" => Some("application/vnd.ms-excel"),
+        "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "heic" => Some("image/heic"),
+        "dwg" => Some("image/vnd.dwg"),
+        "zip" => Some("application/zip"),
+        _ => None,
+    }
 }
 
 fn project_remote_order_comment(
@@ -11537,6 +11659,224 @@ mod tests {
         connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, 'fixture team', 1, 1)", params![team_id.to_string(), department_id.to_string(), format!("T-{}", team_id.simple())]).unwrap();
         drop(connection);
         grant_test_scope(service, account_id, project_id, department_id, team_id, now);
+    }
+
+    fn order_attachment_fixture(service: &LocalAuthService, now: SystemTime) -> Uuid {
+        let purchaser = CachedAccount {
+            id: Uuid::new_v4(),
+            username: format!("attachment-purchaser-{}", Uuid::new_v4()),
+            roles: vec![Role::Purchaser],
+            enabled: true,
+            requires_password_change: false,
+        };
+        service
+            .cache_verified_account(purchaser.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &purchaser.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let country_id = Uuid::new_v4();
+        grant_new_test_scope(service, purchaser.id, country_id, now);
+        let (project_id, department_id, team_id): (String, String, String) = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT project_id, department_id, team_id FROM local_authorization_snapshots WHERE account_id = ?1",
+                [purchaser.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let order_id = Uuid::new_v4();
+        service.connection.lock().unwrap().execute(
+            "INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'ATTACHMENT-FIXTURE', ?2, ?3, 'fixture site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'draft', 'draft', 'normal', '2026-10-15', 'fixture address', 0, 0, 0, 0, 0, 0, 0, 1, ?7, ?7)",
+            params![order_id.to_string(), country_id.to_string(), project_id, department_id, team_id, purchaser.id.to_string(), unix_seconds(now)],
+        ).unwrap();
+        order_id
+    }
+
+    fn attachment_source(name: &str, contents: &[u8]) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("{}-{}", Uuid::new_v4(), name));
+        fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn order_attachment_ingestion_persists_pending_upload_with_sha256() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let order_id = order_attachment_fixture(&service, now);
+        let source = attachment_source("invoice.PDF", b"offline attachment fixture");
+        let expected_name = source.file_name().unwrap().to_str().unwrap().to_owned();
+
+        let attachment = service
+            .ingest_order_attachment(order_id, source.to_string_lossy().into_owned(), now)
+            .unwrap();
+        assert_eq!(attachment.original_name, expected_name);
+        assert_eq!(attachment.content_type, "application/pdf");
+        assert_eq!(attachment.upload_state, "pending_upload");
+        let (local_path, checksum, upload_state): (String, String, String) = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT local_path, checksum, upload_state FROM local_order_attachments WHERE id = ?1",
+                [attachment.id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            checksum,
+            format!("{:x}", Sha256::digest(b"offline attachment fixture"))
+        );
+        assert_eq!(upload_state, "pending_upload");
+        assert!(Path::new(&local_path).is_file());
+        let detail = service.get_requisition_detail(order_id, now).unwrap();
+        assert_eq!(detail.attachments.len(), 1);
+        assert_eq!(detail.attachments[0].id, attachment.id);
+
+        fs::remove_file(source).unwrap();
+        fs::remove_dir_all(&service.media_directory).unwrap();
+    }
+
+    #[test]
+    fn order_attachment_ingestion_survives_a_file_sqlite_restart() {
+        let database_path =
+            std::env::temp_dir().join(format!("attachment-restart-{}.sqlite", Uuid::new_v4()));
+        let service =
+            LocalAuthService::open_file_for_test(database_path.to_str().unwrap()).unwrap();
+        let now = SystemTime::now();
+        let order_id = order_attachment_fixture(&service, now);
+        let source = attachment_source("restart.pdf", b"restart fixture");
+        let attachment = service
+            .ingest_order_attachment(order_id, source.to_string_lossy().into_owned(), now)
+            .unwrap();
+        let media_directory = service.media_directory.clone();
+        drop(service);
+
+        let connection = Connection::open(&database_path).unwrap();
+        let (stored_id, local_path, upload_state): (String, String, String) = connection
+            .query_row(
+                "SELECT id, local_path, upload_state FROM local_order_attachments WHERE order_id = ?1",
+                [order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(stored_id, attachment.id.to_string());
+        assert_eq!(upload_state, "pending_upload");
+        assert!(Path::new(&local_path).is_file());
+        drop(connection);
+
+        fs::remove_file(source).unwrap();
+        fs::remove_file(&database_path).unwrap();
+        fs::remove_dir_all(media_directory).unwrap();
+    }
+
+    #[test]
+    fn order_attachment_enforces_the_200_mib_total_limit() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let order_id = order_attachment_fixture(&service, now);
+        let connection = service.connection.lock().unwrap();
+        for _ in 0..2 {
+            connection.execute(
+                "INSERT INTO local_order_attachments (id, order_id, original_name, content_type, byte_length, local_path, created_at) VALUES (?1, ?2, 'existing.pdf', 'application/pdf', ?3, 'fixture', ?4)",
+                params![Uuid::new_v4().to_string(), order_id.to_string(), 100 * 1024 * 1024_i64, unix_seconds(now)],
+            ).unwrap();
+        }
+        drop(connection);
+        let source = attachment_source("one-byte.pdf", b"x");
+        assert!(matches!(
+            service.ingest_order_attachment(order_id, source.to_string_lossy().into_owned(), now),
+            Err(AuthError::InvalidInput)
+        ));
+        let directory = service
+            .media_directory
+            .join("order-attachments")
+            .join(order_id.to_string());
+        assert!(fs::read_dir(directory).unwrap().next().is_none());
+
+        fs::remove_file(source).unwrap();
+        fs::remove_dir_all(&service.media_directory).unwrap();
+    }
+
+    #[test]
+    fn order_attachment_rejects_invalid_sources_and_cleans_files_when_sqlite_rejects_insert() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let order_id = order_attachment_fixture(&service, now);
+        let executable = attachment_source("unsafe.exe", b"not allowed");
+        assert!(matches!(
+            service.ingest_order_attachment(
+                order_id,
+                executable.to_string_lossy().into_owned(),
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        ));
+        assert!(matches!(
+            service.ingest_order_attachment(
+                order_id,
+                std::env::temp_dir()
+                    .join("missing-honsen-attachment.pdf")
+                    .to_string_lossy()
+                    .into_owned(),
+                now,
+            ),
+            Err(AuthError::InvalidInput)
+        ));
+        let oversized = attachment_source("oversized.pdf", b"");
+        fs::File::options()
+            .write(true)
+            .open(&oversized)
+            .unwrap()
+            .set_len(100 * 1024 * 1024 + 1)
+            .unwrap();
+        assert!(matches!(
+            service.ingest_order_attachment(
+                order_id,
+                oversized.to_string_lossy().into_owned(),
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        ));
+
+        service.connection.lock().unwrap().execute_batch(
+            "CREATE TRIGGER reject_attachment_insert BEFORE INSERT ON local_order_attachments BEGIN SELECT RAISE(ABORT, 'fixture reject'); END;",
+        ).unwrap();
+        let valid = attachment_source("receipt.jpg", b"image fixture");
+        assert!(matches!(
+            service.ingest_order_attachment(order_id, valid.to_string_lossy().into_owned(), now),
+            Err(AuthError::Database)
+        ));
+        let stored: i64 = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM local_order_attachments WHERE order_id = ?1",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, 0);
+        let directory = service
+            .media_directory
+            .join("order-attachments")
+            .join(order_id.to_string());
+        assert!(fs::read_dir(directory).unwrap().next().is_none());
+
+        for path in [executable, oversized, valid] {
+            fs::remove_file(path).unwrap();
+        }
+        fs::remove_dir_all(&service.media_directory).unwrap();
     }
 
     #[test]

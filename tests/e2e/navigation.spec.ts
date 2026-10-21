@@ -1860,6 +1860,7 @@ test('authenticated desktop switches between cached authorization scopes', async
     ]
     let selected = contexts[0]
     let historicalStatus = 'pending_confirmation'
+    let attachmentArchived = false
     Object.assign(window, {
       __setHistoryPending: () => {
         historicalStatus = 'pending_confirmation'
@@ -1873,6 +1874,7 @@ test('authenticated desktop switches between cached authorization scopes', async
               selection?: { projectId: string }
               filter?: { query?: string }
               orderId?: string
+              sourcePath?: string
             },
           ) {
             if (command === 'issue_local_captcha')
@@ -1948,7 +1950,17 @@ test('authenticated desktop switches between cached authorization scopes', async
                     lineTotalMinor: '1200',
                   },
                 ],
-                attachments: [],
+                attachments: attachmentArchived
+                  ? [
+                      {
+                        id: '00000000-0000-4000-8000-000000000012',
+                        originalName: 'archive.pdf',
+                        contentType: 'application/pdf',
+                        byteLength: 1,
+                        uploadState: 'pending_upload',
+                      },
+                    ]
+                  : [],
                 audits: [
                   {
                     id: '00000000-0000-4000-8000-000000000011',
@@ -1964,6 +1976,19 @@ test('authenticated desktop switches between cached authorization scopes', async
               })
             if (command === 'save_requisition_draft')
               return Promise.resolve({ totalMinor: '0' })
+            if (command === 'ingest_order_attachment') {
+              attachmentArchived = true
+              Object.assign(window, {
+                archivedAttachmentPath: args?.sourcePath,
+              })
+              return Promise.resolve({
+                id: '00000000-0000-4000-8000-000000000012',
+                originalName: 'archive.pdf',
+                contentType: 'application/pdf',
+                byteLength: 1,
+                uploadState: 'pending_upload',
+              })
+            }
             if (
               command === 'list_order_comments' ||
               command === 'list_order_audits'
@@ -2017,6 +2042,18 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     'pending_confirmation',
   )
+  await page.getByLabel('本机附件绝对路径').fill('C:\\fixtures\\archive.pdf')
+  await page.getByRole('button', { name: '离线归档附件' }).click()
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    'archive.pdf',
+  )
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { archivedAttachmentPath?: string })
+          .archivedAttachmentPath,
+    ),
+  ).resolves.toBe('C:\\fixtures\\archive.pdf')
   await page.getByRole('button', { name: '确认订单' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     'confirmed',

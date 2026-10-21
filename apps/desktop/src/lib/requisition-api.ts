@@ -97,6 +97,10 @@ export type FormalIssueView = {
 
 export type RequisitionApi = {
   getRequisitionDetail(orderId: string): Promise<RequisitionDetail>
+  ingestOrderAttachment(
+    orderId: string,
+    sourcePath: string,
+  ): Promise<RequisitionDetail['attachments'][number]>
   listRequisitionHistory(
     cursor?: RequisitionHistoryCursor,
     filter?: RequisitionHistoryFilter,
@@ -128,6 +132,11 @@ function tauriInvoke(): TauriInvoke {
 export const tauriRequisitionApi: RequisitionApi = {
   getRequisitionDetail: (orderId) =>
     tauriInvoke()<RequisitionDetail>('get_requisition_detail', { orderId }),
+  ingestOrderAttachment: (orderId, sourcePath) =>
+    tauriInvoke()<RequisitionDetail['attachments'][number]>(
+      'ingest_order_attachment',
+      { orderId, sourcePath },
+    ),
   listRequisitionHistory: (cursor, filter) =>
     tauriInvoke()<RequisitionHistoryPage>('list_requisition_history', {
       cursor: cursor ?? null,

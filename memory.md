@@ -1,6 +1,12 @@
 # Honsen采购管理系统（HONSEN Procure）— Development Memory
 
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
+
+## T11-A offline attachment ingestion — READY_FOR_RECHECK (2026-10-21)
+
+- **Scope and implementation:** on isolated branch `codex/t11-local-attachment-ingestion` from `d15a5f3039430819aa220bfa312f4db5be251c03`, a trusted Tauri command accepts an absolute user-selected source path only after current-session role and order-scope checks. It permits the approved extension/MIME allowlist, rejects missing/non-file/over-100 MiB sources, enforces the 200 MiB non-deleted order total, copies into a UUID-only managed order directory, calculates SHA-256 from the staged bytes, and writes SQLite metadata as `pending_upload` (never synchronized). The staged file is removed after copy/read/authorization/limit failure; after rename, insert or commit failure the managed file is removed. This deliberately does not decide product duplicate semantics: each user add remains a separately identified attachment. The renderer exposes the command in requisition history; the preview API fails closed because it has no local file service.
+- **Focused evidence:** `cargo fmt --check`; `cargo check`; four `order_attachment_` Rust tests covering SHA-256/state/detail readback, file-SQLite restart, 100 MiB/200 MiB limits, bad type/missing source and SQLite-insert cleanup; existing `catalog_writes_are_role_protected_and_price_changes_keep_history` receipt-attachment ownership regression; desktop TypeScript typecheck and Vite production build all PASS. The Vite chunk-size notice and Rust linker-output notice are non-failing existing tool warnings. No PostgreSQL matrix, Native QA, COS upload, compression, sync or archive-authority acceptance ran.
+- **Environment and remaining status:** prior C: ENOSPC and Cargo target contention were avoided by task-private `E:\HonsenTaskRuntime\t11-local-attachment-ingestion` TEMP/TMP, Cargo target and npm cache; C: retained about 2.2 GiB free. `npm ci` repaired the incomplete local dependency tree without changing tracked dependencies. **BLOCKER for T11 acceptance:** durable upload queue/progress/retry, compression, server-issued COS URLs, scoped remote/archive access and the approved T09/T11 joint receipt-archive proof remain. **WARNING:** filesystem and SQLite cannot form a single atomic transaction; this slice has compensating cleanup for deterministic local failures but no crash-recovery journal. T11-A is builder **READY_FOR_RECHECK**, not T11 completion; no push, PR, merge, PostgreSQL data or other-worktree data was changed.
 
 ## T10-D / G4 production draft-order conflict resolver — READY_FOR_RECHECK (2026-10-20)
 

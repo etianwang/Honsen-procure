@@ -15,6 +15,7 @@ type Props = {
     RequisitionApi,
     | 'listRequisitionHistory'
     | 'getRequisitionDetail'
+    | 'ingestOrderAttachment'
     | 'withdrawRequisition'
     | 'issueOwnerFormalOrder'
   >
@@ -49,6 +50,9 @@ export function RequisitionHistoryPanel({
   const [detailLoading, setDetailLoading] = useState(false)
   const [withdrawError, setWithdrawError] = useState(false)
   const [issueError, setIssueError] = useState(false)
+  const [attachmentPath, setAttachmentPath] = useState('')
+  const [attachmentError, setAttachmentError] = useState(false)
+  const [attachmentSaving, setAttachmentSaving] = useState(false)
   const detailRequest = useRef(0)
 
   useEffect(() => {
@@ -121,6 +125,22 @@ export function RequisitionHistoryPanel({
       setRetry((value) => value + 1)
     } catch {
       setIssueError(true)
+    }
+  }
+
+  async function attachLocalFile(orderId: string) {
+    const sourcePath = attachmentPath.trim()
+    if (!sourcePath) return
+    setAttachmentError(false)
+    setAttachmentSaving(true)
+    try {
+      await api.ingestOrderAttachment(orderId, sourcePath)
+      setAttachmentPath('')
+      await openDetail(orderId)
+    } catch {
+      setAttachmentError(true)
+    } finally {
+      setAttachmentSaving(false)
     }
   }
 
@@ -286,6 +306,28 @@ export function RequisitionHistoryPanel({
             总额：{detail.totalMinor} {detail.primaryCurrency}
           </p>
           <h4>附件</h4>
+          <label>
+            本机附件绝对路径
+            <Input
+              value={attachmentPath}
+              onChange={(event) => setAttachmentPath(event.target.value)}
+              maxLength={4096}
+              placeholder="例如 C:\\Documents\\receipt.pdf"
+            />
+          </label>
+          <Button
+            disabled={!attachmentPath.trim()}
+            loading={attachmentSaving}
+            onClick={() => void attachLocalFile(detail.id)}
+          >
+            离线归档附件
+          </Button>
+          {attachmentError ? (
+            <Alert
+              type="error"
+              title="附件归档失败：请确认文件存在、类型和大小符合要求，且当前账户有该订单权限。"
+            />
+          ) : null}
           {detail.attachments.length ? (
             <ul>
               {detail.attachments.map((attachment) => (
