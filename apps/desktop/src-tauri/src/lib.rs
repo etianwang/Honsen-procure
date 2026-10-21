@@ -4,6 +4,7 @@ mod g2_pull_tests;
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::{Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -31,6 +32,9 @@ const AUTHORIZATION_CACHE_WINDOW: Duration = Duration::from_secs(30 * 24 * 60 * 
 const MAX_FAILURES: i64 = 5;
 const MAX_MATERIAL_IMAGE_BYTES: usize = 100 * 1024 * 1024;
 const SYNC_PULL_PAGE_LIMIT: usize = 500;
+const ATTACHMENT_SELECTION_WINDOW: Duration = Duration::from_secs(5 * 60);
+const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_ORDER_ATTACHMENT_BYTES: i64 = 200 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -428,6 +432,27 @@ pub struct RequisitionAttachmentView {
     pub content_type: String,
     pub byte_length: i64,
     pub upload_state: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentSelectionView {
+    pub token: Uuid,
+    pub original_name: String,
+    pub content_type: String,
+    pub byte_length: i64,
+}
+
+struct PendingOrderAttachmentSelection {
+    order_id: Uuid,
+    account_id: Uuid,
+    session_epoch: Uuid,
+    window_label: String,
+    original_name: String,
+    content_type: String,
+    byte_length: u64,
+    expires_at: SystemTime,
+    file: fs::File,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1327,6 +1352,8 @@ pub struct LocalAuthService {
     connection: Mutex<LocalConnection>,
     media_directory: PathBuf,
     captcha: Mutex<Option<LocalCaptcha>>,
+    pending_order_attachment_selections: Mutex<HashMap<Uuid, PendingOrderAttachmentSelection>>,
+    session_epoch: Mutex<Uuid>,
     credential_vault: Box<dyn CredentialVault>,
     test_tls_root: Option<reqwest::Certificate>,
     test_expected_sync_origin_installation: Mutex<Option<String>>,
@@ -1488,6 +1515,8 @@ impl LocalAuthService {
             }),
             media_directory,
             captcha: Mutex::new(None),
+            pending_order_attachment_selections: Mutex::new(HashMap::new()),
+            session_epoch: Mutex::new(Uuid::new_v4()),
             credential_vault,
             test_tls_root,
             test_expected_sync_origin_installation: Mutex::new(None),
@@ -1953,6 +1982,8 @@ impl LocalAuthService {
             .map_err(|_| AuthError::Database)?;
         connection.execute("INSERT INTO local_session (user_id, started_at, last_active_at) VALUES (?1, ?2, ?2)", params![id, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
         connection.session_invalidated = false;
+        drop(connection);
+        self.rotate_session_epoch()?;
         Ok(AuthenticatedSession {
             user_id: account_id,
             username,
@@ -2935,24 +2966,18 @@ impl LocalAuthService {
         self.save_requisition(draft, None, now)
     }
 
-    pub fn ingest_order_attachment(
+    fn stage_order_attachment_selection(
         &self,
         order_id: Uuid,
-        source_path: String,
+        window_label: &str,
+        source: &Path,
         now: SystemTime,
-    ) -> Result<RequisitionAttachmentView, AuthError> {
-        const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
-        const MAX_ORDER_ATTACHMENT_BYTES: i64 = 200 * 1024 * 1024;
-
-        let privileged = self.require_order_mutation(now)?;
+    ) -> Result<AttachmentSelectionView, AuthError> {
+        self.require_order_mutation(now)?;
         self.require_active_scope_for_order(order_id, now)?;
-        let actor_id = self.active_session_user_id()?;
-        let source = PathBuf::from(source_path);
-        if !source.is_absolute() {
-            return Err(AuthError::InvalidInput);
-        }
-        let metadata = fs::metadata(&source).map_err(|_| AuthError::InvalidInput)?;
-        if !metadata.is_file() || metadata.len() > MAX_ATTACHMENT_BYTES {
+        let account_id = self.active_session_user_id()?;
+        let session_epoch = self.current_session_epoch()?;
+        if window_label.is_empty() || !source.is_absolute() {
             return Err(AuthError::InvalidInput);
         }
         let original_name = source
@@ -2961,7 +2986,77 @@ impl LocalAuthService {
             .filter(|value| valid_required_text(value, 255))
             .ok_or(AuthError::InvalidInput)?
             .to_owned();
-        let content_type = attachment_content_type(&source).ok_or(AuthError::InvalidInput)?;
+        let content_type = attachment_content_type(source).ok_or(AuthError::InvalidInput)?;
+        let (file, metadata) = open_user_selected_attachment(source)?;
+        if metadata.len() > MAX_ATTACHMENT_BYTES {
+            return Err(AuthError::InvalidInput);
+        }
+        let token = Uuid::new_v4();
+        let byte_length = i64::try_from(metadata.len()).map_err(|_| AuthError::InvalidInput)?;
+        let mut selections = self
+            .pending_order_attachment_selections
+            .lock()
+            .map_err(|_| AuthError::Database)?;
+        selections.retain(|_, selection| selection.expires_at > now);
+        selections.insert(
+            token,
+            PendingOrderAttachmentSelection {
+                order_id,
+                account_id,
+                session_epoch,
+                window_label: window_label.into(),
+                original_name: original_name.clone(),
+                content_type: content_type.into(),
+                byte_length: metadata.len(),
+                expires_at: now + ATTACHMENT_SELECTION_WINDOW,
+                file,
+            },
+        );
+        Ok(AttachmentSelectionView {
+            token,
+            original_name,
+            content_type: content_type.into(),
+            byte_length,
+        })
+    }
+
+    pub fn ingest_selected_order_attachment(
+        &self,
+        order_id: Uuid,
+        token: Uuid,
+        window_label: &str,
+        now: SystemTime,
+    ) -> Result<RequisitionAttachmentView, AuthError> {
+        let privileged = self.require_order_mutation(now)?;
+        self.require_active_scope_for_order(order_id, now)?;
+        let actor_id = self.active_session_user_id()?;
+        let session_epoch = self.current_session_epoch()?;
+        let mut selection = {
+            let mut selections = self
+                .pending_order_attachment_selections
+                .lock()
+                .map_err(|_| AuthError::Database)?;
+            let pending = selections.get(&token).ok_or(AuthError::InvalidInput)?;
+            if pending.expires_at <= now {
+                selections.remove(&token);
+                return Err(AuthError::InvalidInput);
+            }
+            if pending.account_id != actor_id
+                || pending.session_epoch != session_epoch
+                || pending.order_id != order_id
+                || pending.window_label != window_label
+            {
+                return Err(AuthError::Forbidden);
+            }
+            selections.remove(&token).ok_or(AuthError::InvalidInput)?
+        };
+        let metadata = selection.file.metadata().map_err(|_| AuthError::Database)?;
+        if !metadata.is_file()
+            || metadata.len() != selection.byte_length
+            || metadata.len() > MAX_ATTACHMENT_BYTES
+        {
+            return Err(AuthError::InvalidInput);
+        }
         let attachment_id = Uuid::new_v4();
         let directory = self
             .media_directory
@@ -2970,13 +3065,16 @@ impl LocalAuthService {
         fs::create_dir_all(&directory).map_err(|_| AuthError::Database)?;
         let final_path = directory.join(attachment_id.to_string());
         let temporary_path = directory.join(format!("{}.part", attachment_id));
-        if fs::copy(&source, &temporary_path).is_err() {
+        if selection.file.seek(SeekFrom::Start(0)).is_err()
+            || copy_selected_attachment(&mut selection.file, &temporary_path, selection.byte_length)
+                .is_err()
+        {
             let _ = fs::remove_file(&temporary_path);
             return Err(AuthError::Database);
         }
         let copied = (|| -> Result<RequisitionAttachmentView, AuthError> {
             let bytes = fs::read(&temporary_path).map_err(|_| AuthError::Database)?;
-            if bytes.len() as u64 != metadata.len() {
+            if bytes.len() as u64 != selection.byte_length {
                 return Err(AuthError::Database);
             }
             let checksum = format!("{:x}", Sha256::digest(&bytes));
@@ -2999,14 +3097,15 @@ impl LocalAuthService {
                     |row| row.get(0),
                 )
                 .map_err(|_| AuthError::Database)?;
-            let byte_length = i64::try_from(metadata.len()).map_err(|_| AuthError::InvalidInput)?;
+            let byte_length =
+                i64::try_from(selection.byte_length).map_err(|_| AuthError::InvalidInput)?;
             if existing_bytes > MAX_ORDER_ATTACHMENT_BYTES - byte_length {
                 return Err(AuthError::InvalidInput);
             }
             fs::rename(&temporary_path, &final_path).map_err(|_| AuthError::Database)?;
             let result = transaction.execute(
                 "INSERT INTO local_order_attachments (id, order_id, original_name, content_type, byte_length, local_path, upload_state, checksum, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending_upload', ?7, ?8)",
-                params![attachment_id.to_string(), order_id.to_string(), original_name, content_type, byte_length, final_path.to_string_lossy(), checksum, unix_seconds(now)],
+                params![attachment_id.to_string(), order_id.to_string(), &selection.original_name, &selection.content_type, byte_length, final_path.to_string_lossy(), checksum, unix_seconds(now)],
             );
             if result.is_err() {
                 let _ = fs::remove_file(&final_path);
@@ -3018,8 +3117,8 @@ impl LocalAuthService {
             }
             Ok(RequisitionAttachmentView {
                 id: attachment_id,
-                original_name,
-                content_type: content_type.into(),
+                original_name: selection.original_name,
+                content_type: selection.content_type,
                 byte_length,
                 upload_state: "pending_upload".into(),
             })
@@ -5769,6 +5868,8 @@ impl LocalAuthService {
             generation: Uuid::new_v4(),
         });
         connection.session_invalidated = false;
+        drop(connection);
+        self.rotate_session_epoch()?;
         Ok(())
     }
 
@@ -6083,6 +6184,19 @@ impl LocalAuthService {
     fn active_session_user_id(&self) -> Result<Uuid, AuthError> {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         Self::session_user_id_on_connection(&connection)
+    }
+
+    fn current_session_epoch(&self) -> Result<Uuid, AuthError> {
+        self.session_epoch
+            .lock()
+            .map(|epoch| *epoch)
+            .map_err(|_| AuthError::Database)
+    }
+
+    fn rotate_session_epoch(&self) -> Result<(), AuthError> {
+        let mut epoch = self.session_epoch.lock().map_err(|_| AuthError::Database)?;
+        *epoch = Uuid::new_v4();
+        Ok(())
     }
 
     fn session_user_id_on_connection(connection: &LocalConnection) -> Result<Uuid, AuthError> {
@@ -6498,13 +6612,46 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub fn ingest_order_attachment(
+    pub fn select_order_attachment(
+        window: tauri::WebviewWindow,
         auth: State<'_, LocalAuthService>,
         order_id: Uuid,
-        source_path: String,
+    ) -> Result<Option<super::AttachmentSelectionView>, CommandError> {
+        let selected = rfd::FileDialog::new()
+            .add_filter(
+                "订单附件",
+                &[
+                    "pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png", "heic", "dwg", "zip",
+                ],
+            )
+            .pick_file();
+        selected
+            .map(|path| {
+                auth.stage_order_attachment_selection(
+                    order_id,
+                    window.label(),
+                    &path,
+                    SystemTime::now(),
+                )
+                .map_err(Into::into)
+            })
+            .transpose()
+    }
+
+    #[tauri::command]
+    pub fn ingest_selected_order_attachment(
+        window: tauri::WebviewWindow,
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+        selection_token: Uuid,
     ) -> Result<super::RequisitionAttachmentView, CommandError> {
-        auth.ingest_order_attachment(order_id, source_path, SystemTime::now())
-            .map_err(Into::into)
+        auth.ingest_selected_order_attachment(
+            order_id,
+            selection_token,
+            window.label(),
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -8625,6 +8772,79 @@ fn attachment_content_type(path: &Path) -> Option<&'static str> {
         "zip" => Some("application/zip"),
         _ => None,
     }
+}
+
+fn open_user_selected_attachment(path: &Path) -> Result<(fs::File, fs::Metadata), AuthError> {
+    if source_path_contains_link_or_reparse_point(path)? {
+        return Err(AuthError::InvalidInput);
+    }
+    let file = open_selected_file_without_write_or_delete_sharing(path)?;
+    let metadata = file.metadata().map_err(|_| AuthError::InvalidInput)?;
+    if !metadata.is_file() || metadata_is_reparse_point(&metadata) {
+        return Err(AuthError::InvalidInput);
+    }
+    Ok((file, metadata))
+}
+
+fn source_path_contains_link_or_reparse_point(path: &Path) -> Result<bool, AuthError> {
+    path.ancestors().try_fold(false, |found, ancestor| {
+        if found {
+            return Ok(true);
+        }
+        let metadata = fs::symlink_metadata(ancestor).map_err(|_| AuthError::InvalidInput)?;
+        Ok(metadata.file_type().is_symlink() || metadata_is_reparse_point(&metadata))
+    })
+}
+
+#[cfg(windows)]
+fn open_selected_file_without_write_or_delete_sharing(path: &Path) -> Result<fs::File, AuthError> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|_| AuthError::InvalidInput)
+}
+
+#[cfg(not(windows))]
+fn open_selected_file_without_write_or_delete_sharing(path: &Path) -> Result<fs::File, AuthError> {
+    fs::File::open(path).map_err(|_| AuthError::InvalidInput)
+}
+
+#[cfg(windows)]
+fn metadata_is_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn metadata_is_reparse_point(_: &fs::Metadata) -> bool {
+    false
+}
+
+fn copy_selected_attachment(
+    source: &mut fs::File,
+    temporary_path: &Path,
+    expected_length: u64,
+) -> Result<(), AuthError> {
+    let mut destination = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(temporary_path)
+        .map_err(|_| AuthError::Database)?;
+    let copied = std::io::copy(source, &mut destination).map_err(|_| AuthError::Database)?;
+    if copied != expected_length {
+        let _ = fs::remove_file(temporary_path);
+        return Err(AuthError::InvalidInput);
+    }
+    destination.sync_all().map_err(|_| AuthError::Database)?;
+    Ok(())
 }
 
 fn project_remote_order_comment(
@@ -11716,8 +11936,11 @@ mod tests {
         let source = attachment_source("invoice.PDF", b"offline attachment fixture");
         let expected_name = source.file_name().unwrap().to_str().unwrap().to_owned();
 
+        let selection = service
+            .stage_order_attachment_selection(order_id, "main", &source, now)
+            .unwrap();
         let attachment = service
-            .ingest_order_attachment(order_id, source.to_string_lossy().into_owned(), now)
+            .ingest_selected_order_attachment(order_id, selection.token, "main", now)
             .unwrap();
         assert_eq!(attachment.original_name, expected_name);
         assert_eq!(attachment.content_type, "application/pdf");
@@ -11742,8 +11965,10 @@ mod tests {
         assert_eq!(detail.attachments.len(), 1);
         assert_eq!(detail.attachments[0].id, attachment.id);
 
+        let media_directory = service.media_directory.clone();
+        drop(service);
         fs::remove_file(source).unwrap();
-        fs::remove_dir_all(&service.media_directory).unwrap();
+        fs::remove_dir_all(media_directory).unwrap();
     }
 
     #[test]
@@ -11755,8 +11980,11 @@ mod tests {
         let now = SystemTime::now();
         let order_id = order_attachment_fixture(&service, now);
         let source = attachment_source("restart.pdf", b"restart fixture");
+        let selection = service
+            .stage_order_attachment_selection(order_id, "main", &source, now)
+            .unwrap();
         let attachment = service
-            .ingest_order_attachment(order_id, source.to_string_lossy().into_owned(), now)
+            .ingest_selected_order_attachment(order_id, selection.token, "main", now)
             .unwrap();
         let media_directory = service.media_directory.clone();
         drop(service);
@@ -11793,8 +12021,11 @@ mod tests {
         }
         drop(connection);
         let source = attachment_source("one-byte.pdf", b"x");
+        let selection = service
+            .stage_order_attachment_selection(order_id, "main", &source, now)
+            .unwrap();
         assert!(matches!(
-            service.ingest_order_attachment(order_id, source.to_string_lossy().into_owned(), now),
+            service.ingest_selected_order_attachment(order_id, selection.token, "main", now),
             Err(AuthError::InvalidInput)
         ));
         let directory = service
@@ -11814,20 +12045,14 @@ mod tests {
         let order_id = order_attachment_fixture(&service, now);
         let executable = attachment_source("unsafe.exe", b"not allowed");
         assert!(matches!(
-            service.ingest_order_attachment(
-                order_id,
-                executable.to_string_lossy().into_owned(),
-                now
-            ),
+            service.stage_order_attachment_selection(order_id, "main", &executable, now),
             Err(AuthError::InvalidInput)
         ));
         assert!(matches!(
-            service.ingest_order_attachment(
+            service.stage_order_attachment_selection(
                 order_id,
-                std::env::temp_dir()
-                    .join("missing-honsen-attachment.pdf")
-                    .to_string_lossy()
-                    .into_owned(),
+                "main",
+                &std::env::temp_dir().join("missing-honsen-attachment.pdf"),
                 now,
             ),
             Err(AuthError::InvalidInput)
@@ -11840,11 +12065,7 @@ mod tests {
             .set_len(100 * 1024 * 1024 + 1)
             .unwrap();
         assert!(matches!(
-            service.ingest_order_attachment(
-                order_id,
-                oversized.to_string_lossy().into_owned(),
-                now
-            ),
+            service.stage_order_attachment_selection(order_id, "main", &oversized, now),
             Err(AuthError::InvalidInput)
         ));
 
@@ -11852,8 +12073,11 @@ mod tests {
             "CREATE TRIGGER reject_attachment_insert BEFORE INSERT ON local_order_attachments BEGIN SELECT RAISE(ABORT, 'fixture reject'); END;",
         ).unwrap();
         let valid = attachment_source("receipt.jpg", b"image fixture");
+        let selection = service
+            .stage_order_attachment_selection(order_id, "main", &valid, now)
+            .unwrap();
         assert!(matches!(
-            service.ingest_order_attachment(order_id, valid.to_string_lossy().into_owned(), now),
+            service.ingest_selected_order_attachment(order_id, selection.token, "main", now),
             Err(AuthError::Database)
         ));
         let stored: i64 = service
@@ -11877,6 +12101,159 @@ mod tests {
             fs::remove_file(path).unwrap();
         }
         fs::remove_dir_all(&service.media_directory).unwrap();
+    }
+
+    #[test]
+    fn order_attachment_requires_a_current_one_time_selection_for_the_same_order_and_window() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let order_id = order_attachment_fixture(&service, now);
+        let other_order_id = Uuid::new_v4();
+        service.connection.lock().unwrap().execute(
+            "INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at)
+             SELECT ?1, 'ATTACHMENT-OTHER', country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at
+             FROM local_purchase_orders WHERE id = ?2",
+            params![other_order_id.to_string(), order_id.to_string()],
+        ).unwrap();
+        let source = attachment_source("authorized.pdf", b"selected by a user");
+        let selection = service
+            .stage_order_attachment_selection(order_id, "main", &source, now)
+            .unwrap();
+
+        assert!(matches!(
+            service.ingest_selected_order_attachment(other_order_id, selection.token, "main", now),
+            Err(AuthError::Forbidden)
+        ));
+        assert!(matches!(
+            service.ingest_selected_order_attachment(
+                order_id,
+                selection.token,
+                "other-window",
+                now
+            ),
+            Err(AuthError::Forbidden)
+        ));
+        service
+            .ingest_selected_order_attachment(order_id, selection.token, "main", now)
+            .unwrap();
+        assert!(matches!(
+            service.ingest_selected_order_attachment(order_id, selection.token, "main", now),
+            Err(AuthError::InvalidInput)
+        ));
+
+        let session_selection = service
+            .stage_order_attachment_selection(order_id, "main", &source, now)
+            .unwrap();
+        let username: String = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row("SELECT username FROM local_accounts LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert!(matches!(
+            service.ingest_selected_order_attachment(
+                order_id,
+                session_selection.token,
+                "main",
+                now
+            ),
+            Err(AuthError::Forbidden)
+        ));
+
+        let media_directory = service.media_directory.clone();
+        drop(service);
+        fs::remove_file(source).unwrap();
+        fs::remove_dir_all(media_directory).unwrap();
+    }
+
+    #[test]
+    fn order_attachment_rejects_expired_selection_and_keeps_the_original_open_file() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let order_id = order_attachment_fixture(&service, now);
+        let source = attachment_source("selected.pdf", b"original selection bytes");
+        let expired = service
+            .stage_order_attachment_selection(order_id, "main", &source, now)
+            .unwrap();
+        assert!(matches!(
+            service.ingest_selected_order_attachment(
+                order_id,
+                expired.token,
+                "main",
+                now + ATTACHMENT_SELECTION_WINDOW + Duration::from_secs(1),
+            ),
+            Err(AuthError::InvalidInput)
+        ));
+
+        let selection = service
+            .stage_order_attachment_selection(order_id, "main", &source, now)
+            .unwrap();
+        assert!(fs::rename(&source, source.with_extension("moved")).is_err());
+        let attachment = service
+            .ingest_selected_order_attachment(order_id, selection.token, "main", now)
+            .unwrap();
+        let stored_path: String = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT local_path FROM local_order_attachments WHERE id = ?1",
+                [attachment.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fs::read(stored_path).unwrap(), b"original selection bytes");
+
+        fs::remove_file(source).unwrap();
+        fs::remove_dir_all(&service.media_directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn order_attachment_rejects_a_windows_reparse_point_before_staging() {
+        use std::process::Command;
+
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let order_id = order_attachment_fixture(&service, now);
+        let target_directory =
+            std::env::temp_dir().join(format!("attachment-target-{}", Uuid::new_v4()));
+        let junction = std::env::temp_dir().join(format!("attachment-junction-{}", Uuid::new_v4()));
+        fs::create_dir(&target_directory).unwrap();
+        let target = target_directory.join("link-target.pdf");
+        fs::write(&target, b"private target").unwrap();
+        let status = Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target_directory)
+            .status()
+            .expect("start Windows junction creation");
+        assert!(status.success(), "Windows junction creation must succeed");
+        let linked_file = junction.join("link-target.pdf");
+
+        assert!(matches!(
+            service.stage_order_attachment_selection(order_id, "main", &linked_file, now),
+            Err(AuthError::InvalidInput)
+        ));
+
+        fs::remove_dir(junction).unwrap();
+        fs::remove_file(target).unwrap();
+        fs::remove_dir(target_directory).unwrap();
+        if service.media_directory.exists() {
+            fs::remove_dir_all(&service.media_directory).unwrap();
+        }
     }
 
     #[test]

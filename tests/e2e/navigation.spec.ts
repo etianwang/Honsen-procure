@@ -1874,7 +1874,7 @@ test('authenticated desktop switches between cached authorization scopes', async
               selection?: { projectId: string }
               filter?: { query?: string }
               orderId?: string
-              sourcePath?: string
+              selectionToken?: string
             },
           ) {
             if (command === 'issue_local_captcha')
@@ -1976,10 +1976,17 @@ test('authenticated desktop switches between cached authorization scopes', async
               })
             if (command === 'save_requisition_draft')
               return Promise.resolve({ totalMinor: '0' })
-            if (command === 'ingest_order_attachment') {
+            if (command === 'select_order_attachment')
+              return Promise.resolve({
+                token: '00000000-0000-4000-8000-000000000013',
+                originalName: 'archive.pdf',
+                contentType: 'application/pdf',
+                byteLength: 1,
+              })
+            if (command === 'ingest_selected_order_attachment') {
               attachmentArchived = true
               Object.assign(window, {
-                archivedAttachmentPath: args?.sourcePath,
+                archivedAttachmentToken: args?.selectionToken,
               })
               return Promise.resolve({
                 id: '00000000-0000-4000-8000-000000000012',
@@ -2042,7 +2049,9 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     'pending_confirmation',
   )
-  await page.getByLabel('本机附件绝对路径').fill('C:\\fixtures\\archive.pdf')
+  await expect(page.getByLabel('本机附件绝对路径')).toHaveCount(0)
+  await page.getByRole('button', { name: '选择本机附件' }).click()
+  await expect(page.getByText('已选择：archive.pdf · 1 字节')).toBeVisible()
   await page.getByRole('button', { name: '离线归档附件' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     'archive.pdf',
@@ -2050,10 +2059,10 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(
     page.evaluate(
       () =>
-        (window as Window & { archivedAttachmentPath?: string })
-          .archivedAttachmentPath,
+        (window as Window & { archivedAttachmentToken?: string })
+          .archivedAttachmentToken,
     ),
-  ).resolves.toBe('C:\\fixtures\\archive.pdf')
+  ).resolves.toBe('00000000-0000-4000-8000-000000000013')
   await page.getByRole('button', { name: '确认订单' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     'confirmed',

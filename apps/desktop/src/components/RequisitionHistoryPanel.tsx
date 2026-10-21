@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Input } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type {
+  AttachmentSelection,
   RequisitionApi,
   RequisitionDetail,
   RequisitionHistoryCursor,
@@ -15,7 +16,8 @@ type Props = {
     RequisitionApi,
     | 'listRequisitionHistory'
     | 'getRequisitionDetail'
-    | 'ingestOrderAttachment'
+    | 'selectOrderAttachment'
+    | 'ingestSelectedOrderAttachment'
     | 'withdrawRequisition'
     | 'issueOwnerFormalOrder'
   >
@@ -50,7 +52,8 @@ export function RequisitionHistoryPanel({
   const [detailLoading, setDetailLoading] = useState(false)
   const [withdrawError, setWithdrawError] = useState(false)
   const [issueError, setIssueError] = useState(false)
-  const [attachmentPath, setAttachmentPath] = useState('')
+  const [attachmentSelection, setAttachmentSelection] =
+    useState<AttachmentSelection | null>(null)
   const [attachmentError, setAttachmentError] = useState(false)
   const [attachmentSaving, setAttachmentSaving] = useState(false)
   const detailRequest = useRef(0)
@@ -128,14 +131,28 @@ export function RequisitionHistoryPanel({
     }
   }
 
-  async function attachLocalFile(orderId: string) {
-    const sourcePath = attachmentPath.trim()
-    if (!sourcePath) return
+  async function selectLocalAttachment(orderId: string) {
     setAttachmentError(false)
     setAttachmentSaving(true)
     try {
-      await api.ingestOrderAttachment(orderId, sourcePath)
-      setAttachmentPath('')
+      setAttachmentSelection(await api.selectOrderAttachment(orderId))
+    } catch {
+      setAttachmentError(true)
+    } finally {
+      setAttachmentSaving(false)
+    }
+  }
+
+  async function attachSelectedLocalFile(orderId: string) {
+    if (!attachmentSelection) return
+    setAttachmentError(false)
+    setAttachmentSaving(true)
+    try {
+      await api.ingestSelectedOrderAttachment(
+        orderId,
+        attachmentSelection.token,
+      )
+      setAttachmentSelection(null)
       await openDetail(orderId)
     } catch {
       setAttachmentError(true)
@@ -306,19 +323,22 @@ export function RequisitionHistoryPanel({
             总额：{detail.totalMinor} {detail.primaryCurrency}
           </p>
           <h4>附件</h4>
-          <label>
-            本机附件绝对路径
-            <Input
-              value={attachmentPath}
-              onChange={(event) => setAttachmentPath(event.target.value)}
-              maxLength={4096}
-              placeholder="例如 C:\\Documents\\receipt.pdf"
-            />
-          </label>
           <Button
-            disabled={!attachmentPath.trim()}
             loading={attachmentSaving}
-            onClick={() => void attachLocalFile(detail.id)}
+            onClick={() => void selectLocalAttachment(detail.id)}
+          >
+            选择本机附件
+          </Button>
+          {attachmentSelection ? (
+            <p>
+              已选择：{attachmentSelection.originalName} ·{' '}
+              {attachmentSelection.byteLength} 字节
+            </p>
+          ) : null}
+          <Button
+            disabled={!attachmentSelection}
+            loading={attachmentSaving}
+            onClick={() => void attachSelectedLocalFile(detail.id)}
           >
             离线归档附件
           </Button>
