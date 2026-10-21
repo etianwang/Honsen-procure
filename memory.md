@@ -654,7 +654,8 @@ Build shared contracts and exact money/quantity helpers only:
 
 ## T04 final independent QA handoff — 2026-10-21
 
+- FINAL REVIEW UPDATE: `docs/planning/2026-10-21-t04-final-review-blockers.md` records two newly confirmed category sync blockers. Prior QA PASS is retained only for its tested cases; PR #15 is not approved for merge until these are fixed and independently rechecked.
 - T04 QA PASS for the bounded category slice; desktop evidence is for candidate `8d16317c0c1864890014f8085aad44769fc50dd3`, with the unchanged production boundary at PR head `3ac43fc53da13442f6444399a262e3756c145589`. Details, results and scope are in `docs/planning/2026-10-21-t04-desktop-final-recheck.md`.
-- BLOCKER: none established for this bounded independent QA. Formal release holds are not cleared by this result.
+- BLOCKER: business-code validator mismatch and cross-device duplicate-code Pull failure, as documented above. Formal release holds are not cleared by this result.
 - WARNING: downgrade to software unaware of migration 0049 was not tested. Historical snake_case Pull used a synthetic server change-log fixture; it was not a historical-client Push.
 - DEFERRED: T11-A, T13, G4, PostgreSQL release acceptance and Formal hold retain their prior states. PR #15 remains Draft pending authorized review; no merge performed.
