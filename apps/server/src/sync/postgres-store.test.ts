@@ -112,6 +112,23 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       rejected: '1',
       changes: '0',
     })
+    const pulled = await store.pullChanges({
+      actor: { id: actorId, roles: ['administrator'], installationId },
+      cursor: '0',
+      limit: 500,
+    })
+    expect(
+      pulled.changes.filter(
+        (change) => change.entityId === winner.event.entityId,
+      ),
+    ).toMatchObject([
+      { entityType: 'material_category', version: 1 },
+      {
+        entityType: 'material_category',
+        version: 2,
+        payload: { name: 'Renamed', isActive: false },
+      },
+    ])
   })
 
   it('keeps RFQ snapshots immutable across retry, status transitions and stale writes', async () => {
