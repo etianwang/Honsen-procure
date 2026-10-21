@@ -1122,6 +1122,13 @@ pub enum ReferenceMasterDataInput {
         is_active: bool,
         version: i64,
     },
+    MaterialCategory {
+        id: Uuid,
+        business_code: String,
+        name: String,
+        is_active: bool,
+        version: i64,
+    },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -2197,6 +2204,22 @@ impl LocalAuthService {
         {
             records.push(row.map_err(|_| AuthError::Database)?);
         }
+        let mut categories = connection.prepare("SELECT id, business_code, name, is_active, version FROM local_material_categories WHERE deleted_at IS NULL ORDER BY name").map_err(|_| AuthError::Database)?;
+        for row in categories
+            .query_map([], |row| {
+                Ok(ReferenceMasterDataInput::MaterialCategory {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    business_code: row.get(1)?,
+                    name: row.get(2)?,
+                    is_active: row.get::<_, i64>(3)? != 0,
+                    version: row.get(4)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+        {
+            records.push(row.map_err(|_| AuthError::Database)?);
+        }
         Ok(records)
     }
 
@@ -2279,6 +2302,7 @@ impl LocalAuthService {
             ReferenceMasterDataInput::Department { id, .. } => ("department", *id),
             ReferenceMasterDataInput::Team { id, .. } => ("team", *id),
             ReferenceMasterDataInput::Unit { id, .. } => ("unit", *id),
+            ReferenceMasterDataInput::MaterialCategory { id, .. } => ("material_category", *id),
         };
         let payload = serde_json::to_string(&record).map_err(|_| AuthError::InvalidInput)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
@@ -2332,6 +2356,14 @@ impl LocalAuthService {
                 )
                 .optional()
                 .map_err(|_| AuthError::Database)?,
+            "material_category" => transaction
+                .query_row(
+                    "SELECT is_active FROM local_material_categories WHERE id = ?1",
+                    [entity_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?,
             _ => None,
         };
         let audit_next_active = match &record {
@@ -2341,6 +2373,7 @@ impl LocalAuthService {
             | ReferenceMasterDataInput::Unit { is_active, .. }
             | ReferenceMasterDataInput::Department { is_active, .. }
             | ReferenceMasterDataInput::Team { is_active, .. } => Some(*is_active),
+            ReferenceMasterDataInput::MaterialCategory { is_active, .. } => Some(*is_active),
         };
         match record {
             ReferenceMasterDataInput::Country {
@@ -2475,10 +2508,26 @@ impl LocalAuthService {
                 )?;
                 transaction.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
+            ReferenceMasterDataInput::MaterialCategory {
+                id,
+                business_code,
+                name,
+                is_active,
+                version,
+            } => {
+                validate_reference(&business_code, &name, version)?;
+                assert_immutable_local_business_code(
+                    &transaction,
+                    "local_material_categories",
+                    id,
+                    &business_code,
+                )?;
+                transaction.execute("INSERT INTO local_material_categories (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+            }
         }
         if matches!(
             entity_type,
-            "country" | "project" | "site" | "unit" | "department" | "team"
+            "country" | "project" | "site" | "unit" | "department" | "team" | "material_category"
         ) {
             let action = match (audit_prior_active, audit_next_active) {
                 (None, _) => "create",
@@ -7121,6 +7170,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0047_sync_account_pull_state",
             include_str!("../migrations/0047_sync_account_pull_state.sql"),
         ),
+        (
+            "0048_material_category_audit",
+            include_str!("../migrations/0048_material_category_audit.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -8664,6 +8717,9 @@ fn project_remote_reference_master_data(
             assert_immutable_local_business_code(transaction, "local_units", *id, business_code)?;
             transaction.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, *is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
         }
+        // Categories have their own Pull projector because they are not part of
+        // the legacy reference-master-data contract.
+        ReferenceMasterDataInput::MaterialCategory { .. } => return Err(AuthError::InvalidInput),
     }
     Ok(())
 }
@@ -14694,6 +14750,104 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        assert_eq!(outbox_count, 3);
+    }
+
+    #[test]
+    fn material_categories_are_authorized_audited_and_never_deleted() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let id = Uuid::new_v4();
+        let category = |name: &str, is_active: bool, version: i64| {
+            ReferenceMasterDataInput::MaterialCategory {
+                id,
+                business_code: "fixture-category".into(),
+                name: name.into(),
+                is_active,
+                version,
+            }
+        };
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_reference_master_data(category("Electrical", true, 1), now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: Uuid::new_v4(),
+                    username: "administrator".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        service
+            .save_reference_master_data(category("Electrical", true, 1), now)
+            .unwrap();
+        service
+            .save_reference_master_data(category("Electrical revised", true, 2), now)
+            .unwrap();
+        service
+            .save_reference_master_data(category("Electrical revised", false, 3), now)
+            .unwrap();
+        assert!(
+            service
+                .list_reference_master_data(now)
+                .unwrap()
+                .contains(&category("Electrical revised", false, 3))
+        );
+        assert_eq!(
+            service.save_reference_master_data(
+                ReferenceMasterDataInput::MaterialCategory {
+                    id,
+                    business_code: "changed".into(),
+                    name: "Electrical revised".into(),
+                    is_active: false,
+                    version: 4
+                },
+                now
+            ),
+            Err(AuthError::ImmutableBusinessCode)
+        );
+        let connection = service.connection.lock().unwrap();
+        let actions: Vec<String> = connection.prepare("SELECT action FROM local_master_data_audit_entries WHERE entity_type = 'material_category' AND entity_id = ?1 ORDER BY rowid").unwrap().query_map([id.to_string()], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
+        assert_eq!(actions, ["create", "edit", "disable"]);
+        let category_row: (String, i64) = connection
+            .query_row(
+                "SELECT name, is_active FROM local_material_categories WHERE id = ?1",
+                [id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(category_row, ("Electrical revised".into(), 0));
+        let outbox_count: i64 = connection.query_row("SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?1", [id.to_string()], |row| row.get(0)).unwrap();
         assert_eq!(outbox_count, 3);
     }
 

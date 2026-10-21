@@ -1,6 +1,13 @@
 # Honsen采购管理系统（HONSEN Procure）— Development Memory
 
-**Last updated:** 2026-10-20
+**Last updated:** 2026-10-21
+
+## T04 material-category maintenance — READY_FOR_RECHECK (2026-10-21)
+
+- **Scope:** branch `codex/t04-material-category-maintenance` starts at V1 unified baseline `d15a5f3039430819aa220bfa312f4db5be251c03`. It exposes the existing `local_material_categories` schema through the trusted master-data boundary and one Master Data UI tab. Administrators can list, add, rename and enable/disable categories. There is no delete command or physical deletion; existing `local_materials.category_id` foreign-key references remain untouched. Category business codes are immutable.
+- **Consistency:** every category mutation validates input, writes the category, appends `local_master_data_audit_entries`, and inserts the established `material_category` outbox event in one SQLite transaction. Migration `0048_material_category_audit` extends the existing audit CHECK constraint, preserving all prior audit rows. Existing shared sync entity support and the dedicated desktop Pull projection are reused; no new protocol or server path was introduced.
+- **Evidence:** `cargo fmt --check`; focused Rust `material_categories_are_authorized_audited_and_never_deleted` 1/1; `cargo check`; desktop strict TypeScript typecheck; Vite production build; and Playwright `administrator can create, rename and disable a material category offline` 1/1 all pass on E:-isolated build/cache directories. The first focused test correctly failed before migration 0048 because the prior audit CHECK rejected `material_category`; the transaction rolled back rather than emitting a partial category/outbox record.
+- **DEFERRED:** independent QA should re-run the focused Rust/Playwright evidence and exercise actual Push/Pull convergence against a disposable PostgreSQL environment. **WARNING:** Vite reports the pre-existing >500 kB bundle-size advisory. T04 parent and all milestones remain OPEN. T13 backup/restore remains `BLOCKED_DECISION`.
 
 ## T10-D / G4 production draft-order conflict resolver — READY_FOR_RECHECK (2026-10-20)
 

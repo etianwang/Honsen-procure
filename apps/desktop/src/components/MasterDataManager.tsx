@@ -66,6 +66,10 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
       ),
     [items],
   )
+  const categories = useMemo(
+    () => items.filter((item): item is Extract<ReferenceMasterDataView, { kind: 'material_category' }> => item.kind === 'material_category'),
+    [items],
+  )
 
   async function save(record: ReferenceMasterDataView) {
     try {
@@ -180,10 +184,37 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
               />
             ),
           },
+          {
+            key: 'material-categories',
+            label: '材料分类',
+            children: <MaterialCategoryEditor categories={categories} canEdit={canEdit} save={save} status={status} />,
+          },
         ]}
       />
     </Card>
   )
+}
+
+function MaterialCategoryEditor({ categories, canEdit, save, status }: {
+  categories: Extract<ReferenceMasterDataView, { kind: 'material_category' }>[]
+  canEdit: boolean
+  save: (item: ReferenceMasterDataView) => Promise<void>
+  status: (item: ReferenceMasterDataView) => ReactNode
+}) {
+  const [code, setCode] = useState('')
+  const [name, setName] = useState('')
+  return <Space orientation="vertical" style={{ width: '100%' }}>
+    <Space wrap>
+      <Input aria-label="材料分类代码" value={code} onChange={(event) => setCode(event.target.value)} disabled={!canEdit} />
+      <Input aria-label="材料分类名称" value={name} onChange={(event) => setName(event.target.value)} disabled={!canEdit} />
+      <Button disabled={!canEdit || !code.trim() || !name.trim()} onClick={() => void save({ kind: 'material_category', id: newId(), business_code: code.trim(), name: name.trim(), is_active: true, version: 1 })}>新增材料分类</Button>
+    </Space>
+    <Table rowKey="id" pagination={false} dataSource={categories} columns={[
+      { title: '代码', dataIndex: 'business_code' },
+      { title: '名称', render: (_, row) => <Input aria-label={`编辑材料分类名称-${row.business_code}`} defaultValue={row.name} disabled={!canEdit} onBlur={(event) => { if (event.target.value !== row.name) void save({ ...row, name: event.target.value, version: row.version + 1 }) }} /> },
+      { title: '状态', render: (_, row) => status(row) },
+    ]} />
+  </Space>
 }
 
 function DepartmentEditor({
