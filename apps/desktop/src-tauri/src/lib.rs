@@ -5416,7 +5416,7 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, rowid LIMIT ?2")
+            .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT') ORDER BY o.created_at, o.rowid LIMIT ?2")
             .map_err(|_| AuthError::Database)?
             .query_map(params![account_id.to_string(), limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -5895,7 +5895,8 @@ impl LocalAuthService {
         if events.is_empty() {
             return Ok(SyncPushView {
                 accepted_count: 0,
-                pending_count: 0,
+                pending_count: usize::try_from(self.sync_status(now)?.pending_count)
+                    .map_err(|_| AuthError::Database)?,
             });
         }
         self.ensure_active_sync_account(account_id)?;
@@ -5961,7 +5962,8 @@ impl LocalAuthService {
         self.ensure_active_sync_account(account_id)?;
         Ok(SyncPushView {
             accepted_count,
-            pending_count: self.pending_sync_events(100, now)?.len(),
+            pending_count: usize::try_from(self.sync_status(now)?.pending_count)
+                .map_err(|_| AuthError::Database)?,
         })
     }
 
@@ -17426,18 +17428,22 @@ mod tests {
             )
             .unwrap();
         let event_id = Uuid::new_v4();
+        let category_id = Uuid::new_v4();
+        let unrelated_id = Uuid::new_v4();
         {
             let mut connection = service.connection.lock().unwrap();
             let tx = connection.transaction().unwrap();
             insert_local_sync_outbox(
                 &tx,
                 "material_category",
-                Uuid::new_v4(),
+                category_id,
                 "{\"businessCode\":\"CAT-1\"}",
                 now,
             )
             .unwrap();
             tx.execute("UPDATE local_sync_outbox SET event_id = ?1 WHERE rowid = (SELECT MAX(rowid) FROM local_sync_outbox)", [event_id.to_string()]).unwrap();
+            insert_local_sync_outbox(&tx, "material_category", category_id, "{}", now).unwrap();
+            insert_local_sync_outbox(&tx, "material", unrelated_id, "{}", now).unwrap();
             tx.commit().unwrap();
         }
         service
@@ -17459,6 +17465,11 @@ mod tests {
             [event_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).unwrap();
         assert_eq!(row, (None, None, Some("CATEGORY_CODE_CONFLICT".into())));
+        drop(connection);
+        let pending = service.pending_sync_events(100, now).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].entity_id, unrelated_id);
+        assert_eq!(service.sync_status(now).unwrap().pending_count, 3);
     }
 
     #[test]
