@@ -1,5 +1,6 @@
 import {
   exchangeRateSchema,
+  categoryRepairRequestSchema,
   materialCategorySchema,
   projectDefaultsSchema,
   referenceMasterDataSchema,
@@ -62,6 +63,18 @@ const rfqPayloadSchema = z.strictObject({
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
+
+  async repairCategory(actor: SyncActor, input: unknown) {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    )
+      throw new CategoryRepairError('FORBIDDEN')
+    const request = categoryRepairRequestSchema.parse(input)
+    if (!this.store.repairCategory) throw new CategoryRepairError('UNAVAILABLE')
+    return this.store.repairCategory({ actor, request })
+  }
 
   async push(actor: SyncActor, input: unknown): Promise<SyncPushResponse> {
     const request = syncPushRequestSchema.parse(input)
@@ -283,6 +296,12 @@ export class SyncService {
       previousCountryId === nextCountryId ||
       !(await this.store.hasProjectBusinessUse(event.entityId))
     )
+  }
+}
+
+export class CategoryRepairError extends Error {
+  constructor(public readonly code: 'FORBIDDEN' | 'UNAVAILABLE' | 'CONFLICT') {
+    super(code)
   }
 }
 

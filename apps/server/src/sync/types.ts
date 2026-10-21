@@ -3,6 +3,7 @@ import type {
   SyncChange,
   SyncEvent,
   SyncEventResult,
+  CategoryRepairRequest,
 } from '@honsen/shared'
 
 export type SyncActor = {
@@ -12,6 +13,10 @@ export type SyncActor = {
 }
 
 export type SyncStore = {
+  repairCategory?(input: {
+    actor: SyncActor
+    request: CategoryRepairRequest
+  }): Promise<{ categoryId: string; version: number }>
   pushEvent(input: {
     event: SyncEvent
     installationId: string
