@@ -30,6 +30,90 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     await pool!.end()
   })
 
+  it('serializes distinct category IDs competing for one code and replays the conflict', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const businessCode = `CAT-${randomUUID()}`
+    const installationId = randomUUID()
+    const makeInput = () => {
+      const id = randomUUID()
+      return {
+        actorId,
+        installationId,
+        event: {
+          eventId: randomUUID(),
+          entityType: 'material_category' as const,
+          entityId: id,
+          operation: 'upsert' as const,
+          baseVersion: 0,
+          payload: {
+            id,
+            businessCode,
+            name: 'Fixture',
+            isActive: true,
+            version: 1,
+          },
+        },
+      }
+    }
+    const inputs = [makeInput(), makeInput()]
+    const results = await Promise.all(
+      inputs.map((input) => store.pushEvent(input)),
+    )
+    expect(
+      results.filter((result) => result.status === 'accepted'),
+    ).toHaveLength(1)
+    const loser = results.findIndex(
+      (result) => result.errorCode === 'CATEGORY_CODE_CONFLICT',
+    )
+    expect(loser).toBeGreaterThanOrEqual(0)
+    expect(await store.pushEvent(inputs[loser]!)).toMatchObject({
+      eventId: inputs[loser]!.event.eventId,
+      status: 'validation_error',
+      errorCode: 'CATEGORY_CODE_CONFLICT',
+    })
+    const rows = await pool!.query(
+      "SELECT entity_id FROM sync_entities WHERE entity_type = 'material_category' AND payload_json->>'businessCode' = $1",
+      [businessCode],
+    )
+    expect(rows.rowCount).toBe(1)
+    const winner = inputs[loser === 0 ? 1 : 0]!
+    expect(await store.pushEvent(winner)).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(
+      await store.pushEvent({
+        ...winner,
+        event: {
+          ...winner.event,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: {
+            ...winner.event.payload,
+            name: 'Renamed',
+            isActive: false,
+            version: 2,
+          },
+        },
+      }),
+    ).toMatchObject({ status: 'accepted', serverVersion: 2 })
+    expect(
+      await store.pushEvent({
+        ...winner,
+        event: { ...winner.event, eventId: randomUUID(), baseVersion: 0 },
+      }),
+    ).toMatchObject({ status: 'conflict', serverVersion: 2 })
+    const rejectedEffects = await pool!.query(
+      `SELECT (SELECT count(*) FROM sync_events WHERE event_id = $1 AND result_status = 'validation_error' AND result_error_code = 'CATEGORY_CODE_CONFLICT') AS rejected,
+              (SELECT count(*) FROM server_change_log WHERE entity_id = $2) AS changes`,
+      [inputs[loser]!.event.eventId, inputs[loser]!.event.entityId],
+    )
+    expect(rejectedEffects.rows[0]).toMatchObject({
+      rejected: '1',
+      changes: '0',
+    })
+  })
+
   it('keeps RFQ snapshots immutable across retry, status transitions and stale writes', async () => {
     const store = new PostgresSyncStore(pool!)
     const service = new SyncService(store)

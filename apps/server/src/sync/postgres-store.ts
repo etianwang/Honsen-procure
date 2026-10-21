@@ -27,6 +27,7 @@ const globallyVisibleEntityTypes = [
 type StoredEvent = {
   event_id: string
   result_status: SyncEventResult['status']
+  result_error_code: string | null
   server_version: string | null
   origin_account_id: string | null
   origin_installation_id: string | null
@@ -67,7 +68,7 @@ export class PostgresSyncStore implements SyncStore {
         `${input.event.entityType}:${input.event.entityId}`,
       ])
       const prior = await client.query<StoredEvent>(
-        `SELECT event_id, result_status, server_version, origin_account_id,
+        `SELECT event_id, result_status, result_error_code, server_version, origin_account_id,
                 origin_installation_id, origin_status
          FROM sync_events WHERE event_id = $1`,
         [input.event.eventId],
@@ -539,8 +540,10 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
-      await client.query(
-        `INSERT INTO sync_entities
+      await client.query('SAVEPOINT category_entity_write')
+      try {
+        await client.query(
+          `INSERT INTO sync_entities
            (entity_type, entity_id, version, is_deleted, payload_json, updated_by)
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (entity_type, entity_id) DO UPDATE SET
@@ -549,19 +552,51 @@ export class PostgresSyncStore implements SyncStore {
            payload_json = EXCLUDED.payload_json,
            updated_by = EXCLUDED.updated_by,
            updated_at = NOW()`,
-        [
-          input.event.entityType,
-          input.event.entityId,
-          serverVersion,
-          deleted,
-          defaultsPayload ??
-            ratePayload ??
-            taxPayload ??
-            unitPayload ??
-            input.event.payload,
-          input.actorId,
-        ],
-      )
+          [
+            input.event.entityType,
+            input.event.entityId,
+            serverVersion,
+            deleted,
+            defaultsPayload ??
+              ratePayload ??
+              taxPayload ??
+              unitPayload ??
+              input.event.payload,
+            input.actorId,
+          ],
+        )
+      } catch (error) {
+        if (
+          input.event.entityType !== 'material_category' ||
+          typeof error !== 'object' ||
+          error === null ||
+          !('constraint' in error) ||
+          error.constraint !== 'material_category_business_code_unique'
+        )
+          throw error
+        await client.query('ROLLBACK TO SAVEPOINT category_entity_write')
+        await client.query(
+          `INSERT INTO sync_events
+           (event_id, installation_id, actor_id, origin_account_id, origin_installation_id, origin_status, origin_attested_at, entity_type, entity_id, operation, base_version, result_status, result_error_code, server_version)
+           VALUES ($1, $2, $3, $3, $2, 'attested', NOW(), $4, $5, $6, $7, 'validation_error', 'CATEGORY_CODE_CONFLICT', NULL)`,
+          [
+            input.event.eventId,
+            input.installationId,
+            input.actorId,
+            input.event.entityType,
+            input.event.entityId,
+            input.event.operation,
+            input.event.baseVersion,
+          ],
+        )
+        await client.query('COMMIT')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+          errorCode: 'CATEGORY_CODE_CONFLICT',
+        }
+      }
       await client.query(
         `INSERT INTO sync_events
            (event_id, installation_id, actor_id, origin_account_id, origin_installation_id, origin_status, origin_attested_at, entity_type, entity_id, operation, base_version, result_status, server_version)
@@ -1777,6 +1812,7 @@ function eventResult(row: StoredEvent): SyncEventResult {
   return {
     eventId: row.event_id,
     status: row.result_status,
+    ...(row.result_error_code ? { errorCode: row.result_error_code } : {}),
     serverVersion:
       row.server_version === null ? null : Number(row.server_version),
   }
