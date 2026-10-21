@@ -569,10 +569,16 @@ test('administrator can create, rename and disable a material category offline',
   await page.getByLabel('材料分类代码').fill('fixture-electrical')
   await page.getByLabel('材料分类名称').fill('Electrical')
   await page.getByRole('button', { name: '新增材料分类' }).click()
-  await expect(page.getByLabel('编辑材料分类名称-fixture-electrical')).toHaveValue('Electrical')
-  await page.getByLabel('编辑材料分类名称-fixture-electrical').fill('Electrical revised')
+  await expect(
+    page.getByLabel('编辑材料分类名称-fixture-electrical'),
+  ).toHaveValue('Electrical')
+  await page
+    .getByLabel('编辑材料分类名称-fixture-electrical')
+    .fill('Electrical revised')
   await page.getByLabel('编辑材料分类名称-fixture-electrical').blur()
-  await expect(page.getByLabel('编辑材料分类名称-fixture-electrical')).toHaveValue('Electrical revised')
+  await expect(
+    page.getByLabel('编辑材料分类名称-fixture-electrical'),
+  ).toHaveValue('Electrical revised')
   await page.getByRole('button', { name: /停\s*用/ }).click()
   await expect(page.getByRole('button', { name: /启\s*用/ })).toBeVisible()
   await expect(browserErrors).toEqual([])
