@@ -39,6 +39,12 @@ The Playwright proof verifies that the raw absolute-path input is absent, select
 
 A fresh Windows `New-Item -ItemType SymbolicLink` attempt against a QA-owned file returned: `Administrator privilege required for this operation.` The previously verified junction case is a real reparse-point proof, but it is not evidence for a terminal file symlink. Therefore this QA does not claim PASS.
 
+## Final symlink-evidence environment check — 2026-10-21
+
+The current isolated Windows QA account is `desktop-rtp971k\this pc`. `whoami /priv` lists no `SeCreateSymbolicLinkPrivilege`, and the AppModelUnlock Developer Mode values are not available to this non-elevated session. The earlier fresh symlink creation attempt therefore cannot be retried meaningfully here; it already returned `Administrator privilege required for this operation` before a link object existed. No native file-dialog selection was attempted, so a chooser cancellation, missing source path, or test-harness failure cannot be misreported as production rejection.
+
+**Final QA verdict remains BLOCKED_ENV.** The independently verified real `mklink /J` junction rejection remains valid reparse evidence, but the required terminal file-symlink creation and production rejection proof needs a Windows account with Developer Mode or `SeCreateSymbolicLinkPrivilege`. No production candidate file, attachment SQLite row, managed file, G4/PostgreSQL/Formal state, push, PR, or merge changed in this supplement.
+
 No PostgreSQL, G4/Native matrix, COS/archive, push, PR, merge, production database, or production-source change occurred. The QA worktree is otherwise clean; its only intended change is this evidence document.
 
 ## Independent recheck entry
