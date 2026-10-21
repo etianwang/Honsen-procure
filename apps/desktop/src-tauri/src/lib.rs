@@ -11948,6 +11948,21 @@ mod tests {
     }
 
     #[test]
+    fn category_audit_upgrade_preserves_existing_exchange_rate_history() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0043_exchange_rate_audit.sql"))
+            .unwrap();
+        connection.execute("DELETE FROM local_schema_migrations WHERE version = '0048_material_category_audit'", []).unwrap();
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, previous_json, next_json, created_at) VALUES ('old-rate', 'actor', 'exchange_rate', 'rate', 'create', NULL, '{\"rate\":1}', 42)", []).unwrap();
+
+        migrate(&mut connection).unwrap();
+        let saved: (String, String, i64) = connection.query_row("SELECT entity_type, next_json, created_at FROM local_master_data_audit_entries WHERE id = 'old-rate'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(saved, ("exchange_rate".into(), "{\"rate\":1}".into(), 42));
+    }
+
+    #[test]
     fn pull_continues_only_after_a_full_advancing_page() {
         let change = SyncPullChangeInput {
             cursor: "501".into(),
