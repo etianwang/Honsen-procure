@@ -2,6 +2,15 @@
 
 **Last updated:** 2026-10-21
 
+## T04 FIX2-B continuation — PARTIAL / NOT READY TO MERGE (2026-10-21)
+
+- Production checkpoint `fa968c04c8a2c8c2b185e37225358158fb7ee608` follows `d832b46c8fdde375988302fc5f842990c3aab67a` on `codex/t04-material-category-maintenance`; the preceding formatting checkpoint is `074ac8218e954d8da33fbd31c98ff9a343ca09b5`. Both were pushed. This handoff is a documentation-only child commit; check Git for its exact SHA. PR #15 remains Draft.
+- The desktop Outbox now holds `CATEGORY_CODE_CONFLICT` and later pending events for the same category without acknowledging, superseding or deleting them; unrelated entities can still send. The pending count includes held records. The focused Rust conflict regression, existing permanent-failure regression and `cargo fmt --check` passed with this source. Server event-ID replay returns the stored conflict, so eventual recovery requires a new event ID linked to the retained original; that recovery is not yet implemented.
+- **BLOCKER:** migration 008 registers historical duplicate categories server-side, but the desktop Pull projector does not consume that registry. SQLite category uniqueness and material foreign keys can still roll back a Pull page. Persistent quarantine, dependent-material handling, cursor advancement and safe replay remain unimplemented and untested. The existing immutable category-code check also requires an authenticated, verifiable repair path before any changed code may be projected.
+- **BLOCKER:** an authenticated, administrator-authorized, audited and idempotent server repair API and its concurrency/replay handling remain unimplemented. Outbox unblocking and a new-event relationship after successful repair are likewise absent. No PostgreSQL or two-desktop repair/Pull test was run in this continuation; those missing tests affect the requested recovery and data-consistency acceptance items.
+- **BLOCKER:** independent recheck has not occurred; do not mark READY_FOR_INDEPENDENT_RECHECK or independent QA PASS. Latest GitHub quality for `fa968c04` was still running when checked. Prior CI failure `39642541535` was a `memory.md` formatting violation; checkpoint `074ac821` addressed the reported formatting only.
+- **DEFERRED:** FIX2-C administrator UI and real two-device acceptance remain separate. **WARNING:** E:-isolated task build directories contain disposable local build artifacts; no database, credentials or large evidence was committed. The selected production worktree was clean before this handoff. G4, T11-A, T13, PR #13 and release holds were not changed.
+
 ## T04 FIX1 — BLOCKED_ENV / NOT READY TO MERGE (2026-10-21)
 
 - Checkpoint code SHA `d97f0d885e7d705dfe7606dd3117ff047ea74c56` on `codex/t04-material-category-maintenance`. The preceding READY_FOR_RECHECK entry is historical and was superseded by independent QA FAIL at `a0a8aa0`; independent QA evidence `6f2fc889691d3620f9efd073cbe502385be46a03` is pushed on `codex/qa-t04-material-category`.
