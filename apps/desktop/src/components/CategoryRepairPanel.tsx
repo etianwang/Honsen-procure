@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import type {
   CategoryRepairApi,
   LocalCategoryConflict,
+  PendingCategoryRepair,
   RemoteCategoryConflict,
 } from '../lib/category-repair-api'
 
 export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
   const [local, setLocal] = useState<LocalCategoryConflict[]>([])
   const [remote, setRemote] = useState<RemoteCategoryConflict[]>([])
+  const [pending, setPending] = useState<PendingCategoryRepair[]>([])
   const [code, setCode] = useState('')
   const [reason, setReason] = useState('')
   const [message, setMessage] = useState('')
@@ -21,7 +23,32 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
       .listRemote()
       .then(setRemote)
       .catch(() => setMessage('云端隔离列表不可用，请联网后重试。'))
+    void api
+      .listPending()
+      .then(setPending)
+      .catch(() => setMessage('无法读取待确认的修复请求。'))
   }, [api])
+  async function retryPending(item: PendingCategoryRepair) {
+    setBusy(true)
+    try {
+      await api.repairRemote(item)
+      setPending((items) =>
+        items.filter((row) => row.categoryId !== item.categoryId),
+      )
+      setRemote((items) =>
+        items.filter((row) => row.categoryId !== item.categoryId),
+      )
+      setMessage('云端修复已确认，桌面同步已完成。')
+    } catch {
+      void api
+        .listPending()
+        .then(setPending)
+        .catch(() => {})
+      setMessage('修复仍待确认；请检查权限或网络后重试。')
+    } finally {
+      setBusy(false)
+    }
+  }
   async function repair(item: LocalCategoryConflict | RemoteCategoryConflict) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(code) || !reason.trim()) {
       setMessage('请填写合法的新编码和修复原因。')
@@ -48,6 +75,10 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
       setCode('')
       setReason('')
     } catch {
+      void api
+        .listPending()
+        .then(setPending)
+        .catch(() => {})
       setMessage('修复未完成；原记录仍保留，请检查权限、网络和编码。')
     } finally {
       setBusy(false)
@@ -108,7 +139,22 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
             </button>
           </article>
         ))}
-        {local.length === 0 && remote.length === 0 && (
+        {pending.map((item) => (
+          <article className="workflow-comment" key={item.categoryId}>
+            <p>
+              待确认的云端修复 {item.categoryId} · {item.newBusinessCode}
+            </p>
+            <p>原因：{item.reason}</p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void retryPending(item)}
+            >
+              重试待确认修复
+            </button>
+          </article>
+        ))}
+        {local.length === 0 && remote.length === 0 && pending.length === 0 && (
           <p>没有已发现的分类编码冲突。</p>
         )}
       </div>

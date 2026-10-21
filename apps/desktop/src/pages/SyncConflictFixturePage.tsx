@@ -11,6 +11,17 @@ const categoryApi = {
     },
   ],
   listRemote: async () => [],
+  listPending: async () =>
+    new URLSearchParams(window.location.search).has('pending')
+      ? [
+          {
+            categoryId: '00000000-0000-4000-8000-000000000094',
+            expectedVersion: 1,
+            newBusinessCode: 'CAT-RETRY',
+            reason: '连接中断',
+          },
+        ]
+      : [],
   repairLocal: async () => '00000000-0000-4000-8000-000000000093',
   repairRemote: async () => {},
 }

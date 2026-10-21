@@ -157,6 +157,7 @@ fn main() {
             commands::sync_status,
             commands::list_sync_conflicts,
             commands::list_local_category_conflicts,
+            commands::list_pending_remote_category_repairs,
             commands::repair_local_category_conflict,
             commands::list_remote_category_quarantine,
             commands::repair_remote_category,

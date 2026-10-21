@@ -250,7 +250,7 @@ pub struct LocalCategoryConflictView {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CategoryRepairInput {
     pub category_id: Uuid,
@@ -6006,6 +6006,32 @@ impl LocalAuthService {
         Ok(account_id)
     }
 
+    pub fn list_pending_remote_category_repairs(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<CategoryRepairInput>, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        let actor = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut query = connection.prepare("SELECT category_id, expected_version, new_business_code, reason FROM local_remote_category_repair_intents WHERE actor_id = ?1 AND status = 'pending' ORDER BY created_at, rowid").map_err(|_| AuthError::Database)?;
+        query
+            .query_map([actor.to_string()], |row| {
+                Ok(CategoryRepairInput {
+                    category_id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    expected_version: row.get(1)?,
+                    new_business_code: row.get(2)?,
+                    reason: row.get(3)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
     pub async fn list_remote_category_quarantine(
         &self,
         now: SystemTime,
@@ -6830,6 +6856,14 @@ pub mod commands {
             SystemTime::now(),
         )
         .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_pending_remote_category_repairs(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::CategoryRepairInput>, CommandError> {
+        auth.list_pending_remote_category_repairs(SystemTime::now())
+            .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -18075,9 +18109,14 @@ mod tests {
         let old_event = Uuid::new_v4();
         {
             let connection = service.connection.lock().unwrap();
+            connection.execute("INSERT INTO local_remote_category_repair_intents (request_id, actor_id, category_id, expected_version, new_business_code, reason, status, created_at) VALUES (?1, ?2, ?3, 1, 'CAT-RETRY', 'network retry', 'pending', ?4)", params![Uuid::new_v4().to_string(), user.id.to_string(), category_id.to_string(), unix_seconds(now)]).unwrap();
             connection.execute("INSERT INTO local_material_categories (id, business_code, name, is_active, version) VALUES (?1, 'CAT-OLD', 'Fixture', 1, 1)", [category_id.to_string()]).unwrap();
             connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id, last_error) VALUES (?1, 'material_category', ?2, 'upsert', 0, '{}', ?3, ?4, 'CATEGORY_CODE_CONFLICT')", params![old_event.to_string(), category_id.to_string(), unix_seconds(now), user.id.to_string()]).unwrap();
         }
+        let intents = service.list_pending_remote_category_repairs(now).unwrap();
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].category_id, category_id);
+        assert_eq!(intents[0].new_business_code, "CAT-RETRY");
         let new_event = service
             .repair_local_category_conflict(old_event, "CAT-NEW", "resolve duplicate", now)
             .unwrap();

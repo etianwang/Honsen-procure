@@ -1715,6 +1715,16 @@ test('administrator repairs a local category conflict with an explicit reason', 
   await expect(page.getByText('冲突分类 CAT-OLD')).toHaveCount(0)
 })
 
+test('administrator can retry an uncertain remote repair after reload', async ({
+  page,
+}) => {
+  await page.goto('/?test=sync-conflict&pending=1')
+  await expect(page.getByText(/待确认的云端修复/)).toBeVisible()
+  await page.getByRole('button', { name: '重试待确认修复' }).click()
+  await expect(page.getByText('云端修复已确认，桌面同步已完成。')).toBeVisible()
+  await expect(page.getByText(/待确认的云端修复/)).toHaveCount(0)
+})
+
 test('cross-account conflict resolution stays visible and gives an actionable error', async ({
   page,
 }) => {
