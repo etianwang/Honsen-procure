@@ -111,6 +111,47 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       [request.requestId],
     )
     expect(audit.rows[0].count).toBe('1')
+    const pulled = await store.pullChanges({ actor, cursor: '0', limit: 500 })
+    const repairChange = pulled.changes.find(
+      (change) => change.entityId === duplicate && change.version === 2,
+    )
+    expect(repairChange?.payload.__categoryRepair).toMatchObject({
+      requestId: request.requestId,
+      oldBusinessCode: code,
+      newBusinessCode: request.newBusinessCode,
+    })
+    const survivor = await pool!.query(
+      'SELECT status FROM category_code_quarantine WHERE entity_id = $1',
+      [first],
+    )
+    expect(survivor.rows[0].status).toBe('resolved')
+    expect(pulled.changes.some((change) => change.entityId === first)).toBe(
+      true,
+    )
+    const forged = await store.pushEvent({
+      actorId,
+      installationId,
+      event: {
+        eventId: randomUUID(),
+        entityType: 'material_category',
+        entityId: duplicate,
+        operation: 'upsert',
+        baseVersion: 2,
+        payload: {
+          id: duplicate,
+          businessCode: `CAT-${randomUUID()}`,
+          name: 'Fixture',
+          isActive: true,
+          version: 3,
+          __categoryRepair: {
+            requestId: randomUUID(),
+            oldBusinessCode: request.newBusinessCode,
+            newBusinessCode: 'FORGED',
+          },
+        },
+      },
+    })
+    expect(forged.status).toBe('validation_error')
   })
 
   it('serializes distinct category IDs competing for one code and replays the conflict', async () => {

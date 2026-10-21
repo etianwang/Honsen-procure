@@ -5583,6 +5583,7 @@ impl LocalAuthService {
             if quarantine_category_projection(&transaction, change)? {
                 continue;
             }
+            apply_pull_category_repair(&transaction, change)?;
             project_remote_catalog_change(&transaction, change, now)?;
             project_remote_master_data_change(&transaction, change, now)?;
             transaction.execute("DELETE FROM local_sync_projection_quarantine WHERE entity_type = ?1 AND entity_id = ?2", params![change.entity_type, change.entity_id.to_string()]).map_err(|_| AuthError::Database)?;
@@ -7852,6 +7853,15 @@ fn quarantine_category_projection(
                 return Err(AuthError::InvalidInput);
             }
             validate_reference(&category.business_code, &category.name, category.version)?;
+            if change
+                .payload
+                .get("__categoryQuarantine")
+                .and_then(|value| value.as_bool())
+                == Some(true)
+            {
+                transaction.execute("INSERT INTO local_sync_projection_quarantine (entity_type, entity_id, dependency_id, reason, server_version) VALUES (?1, ?2, ?2, 'SERVER_CATEGORY_QUARANTINE', ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET reason = excluded.reason, dependency_id = excluded.dependency_id, server_version = excluded.server_version WHERE excluded.server_version >= local_sync_projection_quarantine.server_version", params![change.entity_type, category.id.to_string(), change.version]).map_err(|_| AuthError::Database)?;
+                return Ok(true);
+            }
             let conflicting_id: Option<String> = transaction.query_row(
                 "SELECT id FROM local_material_categories WHERE business_code = ?1 AND id <> ?2 LIMIT 1",
                 params![category.business_code, category.id.to_string()], |row| row.get(0),
@@ -7900,11 +7910,59 @@ fn quarantine_category_projection(
     Ok(false)
 }
 
+fn apply_pull_category_repair(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+) -> Result<(), AuthError> {
+    if change.entity_type != "material_category" || change.operation != "upsert" {
+        return Ok(());
+    }
+    let category: MaterialCategoryInput =
+        serde_json::from_value(change.payload.clone()).map_err(|_| AuthError::InvalidInput)?;
+    let current: Option<String> = transaction
+        .query_row(
+            "SELECT business_code FROM local_material_categories WHERE id = ?1",
+            [category.id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    if let Some(old_code) = current.filter(|old| old != &category.business_code) {
+        let marker = change
+            .payload
+            .get("__categoryRepair")
+            .ok_or(AuthError::ImmutableBusinessCode)?;
+        let request_id = marker
+            .get("requestId")
+            .and_then(|value| value.as_str())
+            .ok_or(AuthError::ImmutableBusinessCode)?;
+        if Uuid::parse_str(request_id).is_err()
+            || marker
+                .get("oldBusinessCode")
+                .and_then(|value| value.as_str())
+                != Some(old_code.as_str())
+            || marker
+                .get("newBusinessCode")
+                .and_then(|value| value.as_str())
+                != Some(category.business_code.as_str())
+        {
+            return Err(AuthError::ImmutableBusinessCode);
+        }
+        transaction
+            .execute(
+                "UPDATE local_material_categories SET business_code = ?2 WHERE id = ?1",
+                params![category.id.to_string(), category.business_code],
+            )
+            .map_err(|_| AuthError::Database)?;
+    }
+    Ok(())
+}
+
 fn replay_quarantined_category_dependents(
     transaction: &Transaction<'_>,
     now: SystemTime,
 ) -> Result<(), AuthError> {
-    for entity_type in ["material", "material_price"] {
+    for entity_type in ["material_category", "material", "material_price"] {
         let mut statement = transaction.prepare(
             "SELECT r.entity_id, r.operation, r.server_version, r.payload_json, r.changed_at FROM local_sync_projection_quarantine q JOIN local_sync_remote_entities r ON r.entity_type = q.entity_type AND r.entity_id = q.entity_id WHERE q.entity_type = ?1 ORDER BY q.entity_id",
         ).map_err(|_| AuthError::Database)?;
@@ -7935,7 +7993,9 @@ fn replay_quarantined_category_dependents(
             if quarantine_category_projection(transaction, &change)? {
                 continue;
             }
+            apply_pull_category_repair(transaction, &change)?;
             project_remote_catalog_change(transaction, &change, now)?;
+            project_remote_master_data_change(transaction, &change, now)?;
             transaction.execute("DELETE FROM local_sync_projection_quarantine WHERE entity_type = ?1 AND entity_id = ?2", params![entity_type, id]).map_err(|_| AuthError::Database)?;
             transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![entity_type, id, version]).map_err(|_| AuthError::Database)?;
         }
@@ -12346,6 +12406,35 @@ mod tests {
             )
             .unwrap();
         assert_eq!(remaining, 0);
+        drop(connection);
+        let mut first_repair = change(
+            "5",
+            "material_category",
+            first,
+            serde_json::json!({
+                "id": first, "businessCode": "CAT-FIRST-NEW", "name": "Fixture", "isActive": true, "version": 2,
+                "__categoryRepair": { "requestId": Uuid::new_v4(), "oldBusinessCode": "CAT-DUP", "newBusinessCode": "CAT-FIRST-NEW" }
+            }),
+        );
+        first_repair.version = 2;
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![first_repair],
+                    next_cursor: "5".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let code: String = connection
+            .query_row(
+                "SELECT business_code FROM local_material_categories WHERE id = ?1",
+                [first.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(code, "CAT-FIRST-NEW");
     }
 
     #[test]

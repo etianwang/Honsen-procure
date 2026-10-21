@@ -120,6 +120,10 @@ export class PostgresSyncStore implements SyncStore {
         current.payload_json.businessCode ?? current.payload_json.business_code
       if (typeof oldCode !== 'string' || oldCode === request.newBusinessCode)
         throw new CategoryRepairError('CONFLICT')
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('material_category:' || $1, 0))",
+        [oldCode],
+      )
       const payload: Record<string, unknown> = {
         ...current.payload_json,
         businessCode: request.newBusinessCode,
@@ -159,6 +163,19 @@ export class PostgresSyncStore implements SyncStore {
       await client.query(
         "INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id) VALUES ('material_category', $1, 'upsert', $2, $3, $4)",
         [request.categoryId, version, payload, actor.id],
+      )
+      await client.query(
+        `WITH remaining AS (
+        SELECT entity_id, version, payload_json FROM sync_entities
+        WHERE entity_type = 'material_category' AND COALESCE(payload_json->>'businessCode', payload_json->>'business_code') COLLATE "C" = $1 COLLATE "C"
+      ), released AS (
+        UPDATE category_code_quarantine SET status = 'resolved'
+        WHERE status = 'unresolved' AND entity_id IN (SELECT entity_id FROM remaining)
+          AND (SELECT count(*) FROM remaining) <= 1
+        RETURNING entity_id
+      ) INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id)
+        SELECT 'material_category', r.entity_id, 'upsert', r.version, r.payload_json, $2 FROM remaining r JOIN released q ON q.entity_id = r.entity_id`,
+        [oldCode, actor.id],
       )
       await client.query('COMMIT')
       return { categoryId: request.categoryId, version }
@@ -349,6 +366,39 @@ export class PostgresSyncStore implements SyncStore {
         await this.recordConflict(client, input, current, result)
         await client.query('COMMIT')
         return result
+      }
+
+      if (
+        input.event.entityType === 'material_category' &&
+        ('__categoryRepair' in input.event.payload ||
+          '__categoryQuarantine' in input.event.payload ||
+          (current &&
+            (current.payload_json.businessCode ??
+              current.payload_json.business_code) !==
+              (input.event.payload.businessCode ??
+                input.event.payload.business_code)))
+      ) {
+        await client.query(
+          `INSERT INTO sync_events
+          (event_id, installation_id, actor_id, origin_account_id, origin_installation_id, origin_status, origin_attested_at, entity_type, entity_id, operation, base_version, result_status, result_error_code, server_version)
+          VALUES ($1,$2,$3,$3,$2,'attested',NOW(),$4,$5,$6,$7,'validation_error','CATEGORY_REPAIR_REQUIRED',NULL)`,
+          [
+            input.event.eventId,
+            input.installationId,
+            input.actorId,
+            input.event.entityType,
+            input.event.entityId,
+            input.event.operation,
+            input.event.baseVersion,
+          ],
+        )
+        await client.query('COMMIT')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+          errorCode: 'CATEGORY_REPAIR_REQUIRED',
+        }
       }
 
       if (
@@ -1582,13 +1632,21 @@ export class PostgresSyncStore implements SyncStore {
       version: string
       payload_json: Record<string, unknown>
       changed_at: Date
+      repair_request_id: string | null
+      old_business_code: string | null
+      new_business_code: string | null
+      quarantine_status: string | null
     }>(
-      `SELECT sequence, entity_type, entity_id, operation, version, payload_json, changed_at
+      `SELECT c.sequence, c.entity_type, c.entity_id, c.operation, c.version, c.payload_json, c.changed_at,
+              repair.request_id AS repair_request_id, repair.old_business_code, repair.new_business_code,
+              q.status AS quarantine_status
        FROM server_change_log c
-       WHERE sequence > $1
+       LEFT JOIN category_code_repairs repair ON c.entity_type = 'material_category' AND repair.category_id = c.entity_id AND repair.result_version = c.version
+       LEFT JOIN category_code_quarantine q ON c.entity_type = 'material_category' AND q.entity_id = c.entity_id
+       WHERE c.sequence > $1
          AND (
            $2
-           OR entity_type = ANY($3::text[])
+           OR c.entity_type = ANY($3::text[])
            OR (
              c.entity_type = 'supplier'
              AND EXISTS (
@@ -1616,7 +1674,7 @@ export class PostgresSyncStore implements SyncStore {
                AND b.project_id::text = c.payload_json->>'projectId'
            )
          )
-       ORDER BY sequence
+       ORDER BY c.sequence
        LIMIT $5`,
       [
         input.cursor,
@@ -1626,15 +1684,30 @@ export class PostgresSyncStore implements SyncStore {
         input.limit,
       ],
     )
-    const changes = result.rows.map((row) => ({
-      cursor: row.sequence,
-      entityType: row.entity_type,
-      entityId: row.entity_id,
-      operation: row.operation,
-      version: Number(row.version),
-      payload: row.payload_json,
-      changedAt: row.changed_at.toISOString(),
-    }))
+    const changes = result.rows.map((row) => {
+      const payload = { ...row.payload_json }
+      if (row.entity_type === 'material_category') {
+        delete payload.__categoryRepair
+        delete payload.__categoryQuarantine
+        if (row.repair_request_id)
+          payload.__categoryRepair = {
+            requestId: row.repair_request_id,
+            oldBusinessCode: row.old_business_code,
+            newBusinessCode: row.new_business_code,
+          }
+        if (row.quarantine_status === 'unresolved')
+          payload.__categoryQuarantine = true
+      }
+      return {
+        cursor: row.sequence,
+        entityType: row.entity_type,
+        entityId: row.entity_id,
+        operation: row.operation,
+        version: Number(row.version),
+        payload,
+        changedAt: row.changed_at.toISOString(),
+      }
+    })
     return {
       changes,
       nextCursor: changes.at(-1)?.cursor ?? input.cursor,
