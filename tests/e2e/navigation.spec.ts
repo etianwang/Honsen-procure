@@ -1701,6 +1701,20 @@ test('administrator resolves a sync conflict through the accessible control', as
   await expect(page.getByText('没有待处理的同步冲突。')).toBeVisible()
 })
 
+test('administrator repairs a local category conflict with an explicit reason', async ({
+  page,
+}) => {
+  await page.goto('/?test=sync-conflict')
+  await expect(page.getByText('冲突分类 CAT-OLD')).toBeVisible()
+  await page.getByLabel('分类新编码').fill('CAT-NEW')
+  await page.getByLabel('分类修复原因').fill('编码重复')
+  await page.getByRole('button', { name: '修复本地分类' }).click()
+  await expect(
+    page.getByText('已保留原事件并生成新的待同步事件。'),
+  ).toBeVisible()
+  await expect(page.getByText('冲突分类 CAT-OLD')).toHaveCount(0)
+})
+
 test('cross-account conflict resolution stays visible and gives an actionable error', async ({
   page,
 }) => {

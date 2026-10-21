@@ -232,6 +232,33 @@ pub struct MaterialCategoryInput {
     pub version: i64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryQuarantineView {
+    pub category_id: Uuid,
+    pub business_code: String,
+    pub name: String,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCategoryConflictView {
+    pub event_id: Uuid,
+    pub category_id: Uuid,
+    pub business_code: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CategoryRepairInput {
+    pub category_id: Uuid,
+    pub expected_version: i64,
+    pub new_business_code: String,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialPriceInput {
@@ -5386,6 +5413,33 @@ impl LocalAuthService {
             .collect()
     }
 
+    pub fn list_local_category_conflicts(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<LocalCategoryConflictView>, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        let actor = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut query = connection.prepare("SELECT o.event_id, o.entity_id, c.business_code, c.name FROM local_sync_outbox o JOIN local_material_categories c ON c.id = o.entity_id WHERE o.owner_account_id = ?1 AND o.entity_type = 'material_category' AND o.last_error = 'CATEGORY_CODE_CONFLICT' AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY o.created_at, o.rowid").map_err(|_| AuthError::Database)?;
+        query
+            .query_map([actor.to_string()], |row| {
+                Ok(LocalCategoryConflictView {
+                    event_id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    category_id: Uuid::parse_str(&row.get::<_, String>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    business_code: row.get(2)?,
+                    name: row.get(3)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
     pub fn repair_local_category_conflict(
         &self,
         old_event: Uuid,
@@ -5950,6 +6004,130 @@ impl LocalAuthService {
         }
         self.require_catalog_read(now)?;
         Ok(account_id)
+    }
+
+    pub async fn list_remote_category_quarantine(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<CategoryQuarantineView>, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        let request = self.sync_request(now)?;
+        self.refresh_authorization_for_session(&request, now)
+            .await?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        let base =
+            std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+        let response = self
+            .https_client()?
+            .get(sync_endpoint_from(&base, "category-quarantine")?)
+            .bearer_auth(&request.token)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.reject_sync_session(request.session)?;
+        }
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AuthError::Forbidden);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        self.verify_test_sync_origin(&response)?;
+        let rows = response
+            .json::<Vec<CategoryQuarantineView>>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        Ok(rows)
+    }
+
+    pub async fn repair_remote_category(
+        &self,
+        input: CategoryRepairInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        if input.expected_version < 1
+            || !valid_business_code(&input.new_business_code)
+            || !valid_required_text(&input.reason, 1000)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let request = self.sync_request(now)?;
+        self.refresh_authorization_for_session(&request, now)
+            .await?;
+        let request_id = {
+            let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            Self::require_request_session(&connection, request.session)?;
+            let tx = connection.transaction().map_err(|_| AuthError::Database)?;
+            let prior: Option<String> = tx.query_row("SELECT request_id FROM local_remote_category_repair_intents WHERE actor_id = ?1 AND category_id = ?2 AND expected_version = ?3 AND new_business_code = ?4 AND reason = ?5 AND status IN ('pending', 'accepted') ORDER BY created_at DESC LIMIT 1", params![request.session.account_id.to_string(), input.category_id.to_string(), input.expected_version, input.new_business_code, input.reason], |row| row.get(0)).optional().map_err(|_| AuthError::Database)?;
+            let id = if let Some(id) = prior {
+                id
+            } else {
+                let has_pending: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM local_remote_category_repair_intents WHERE actor_id = ?1 AND category_id = ?2 AND status = 'pending')", params![request.session.account_id.to_string(), input.category_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+                if has_pending {
+                    return Err(AuthError::InvalidInput);
+                }
+                let id = Uuid::new_v4().to_string();
+                tx.execute("INSERT INTO local_remote_category_repair_intents (request_id, actor_id, category_id, expected_version, new_business_code, reason, status, created_at) VALUES (?1,?2,?3,?4,?5,?6,'pending',?7)", params![id, request.session.account_id.to_string(), input.category_id.to_string(), input.expected_version, input.new_business_code, input.reason, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                id
+            };
+            tx.commit().map_err(|_| AuthError::Database)?;
+            id
+        };
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        let base =
+            std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+        let response = self.https_client()?.post(sync_endpoint_from(&base, "category-repairs")?).bearer_auth(&request.token).json(&serde_json::json!({"requestId": request_id, "categoryId": input.category_id, "expectedVersion": input.expected_version, "newBusinessCode": input.new_business_code, "reason": input.reason})).send().await.map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.reject_sync_session(request.session)?;
+        }
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AuthError::Forbidden);
+        }
+        if response.status() == reqwest::StatusCode::CONFLICT {
+            let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            Self::require_request_session(&connection, request.session)?;
+            connection.execute("UPDATE local_remote_category_repair_intents SET status = 'conflict' WHERE request_id = ?1", [&request_id]).map_err(|_| AuthError::Database)?;
+            return Err(AuthError::InvalidInput);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        self.verify_test_sync_origin(&response)?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if result.get("categoryId").and_then(|v| v.as_str())
+            != Some(input.category_id.to_string().as_str())
+            || result.get("version").and_then(|v| v.as_i64()) != Some(input.expected_version + 1)
+        {
+            return Err(AuthError::SyncTransport);
+        }
+        {
+            let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            Self::require_request_session(&connection, request.session)?;
+            connection.execute("UPDATE local_remote_category_repair_intents SET status = 'accepted' WHERE request_id = ?1", [&request_id]).map_err(|_| AuthError::Database)?;
+        }
+        self.pull_sync_https(now).await?;
+        Ok(())
     }
 
     pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
@@ -6631,6 +6809,49 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn list_local_category_conflicts(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::LocalCategoryConflictView>, CommandError> {
+        auth.list_local_category_conflicts(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn repair_local_category_conflict(
+        auth: State<'_, LocalAuthService>,
+        event_id: Uuid,
+        new_business_code: String,
+        reason: String,
+    ) -> Result<Uuid, CommandError> {
+        auth.repair_local_category_conflict(
+            event_id,
+            &new_business_code,
+            &reason,
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn list_remote_category_quarantine(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::CategoryQuarantineView>, CommandError> {
+        auth.list_remote_category_quarantine(SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn repair_remote_category(
+        auth: State<'_, LocalAuthService>,
+        input: super::CategoryRepairInput,
+    ) -> Result<(), CommandError> {
+        auth.repair_remote_category(input, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn list_sync_conflicts(
         auth: State<'_, LocalAuthService>,
     ) -> Result<Vec<super::SyncConflictView>, CommandError> {
@@ -7292,6 +7513,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0051_local_category_code_repairs",
             include_str!("../migrations/0051_local_category_code_repairs.sql"),
+        ),
+        (
+            "0052_remote_category_repair_intents",
+            include_str!("../migrations/0052_remote_category_repair_intents.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));

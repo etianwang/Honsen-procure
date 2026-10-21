@@ -1,4 +1,19 @@
 import { SyncConflictPanel } from '../components/SyncConflictPanel'
+import { CategoryRepairPanel } from '../components/CategoryRepairPanel'
+
+const categoryApi = {
+  listLocal: async () => [
+    {
+      eventId: '00000000-0000-4000-8000-000000000091',
+      categoryId: '00000000-0000-4000-8000-000000000092',
+      businessCode: 'CAT-OLD',
+      name: 'Fixture',
+    },
+  ],
+  listRemote: async () => [],
+  repairLocal: async () => '00000000-0000-4000-8000-000000000093',
+  repairRemote: async () => {},
+}
 
 export function SyncConflictFixturePage() {
   return (
@@ -27,6 +42,7 @@ export function SyncConflictFixturePage() {
           resolvePurchaseOrderConflict: async () => {},
         }}
       />
+      <CategoryRepairPanel api={categoryApi} />
     </main>
   )
 }
