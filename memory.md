@@ -659,6 +659,7 @@ Build shared contracts and exact money/quantity helpers only:
 - BLOCKER: server atomic cross-UUID uniqueness, structured recoverable conflicts, legacy duplicate isolation and desktop recovery remain unimplemented and untested. Do not merge PR #15.
 - Tests not executed: PostgreSQL concurrent/replay/recovery and desktop A/B FIX2 acceptance, affected package full gates and independent QA. These omissions prevent accepting the synchronization and recovery requirements.
 - Toolbox integration gaps remain as documented in `docs/HONSEN_TOOLBOX_INTEGRATION.md`; this checkpoint does not change Toolbox, installer or release contracts.
+
 # T04 FIX2-B partial handoff — 2026-10-21
 
 - **Checkpoint:** production code `86c1d2450b051edff75c5a43a67c2e1a547f25de` on `codex/t04-material-category-maintenance`; see `docs/planning/2026-10-21-t04-fix2b-handoff.md` for the evidence and remaining protocol design. The handoff commit is the current Git HEAD. No other worktree or database was modified.
