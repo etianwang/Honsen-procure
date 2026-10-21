@@ -5386,13 +5386,74 @@ impl LocalAuthService {
             .collect()
     }
 
+    pub fn repair_local_category_conflict(
+        &self,
+        old_event: Uuid,
+        new_code: &str,
+        reason: &str,
+        now: SystemTime,
+    ) -> Result<Uuid, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        if !valid_business_code(new_code) || !valid_required_text(reason, 1000) {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let tx = connection.transaction().map_err(|_| AuthError::Database)?;
+        require_transaction_account(&tx, actor)?;
+        let existing: Option<(String, String, String, String)> = tx.query_row("SELECT new_event_id, actor_id, new_business_code, reason FROM local_category_code_repairs WHERE old_event_id = ?1", [old_event.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).optional().map_err(|_| AuthError::Database)?;
+        if let Some((id, owner, code, saved_reason)) = existing {
+            if owner != actor.to_string() || code != new_code || saved_reason != reason {
+                return Err(AuthError::InvalidInput);
+            }
+            return Uuid::parse_str(&id).map_err(|_| AuthError::Database);
+        }
+        let entity: Option<(String, i64)> = tx.query_row("SELECT entity_id, base_version FROM local_sync_outbox WHERE event_id = ?1 AND owner_account_id = ?2 AND entity_type = 'material_category' AND last_error = 'CATEGORY_CODE_CONFLICT' AND acknowledged_at IS NULL AND superseded_at IS NULL", params![old_event.to_string(), actor.to_string()], |row| Ok((row.get(0)?, row.get(1)?))).optional().map_err(|_| AuthError::Database)?;
+        let (entity_id, base_version) = entity.ok_or(AuthError::InvalidInput)?;
+        if base_version != 0 {
+            return Err(AuthError::InvalidInput);
+        }
+        let other_owner: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (owner_account_id IS NULL OR owner_account_id <> ?2))", params![entity_id, actor.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if other_owner {
+            return Err(AuthError::SyncAccountBoundary);
+        }
+        let (old_code, name, active, version): (String, String, i64, i64) = tx.query_row("SELECT business_code, name, is_active, version FROM local_material_categories WHERE id = ?1 AND deleted_at IS NULL", [&entity_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::InvalidInput)?;
+        if old_code == new_code {
+            return Err(AuthError::InvalidInput);
+        }
+        let id = Uuid::parse_str(&entity_id).map_err(|_| AuthError::Database)?;
+        let payload = serde_json::to_string(&MaterialCategoryInput {
+            id,
+            business_code: new_code.into(),
+            name,
+            is_active: active != 0,
+            version: version + 1,
+        })
+        .map_err(|_| AuthError::Database)?;
+        tx.execute(
+            "UPDATE local_material_categories SET business_code = ?2, version = ?3 WHERE id = ?1",
+            params![entity_id, new_code, version + 1],
+        )
+        .map_err(|_| AuthError::Database)?;
+        let new_event = Uuid::new_v4();
+        tx.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'material_category', ?2, 'upsert', 0, ?3, ?4, ?5)", params![new_event.to_string(), entity_id, payload, unix_seconds(now), actor.to_string()]).map_err(|_| AuthError::Database)?;
+        tx.execute("INSERT INTO local_category_code_repairs (old_event_id, new_event_id, actor_id, old_business_code, new_business_code, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![old_event.to_string(), new_event.to_string(), actor.to_string(), old_code, new_code, reason, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        tx.execute("INSERT INTO local_category_code_repair_events (event_id, repair_event_id) SELECT event_id, ?1 FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?2 AND owner_account_id = ?3 AND event_id <> ?4 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = local_sync_outbox.event_id)", params![old_event.to_string(), entity_id, actor.to_string(), new_event.to_string()]).map_err(|_| AuthError::Database)?;
+        tx.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, previous_json, next_json, created_at) VALUES (?1, ?2, 'material_category', ?3, 'edit', ?4, ?5, ?6)", params![Uuid::new_v4().to_string(), actor.to_string(), entity_id, serde_json::json!({"businessCode": old_code, "reason": reason}).to_string(), payload, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        tx.commit().map_err(|_| AuthError::Database)?;
+        Ok(new_event)
+    }
+
     pub fn sync_status(&self, now: SystemTime) -> Result<SyncStatusView, AuthError> {
         self.require_catalog_read(now)?;
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
             .query_row(
-                "SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1)",
+                "SELECT (SELECT COUNT(*) FROM local_sync_outbox o WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1)",
                 [account_id.to_string()],
                 |row| Ok(SyncStatusView {
                     pending_count: row.get(0)?,
@@ -5416,7 +5477,7 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT') ORDER BY o.created_at, o.rowid LIMIT ?2")
+            .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = blocked.event_id)) ORDER BY o.created_at, o.rowid LIMIT ?2")
             .map_err(|_| AuthError::Database)?
             .query_map(params![account_id.to_string(), limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -5556,7 +5617,7 @@ impl LocalAuthService {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String, Option<String>)> = transaction.query_row(
-                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
+                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
                 params![change.entity_type, change.entity_id.to_string(), account_id_text],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).optional().map_err(|_| AuthError::Database)?;
@@ -7227,6 +7288,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0050_sync_projection_quarantine",
             include_str!("../migrations/0050_sync_projection_quarantine.sql"),
+        ),
+        (
+            "0051_local_category_code_repairs",
+            include_str!("../migrations/0051_local_category_code_repairs.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -9304,7 +9369,7 @@ fn insert_local_sync_outbox(
         .unwrap_or(0);
     let pending_count: i64 = transaction
         .query_row(
-            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL",
+            "SELECT COUNT(*) FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)",
             params![entity_type, entity_id.to_string()],
             |row| row.get(0),
         )
@@ -17758,6 +17823,88 @@ mod tests {
         drop(connection);
         drop(service);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn administrator_recovers_category_conflict_without_losing_events() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let user = CachedAccount {
+            roles: vec![Role::Administrator],
+            ..account()
+        };
+        service
+            .cache_verified_account(user.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &user.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let category_id = Uuid::new_v4();
+        let old_event = Uuid::new_v4();
+        {
+            let connection = service.connection.lock().unwrap();
+            connection.execute("INSERT INTO local_material_categories (id, business_code, name, is_active, version) VALUES (?1, 'CAT-OLD', 'Fixture', 1, 1)", [category_id.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id, last_error) VALUES (?1, 'material_category', ?2, 'upsert', 0, '{}', ?3, ?4, 'CATEGORY_CODE_CONFLICT')", params![old_event.to_string(), category_id.to_string(), unix_seconds(now), user.id.to_string()]).unwrap();
+        }
+        let new_event = service
+            .repair_local_category_conflict(old_event, "CAT-NEW", "resolve duplicate", now)
+            .unwrap();
+        assert_ne!(old_event, new_event);
+        assert_eq!(
+            service
+                .repair_local_category_conflict(old_event, "CAT-NEW", "resolve duplicate", now)
+                .unwrap(),
+            new_event
+        );
+        let pending = service.pending_sync_events(100, now).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event_id, new_event);
+        assert_eq!(pending[0].base_version, 0);
+        let connection = service.connection.lock().unwrap();
+        let old: (Option<i64>, Option<i64>, String) = connection.query_row("SELECT acknowledged_at, superseded_at, last_error FROM local_sync_outbox WHERE event_id = ?1", [old_event.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(old, (None, None, "CATEGORY_CODE_CONFLICT".into()));
+        let link: String = connection
+            .query_row(
+                "SELECT new_event_id FROM local_category_code_repairs WHERE old_event_id = ?1",
+                [old_event.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(link, new_event.to_string());
+        drop(connection);
+        let engineer = CachedAccount {
+            username: "other-engineer".into(),
+            ..account()
+        };
+        service
+            .cache_verified_account(engineer.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &engineer.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.repair_local_category_conflict(
+                old_event,
+                "CAT-OTHER",
+                "resolve duplicate",
+                now
+            ),
+            Err(AuthError::Forbidden)
+        );
     }
 
     #[test]
