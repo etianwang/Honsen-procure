@@ -7174,6 +7174,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0048_material_category_audit",
             include_str!("../migrations/0048_material_category_audit.sql"),
         ),
+        (
+            "0049_material_category_audit_compat",
+            include_str!("../migrations/0049_material_category_audit_compat.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -7188,6 +7192,34 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             Some(value) if value == checksum => continue,
             Some(_) => return Err(AuthError::Database),
             None => {
+                if migration.0 == "0048_material_category_audit" {
+                    // Apply 0049 instead of the faulty, not-yet-applied 0048 without fabricating its checksum record.
+                    let sql = include_str!("../migrations/0049_material_category_audit_compat.sql");
+                    let version = "0049_material_category_audit_compat";
+                    let compat_checksum = format!("{:x}", Sha256::digest(sql.as_bytes()));
+                    let recorded: Option<String> = connection
+                        .query_row(
+                            "SELECT checksum FROM local_schema_migrations WHERE version = ?1",
+                            [version],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(|_| AuthError::Database)?;
+                    match recorded {
+                        Some(value) if value == compat_checksum => continue,
+                        Some(_) => return Err(AuthError::Database),
+                        None => {
+                            let transaction =
+                                connection.transaction().map_err(|_| AuthError::Database)?;
+                            transaction
+                                .execute_batch(sql)
+                                .map_err(|_| AuthError::Database)?;
+                            transaction.execute("INSERT INTO local_schema_migrations (version, checksum, applied_at) VALUES (?1, ?2, ?3)", params![version, compat_checksum, unix_seconds(SystemTime::now())]).map_err(|_| AuthError::Database)?;
+                            transaction.commit().map_err(|_| AuthError::Database)?;
+                            continue;
+                        }
+                    }
+                }
                 if migration.0 == "0045_procurement_expenditures" {
                     let legacy_checksum = connection
                         .query_row(
@@ -11955,11 +11987,63 @@ mod tests {
             .execute_batch(include_str!("../migrations/0043_exchange_rate_audit.sql"))
             .unwrap();
         connection.execute("DELETE FROM local_schema_migrations WHERE version = '0048_material_category_audit'", []).unwrap();
+        connection.execute("DELETE FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", []).unwrap();
         connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, previous_json, next_json, created_at) VALUES ('old-rate', 'actor', 'exchange_rate', 'rate', 'create', NULL, '{\"rate\":1}', 42)", []).unwrap();
 
         migrate(&mut connection).unwrap();
         let saved: (String, String, i64) = connection.query_row("SELECT entity_type, next_json, created_at FROM local_master_data_audit_entries WHERE id = 'old-rate'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
         assert_eq!(saved, ("exchange_rate".into(), "{\"rate\":1}".into(), 42));
+        migrate(&mut connection).unwrap();
+        let old_marker: i64 = connection.query_row("SELECT count(*) FROM local_schema_migrations WHERE version = '0048_material_category_audit'", [], |row| row.get(0)).unwrap();
+        assert_eq!(old_marker, 0);
+    }
+
+    #[test]
+    fn category_audit_upgrade_accepts_original_0048_checksum() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0048_material_category_audit.sql"
+            ))
+            .unwrap();
+        connection.execute("DELETE FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", []).unwrap();
+        let old_checksum = format!(
+            "{:x}",
+            Sha256::digest(
+                include_str!("../migrations/0048_material_category_audit.sql").as_bytes()
+            )
+        );
+        connection.execute("INSERT INTO local_schema_migrations (version, checksum, applied_at) VALUES ('0048_material_category_audit', ?1, 42)", [&old_checksum]).unwrap();
+        migrate(&mut connection).unwrap();
+        let saved: (String, i64) = connection.query_row("SELECT checksum, applied_at FROM local_schema_migrations WHERE version = '0048_material_category_audit'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(saved, (old_checksum, 42));
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('rate', 'actor', 'exchange_rate', 'id', 'create', '{}', 1)", []).unwrap();
+    }
+
+    #[test]
+    fn category_audit_upgrade_rolls_back_on_failure() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0043_exchange_rate_audit.sql"))
+            .unwrap();
+        connection.execute("DELETE FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", []).unwrap();
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('rate', 'actor', 'exchange_rate', 'id', 'create', '{}', 1)", []).unwrap();
+        connection
+            .execute_batch("CREATE TRIGGER reject_0049 BEFORE INSERT ON local_schema_migrations WHEN NEW.version = '0049_material_category_audit_compat' BEGIN SELECT RAISE(ABORT, 'injected failure'); END;")
+            .unwrap();
+        assert_eq!(migrate(&mut connection), Err(AuthError::Database));
+        let count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM local_master_data_audit_entries WHERE id = 'rate'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let count: i64 = connection.query_row("SELECT count(*) FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]
