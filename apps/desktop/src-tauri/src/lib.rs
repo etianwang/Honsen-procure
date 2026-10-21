@@ -12305,6 +12305,47 @@ mod tests {
             )
             .unwrap();
         assert_eq!(quarantined, 2);
+        drop(connection);
+        let repaired = ReferenceMasterDataInput::MaterialCategory {
+            id: duplicate,
+            business_code: "CAT-REPAIRED".into(),
+            name: "Fixture".into(),
+            is_active: true,
+            version: 2,
+        };
+        let mut repair_change = change(
+            "4",
+            "material_category",
+            duplicate,
+            serde_json::to_value(repaired).unwrap(),
+        );
+        repair_change.version = 2;
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![repair_change],
+                    next_cursor: "4".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let reference: String = connection
+            .query_row(
+                "SELECT category_id FROM local_materials WHERE id = ?1",
+                [material_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reference, duplicate.to_string());
+        let remaining: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_projection_quarantine WHERE entity_id IN (?1, ?2)",
+                params![duplicate.to_string(), material_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 
     #[test]
