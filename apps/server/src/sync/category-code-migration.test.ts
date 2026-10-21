@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { Pool } from 'pg'
 import { describe, expect, it } from 'vitest'
 
@@ -45,6 +46,29 @@ describe.skipIf(!databaseUrl)(
         await client.query('BEGIN')
         await client.query(sql)
         await client.query('COMMIT')
+        const quarantineMigration = new URL(
+          '../../migrations/008_category_code_quarantine.sql',
+          import.meta.url,
+        )
+        if (existsSync(quarantineMigration))
+          await client.query(await readFile(quarantineMigration, 'utf8'))
+        expect(
+          (
+            await client.query(
+              "SELECT to_regclass('category_code_quarantine') IS NOT NULL AS present",
+            )
+          ).rows[0].present,
+        ).toBe(true)
+        const quarantined = await client.query(
+          'SELECT entity_id, business_code FROM category_code_quarantine ORDER BY entity_id',
+        )
+        expect(quarantined.rows.map((row) => row.entity_id).sort()).toEqual(
+          ids.slice(0, 2).sort(),
+        )
+        expect(quarantined.rows.map((row) => row.business_code)).toEqual([
+          'HISTORIC',
+          'HISTORIC',
+        ])
         await expect(
           client.query(
             "INSERT INTO sync_entities VALUES ('material_category', $1, $2)",
