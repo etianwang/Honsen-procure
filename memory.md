@@ -2,6 +2,15 @@
 
 **Last updated:** 2026-10-21
 
+## T04 FIX1 — BLOCKED_ENV / NOT READY TO MERGE (2026-10-21)
+
+- Checkpoint code SHA `d97f0d885e7d705dfe7606dd3117ff047ea74c56` on `codex/t04-material-category-maintenance`. The preceding READY_FOR_RECHECK entry is historical and was superseded by independent QA FAIL at `a0a8aa0`; independent QA evidence `6f2fc889691d3620f9efd073cbe502385be46a03` is pushed on `codex/qa-t04-material-category`.
+- Migration 0048 remains byte-for-byte unchanged. A missing 0048 is bypassed by transactional migration 0049, recording only 0049 and not fabricating a 0048 checksum; an already-recorded 0048 retains its original checksum and gets 0049 normally. Three focused Rust tests passed: old audit history, original 0048 marker, and injected failure after DDL with transaction rollback. **WARNING:** a downgrade to old code that does not understand 0049 can attempt the original 0048 again; downgrade compatibility is not proven and must not be assumed.
+- Category outbox now emits camelCase; Pull also accepts legacy snake_case. Rust tests cover category outbox shape and legacy deserialization. The trusted Rust and server category-write boundaries restrict mutations to administrators/super-administrators; a shared Zod category schema validates server Push. Server sync service tests 17/17, server/shared typechecks, desktop typecheck/build and focused Playwright category DOM 1/1 passed. Rust category authorization regression passed. E: isolated target and temporary directories used.
+- **BLOCKER:** actual two-desktop PostgreSQL Push/Pull, duplicate Push/Pull and projection have not run: WSL reported failure to start the `honsen-dev` systemd session; the attempted Docker check did not return. No claim of PostgreSQL PASS or READY_FOR_RECHECK. No G4, T11-A, T13, PostgreSQL release or Formal hold status changed.
+- **BLOCKER:** independent recheck must cover both 0048 paths, checksum mismatch, preserved audit payloads, failure rollback, category authorization, legacy/canonical Push/Pull and replay on the final candidate SHA. CI must finish and pass before acceptance. **WARNING:** Vite reported its existing bundle-size advisory. Full Native QA not run, per scope.
+- Local generated build/test data stays under `E:\HonsenTaskRuntime\t04-fix1`; no business database, credentials, or large raw QA artifacts were committed. Final checkpoint SHA and clean/dirty status must be verified from Git at handoff.
+
 ## T04 material-category maintenance — READY_FOR_RECHECK (2026-10-21)
 
 - **Scope:** branch `codex/t04-material-category-maintenance` starts at V1 unified baseline `d15a5f3039430819aa220bfa312f4db5be251c03`. It exposes the existing `local_material_categories` schema through the trusted master-data boundary and one Master Data UI tab. Administrators can list, add, rename and enable/disable categories. There is no delete command or physical deletion; existing `local_materials.category_id` foreign-key references remain untouched. Category business codes are immutable.
