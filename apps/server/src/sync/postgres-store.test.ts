@@ -70,15 +70,13 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     } finally {
       client.release()
     }
-    const requests = ids
-      .slice(0, 2)
-      .map((categoryId) => ({
-        requestId: randomUUID(),
-        categoryId,
-        expectedVersion: 1,
-        newBusinessCode: `CAT-${randomUUID()}`,
-        reason: 'concurrent repair',
-      }))
+    const requests = ids.slice(0, 2).map((categoryId) => ({
+      requestId: randomUUID(),
+      categoryId,
+      expectedVersion: 1,
+      newBusinessCode: `CAT-${randomUUID()}`,
+      reason: 'concurrent repair',
+    }))
     const results = await Promise.all(
       requests.map((request) => store.repairCategory({ actor, request })),
     )
