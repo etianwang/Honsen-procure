@@ -655,7 +655,7 @@ Build shared contracts and exact money/quantity helpers only:
 ## T04 FIX2 checkpoint — INCOMPLETE
 
 - Rust category creation now enforces the existing shared business-code first-character rule; focused category test demonstrated `-CAT` was accepted before the change and passes afterward, including empty, 64- and 65-character boundaries. `cargo fmt --check` passed. This checkpoint is not independent QA and is not READY_FOR_RECHECK.
-- BLOCKER: existing invalid local codes still require an authorized, audited and lossless repair path. Their presence on internal devices or server has not been checked; no production database was inspected.
+- BLOCKER: existing invalid local codes still require an authorized, audited and lossless repair path. A read-only aggregate check of this machine's default local SQLite found 0 categories and 0 invalid codes; other internal devices and the production server have not been inspected.
 - BLOCKER: server atomic cross-UUID uniqueness, structured recoverable conflicts, legacy duplicate isolation and desktop recovery remain unimplemented and untested. Do not merge PR #15.
 - Tests not executed: PostgreSQL concurrent/replay/recovery and desktop A/B FIX2 acceptance, affected package full gates and independent QA. These omissions prevent accepting the synchronization and recovery requirements.
 - Toolbox integration gaps remain as documented in `docs/HONSEN_TOOLBOX_INTEGRATION.md`; this checkpoint does not change Toolbox, installer or release contracts.
