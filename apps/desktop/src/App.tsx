@@ -66,6 +66,12 @@ const previewRequisitionApi: RequisitionApi = {
   async getRequisitionDetail() {
     throw new Error('预览环境没有历史记录')
   },
+  async selectOrderAttachment() {
+    throw new Error('预览环境不支持本地附件选择')
+  },
+  async ingestSelectedOrderAttachment() {
+    throw new Error('预览环境不支持本地附件归档')
+  },
   async listRequisitionHistory() {
     return { records: [], nextCursor: null }
   },

@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Input } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type {
+  AttachmentSelection,
   RequisitionApi,
   RequisitionDetail,
   RequisitionHistoryCursor,
@@ -15,6 +16,8 @@ type Props = {
     RequisitionApi,
     | 'listRequisitionHistory'
     | 'getRequisitionDetail'
+    | 'selectOrderAttachment'
+    | 'ingestSelectedOrderAttachment'
     | 'withdrawRequisition'
     | 'issueOwnerFormalOrder'
   >
@@ -49,6 +52,10 @@ export function RequisitionHistoryPanel({
   const [detailLoading, setDetailLoading] = useState(false)
   const [withdrawError, setWithdrawError] = useState(false)
   const [issueError, setIssueError] = useState(false)
+  const [attachmentSelection, setAttachmentSelection] =
+    useState<AttachmentSelection | null>(null)
+  const [attachmentError, setAttachmentError] = useState(false)
+  const [attachmentSaving, setAttachmentSaving] = useState(false)
   const detailRequest = useRef(0)
 
   useEffect(() => {
@@ -121,6 +128,36 @@ export function RequisitionHistoryPanel({
       setRetry((value) => value + 1)
     } catch {
       setIssueError(true)
+    }
+  }
+
+  async function selectLocalAttachment(orderId: string) {
+    setAttachmentError(false)
+    setAttachmentSaving(true)
+    try {
+      setAttachmentSelection(await api.selectOrderAttachment(orderId))
+    } catch {
+      setAttachmentError(true)
+    } finally {
+      setAttachmentSaving(false)
+    }
+  }
+
+  async function attachSelectedLocalFile(orderId: string) {
+    if (!attachmentSelection) return
+    setAttachmentError(false)
+    setAttachmentSaving(true)
+    try {
+      await api.ingestSelectedOrderAttachment(
+        orderId,
+        attachmentSelection.token,
+      )
+      setAttachmentSelection(null)
+      await openDetail(orderId)
+    } catch {
+      setAttachmentError(true)
+    } finally {
+      setAttachmentSaving(false)
     }
   }
 
@@ -286,6 +323,31 @@ export function RequisitionHistoryPanel({
             总额：{detail.totalMinor} {detail.primaryCurrency}
           </p>
           <h4>附件</h4>
+          <Button
+            loading={attachmentSaving}
+            onClick={() => void selectLocalAttachment(detail.id)}
+          >
+            选择本机附件
+          </Button>
+          {attachmentSelection ? (
+            <p>
+              已选择：{attachmentSelection.originalName} ·{' '}
+              {attachmentSelection.byteLength} 字节
+            </p>
+          ) : null}
+          <Button
+            disabled={!attachmentSelection}
+            loading={attachmentSaving}
+            onClick={() => void attachSelectedLocalFile(detail.id)}
+          >
+            离线归档附件
+          </Button>
+          {attachmentError ? (
+            <Alert
+              type="error"
+              title="附件归档失败：请确认文件存在、类型和大小符合要求，且当前账户有该订单权限。"
+            />
+          ) : null}
           {detail.attachments.length ? (
             <ul>
               {detail.attachments.map((attachment) => (
