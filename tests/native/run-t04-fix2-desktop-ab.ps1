@@ -68,4 +68,3 @@ try {
   if ($vite -and !$vite.HasExited) { Stop-Process -Id $vite.Id }
   if ($certificate) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($certificate.Thumbprint)" }
 }
-
