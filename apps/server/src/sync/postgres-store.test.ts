@@ -30,6 +30,89 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     await pool!.end()
   })
 
+  it('repairs a quarantined duplicate without changing its UUID or material references and replays idempotently', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const first = randomUUID(),
+      duplicate = randomUUID(),
+      material = randomUUID()
+    const code = `CAT-${randomUUID()}`
+    const installationId = randomUUID()
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId,
+    }
+    const request = {
+      requestId: randomUUID(),
+      categoryId: duplicate,
+      expectedVersion: 1,
+      newBusinessCode: `CAT-${randomUUID()}`,
+      reason: 'legacy duplicate',
+    }
+    const client = await pool!.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query("SET LOCAL session_replication_role = 'replica'")
+      for (const id of [first, duplicate])
+        await client.query(
+          "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('material_category', $1, 1, $2, $3)",
+          [
+            id,
+            {
+              id,
+              businessCode: code,
+              name: 'Fixture',
+              isActive: true,
+              version: 1,
+            },
+            actorId,
+          ],
+        )
+      await client.query(
+        "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('material', $1, 1, $2, $3)",
+        [material, { id: material, categoryId: duplicate }, actorId],
+      )
+      await client.query(
+        'INSERT INTO category_code_quarantine (entity_id, business_code) VALUES ($1, $3), ($2, $3)',
+        [first, duplicate, code],
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+    const result = await store.repairCategory({ actor, request })
+    expect(result).toEqual({ categoryId: duplicate, version: 2 })
+    expect(await store.repairCategory({ actor, request })).toEqual(result)
+    await expect(
+      store.repairCategory({
+        actor,
+        request: { ...request, reason: 'different' },
+      }),
+    ).rejects.toThrow()
+    const category = await pool!.query(
+      "SELECT entity_id, version, payload_json FROM sync_entities WHERE entity_type = 'material_category' AND entity_id = $1",
+      [duplicate],
+    )
+    expect(category.rows[0]).toMatchObject({
+      entity_id: duplicate,
+      version: '2',
+      payload_json: { id: duplicate, businessCode: request.newBusinessCode },
+    })
+    const ref = await pool!.query(
+      "SELECT payload_json->>'categoryId' AS category_id FROM sync_entities WHERE entity_type = 'material' AND entity_id = $1",
+      [material],
+    )
+    expect(ref.rows[0].category_id).toBe(duplicate)
+    const audit = await pool!.query(
+      'SELECT count(*) AS count FROM category_code_repairs WHERE request_id = $1',
+      [request.requestId],
+    )
+    expect(audit.rows[0].count).toBe('1')
+  })
+
   it('serializes distinct category IDs competing for one code and replays the conflict', async () => {
     const store = new PostgresSyncStore(pool!)
     const businessCode = `CAT-${randomUUID()}`

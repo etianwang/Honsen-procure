@@ -9,6 +9,7 @@ import { isDeepStrictEqual } from 'node:util'
 import type { Pool, PoolClient } from 'pg'
 import { formalShortCode, parseFormalIssue } from './formal-issue.js'
 import type { SyncActor, SyncStore } from './types.js'
+import { CategoryRepairError } from './service.js'
 
 const globallyVisibleEntityTypes = [
   'country',
@@ -52,6 +53,129 @@ type ProjectDefaultsBusinessRow = {
 
 export class PostgresSyncStore implements SyncStore {
   constructor(private readonly pool: Pool) {}
+
+  async repairCategory(
+    input: Parameters<NonNullable<SyncStore['repairCategory']>>[0],
+  ) {
+    if (
+      !input.actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    )
+      throw new CategoryRepairError('FORBIDDEN')
+    const client = await this.pool.connect()
+    const { request, actor } = input
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        request.requestId,
+      ])
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `material_category:${request.categoryId}`,
+      ])
+      const existing = await client.query<{
+        actor_id: string
+        installation_id: string
+        category_id: string
+        expected_version: string
+        result_version: string
+        new_business_code: string
+        reason: string
+      }>('SELECT * FROM category_code_repairs WHERE request_id = $1', [
+        request.requestId,
+      ])
+      const prior = existing.rows[0]
+      if (prior) {
+        if (
+          prior.actor_id !== actor.id ||
+          prior.installation_id !== actor.installationId ||
+          prior.category_id !== request.categoryId ||
+          Number(prior.expected_version) !== request.expectedVersion ||
+          prior.new_business_code !== request.newBusinessCode ||
+          prior.reason !== request.reason
+        )
+          throw new CategoryRepairError('CONFLICT')
+        await client.query('COMMIT')
+        return {
+          categoryId: prior.category_id,
+          version: Number(prior.result_version),
+        }
+      }
+      const entity = await client.query<StoredEntity>(
+        "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'material_category' AND entity_id = $1 FOR UPDATE",
+        [request.categoryId],
+      )
+      const quarantine = await client.query(
+        "SELECT 1 FROM category_code_quarantine WHERE entity_id = $1 AND status = 'unresolved' FOR UPDATE",
+        [request.categoryId],
+      )
+      const current = entity.rows[0]
+      if (
+        !current ||
+        Number(current.version) !== request.expectedVersion ||
+        quarantine.rowCount !== 1
+      )
+        throw new CategoryRepairError('CONFLICT')
+      const oldCode =
+        current.payload_json.businessCode ?? current.payload_json.business_code
+      if (typeof oldCode !== 'string' || oldCode === request.newBusinessCode)
+        throw new CategoryRepairError('CONFLICT')
+      const payload: Record<string, unknown> = {
+        ...current.payload_json,
+        businessCode: request.newBusinessCode,
+        version: request.expectedVersion + 1,
+      }
+      delete payload.business_code
+      const version = request.expectedVersion + 1
+      await client.query(
+        "UPDATE sync_entities SET payload_json = $2, version = $3, updated_by = $4, updated_at = NOW() WHERE entity_type = 'material_category' AND entity_id = $1",
+        [request.categoryId, payload, version, actor.id],
+      )
+      await client.query(
+        "UPDATE category_code_quarantine SET status = 'resolved' WHERE entity_id = $1",
+        [request.categoryId],
+      )
+      await client.query(
+        'INSERT INTO category_code_repairs (request_id, actor_id, installation_id, category_id, expected_version, result_version, old_business_code, new_business_code, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+        [
+          request.requestId,
+          actor.id,
+          actor.installationId,
+          request.categoryId,
+          request.expectedVersion,
+          version,
+          oldCode,
+          request.newBusinessCode,
+          request.reason,
+        ],
+      )
+      await client.query(
+        "INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action, reason) VALUES ($1, $2, 'material_category', $3, 'repair_business_code', $4)",
+        [request.requestId, actor.id, request.categoryId, request.reason],
+      )
+      await client.query(
+        'LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE',
+      )
+      await client.query(
+        "INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id) VALUES ('material_category', $1, 'upsert', $2, $3, $4)",
+        [request.categoryId, version, payload, actor.id],
+      )
+      await client.query('COMMIT')
+      return { categoryId: request.categoryId, version }
+    } catch (error) {
+      await client.query('ROLLBACK')
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'constraint' in error &&
+        error.constraint === 'material_category_business_code_unique'
+      )
+        throw new CategoryRepairError('CONFLICT')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
 
   async pushEvent(input: {
     event: SyncEvent
