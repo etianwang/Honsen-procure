@@ -30,6 +30,70 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     await pool!.end()
   })
 
+  it('serializes simultaneous repairs of the same duplicate group', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const ids = [randomUUID(), randomUUID(), randomUUID()]
+    const code = `CAT-${randomUUID()}`
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
+    const client = await pool!.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query("SET LOCAL session_replication_role = 'replica'")
+      for (const id of ids) {
+        await client.query(
+          "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('material_category', $1, 1, $2, $3)",
+          [
+            id,
+            {
+              id,
+              businessCode: code,
+              name: 'Fixture',
+              isActive: true,
+              version: 1,
+            },
+            actorId,
+          ],
+        )
+        await client.query(
+          'INSERT INTO category_code_quarantine (entity_id, business_code) VALUES ($1, $2)',
+          [id, code],
+        )
+      }
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+    const requests = ids
+      .slice(0, 2)
+      .map((categoryId) => ({
+        requestId: randomUUID(),
+        categoryId,
+        expectedVersion: 1,
+        newBusinessCode: `CAT-${randomUUID()}`,
+        reason: 'concurrent repair',
+      }))
+    const results = await Promise.all(
+      requests.map((request) => store.repairCategory({ actor, request })),
+    )
+    expect(results.map((result) => result.version)).toEqual([2, 2])
+    const states = await pool!.query(
+      'SELECT status FROM category_code_quarantine WHERE entity_id = ANY($1::uuid[])',
+      [ids],
+    )
+    expect(states.rows.map((row) => row.status)).toEqual([
+      'resolved',
+      'resolved',
+      'resolved',
+    ])
+  })
+
   it('repairs a quarantined duplicate without changing its UUID or material references and replays idempotently', async () => {
     const store = new PostgresSyncStore(pool!)
     const first = randomUUID(),

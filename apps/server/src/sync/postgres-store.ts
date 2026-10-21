@@ -118,6 +118,23 @@ export class PostgresSyncStore implements SyncStore {
           version: Number(prior.result_version),
         }
       }
+      // Lock both code groups in a consistent order before taking quarantine
+      // row locks. Two administrators may repair different members of one group.
+      const snapshot = await client.query<StoredEntity>(
+        "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'material_category' AND entity_id = $1",
+        [request.categoryId],
+      )
+      const oldCode =
+        snapshot.rows[0]?.payload_json.businessCode ??
+        snapshot.rows[0]?.payload_json.business_code
+      if (typeof oldCode !== 'string' || oldCode === request.newBusinessCode)
+        throw new CategoryRepairError('CONFLICT')
+      for (const code of [oldCode, request.newBusinessCode].sort()) {
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended('material_category:' || $1, 0))",
+          [code],
+        )
+      }
       const entity = await client.query<StoredEntity>(
         "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'material_category' AND entity_id = $1 FOR UPDATE",
         [request.categoryId],
@@ -130,17 +147,11 @@ export class PostgresSyncStore implements SyncStore {
       if (
         !current ||
         Number(current.version) !== request.expectedVersion ||
-        quarantine.rowCount !== 1
+        quarantine.rowCount !== 1 ||
+        (current.payload_json.businessCode ??
+          current.payload_json.business_code) !== oldCode
       )
         throw new CategoryRepairError('CONFLICT')
-      const oldCode =
-        current.payload_json.businessCode ?? current.payload_json.business_code
-      if (typeof oldCode !== 'string' || oldCode === request.newBusinessCode)
-        throw new CategoryRepairError('CONFLICT')
-      await client.query(
-        "SELECT pg_advisory_xact_lock(hashtextextended('material_category:' || $1, 0))",
-        [oldCode],
-      )
       const payload: Record<string, unknown> = {
         ...current.payload_json,
         businessCode: request.newBusinessCode,
