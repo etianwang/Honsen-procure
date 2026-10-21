@@ -12087,6 +12087,112 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_category_pull_preserves_material_and_advances_cursor() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: account_id,
+                    username: "category-pull".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "category-pull",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        grant_new_test_scope(&service, account_id, Uuid::new_v4(), now);
+        let first = Uuid::new_v4();
+        let duplicate = Uuid::new_v4();
+        let material_id = Uuid::new_v4();
+        let category = |id| {
+            serde_json::to_value(ReferenceMasterDataInput::MaterialCategory {
+                id,
+                business_code: "CAT-DUP".into(),
+                name: "Fixture".into(),
+                is_active: true,
+                version: 1,
+            })
+            .unwrap()
+        };
+        let material = MaterialInput {
+            id: material_id,
+            sku: Some("MAT-DUP".into()),
+            category_id: Some(duplicate),
+            name_zh: "fixture".into(),
+            name_fr: None,
+            aliases: vec![],
+            brand: None,
+            model: "fixture".into(),
+            specification: "fixture".into(),
+            unit: "pcs".into(),
+            notes: None,
+            is_active: true,
+            version: 1,
+        };
+        let change = |cursor: &str, entity_type: &str, entity_id, payload| SyncPullChangeInput {
+            cursor: cursor.into(),
+            entity_type: entity_type.into(),
+            entity_id,
+            operation: "upsert".into(),
+            version: 1,
+            payload,
+            changed_at: "2026-10-21T00:00:00Z".into(),
+        };
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![
+                        change("1", "material_category", first, category(first)),
+                        change("2", "material_category", duplicate, category(duplicate)),
+                        change(
+                            "3",
+                            "material",
+                            material_id,
+                            serde_json::to_value(material).unwrap(),
+                        ),
+                    ],
+                    next_cursor: "3".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let cursor: String = connection
+            .query_row(
+                "SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1",
+                [account_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cursor, "3");
+        let material_json: String = connection.query_row("SELECT payload_json FROM local_sync_remote_entities WHERE entity_type = 'material' AND entity_id = ?1", [material_id.to_string()], |row| row.get(0)).unwrap();
+        let saved: MaterialInput = serde_json::from_str(&material_json).unwrap();
+        assert_eq!(saved.category_id, Some(duplicate));
+        let quarantined: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_projection_quarantine WHERE entity_id IN (?1, ?2)",
+                params![duplicate.to_string(), material_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(quarantined, 2);
+    }
+
+    #[test]
     fn material_category_push_payload_can_be_projected_on_pull() {
         let record = ReferenceMasterDataInput::MaterialCategory {
             id: Uuid::new_v4(),
