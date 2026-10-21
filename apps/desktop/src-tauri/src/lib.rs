@@ -224,8 +224,10 @@ pub struct SupplierInput {
 #[serde(rename_all = "camelCase")]
 pub struct MaterialCategoryInput {
     pub id: Uuid,
+    #[serde(alias = "business_code")]
     pub business_code: String,
     pub name: String,
+    #[serde(alias = "is_active")]
     pub is_active: bool,
     pub version: i64,
 }
@@ -2304,7 +2306,23 @@ impl LocalAuthService {
             ReferenceMasterDataInput::Unit { id, .. } => ("unit", *id),
             ReferenceMasterDataInput::MaterialCategory { id, .. } => ("material_category", *id),
         };
-        let payload = serde_json::to_string(&record).map_err(|_| AuthError::InvalidInput)?;
+        let payload = match &record {
+            ReferenceMasterDataInput::MaterialCategory {
+                id,
+                business_code,
+                name,
+                is_active,
+                version,
+            } => serde_json::to_string(&MaterialCategoryInput {
+                id: *id,
+                business_code: business_code.clone(),
+                name: name.clone(),
+                is_active: *is_active,
+                version: *version,
+            }),
+            _ => serde_json::to_string(&record),
+        }
+        .map_err(|_| AuthError::InvalidInput)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         let audit_prior_active = match entity_type {
@@ -12047,6 +12065,21 @@ mod tests {
     }
 
     #[test]
+    fn material_category_push_payload_can_be_projected_on_pull() {
+        let record = ReferenceMasterDataInput::MaterialCategory {
+            id: Uuid::new_v4(),
+            business_code: "CAT-1".into(),
+            name: "Fixture".into(),
+            is_active: true,
+            version: 1,
+        };
+        let payload = serde_json::to_value(record).unwrap();
+        let category: MaterialCategoryInput = serde_json::from_value(payload).unwrap();
+        assert_eq!(category.business_code, "CAT-1");
+        assert!(category.is_active);
+    }
+
+    #[test]
     fn pull_continues_only_after_a_full_advancing_page() {
         let change = SyncPullChangeInput {
             cursor: "501".into(),
@@ -14948,6 +14981,11 @@ mod tests {
         assert_eq!(category_row, ("Electrical revised".into(), 0));
         let outbox_count: i64 = connection.query_row("SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?1", [id.to_string()], |row| row.get(0)).unwrap();
         assert_eq!(outbox_count, 3);
+        let payload: String = connection.query_row("SELECT payload_json FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?1 ORDER BY rowid LIMIT 1", [id.to_string()], |row| row.get(0)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(json["businessCode"], "fixture-category");
+        assert_eq!(json["isActive"], true);
+        assert!(json.get("business_code").is_none());
     }
 
     #[test]
