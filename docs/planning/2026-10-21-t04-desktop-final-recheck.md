@@ -1,0 +1,21 @@
+# T04 final independent recheck
+
+**QA PASS for the T04 scope; Draft PR is not automatically merged.** The desktop run used production candidate `8d16317c0c1864890014f8085aad44769fc50dd3`. The current PR head `3ac43fc53da13442f6444399a262e3756c145589` differs only in four G1 integration-test expected error-code fields; the application, sync, IPC, migrations and desktop build are unchanged. Evidence from the candidate therefore applies to those unchanged boundaries. Original migration evidence remains in `2026-10-21-t04-fix1-final-qa.md`; downgrade to software unaware of 0049 remains unverified and is not claimed supported.
+
+## Environment and execution
+
+Windows; isolated PostgreSQL 16.14 on loopback port 55440, E: test cluster and separate synthetic `t04_desktop_test` database; no shared PostgreSQL service touched. Cargo target and TEMP/TMP were on E:. Built `HonsenProcure` and the test-profile binary with `cargo build --offline --manifest-path apps/desktop/src-tauri/Cargo.toml --bin HonsenProcure --bin honsen-procure-test-profile`. The focused `tests/native/t04-desktop-ab.mjs` uses two separate test-profile SQLite files, real desktop WebView IPC, real Rust HTTPS transport, the real test HTTPS server and PostgreSQL. The test-only launcher requires `T04_TASK_ROOT` and `T04_TEST_DATABASE_URL` to identify an isolated E: runtime and loopback test database; those launcher inputs were parameterized after the successful run without changing the exercised desktop code or assertions.
+
+The first attempt stopped before writes because the second WebView did not expose IPC within 5 seconds. The second reached create/Push/Pull but stopped when the material write was forbidden because the test account lacked project scope. The existing synthetic project-scope fixture was added to the test account. The third run passed. These were test setup failures, not suppressed product failures.
+
+## Actual desktop and server evidence
+
+- A administrator IPC created category `0b0770ca-9adf-4951-b9e4-4653fb0aba34`, code `T04-0b0770ca-9adf-4951-b9e4-4653fb0aba34`; its unacknowledged Outbox used camelCase `businessCode` and `isActive`. Push returned accepted count 1, pending count 0. Server response for event `2c59f905-faa2-45cf-82f5-81f4fcd89bf3`: HTTP 200, `accepted`, server version 1. PostgreSQL stored the same camelCase payload.
+- B Pull returned cursor 2, projected the category, and B created a material referencing it. A changed name to `Revised`, active to false, version 2; Push event `1c181499-19c2-415b-b5d2-1b61ef77e0ab` returned HTTP 200, `accepted`, server version 2. B Pull advanced 2 to 3. SQLite readback: same category UUID and code, name `Revised`, `is_active=0`, version 2; material `5e2b3cff-0b55-4d39-acc4-344786c692db` retained the category UUID.
+- Repeated desktop Pull applied zero changes and kept cursor 3; repeated Push accepted zero and left zero pending. PostgreSQL contained one category entity and exactly the two accepted create/update events. The previous service-level evidence separately exercised replay of the identical event.
+- A synthetic historical snake_case payload was inserted into the isolated server change log, not sent by a historical client. B's real desktop Pull advanced cursor 3 to 4 and projected category `78c81d80-5bfd-4671-bfd4-de53bd7b9d75`, name `Legacy`, active 1, version 1. This proves real Pull projection, not legacy-client Push.
+- B then logged in as an engineer without administrator rights; IPC category mutation returned `{code: forbidden}`. The earlier independent PostgreSQL test separately verifies server-side purchaser rejection.
+
+## CI and disposition
+
+G1 was reproduced with three failures. Shared `syncPushResponseSchema` allows `errorCode`; service permission denial returns `FORBIDDEN`, while rejected origin replay is normalized to `VALIDATION_REJECTED`. The exact expectations were extended to assert those codes; no safety assertion or application behavior was removed. The targeted PostgreSQL G1 tests passed 3/3, server typecheck and Prettier check passed. On `3ac43fc`, both GitHub `quality` checks passed. The PR may be considered for removal of Draft subject to normal review and authorization; this QA does not merge it or change G4, T11-A, T13, PostgreSQL release gate or Formal hold.

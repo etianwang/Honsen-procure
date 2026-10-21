@@ -651,3 +651,10 @@ Build shared contracts and exact money/quantity helpers only:
 3. Add unit tests for XOF/CNY/USD/EUR formatting, quantity parsing and half-up rounding.
 4. Add a development-only currency preview used by a Playwright DOM click/select test.
 5. Before marking T01 done, run every quality gate and record exact commands/results in this file.
+
+## T04 final independent QA handoff — 2026-10-21
+
+- T04 QA PASS for the bounded category slice; desktop evidence is for candidate `8d16317c0c1864890014f8085aad44769fc50dd3`, with the unchanged production boundary at PR head `3ac43fc53da13442f6444399a262e3756c145589`. Details, results and scope are in `docs/planning/2026-10-21-t04-desktop-final-recheck.md`.
+- BLOCKER: none established for this bounded independent QA. Formal release holds are not cleared by this result.
+- WARNING: downgrade to software unaware of migration 0049 was not tested. Historical snake_case Pull used a synthetic server change-log fixture; it was not a historical-client Push.
+- DEFERRED: T11-A, T13, G4, PostgreSQL release acceptance and Formal hold retain their prior states. PR #15 remains Draft pending authorized review; no merge performed.
