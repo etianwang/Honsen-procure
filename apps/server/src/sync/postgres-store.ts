@@ -54,6 +54,23 @@ type ProjectDefaultsBusinessRow = {
 export class PostgresSyncStore implements SyncStore {
   constructor(private readonly pool: Pool) {}
 
+  async listCategoryQuarantine() {
+    const result = await this.pool.query<{
+      category_id: string
+      business_code: string
+      name: string
+      version: string
+    }>(`SELECT q.entity_id AS category_id, q.business_code, COALESCE(e.payload_json->>'name', '') AS name, e.version
+      FROM category_code_quarantine q JOIN sync_entities e ON e.entity_type = 'material_category' AND e.entity_id = q.entity_id
+      WHERE q.status = 'unresolved' ORDER BY q.business_code, q.entity_id`)
+    return result.rows.map((row) => ({
+      categoryId: row.category_id,
+      businessCode: row.business_code,
+      name: row.name,
+      version: Number(row.version),
+    }))
+  }
+
   async repairCategory(
     input: Parameters<NonNullable<SyncStore['repairCategory']>>[0],
   ) {

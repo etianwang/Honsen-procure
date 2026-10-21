@@ -130,6 +130,12 @@ describe('sync API', () => {
         payload,
       })
       expect(forbidden.statusCode).toBe(403)
+      const list = await app.inject({
+        method: 'GET',
+        url: '/api/sync/category-quarantine',
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(list.statusCode).toBe(403)
     } finally {
       await app.close()
     }

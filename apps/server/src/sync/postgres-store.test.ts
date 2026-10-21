@@ -83,6 +83,13 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     } finally {
       client.release()
     }
+    const quarantined = await store.listCategoryQuarantine()
+    expect(quarantined).toContainEqual({
+      categoryId: duplicate,
+      businessCode: code,
+      name: 'Fixture',
+      version: 1,
+    })
     const result = await store.repairCategory({ actor, request })
     expect(result).toEqual({ categoryId: duplicate, version: 2 })
     expect(await store.repairCategory({ actor, request })).toEqual(result)

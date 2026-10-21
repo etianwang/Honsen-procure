@@ -235,6 +235,25 @@ export function createApp(
   }
 
   if (sync) {
+    app.get('/api/sync/category-quarantine', async (request, reply) => {
+      try {
+        if (typeof request.headers.authorization !== 'string')
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        return await sync.listCategoryQuarantine(
+          await authenticateRequest(request),
+        )
+      } catch (error) {
+        if (error instanceof AuthenticationError)
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        if (error instanceof CategoryRepairError)
+          return reply
+            .status(error.code === 'FORBIDDEN' ? 403 : 503)
+            .send({ code: error.code })
+        if (error instanceof z.ZodError)
+          return reply.status(400).send({ code: 'INVALID_REQUEST' })
+        throw error
+      }
+    })
     app.post('/api/sync/category-repairs', async (request, reply) => {
       try {
         if (typeof request.headers.authorization !== 'string')

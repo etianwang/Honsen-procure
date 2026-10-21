@@ -13,6 +13,14 @@ export type SyncActor = {
 }
 
 export type SyncStore = {
+  listCategoryQuarantine?(): Promise<
+    Array<{
+      categoryId: string
+      businessCode: string
+      name: string
+      version: number
+    }>
+  >
   repairCategory?(input: {
     actor: SyncActor
     request: CategoryRepairRequest

@@ -64,6 +64,18 @@ const rfqPayloadSchema = z.strictObject({
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
 
+  async listCategoryQuarantine(actor: SyncActor) {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    )
+      throw new CategoryRepairError('FORBIDDEN')
+    if (!this.store.listCategoryQuarantine)
+      throw new CategoryRepairError('UNAVAILABLE')
+    return this.store.listCategoryQuarantine()
+  }
+
   async repairCategory(actor: SyncActor, input: unknown) {
     if (
       !actor.roles.some(
