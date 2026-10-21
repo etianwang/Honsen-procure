@@ -651,3 +651,11 @@ Build shared contracts and exact money/quantity helpers only:
 3. Add unit tests for XOF/CNY/USD/EUR formatting, quantity parsing and half-up rounding.
 4. Add a development-only currency preview used by a Playwright DOM click/select test.
 5. Before marking T01 done, run every quality gate and record exact commands/results in this file.
+
+## T04 FIX2 checkpoint — INCOMPLETE
+
+- Rust category creation now enforces the existing shared business-code first-character rule; focused category test demonstrated `-CAT` was accepted before the change and passes afterward, including empty, 64- and 65-character boundaries. `cargo fmt --check` passed. This checkpoint is not independent QA and is not READY_FOR_RECHECK.
+- BLOCKER: existing invalid local codes still require an authorized, audited and lossless repair path. Their presence on internal devices or server has not been checked; no production database was inspected.
+- BLOCKER: server atomic cross-UUID uniqueness, structured recoverable conflicts, legacy duplicate isolation and desktop recovery remain unimplemented and untested. Do not merge PR #15.
+- Tests not executed: PostgreSQL concurrent/replay/recovery and desktop A/B FIX2 acceptance, affected package full gates and independent QA. These omissions prevent accepting the synchronization and recovery requirements.
+- Toolbox integration gaps remain as documented in `docs/HONSEN_TOOLBOX_INTEGRATION.md`; this checkpoint does not change Toolbox, installer or release contracts.

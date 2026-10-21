@@ -2541,6 +2541,9 @@ impl LocalAuthService {
                 version,
             } => {
                 validate_reference(&business_code, &name, version)?;
+                if !valid_business_code(&business_code) {
+                    return Err(AuthError::InvalidInput);
+                }
                 assert_immutable_local_business_code(
                     &transaction,
                     "local_material_categories",
@@ -14972,6 +14975,38 @@ mod tests {
                 "correct-password",
                 captcha.id,
                 answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        for code in [
+            "-CAT".to_owned(),
+            "_CAT".to_owned(),
+            "".to_owned(),
+            "A".repeat(65),
+        ] {
+            assert_eq!(
+                service.save_reference_master_data(
+                    ReferenceMasterDataInput::MaterialCategory {
+                        id: Uuid::new_v4(),
+                        business_code: code,
+                        name: "Invalid code".into(),
+                        is_active: true,
+                        version: 1,
+                    },
+                    now
+                ),
+                Err(AuthError::InvalidInput)
+            );
+        }
+        service
+            .save_reference_master_data(
+                ReferenceMasterDataInput::MaterialCategory {
+                    id: Uuid::new_v4(),
+                    business_code: "A".repeat(64),
+                    name: "Maximum code".into(),
+                    is_active: true,
+                    version: 1,
+                },
                 now,
             )
             .unwrap();
