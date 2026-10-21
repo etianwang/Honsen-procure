@@ -2295,7 +2295,14 @@ impl LocalAuthService {
         record: ReferenceMasterDataInput,
         now: SystemTime,
     ) -> Result<(), AuthError> {
-        self.require_master_data_mutation(now)?;
+        if matches!(record, ReferenceMasterDataInput::MaterialCategory { .. }) {
+            match self.require_role(Role::Administrator, now) {
+                Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+                result => result?,
+            }
+        } else {
+            self.require_master_data_mutation(now)?;
+        }
         let actor_id = self.active_session_user_id()?;
         let (entity_type, entity_id) = match &record {
             ReferenceMasterDataInput::Country { id, .. } => ("country", *id),
@@ -14906,6 +14913,34 @@ mod tests {
         service
             .offline_login(
                 "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_reference_master_data(category("Electrical", true, 1), now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: Uuid::new_v4(),
+                    username: "purchaser".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "purchaser",
                 "correct-password",
                 captcha.id,
                 answer(&captcha.question),

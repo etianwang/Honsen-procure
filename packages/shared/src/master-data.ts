@@ -55,6 +55,10 @@ const activeReferenceSchema = z.object({
   isActive: z.boolean(),
 })
 
+export const materialCategorySchema = activeReferenceSchema.extend({
+  version: z.number().int().min(1),
+})
+
 export const referenceMasterDataSchema = z.discriminatedUnion('kind', [
   activeReferenceSchema.extend({
     kind: z.literal('country'),

@@ -1,5 +1,6 @@
 import {
   exchangeRateSchema,
+  materialCategorySchema,
   projectDefaultsSchema,
   referenceMasterDataSchema,
   uuidSchema,
@@ -133,6 +134,17 @@ export class SyncService {
     }
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
+    if (event.entityType === 'material_category') {
+      const payload = referencePayload(event.payload)
+      return (
+        event.operation === 'upsert' &&
+        actor.roles.some(
+          (role) => role === 'administrator' || role === 'super_administrator',
+        ) &&
+        payload.id === event.entityId &&
+        materialCategorySchema.safeParse(payload).success
+      )
+    }
     if (
       referenceMasterDataTypes.includes(
         event.entityType as (typeof referenceMasterDataTypes)[number],
