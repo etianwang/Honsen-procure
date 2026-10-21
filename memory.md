@@ -1,3 +1,9 @@
+## T04 FIX2-B/C independent QA handoff — 2026-10-21
+
+- Candidate `dc414f18b5efba040ce4a20bacefb3d1a4de539c`, independent branch `codex/qa-t04-fix2-final`. QA checkpoint is the commit containing this entry; `git log -1 --format=%H` gives its SHA. Evidence and limitations are in `docs/planning/2026-10-21-t04-fix2-independent-qa.md`. Functional independent QA PASS for the stated boundaries; no final review or merge.
+- **BLOCKER (release only):** establish and execute controlled single-runner migration and stop old servers before upgrading; concurrent runners failed independently, and old-server mixed-version error handling is incompatible by source inspection. Restore/rollback and production deployment authority remain separate. **DEFERRED:** original T04 parent and release gates. **WARNING:** old-version downgrade is unverified; injected migration failures cover SQLite 0050 and PostgreSQL 007, not every migration. API permission test used Fastify inject; Windows recovery IPC and UI were real. No unrelated test suite was rerun.
+- PostgreSQL and SQLite synthetic databases, build artifacts and raw native logs are in `E:/HonsenTaskRuntime/qa-t04-fix2-final`; no EXE, database, credentials or certificates are committed. No business data, production branch or PR was modified. The status and remaining ignored test environment should be rechecked at handoff.
+
 # Honsen采购管理系统（HONSEN Procure）— Development Memory
 
 **Last updated:** 2026-10-21
