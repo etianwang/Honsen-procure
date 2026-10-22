@@ -448,6 +448,7 @@ function App() {
           ) : page === 'materials' ? (
             <MaterialsPage
               role={session ? role : 'purchaser'}
+              countryId={requisitionContext?.countryId}
               api={
                 (
                   window as Window & {

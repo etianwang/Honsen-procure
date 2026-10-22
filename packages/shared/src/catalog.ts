@@ -21,6 +21,7 @@ export const materialSchema = z.object({
 
 export const supplierSchema = z.object({
   id: uuidSchema,
+  countryId: uuidSchema,
   businessCode: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1).max(255),
   contactName: optionalText,

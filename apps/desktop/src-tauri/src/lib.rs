@@ -1066,6 +1066,7 @@ pub struct CatalogMaterialView {
 #[serde(rename_all = "camelCase")]
 pub struct SupplierView {
     pub id: Uuid,
+    pub country_id: Uuid,
     pub business_code: String,
     pub name: String,
     pub contact_name: Option<String>,
@@ -5343,7 +5344,7 @@ impl LocalAuthService {
         let mut statement = connection
             .prepare(
                 "SELECT id, business_code, name, contact_name, address, city, country, phone, whatsapp, email,
-                        payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version
+                        payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version, country_id
                  FROM local_suppliers
                  WHERE deleted_at IS NULL AND country_id IS NOT NULL
                    AND EXISTS (SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 AND p.country_id = local_suppliers.country_id)
@@ -5369,6 +5370,7 @@ impl LocalAuthService {
                     row.get::<_, i64>(13)?,
                     row.get::<_, i64>(14)?,
                     row.get::<_, i64>(15)?,
+                    row.get::<_, String>(16)?,
                 ))
             })
             .map_err(|_| AuthError::Database)?
@@ -5390,9 +5392,11 @@ impl LocalAuthService {
                     is_blacklisted,
                     is_active,
                     version,
+                    country_id,
                 ) = row.map_err(|_| AuthError::Database)?;
                 Ok(SupplierView {
                     id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
+                    country_id: Uuid::parse_str(&country_id).map_err(|_| AuthError::Database)?,
                     business_code,
                     name,
                     contact_name,
@@ -18044,6 +18048,7 @@ mod tests {
         let visible_suppliers = service.list_suppliers(now).unwrap();
         assert_eq!(visible_suppliers.len(), 1);
         assert_eq!(visible_suppliers[0].id, cm_supplier);
+        assert_eq!(visible_suppliers[0].country_id, cm);
         let visible_quotes = service.search_catalog("global", None, now).unwrap();
         assert_eq!(visible_quotes[0].prices.len(), 1);
         assert_eq!(visible_quotes[0].prices[0].supplier_id, cm_supplier);
