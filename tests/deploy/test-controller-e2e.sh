@@ -88,6 +88,7 @@ if [[ -e $root/check-release-owner && " $* " == *' token='* ]]; then
   fi
   /usr/bin/psql "$@" < "$input"
   if grep -q '^DELETE FROM honsen_deployment.controller_lock' "$input" && [[ -f $root/pause-after-release ]]; then
+    printf '%s\n' "$token" > "$root/release-token"
     printf '%s\n' "$$" > "$root/release-completed"
     while [[ ! -f $root/after-release-resume ]]; do sleep .05; done
   fi
@@ -199,7 +200,7 @@ run_case() {
   echo "controller scenario: $scenario"
   systemctl stop honsen-procure.service >/dev/null 2>&1 || :
   systemctl unmask --runtime honsen-procure.service >/dev/null 2>&1 || :
-  rm -f /run/honsen-procure/deployment-ready /opt/honsen-procure/current /opt/honsen-procure/.current-next "$root/fail-live" "$root/pause-live" "$root/live-waiting" "$root/live-resume" "$root/pause-confirm" "$root/confirm-waiting" "$root/confirm-resume" "$root/check-release-owner" "$root/pause-release" "$root/release-waiting" "$root/release-resume" "$root/pause-after-release" "$root/release-completed" "$root/after-release-resume"
+  rm -f /run/honsen-procure/deployment-ready /opt/honsen-procure/current /opt/honsen-procure/.current-next "$root/fail-live" "$root/pause-live" "$root/live-waiting" "$root/live-resume" "$root/pause-confirm" "$root/confirm-waiting" "$root/confirm-resume" "$root/check-release-owner" "$root/pause-release" "$root/release-waiting" "$root/release-resume" "$root/pause-after-release" "$root/release-completed" "$root/release-token" "$root/after-release-resume"
   rm -rf /var/lib/honsen-procure
   PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db" >/dev/null
   export PGDATABASE=$db
@@ -355,14 +356,37 @@ SQL
       sleep .01
     done
     [[ $reached == 1 ]] || { echo 'post-release termination checkpoint was not reached' >&2; exit 1; }
+    old_token=$(cat "$root/release-token")
+    old_guard=$(ls -td "$root"/log/.traffic-guard.* | head -n 1)
+    old_audit=$(ls -t "$root"/log/deploy-*.log | head -n 1)
     [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 0 ]]
     kill -KILL "$first" "$(cat "$root/release-completed")"
     wait "$first" || result=$?
     [[ $result == 137 ]]
     for _ in {1..200}; do flock -n /run/honsen-procure/deploy.lock true && break; sleep .05; done
     flock -n /run/honsen-procure/deploy.lock true
-    rm -f "$root/check-release-owner" "$root/pause-after-release"
-    bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/post-release-repeat.log" 2>&1
+    rm -f "$root/pause-after-release"
+    touch "$root/pause-release"
+    bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/post-release-repeat.log" 2>&1 &
+    second=$!
+    reached=0
+    for _ in {1..3000}; do
+      if [[ -f $root/release-waiting ]]; then reached=1; break; fi
+      kill -0 "$second" || break
+      sleep .01
+    done
+    [[ $reached == 1 ]] || { echo 'second deployment did not reach its release checkpoint' >&2; exit 1; }
+    systemd-run --unit honsen-stale-guard-test.service --property=Type=exec --property=RemainAfterExit=yes \
+      /bin/bash "$root/release/deploy/linux/traffic-watchdog.sh" "$root/config" 0 0 "$old_guard" "$old_audit" "$old_token" >/dev/null
+    reached=0
+    for _ in {1..1000}; do [[ -f $old_guard/failed ]] && { reached=1; break; }; sleep .01; done
+    [[ $reached == 1 ]] || { echo 'stale supervisor did not reach recovery' >&2; exit 1; }
+    touch "$root/release-resume"
+    wait "$second"
+    for _ in {1..1000}; do grep -q 'step=traffic_watchdog:recovery_abandoned:not_owner' "$old_audit" && break; sleep .01; done
+    grep -q 'step=traffic_watchdog:recovery_abandoned:not_owner' "$old_audit"
+    systemctl stop honsen-stale-guard-test.service
+    rm -f "$root/check-release-owner" "$root/pause-release"
     grep -q 'version already deployed' "$root/post-release-repeat.log"
     [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 200 ]]
     systemctl is-active --quiet honsen-procure.service
