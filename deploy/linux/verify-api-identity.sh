@@ -13,6 +13,12 @@ async function main() {
   const client = new Client({ connectionString: urls[0].slice('POSTGRES_URL='.length) })
   await client.connect()
   const result = await client.query("SELECT current_user || '|' || current_database() || '|' || coalesce(inet_server_addr()::text, 'unix') || '|' || coalesce(inet_server_port()::text, 'unix') AS identity")
+  // The registry uses SELECT FOR UPDATE and INSERT in the sync path.
+  const check = await client.query(`SELECT has_schema_privilege(current_user, 'public', 'USAGE')
+    AND COALESCE(has_table_privilege(current_user, to_regclass('public.formal_issue_registry'), 'SELECT'), false)
+    AND COALESCE(has_table_privilege(current_user, to_regclass('public.formal_issue_registry'), 'INSERT'), false)
+    AND COALESCE(has_table_privilege(current_user, to_regclass('public.formal_issue_registry'), 'UPDATE'), false) AS ok`)
+  if (!check.rows[0].ok) throw new Error('API database privileges incomplete')
   process.stdout.write(result.rows[0].identity)
   await client.end()
 }
