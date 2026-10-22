@@ -10,14 +10,22 @@ try {
   if (process.argv.length !== 4)
     throw new Error('usage: create-artifact-manifest RELEASE_DIR OUTPUT')
   const [root, output] = process.argv.slice(2)
-  const commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], {
+  const git = [
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'core.hooksPath=/dev/null',
+    '-C',
+    root,
+  ]
+  const commit = execFileSync('git', [...git, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
   }).trim()
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('invalid Git commit')
   if (
     execFileSync(
       'git',
-      ['-C', root, 'status', '--porcelain', '--untracked-files=no'],
+      [...git, 'status', '--porcelain', '--untracked-files=no'],
       { encoding: 'utf8' },
     )
   ) {

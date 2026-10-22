@@ -21,7 +21,13 @@ sshd_pid=
 created_user=0
 created_restore=0
 cleanup() {
+  status=$?
   set +e
+  if (( status != 0 )); then
+    for log in "$root"/writer.log "$root"/backup.log "$root"/migration.log "$root"/readiness.log "$root"/traffic.log "$root"/success.log "$root"/repeat.log "$root"/concurrent.log; do
+      if [[ -f $log ]]; then printf '\n--- %s ---\n' "${log##*/}" >&2; tail -n 30 "$log" >&2; fi
+    done
+  fi
   systemctl stop honsen-procure.service honsen-controller-nginx.service >/dev/null 2>&1
   systemctl unmask --runtime honsen-procure.service >/dev/null 2>&1
   mountpoint -q "$root/remote" && fusermount3 -u "$root/remote"

@@ -27,8 +27,8 @@ install -d -m 700 -o root -g root /run/honsen-procure
 [[ ! -L /run/honsen-procure/deploy.lock ]] || { echo 'deployment lock is a symlink' >&2; exit 1; }
 exec 9>/run/honsen-procure/deploy.lock
 flock -n 9 || { echo 'another deployment is running' >&2; exit 1; }
-[[ $(git -C "$RELEASE_DIR" rev-parse HEAD) == "$RELEASE_SHA" && -z $(git -C "$RELEASE_DIR" status --porcelain --untracked-files=no) ]] || { echo 'release source mismatch or dirty' >&2; exit 1; }
 node "$script_dir/verify-artifact.cjs" "$RELEASE_DIR" "$RELEASE_SHA" "$RELEASE_MANIFEST" "$RELEASE_MANIFEST_SHA256"
+[[ $(git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$RELEASE_DIR" rev-parse HEAD) == "$RELEASE_SHA" && -z $(git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$RELEASE_DIR" status --porcelain --untracked-files=no) ]] || { echo 'release source mismatch or dirty' >&2; exit 1; }
 node "$script_dir/verify-writer-inventory.cjs" "$WRITER_INVENTORY" "$OLD_ROLE" "$NEW_ROLE" "$(hostname -f)"
 [[ $OLD_ROLE =~ ^[a-z_][a-z0-9_]*$ && $NEW_ROLE =~ ^[a-z_][a-z0-9_]*$ && $OLD_ROLE != "$NEW_ROLE" ]] || exit 2
 export POSTGRES_URL PGDATABASE NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT RESTORE_SERVICE PGSERVICEFILE PGPASSFILE
