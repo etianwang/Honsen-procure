@@ -149,7 +149,7 @@ printf '%s\n%s\n' "$RELEASE_SHA" "$RELEASE_MANIFEST_SHA256" > "$marker"
 chmod 600 "$marker"
 mv -f -- "$marker" /var/lib/honsen-procure/deployment.sha
 log_event traffic_activated
+log_event success
 bash "$script_dir/deployment-lock.sh" release "$lock_token"
 trap - EXIT
-log_event success || { echo "deployment is live but audit finalization failed: $log" >&2; exit 1; }
 printf 'deployment succeeded; audit: %s\n' "$log"

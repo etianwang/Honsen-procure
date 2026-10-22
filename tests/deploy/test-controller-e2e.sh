@@ -35,7 +35,7 @@ git -c safe.directory="$TEST_REPO" clone --quiet --no-hardlinks "$TEST_REPO" "$r
 rsync -a --exclude=.git "$TEST_REPO/" "$root/release/"
 chown -R root:root "$root/release"
 chmod -R go-w "$root/release"
-export PATH="$TEST_NODE_DIR:/usr/bin:/bin"
+export PATH="$TEST_NODE_DIR:/usr/sbin:/usr/bin:/sbin:/bin"
 sha=$(git -C "$root/release" rev-parse HEAD)
 manifest_digest=$(node "$root/release/deploy/linux/create-artifact-manifest.cjs" "$root/release" "$root/manifest.json")
 cp "$root/release/deploy/linux/honsen-procure.service" /usr/lib/systemd/system/honsen-procure.service
