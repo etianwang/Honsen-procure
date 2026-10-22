@@ -128,11 +128,13 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
           eventId: event.eventId,
           status: 'validation_error',
           serverVersion: null,
+          errorCode: 'FORBIDDEN',
         },
         {
           eventId: stale.eventId,
           status: 'validation_error',
           serverVersion: null,
+          errorCode: 'FORBIDDEN',
         },
       ])
       const pull = await api.inject({
@@ -237,6 +239,7 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
         eventId: event.eventId,
         status: 'validation_error',
         serverVersion: null,
+        errorCode: 'VALIDATION_REJECTED',
       })
       const pull = await api.inject({
         method: 'GET',
@@ -312,6 +315,7 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
         eventId: event.eventId,
         status: 'validation_error',
         serverVersion: null,
+        errorCode: 'VALIDATION_REJECTED',
       })
       const next = {
         ...event,
