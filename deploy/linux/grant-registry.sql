@@ -14,6 +14,10 @@ BEGIN
   END IF;
   EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', role_name);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE ON public.formal_issue_registry TO %I', role_name);
+  IF to_regclass('public.server_change_log_sequence_seq') IS NULL THEN
+    RAISE EXCEPTION 'required change-log sequence is missing';
+  END IF;
+  EXECUTE format('GRANT USAGE ON SEQUENCE public.server_change_log_sequence_seq TO %I', role_name);
 END
 $grant$;
 COMMIT;

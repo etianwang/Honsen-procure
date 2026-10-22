@@ -36,7 +36,7 @@ for _ in {1..2400}; do
   fi
   if ! kill -0 "$child" 2>/dev/null; then
     if ! wait "$child"; then recover; exit 0; fi
-    touch "$guard/ready"
+    printf '%s\n' "$$" > "$guard/ready"
     break
   fi
   sleep .05

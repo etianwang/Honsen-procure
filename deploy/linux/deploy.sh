@@ -77,6 +77,8 @@ failed() {
   fi
 }
 trap failed EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 log_event start
 [[ -f "$RELEASE_DIR/apps/server/dist/index.js" && -f "$RELEASE_DIR/node_modules/tsx/dist/cli.mjs" ]] || { echo 'built server or migration runtime missing' >&2; exit 1; }
 bash "$script_dir/verify-systemd.sh" "$RELEASE_DIR/deploy/linux/honsen-procure.service"
@@ -167,7 +169,8 @@ systemd-run --unit "$guard_unit" --property=Type=exec --property=Restart=on-fail
 traffic_ready=0
 for _ in {1..2400}; do
   [[ ! -e $guard/failed ]] || break
-  if [[ -f $guard/ready ]] && systemctl is-active --quiet "$guard_unit"; then traffic_ready=1; break; fi
+  if [[ -f $guard/ready ]] && systemctl is-active --quiet "$guard_unit" &&
+     [[ $(cat "$guard/ready") == "$(systemctl show -p MainPID --value "$guard_unit")" ]]; then traffic_ready=1; break; fi
   sleep .05
 done
 [[ $traffic_ready == 1 ]] || { echo 'traffic supervisor did not confirm live ingress' >&2; exit 1; }
