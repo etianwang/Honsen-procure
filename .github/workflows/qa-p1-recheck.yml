@@ -1,0 +1,57 @@
+name: Independent P1 deployment recheck
+on:
+  push:
+    branches: [codex/qa-v1-linux-deployment-final]
+permissions:
+  contents: read
+jobs:
+  recheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: honsen_test
+          POSTGRES_USER: honsen_test
+          POSTGRES_PASSWORD: ${{ github.run_id }}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U honsen_test -d honsen_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: qa
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 1e71f13f5068742950ef6efbb94a918d727e251e
+          path: production
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: production/.nvmrc
+      - name: Install and build exact production SHA
+        working-directory: production
+        run: |
+          test "$(git rev-parse HEAD)" = 1e71f13f5068742950ef6efbb94a918d727e251e
+          npm ci
+          npm run build
+      - name: Install isolated Linux integration prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nginx sshfs openssh-server postgresql-client rsync
+      - name: Execute independent focused driver
+        run: |
+          set -o pipefail
+          sudo env HONSEN_DEPLOY_TEST=disposable-ci TEST_NODE_DIR="$(dirname "$(command -v node)")" TEST_PG_PASSWORD="${{ github.run_id }}" TEST_REPO="$GITHUB_WORKSPACE/production" bash "$GITHUB_WORKSPACE/qa/qa-recheck/controller-recheck.sh" 2>&1 | tee "$RUNNER_TEMP/p1-recheck.log"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-recheck-log
+          path: ${{ runner.temp }}/p1-recheck.log
+          if-no-files-found: warn
+          retention-days: 30
