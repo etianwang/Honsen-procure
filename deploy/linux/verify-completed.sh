@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Exit 3 means this SHA has not been recorded; any other failure is unsafe.
 set -euo pipefail
-: "${RELEASE_SHA:?}" "${RELEASE_DIR:?}" "${OLD_ROLE:?}" "${NEW_ROLE:?}" "${INGRESS_INCLUDE:?}" "${INGRESS_HOST:?}" "${INGRESS_PORT:?}"
+: "${RELEASE_SHA:?}" "${RELEASE_MANIFEST_SHA256:?}" "${RELEASE_DIR:?}" "${OLD_ROLE:?}" "${NEW_ROLE:?}" "${INGRESS_INCLUDE:?}" "${INGRESS_HOST:?}" "${INGRESS_PORT:?}"
 [[ $# == 2 ]] || exit 2
 marker=$1
 current=$2
 [[ -e $marker ]] || exit 3
 [[ -f $marker && ! -L $marker && $(stat -c %u "$marker") == 0 && $(stat -c %a "$marker") == 600 ]] || exit 1
-recorded=$(cat "$marker")
+mapfile -t records < "$marker"
+[[ ${#records[@]} == 2 ]] || exit 1
+recorded=${records[0]}
 [[ $recorded =~ ^[0-9a-f]{40}$ ]] || exit 1
 [[ $recorded == "$RELEASE_SHA" ]] || exit 3
+[[ ${records[1]} == "$RELEASE_MANIFEST_SHA256" && $RELEASE_MANIFEST_SHA256 =~ ^[0-9a-f]{64}$ ]] || { echo 'same commit has a different artifact digest' >&2; exit 1; }
 [[ -L $current && $(readlink -f "$current") == $(readlink -f "$RELEASE_DIR") ]] || exit 1
 systemctl is-active --quiet honsen-procure.service
 pid=$(systemctl show -p MainPID --value honsen-procure.service)
