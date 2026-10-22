@@ -225,12 +225,16 @@ EOF
   chmod 600 "$root/config"
   [[ $scenario != traffic ]] || touch "$root/fail-live"
   if [[ $scenario == privileges ]]; then
+    existing_logs=$(find "$root/log" -maxdepth 1 -type f -name 'deploy-*.log' -printf '|%f|')
     (
       for _ in {1..3000}; do
-        if [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_new'") == t ]]; then
-          psql -X -v ON_ERROR_STOP=1 -c 'REVOKE INSERT ON formal_issue_registry FROM gate_new' >/dev/null
-          exit 0
-        fi
+        for audit in "$root"/log/deploy-*.log; do
+          [[ -f $audit && $existing_logs != *"|${audit##*/}|"* ]] || continue
+          if grep -q 'step=new_role_activated' "$audit"; then
+            psql -X -v ON_ERROR_STOP=1 -c 'REVOKE INSERT ON formal_issue_registry FROM gate_new' >/dev/null
+            exit 0
+          fi
+        done
         sleep .01
       done
       exit 1

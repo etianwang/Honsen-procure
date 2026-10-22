@@ -139,6 +139,7 @@ phase=permissions
 log_event api_permissions_granted
 phase=activate
 psql -X -v ON_ERROR_STOP=1 -v old_role="$OLD_ROLE" -v new_role="$NEW_ROLE" -f "$script_dir/activate-new-role.sql" >/dev/null
+log_event new_role_activated
 mkdir -p /run/honsen-procure
 ln -sT "$RELEASE_DIR" /opt/honsen-procure/.current-next
 mv -Tf /opt/honsen-procure/.current-next /opt/honsen-procure/current
