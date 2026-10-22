@@ -13,6 +13,11 @@ tmp=$(mktemp -d "$TEST_WORK_DIR/real-nginx.XXXXXXXX")
 chmod 755 "$tmp"
 backend_pid=
 cleanup() {
+  status=$?
+  if (( status != 0 )); then
+    systemctl status "$unit" --no-pager -l >&2 || :
+    journalctl -u "$unit" --no-pager -n 80 >&2 || :
+  fi
   systemctl stop "$unit" >/dev/null 2>&1 || :
   rm -f -- "$unit_file"
   systemctl daemon-reload >/dev/null 2>&1 || :
