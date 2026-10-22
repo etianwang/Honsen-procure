@@ -141,6 +141,10 @@ http { server {
 EOF
 cat > "$root/nginx-wrapper" <<'SH'
 #!/usr/bin/env bash
+if [[ ${1:-} == -t && -f /var/lib/honsen-controller-test/pause-live ]] && grep -q '^proxy_pass ' /var/lib/honsen-controller-test/ingress.conf; then
+  : > /var/lib/honsen-controller-test/live-waiting
+  while [[ ! -f /var/lib/honsen-controller-test/live-resume ]]; do sleep .05; done
+fi
 if [[ ${1:-} == -t && -f /var/lib/honsen-controller-test/fail-live ]] && grep -q '^proxy_pass ' /var/lib/honsen-controller-test/ingress.conf; then exit 1; fi
 exec /usr/sbin/nginx -c /var/lib/honsen-controller-test/nginx.conf "$@"
 SH
@@ -164,7 +168,7 @@ run_case() {
   echo "controller scenario: $scenario"
   systemctl stop honsen-procure.service >/dev/null 2>&1 || :
   systemctl unmask --runtime honsen-procure.service >/dev/null 2>&1 || :
-  rm -f /run/honsen-procure/deployment-ready /opt/honsen-procure/current /opt/honsen-procure/.current-next "$root/fail-live"
+  rm -f /run/honsen-procure/deployment-ready /opt/honsen-procure/current /opt/honsen-procure/.current-next "$root/fail-live" "$root/pause-live" "$root/live-waiting" "$root/live-resume" "$root/check-release-owner" "$root/pause-release" "$root/release-waiting" "$root/release-resume"
   rm -rf /var/lib/honsen-procure
   PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db" >/dev/null
   export PGDATABASE=$db
@@ -273,7 +277,70 @@ EOF
     privilege_injector=$!
   fi
   result=0
-  if [[ $scenario == interrupt_live ]]; then
+  if [[ $scenario == handoff_kill ]]; then
+    touch "$root/check-release-owner" "$root/pause-release"
+    bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
+    first=$!
+    reached=0
+    for _ in {1..3000}; do
+      if [[ -f $root/release-waiting ]]; then reached=1; break; fi
+      kill -0 "$first" || break
+      sleep .01
+    done
+    [[ $reached == 1 ]] || { echo 'handoff termination checkpoint was not reached' >&2; exit 1; }
+    lock_pid=$(cat "$root/release-waiting")
+    kill -KILL "$first" "$lock_pid"
+    wait "$first" || result=$?
+    [[ $result == 137 ]]
+    [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 1 ]]
+    audit_file=$(ls -t "$root"/log/deploy-*.log | head -n 1)
+    grep -q 'step=traffic_watchdog:confirmed' "$audit_file"
+    grep -q 'step=supervisor_complete' "$audit_file"
+    ! grep -q 'step=success' "$audit_file"
+    [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 200 ]]
+    systemctl is-active --quiet honsen-procure.service
+    if bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/handoff-concurrent.log" 2>&1; then echo 'interrupted handoff allowed a second deployment' >&2; exit 1; fi
+    grep -Eq 'another deployment is running|deployment lock is held' "$root/handoff-concurrent.log"
+    [[ $(psql -X -Atqc 'SELECT sum(value) FROM gate_sentinel') == 7 ]]
+    rm -f "$root/check-release-owner" "$root/pause-release"
+    systemctl mask --runtime --now honsen-procure.service >/dev/null 2>&1 || :
+    PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -v db="$db" <<'SQL' >/dev/null
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();
+DROP DATABASE :"db";
+DROP ROLE gate_old;
+DROP ROLE gate_new;
+SQL
+    return
+  elif [[ $scenario == guard_kill ]]; then
+    touch "$root/pause-live"
+    bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
+    first=$!
+    reached=0
+    for _ in {1..3000}; do
+      if [[ -f $root/live-waiting ]]; then reached=1; break; fi
+      kill -0 "$first" || break
+      sleep .01
+    done
+    [[ $reached == 1 ]] || { echo 'supervisor termination checkpoint was not reached' >&2; exit 1; }
+    token=$(psql -X -Atqc 'SELECT token FROM honsen_deployment.controller_lock')
+    systemctl kill --kill-whom=main --signal=KILL "honsen-traffic-guard-$token.service"
+    wait "$first" || result=$?
+    [[ $result != 0 ]]
+    [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 1 ]]
+    [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
+    [[ $(systemctl show -p LoadState --value honsen-procure.service) == masked ]]
+    [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_new'") == f ]]
+    [[ $(psql -X -Atqc 'SELECT sum(value) FROM gate_sentinel') == 7 ]]
+    audit_file=$(ls -t "$root"/log/deploy-*.log | head -n 1)
+    ! grep -q 'step=success' "$audit_file"
+    PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -v db="$db" <<'SQL' >/dev/null
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();
+DROP DATABASE :"db";
+DROP ROLE gate_old;
+DROP ROLE gate_new;
+SQL
+    return
+  elif [[ $scenario == interrupt_live ]]; then
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
     reached=0
@@ -444,5 +511,5 @@ DROP ROLE gate_new;
 DROP ROLE IF EXISTS gate_parent;
 SQL
 }
-for case in interrupt old_api old_writer writer backup migration start readiness privileges traffic success interrupt_live; do run_case "$case"; done
+for case in interrupt old_api old_writer writer backup migration start readiness privileges traffic success interrupt_live handoff_kill guard_kill; do run_case "$case"; done
 echo 'real isolated controller scenarios and repeat deployment: PASS'
