@@ -42,6 +42,9 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+# GitHub's disposable runner may leave /opt writable to the runner account.
+chown root:root /opt
+chmod go-w /opt
 mkdir -p "$root" /opt/honsen-procure /etc/honsen-procure /run/honsen-procure
 chmod 755 "$root" /opt/honsen-procure /etc/honsen-procure
 useradd --system --user-group --no-create-home honsen-procure

@@ -22,6 +22,19 @@ source "$2"
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 [[ $OFFSITE_STORAGE_ATTESTED == yes && $BACKUP_RETENTION_POLICY == retain-all && $BACKUP_RETENTION_DAYS =~ ^[1-9][0-9]*$ ]] || { echo 'offsite location and retain-all policy must be explicitly confirmed' >&2; exit 1; }
 [[ $RELEASE_SHA =~ ^[0-9a-f]{40}$ && $RELEASE_DIR == /* && -d $RELEASE_DIR && -d $AUDIT_DIR ]] || exit 2
+protected_dir() {
+  local current=$1 mode
+  [[ $current == /* && -d $current && $(realpath -e "$current") == "$current" ]] || return 1
+  while :; do
+    mode=$(stat -c %a "$current")
+    [[ $(stat -c %u "$current") == 0 && $((8#$mode & 8#22)) == 0 ]] || return 1
+    [[ $current == / ]] && return 0
+    current=${current%/*}; [[ -n $current ]] || current=/
+  done
+}
+for dir in /opt/honsen-procure /etc/honsen-procure "$BACKUP_DIR" "$EXTERNAL_BACKUP_DIR" "$AUDIT_DIR"; do
+  protected_dir "$dir" || { echo 'deployment or backup directory is not protected' >&2; exit 1; }
+done
 [[ ! -L /run/honsen-procure ]] || { echo 'deployment runtime directory is a symlink' >&2; exit 1; }
 install -d -m 700 -o root -g root /run/honsen-procure
 [[ ! -L /run/honsen-procure/deploy.lock ]] || { echo 'deployment lock is a symlink' >&2; exit 1; }
