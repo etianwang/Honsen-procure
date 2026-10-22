@@ -13,11 +13,11 @@ alive() {
   [[ $(awk '{print $3}' <<< "$stat") != Z && $(awk '{print $22}' <<< "$stat") == "$start" ]]
 }
 recover() {
-  event recovery_started || :
+  event "recovery_started:$1" || :
   if ! bash "$script_dir/switch-ingress.sh" maintenance; then
-    systemctl stop "$NGINX_UNIT" || :
+    systemctl stop "$NGINX_UNIT" || event ingress_stop_failed || :
   fi
-  systemctl mask --runtime --now honsen-procure.service || :
+  systemctl mask --runtime --now honsen-procure.service || event api_stop_failed || :
   rm -f /run/honsen-procure/deployment-ready
   rm -f /var/lib/honsen-procure/deployment.sha
   if ! PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=2000' \
@@ -28,19 +28,19 @@ recover() {
   touch "$guard/failed"
 }
 # A restart means the preceding service failed; never resume a live switch.
-if ! mkdir "$guard/started" 2>/dev/null; then recover; exit 0; fi
-if ! alive; then recover; exit 0; fi
+if ! mkdir "$guard/started" 2>/dev/null; then recover watchdog_restart; exit 0; fi
+if ! alive; then recover controller_lost; exit 0; fi
 setsid bash "$script_dir/switch-ingress.sh" live &
 child=$!
 for _ in {1..2400}; do
   if ! alive; then
     kill -KILL -- "-$child" 2>/dev/null || :
     wait "$child" 2>/dev/null || :
-    recover
+    recover controller_lost
     exit 0
   fi
   if ! kill -0 "$child" 2>/dev/null; then
-    if ! wait "$child"; then recover; exit 0; fi
+    if ! wait "$child"; then recover live_switch_failed; exit 0; fi
     printf '%s\n' "$$" > "$guard/ready"
     break
   fi
@@ -49,12 +49,16 @@ done
 if [[ ! -e $guard/ready ]]; then
   kill -KILL -- "-$child" 2>/dev/null || :
   wait "$child" 2>/dev/null || :
-  recover
+  recover live_switch_timeout
   exit 0
 fi
 for _ in {1..2400}; do
-  if [[ -f $guard/committed ]]; then event committed || :; exit 0; fi
-  if ! alive; then recover; exit 0; fi
+  if [[ -f $guard/committed ]]; then
+    if event committed; then exit 0; fi
+    recover audit_failed
+    exit 0
+  fi
+  if ! alive; then recover controller_lost; exit 0; fi
   sleep .05
 done
-recover
+recover commit_timeout
