@@ -22,6 +22,8 @@ async function main() {
     AND COALESCE(has_table_privilege(current_user, to_regclass('public.server_change_log'), 'INSERT'), false)
     AND COALESCE(has_sequence_privilege(current_user, to_regclass('public.server_change_log_sequence_seq'), 'USAGE'), false) AS ok`)
   if (!check.rows[0].ok) throw new Error('API database privileges incomplete')
+  await client.query('SELECT order_id FROM public.formal_issue_registry LIMIT 1')
+  await client.query('SELECT sequence FROM public.server_change_log LIMIT 1')
   process.stdout.write(result.rows[0].identity)
   await client.end()
 }
