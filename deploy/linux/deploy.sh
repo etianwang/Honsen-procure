@@ -64,6 +64,7 @@ failed() {
     set +e
     log_event "failed:$phase" || echo 'cannot write deployment audit' >&2
     if [[ $phase != preflight ]]; then
+      if [[ -n ${guard_unit:-} ]]; then systemctl stop "$guard_unit" >/dev/null 2>&1 || :; fi
       if ! bash "$script_dir/switch-ingress.sh" maintenance >/dev/null 2>&1; then
         systemctl stop "$NGINX_UNIT" >/dev/null 2>&1 || log_event ingress_stop_failed
       fi
@@ -158,7 +159,18 @@ SQL
 ) -gt 0 ]]
 log_event readiness_passed
 phase=traffic
-bash "$script_dir/switch-ingress.sh" live
+guard=$(mktemp -d "$AUDIT_DIR/.traffic-guard.XXXXXXXX")
+guard_unit="honsen-traffic-guard-$lock_token.service"
+parent_start=$(awk '{print $22}' "/proc/$$/stat")
+systemd-run --unit "$guard_unit" --property=Type=exec --property=Restart=on-failure --property=RestartSec=1 \
+  /bin/bash "$script_dir/traffic-watchdog.sh" "$2" "$$" "$parent_start" "$guard" "$log" >/dev/null
+traffic_ready=0
+for _ in {1..2400}; do
+  [[ ! -e $guard/failed ]] || break
+  if [[ -f $guard/ready ]] && systemctl is-active --quiet "$guard_unit"; then traffic_ready=1; break; fi
+  sleep .05
+done
+[[ $traffic_ready == 1 ]] || { echo 'traffic supervisor did not confirm live ingress' >&2; exit 1; }
 install -d -m 700 -o root -g root /var/lib/honsen-procure
 marker=$(mktemp /var/lib/honsen-procure/.deployment.XXXXXXXX)
 printf '%s\n%s\n' "$RELEASE_SHA" "$RELEASE_MANIFEST_SHA256" > "$marker"
@@ -167,5 +179,6 @@ mv -f -- "$marker" /var/lib/honsen-procure/deployment.sha
 log_event traffic_activated
 log_event success
 bash "$script_dir/deployment-lock.sh" release "$lock_token"
+touch "$guard/committed"
 trap - EXIT
 printf 'deployment succeeded; audit: %s\n' "$log"
