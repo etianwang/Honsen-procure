@@ -328,6 +328,7 @@ EOF
     [[ -n $token ]]
     # Disposable fixture operator recovery after confirming masked API and maintenance.
     (source "$root/config"; bash "$root/release/deploy/linux/deployment-lock.sh" release "$token")
+    systemctl unmask --runtime honsen-procure.service
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/recovery.log" 2>&1 || { cat "$root/recovery.log"; exit 1; }
     recovery_audit=$(sed -n 's/.*; audit: //p' "$root/recovery.log" | tail -n 1)
     grep -Fq 'grant_object=qa_sequence_items_id_seq owner=honsen_test privileges=USAGE' "$recovery_audit"
