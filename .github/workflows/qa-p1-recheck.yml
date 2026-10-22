@@ -2,6 +2,7 @@ name: Independent P1 deployment recheck
 on:
   push:
     branches: [codex/qa-v1-linux-deployment-final]
+    paths: [qa-recheck/controller-recheck.sh]
 permissions:
   contents: read
 jobs:

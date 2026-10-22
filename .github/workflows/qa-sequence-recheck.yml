@@ -1,0 +1,65 @@
+name: Independent new sequence recheck
+on:
+  push:
+    branches: [codex/qa-v1-linux-deployment-final]
+    paths: [qa-recheck/sequence-recheck.sh, qa-recheck/sequence-fixture.cjs, .github/workflows/qa-sequence-recheck.yml]
+permissions:
+  contents: read
+jobs:
+  sequence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: honsen_test
+          POSTGRES_USER: honsen_test
+          POSTGRES_PASSWORD: ${{ github.run_id }}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U honsen_test -d honsen_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: qa
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 1e71f13f5068742950ef6efbb94a918d727e251e
+          path: production
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: production/.nvmrc
+      - name: Build target and construct synthetic migration fixture
+        working-directory: production
+        run: |
+          test "$(git rev-parse HEAD)" = 1e71f13f5068742950ef6efbb94a918d727e251e
+          npm ci
+          npm run build --workspace @honsen/server
+          node ../qa/qa-recheck/sequence-fixture.cjs
+          git config user.name 'Independent QA fixture'
+          git config user.email 'qa-fixture@example.invalid'
+          git add deploy/linux/api-grant-policy.json apps/server/migrations/007_qa_sequence.sql
+          git commit -m 'test fixture: synthetic sequence migration'
+          git diff --stat HEAD^ HEAD
+          git rev-parse HEAD
+      - name: Install Linux prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nginx sshfs openssh-server postgresql-client rsync
+      - name: Run focused real controller sequence test
+        run: |
+          set -o pipefail
+          sudo env HONSEN_DEPLOY_TEST=disposable-ci TEST_NODE_DIR="$(dirname "$(command -v node)")" TEST_PG_PASSWORD="${{ github.run_id }}" TEST_REPO="$GITHUB_WORKSPACE/production" bash "$GITHUB_WORKSPACE/qa/qa-recheck/sequence-recheck.sh" 2>&1 | tee "$RUNNER_TEMP/sequence-recheck.log"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sequence-recheck-log
+          path: ${{ runner.temp }}/sequence-recheck.log
+          if-no-files-found: warn
+          retention-days: 30
