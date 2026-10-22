@@ -163,6 +163,18 @@ systemctl start honsen-controller-nginx.service
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=honsen_test PGPASSWORD="$TEST_PG_PASSWORD" PGDATABASE=honsen_test
 base_url="postgresql://honsen_test:$TEST_PG_PASSWORD@127.0.0.1:5432"
 printf '127.0.0.1:5432:*:honsen_test:%s\n' "$TEST_PG_PASSWORD" >> "$root/pgpass"
+wait_guard_finished() {
+  local token state
+  token=$(psql -X -Atqc 'SELECT token FROM honsen_deployment.controller_lock')
+  [[ -n $token ]] || return 0
+  for _ in {1..1200}; do
+    state=$(systemctl show -p ActiveState --value "honsen-traffic-guard-$token.service")
+    [[ $state == inactive || $state == failed ]] && return 0
+    sleep .1
+  done
+  echo 'traffic supervisor failed to finish recovery' >&2
+  return 1
+}
 run_case() {
   local scenario=$1 db="gate_e2e_$1" url prior result
   echo "controller scenario: $scenario"
@@ -326,6 +338,7 @@ SQL
     systemctl kill --kill-whom=main --signal=KILL "honsen-traffic-guard-$token.service"
     wait "$first" || result=$?
     [[ $result != 0 ]]
+    wait_guard_finished
     [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 1 ]]
     if bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/guard-concurrent.log" 2>&1; then echo 'failed supervisor allowed a second deployment' >&2; exit 1; fi
     grep -Eq 'another deployment is running|deployment lock is held' "$root/guard-concurrent.log"
@@ -355,7 +368,7 @@ SQL
     kill -KILL "$first"
     wait "$first" || result=$?
     [[ $result == 137 ]]
-    sleep 2
+    wait_guard_finished
     http_status=$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha || :)
     echo "interrupted live switch: HTTP $http_status; lock $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock')"
     [[ $http_status == 503 ]] || { echo 'unsafe: interrupted deployment left live ingress' >&2; exit 1; }
@@ -423,6 +436,7 @@ SQL
   else
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 || result=$?
   fi
+  [[ $scenario != traffic ]] || wait_guard_finished
   if [[ $scenario == privileges ]]; then wait "$privilege_injector"; privilege_injector=; fi
   if [[ $scenario == success ]]; then
     [[ $result == 0 ]] || { cat "$root/$scenario.log"; exit 1; }
