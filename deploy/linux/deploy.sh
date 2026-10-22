@@ -18,6 +18,8 @@ export POSTGRES_URL PGDATABASE NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 exec 9>/run/lock/honsen-procure-deploy.lock
 flock -n 9 || { echo 'another deployment is running' >&2; exit 1; }
+# Both clients must target the same primary before any durable lock or mutation.
+(cd "$RELEASE_DIR" && bash "$script_dir/verify-database.sh")
 # The database lock remains after any interrupted or failed deployment. Recovery
 # requires an operator to inspect the entire deployment before releasing it.
 lock_token=$(cat /proc/sys/kernel/random/uuid)
