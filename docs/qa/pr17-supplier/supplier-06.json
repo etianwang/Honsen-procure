@@ -1,0 +1,9 @@
+{
+  "testedSha": "5708b19caf019b29dae9f420380c6ae7316184a6",
+  "exe": "E:\\Project\\honsen-pr17-qa-cache\\cargo-target\\debug\\HonsenProcure.exe",
+  "exeSha256": "2fa075cfb3440a14949943eaafeaa56c89a0908b8bde696e7c1921d5f11fb4dc",
+  "checks": [],
+  "errors": [],
+  "result": "FAIL",
+  "failure": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('供应商已保存')\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" getByText('供应商已保存') with timeout 5000ms\n  - waiting for getByText('供应商已保存')\n\n    at captureRawStack (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright-core\\lib\\coreBundle.js:9282:17)\n    at callMatcherAsStep (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright\\lib\\matchers\\expect.js:13316:57)\n    at Object.toBeVisible (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright\\lib\\matchers\\expect.js:13308:23)\n    at E:\\Project\\honsen-pr17-supplier-qa\\tests\\native\\pr17-supplier-qa.mjs:86:42"
+}
