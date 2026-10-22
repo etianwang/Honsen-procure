@@ -45,6 +45,37 @@ describe.skipIf(!pool)('PostgreSQL migrations', () => {
     ])
   })
 
+  it('waits for the database lock before running migrations', async () => {
+    const client = await pool!.connect()
+    let released = false
+    try {
+      await client.query(
+        "SELECT pg_advisory_lock(hashtextextended('honsen-procure:migrations', 0))",
+      )
+      const second = runMigrations(pool!)
+      let waiting = false
+      for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+        const result = await client.query<{ waiting: boolean }>(
+          "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event = 'advisory' AND query LIKE '%honsen-procure:migrations%') AS waiting",
+        )
+        waiting = result.rows[0]!.waiting
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      expect(waiting).toBe(true)
+      await client.query(
+        "SELECT pg_advisory_unlock(hashtextextended('honsen-procure:migrations', 0))",
+      )
+      released = true
+      await second
+    } finally {
+      if (!released)
+        await client.query(
+          "SELECT pg_advisory_unlock(hashtextextended('honsen-procure:migrations', 0))",
+        )
+      client.release()
+    }
+  })
+
   it('allows an optional contact without losing a row from the prior schema', async () => {
     const client = await pool!.connect()
     try {
