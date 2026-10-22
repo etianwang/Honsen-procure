@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 [[ ${HONSEN_DEPLOY_TEST:-} == 1 ]] || exit 2
-old="gate_old_${RANDOM}_$$"; new="gate_new_${RANDOM}_$$"; table="gate_proof_${RANDOM}_$$"
+old="gate_old_${RANDOM}_$$"; new="gate_new_${RANDOM}_$$"; other="gate_other_${RANDOM}_$$"; table="gate_proof_${RANDOM}_$$"
 created=0
 cleanup() {
   [[ $created == 1 ]] || return 0
-  psql -X -v ON_ERROR_STOP=1 -v t="$table" -v old="$old" -v new="$new" <<'SQL' >/dev/null
+  psql -X -v ON_ERROR_STOP=1 -v t="$table" -v old="$old" -v new="$new" -v other="$other" <<'SQL' >/dev/null
 DROP TABLE IF EXISTS :"t";
 DROP ROLE IF EXISTS :"old";
 DROP ROLE IF EXISTS :"new";
+DROP ROLE IF EXISTS :"other";
 SQL
 }
 trap cleanup EXIT
@@ -20,6 +21,15 @@ GRANT INSERT ON :"t" TO :"old";
 GRANT INSERT ON :"t" TO :"new";
 SQL
 created=1
+psql -X -v ON_ERROR_STOP=1 -v other="$other" <<'SQL' >/dev/null
+CREATE ROLE :"other" LOGIN;
+SQL
+if psql -X -v ON_ERROR_STOP=1 -v old_role="$old" -v new_role="$new" -f deploy/linux/fence-writers.sql >/dev/null 2>&1; then
+  echo 'unexpected additional login role was accepted' >&2; exit 1
+fi
+psql -X -v ON_ERROR_STOP=1 -v other="$other" <<'SQL' >/dev/null
+DROP ROLE :"other";
+SQL
 psql -X -v ON_ERROR_STOP=1 -v t="$table" -v old="$old" <<'SQL' >/dev/null
 ALTER TABLE :"t" OWNER TO :"old";
 SQL
