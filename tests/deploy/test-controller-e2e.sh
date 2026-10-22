@@ -164,6 +164,7 @@ SQL
   # Exercise a real pending production migration, not only the no-op path.
   if [[ $scenario == success ]]; then
     psql -X -v ON_ERROR_STOP=1 -c "DROP TABLE formal_issue_registry; DELETE FROM schema_migrations WHERE name = '006_formal_issue_registry.sql'" >/dev/null
+    psql -X -v ON_ERROR_STOP=1 -c 'REVOKE UPDATE ON server_change_log FROM gate_new' >/dev/null
   fi
   prior=$(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations) || '|' || (SELECT sum(value)::text FROM gate_sentinel)")
   ln -s "$root/release" /opt/honsen-procure/current

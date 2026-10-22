@@ -35,6 +35,12 @@ async function main() {
   }
   await client.query('SELECT order_id FROM public.formal_issue_registry LIMIT 1')
   await client.query('SELECT sequence FROM public.server_change_log LIMIT 1')
+  await client.query('BEGIN')
+  try {
+    await client.query('LOCK TABLE public.server_change_log IN SHARE ROW EXCLUSIVE MODE NOWAIT')
+  } finally {
+    await client.query('ROLLBACK')
+  }
   process.stdout.write(result.rows[0].identity)
   await client.end()
 }

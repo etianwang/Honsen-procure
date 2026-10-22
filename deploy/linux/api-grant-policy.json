@@ -3,6 +3,11 @@
   "002_project_defaults_and_master_data.sql": [],
   "003_sync.sql": [
     {
+      "kind": "table",
+      "name": "server_change_log",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
       "kind": "sequence",
       "name": "server_change_log_sequence_seq",
       "privileges": ["USAGE"]
