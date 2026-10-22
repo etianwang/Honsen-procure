@@ -18,6 +18,17 @@ bundle does not authenticate that bundle. The controller checks the manifest
 digest and complete inventory before proceeding. Keep the release immutable
 from verification through execution.
 
+The protected writer inventory is a required operator attestation, not fleet
+discovery. Before each release, inspect scheduled jobs, manual scripts, other
+hosts, direct database clients and all credentials. The sample inventory starts
+unapproved; only attest an empty `otherWriters` list after every other entry has
+been stopped and prevented from reconnecting. Freeze privileged database
+administration until release or explicit recovery. Record the actual hostname,
+roles and single systemd API manager. SQL fencing independently checks database
+login roles and sessions; the inventory cannot prove that an undisclosed
+superuser or copied credential does not exist. If this cannot be established,
+do not release. Restrict the JSON file to root ownership and mode 600.
+
 Use separate application login roles for old and new releases and a dedicated
 deployment administrator. The administrator must be the only trusted identity
 allowed to change role privileges, database ownership, or the deployment lock

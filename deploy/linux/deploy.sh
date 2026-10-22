@@ -13,11 +13,13 @@ source "$1"
 : "${POSTGRES_URL:?}" "${PGDATABASE:?}" "${OLD_ROLE:?}" "${NEW_ROLE:?}" "${RELEASE_DIR:?}" "${RELEASE_SHA:?}" "${BACKUP_DIR:?}" "${EXTERNAL_BACKUP_DIR:?}" "${AUDIT_DIR:?}" "${NGINX_BIN:?}" "${NGINX_UNIT:?}" "${INGRESS_INCLUDE:?}" "${INGRESS_HOST:?}" "${INGRESS_PORT:?}"
 : "${RESTORE_SERVICE:?}" "${PGSERVICEFILE:?}" "${PGPASSFILE:?}" "${BACKUP_RETENTION_DAYS:?}" "${OFFSITE_STORAGE_ATTESTED:?}"
 : "${RELEASE_MANIFEST:?}" "${RELEASE_MANIFEST_SHA256:?}"
+: "${WRITER_INVENTORY:?}"
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 [[ $OFFSITE_STORAGE_ATTESTED == yes && $BACKUP_RETENTION_DAYS =~ ^[1-9][0-9]*$ ]] || { echo 'offsite location and retention must be explicitly confirmed' >&2; exit 1; }
 [[ $RELEASE_SHA =~ ^[0-9a-f]{40}$ && $RELEASE_DIR == /* && -d $RELEASE_DIR && -d $AUDIT_DIR ]] || exit 2
 [[ $(git -C "$RELEASE_DIR" rev-parse HEAD) == "$RELEASE_SHA" && -z $(git -C "$RELEASE_DIR" status --porcelain --untracked-files=no) ]] || { echo 'release source mismatch or dirty' >&2; exit 1; }
 node "$script_dir/verify-artifact.cjs" "$RELEASE_DIR" "$RELEASE_SHA" "$RELEASE_MANIFEST" "$RELEASE_MANIFEST_SHA256"
+node "$script_dir/verify-writer-inventory.cjs" "$WRITER_INVENTORY" "$OLD_ROLE" "$NEW_ROLE" "$(hostname -f)"
 [[ $OLD_ROLE =~ ^[a-z_][a-z0-9_]*$ && $NEW_ROLE =~ ^[a-z_][a-z0-9_]*$ && $OLD_ROLE != "$NEW_ROLE" ]] || exit 2
 export POSTGRES_URL PGDATABASE NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT RESTORE_SERVICE PGSERVICEFILE PGPASSFILE
 exec 9>/run/lock/honsen-procure-deploy.lock
