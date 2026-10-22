@@ -345,7 +345,7 @@ DROP ROLE gate_old;
 DROP ROLE gate_new;
 SQL
     return
-  elif [[ $scenario == post_release_kill ]]; then
+  elif [[ $scenario == post_release_kill || $scenario == post_release_term ]]; then
     touch "$root/check-release-owner" "$root/pause-after-release"
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
@@ -360,9 +360,10 @@ SQL
     old_guard=$(ls -td "$root"/log/.traffic-guard.* | head -n 1)
     old_audit=$(ls -t "$root"/log/deploy-*.log | head -n 1)
     [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 0 ]]
-    kill -KILL "$first" "$(cat "$root/release-completed")"
+    if [[ $scenario == post_release_term ]]; then kill -TERM "$first"; else kill -KILL "$first"; fi
+    kill -KILL "$(cat "$root/release-completed")"
     wait "$first" || result=$?
-    [[ $result == 137 ]]
+    if [[ $scenario == post_release_term ]]; then [[ $result == 143 ]]; else [[ $result == 137 ]]; fi
     for _ in {1..200}; do flock -n /run/honsen-procure/deploy.lock true && break; sleep .05; done
     flock -n /run/honsen-procure/deploy.lock true
     rm -f "$root/pause-after-release"
@@ -505,7 +506,7 @@ DROP ROLE gate_old;
 DROP ROLE gate_new;
 SQL
     return
-  elif [[ $scenario == interrupt ]]; then
+  elif [[ $scenario == interrupt || $scenario == interrupt_term ]]; then
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
     reached=0
@@ -515,9 +516,9 @@ SQL
       sleep .02
     done
     [[ $reached == 1 ]] || { echo 'interruption checkpoint was not reached' >&2; exit 1; }
-    kill -KILL "$first"
+    if [[ $scenario == interrupt_term ]]; then kill -TERM "$first"; else kill -KILL "$first"; fi
     wait "$first" || result=$?
-    [[ $result == 137 ]]
+    if [[ $scenario == interrupt_term ]]; then [[ $result == 143 ]]; else [[ $result == 137 ]]; fi
     for _ in {1..100}; do
       [[ $(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE usename IN ('gate_old','gate_new')") == 0 ]] && break
       sleep .05
@@ -656,5 +657,5 @@ DROP ROLE gate_new;
 DROP ROLE IF EXISTS gate_parent;
 SQL
 }
-for case in privileges success interrupt interrupt_live handoff_kill handoff_term post_release_kill guard_kill guard_confirm_kill guard_db_down; do run_case "$case"; done
+for case in privileges success interrupt interrupt_term interrupt_live handoff_kill handoff_term post_release_kill post_release_term guard_kill guard_confirm_kill guard_db_down; do run_case "$case"; done
 echo 'real isolated controller scenarios and repeat deployment: PASS'
