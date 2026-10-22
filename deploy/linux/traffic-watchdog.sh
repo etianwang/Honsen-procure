@@ -28,11 +28,11 @@ recover() {
   flock -x 9 || { event 'recovery_abandoned:host_lock' || :; return 1; }
   if [[ ! -f /run/honsen-procure/deployment-token || $(cat /run/honsen-procure/deployment-token) != "$token" ]]; then
     event 'recovery_abandoned:not_owner' || :
-    return 1
+    return 0
   fi
   owns_lock
   owner_status=$?
-  if [[ $owner_status == 1 ]]; then event 'recovery_abandoned:not_owner' || :; return 1; fi
+  if [[ $owner_status == 1 ]]; then event 'recovery_abandoned:not_owner' || :; return 0; fi
   if [[ $owner_status == 2 ]]; then event 'recovery_database_unavailable' || :; fi
   event "recovery_started:$1" || :
   if ! bash "$script_dir/switch-ingress.sh" maintenance; then
@@ -44,12 +44,13 @@ recover() {
   if ! PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=2000' \
     psql -X -v ON_ERROR_STOP=1 -v role="$NEW_ROLE" -f "$script_dir/disable-role.sql" >/dev/null 2>&1; then
     event new_role_disable_failed || :
+    return 1
   fi
   event recovery_finished || :
 }
 # A restart means the preceding service failed; never resume a live switch.
-if ! mkdir "$guard/started" 2>/dev/null; then recover watchdog_restart; exit 0; fi
-if ! alive; then recover controller_lost; exit 0; fi
+if ! mkdir "$guard/started" 2>/dev/null; then recover watchdog_restart; exit $?; fi
+if ! alive; then recover controller_lost; exit $?; fi
 setsid bash "$script_dir/switch-ingress.sh" live &
 child=$!
 for _ in {1..2400}; do
@@ -57,10 +58,10 @@ for _ in {1..2400}; do
     kill -KILL -- "-$child" 2>/dev/null || :
     wait "$child" 2>/dev/null || :
     recover controller_lost
-    exit 0
+    exit $?
   fi
   if ! kill -0 "$child" 2>/dev/null; then
-    if ! wait "$child"; then recover live_switch_failed; exit 0; fi
+    if ! wait "$child"; then recover live_switch_failed; exit $?; fi
     printf '%s\n' "$$" > "$guard/ready"
     break
   fi
@@ -70,7 +71,7 @@ if [[ ! -e $guard/ready ]]; then
   kill -KILL -- "-$child" 2>/dev/null || :
   wait "$child" 2>/dev/null || :
   recover live_switch_timeout
-  exit 0
+  exit $?
 fi
 for _ in {1..2400}; do
   if [[ -f $guard/commit-request ]]; then
@@ -79,9 +80,9 @@ for _ in {1..2400}; do
       exit 0
     fi
     recover confirmation_failed
-    exit 0
+    exit $?
   fi
-  if ! alive; then recover controller_lost; exit 0; fi
+  if ! alive; then recover controller_lost; exit $?; fi
   sleep .05
 done
 recover commit_timeout

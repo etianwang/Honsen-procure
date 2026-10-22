@@ -173,7 +173,7 @@ phase=traffic
 guard=$(mktemp -d "$AUDIT_DIR/.traffic-guard.XXXXXXXX")
 guard_unit="honsen-traffic-guard-$lock_token.service"
 parent_start=$(awk '{print $22}' "/proc/$$/stat")
-systemd-run --unit "$guard_unit" --property=Type=exec --property=Restart=on-failure --property=RestartSec=1 --property=RemainAfterExit=yes \
+systemd-run --unit "$guard_unit" --property=Type=exec --property=Restart=on-failure --property=RestartSec=5 --property=StartLimitIntervalSec=0 --property=RemainAfterExit=yes \
   /bin/bash "$script_dir/traffic-watchdog.sh" "$2" "$$" "$parent_start" "$guard" "$log" "$lock_token" >/dev/null
 traffic_ready=0
 for _ in {1..2400}; do

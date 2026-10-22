@@ -22,9 +22,11 @@ rogue_pid=
 privilege_injector=
 created_user=0
 created_restore=0
+stopped_pg=
 cleanup() {
   status=$?
   set +e
+  [[ -z $stopped_pg ]] || docker start "$stopped_pg" >/dev/null 2>&1
   if (( status != 0 )); then
     echo "controller fixture exited with status $status" >&2
     systemctl status honsen-procure.service honsen-controller-nginx.service --no-pager -l >&2
@@ -337,6 +339,50 @@ DROP ROLE gate_old;
 DROP ROLE gate_new;
 SQL
     return
+  elif [[ $scenario == guard_db_down ]]; then
+    touch "$root/pause-live"
+    bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
+    first=$!
+    reached=0
+    for _ in {1..3000}; do
+      if [[ -f $root/live-waiting ]]; then reached=1; break; fi
+      kill -0 "$first" || break
+      sleep .01
+    done
+    [[ $reached == 1 ]] || { echo 'database outage checkpoint was not reached' >&2; exit 1; }
+    pg_container=$(docker ps --filter 'publish=5432' --format '{{.ID}}')
+    [[ $pg_container =~ ^[0-9a-f]+$ ]] || { echo 'isolated PostgreSQL service not identified uniquely' >&2; exit 1; }
+    docker stop -t 2 "$pg_container" >/dev/null
+    stopped_pg=$pg_container
+    kill -KILL "$first"
+    wait "$first" || result=$?
+    [[ $result == 137 ]]
+    audit_file=$(ls -t "$root"/log/deploy-*.log | head -n 1)
+    reached=0
+    for _ in {1..1000}; do
+      if grep -q 'step=traffic_watchdog:new_role_disable_failed' "$audit_file"; then reached=1; break; fi
+      sleep .05
+    done
+    [[ $reached == 1 ]] || { echo 'database outage recovery was not observed' >&2; exit 1; }
+    [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
+    [[ $(systemctl show -p LoadState --value honsen-procure.service) == masked ]]
+    docker start "$pg_container" >/dev/null
+    stopped_pg=
+    for _ in {1..200}; do pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1 && break; sleep .1; done
+    pg_isready -h 127.0.0.1 -p 5432 >/dev/null
+    wait_guard_finished
+    [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 1 ]]
+    [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_new'") == f ]]
+    [[ $(psql -X -Atqc 'SELECT sum(value) FROM gate_sentinel') == 7 ]]
+    grep -q 'step=traffic_watchdog:recovery_finished' "$audit_file"
+    ! grep -q 'step=success' "$audit_file"
+    PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -v db="$db" <<'SQL' >/dev/null
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();
+DROP DATABASE :"db";
+DROP ROLE gate_old;
+DROP ROLE gate_new;
+SQL
+    return
   elif [[ $scenario == guard_kill || $scenario == guard_confirm_kill ]]; then
     checkpoint="$root/live-waiting"
     if [[ $scenario == guard_kill ]]; then touch "$root/pause-live"; else touch "$root/pause-confirm"; checkpoint="$root/confirm-waiting"; fi
@@ -542,5 +588,5 @@ DROP ROLE gate_new;
 DROP ROLE IF EXISTS gate_parent;
 SQL
 }
-for case in interrupt old_api old_writer writer backup migration start readiness privileges traffic success interrupt_live handoff_kill guard_kill guard_confirm_kill; do run_case "$case"; done
+for case in interrupt old_api old_writer writer backup migration start readiness privileges traffic success interrupt_live handoff_kill guard_kill guard_confirm_kill guard_db_down; do run_case "$case"; done
 echo 'real isolated controller scenarios and repeat deployment: PASS'
