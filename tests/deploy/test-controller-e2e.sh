@@ -328,7 +328,11 @@ SQL
     if (cd "$root/release" && POSTGRES_URL="$url" NEW_ROLE=gate_policy MIGRATION_OBJECT_SNAPSHOT="$root/policy-snapshot" node deploy/linux/grant-api.cjs); then
       echo 'new object without a grant policy was accepted' >&2; exit 1
     fi
-    psql -X -v ON_ERROR_STOP=1 -c 'DROP TABLE gate_unreviewed; DROP ROLE gate_policy' >/dev/null
+    psql -X -v ON_ERROR_STOP=1 -c 'DROP TABLE gate_unreviewed; CREATE FUNCTION gate_unreviewed() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$' >/dev/null
+    if (cd "$root/release" && POSTGRES_URL="$url" NEW_ROLE=gate_policy MIGRATION_OBJECT_SNAPSHOT="$root/policy-snapshot" node deploy/linux/grant-api.cjs); then
+      echo 'new routine without a grant policy was accepted' >&2; exit 1
+    fi
+    psql -X -v ON_ERROR_STOP=1 -c 'DROP FUNCTION gate_unreviewed(); DROP ROLE gate_policy' >/dev/null
     backup_count=$(find "$root/backup" -type f | wc -l)
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/repeat.log" 2>&1 || { cat "$root/repeat.log"; exit 1; }
     grep -q 'version already deployed' "$root/repeat.log"

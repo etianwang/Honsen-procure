@@ -54,10 +54,19 @@ async function main() {
   try {
     await client.query('BEGIN')
     const objects =
-      await client.query(`SELECT c.oid::text, n.nspname AS schema, c.relname AS name,
+      await client.query(`SELECT 'relation' AS class, c.oid::text, n.nspname AS schema, c.relname AS name,
       CASE WHEN c.relkind = 'S' THEN 'sequence' ELSE 'table' END AS kind
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE c.relkind IN ('r','p','v','m','S') AND n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\'
+        AND n.nspname <> 'information_schema'
+      UNION ALL
+      SELECT 'routine', p.oid::text, n.nspname, p.proname, 'unsupported'
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\' AND n.nspname <> 'information_schema'
+      UNION ALL
+      SELECT 'type', t.oid::text, n.nspname, t.typname, 'unsupported'
+      FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+      WHERE t.typtype IN ('e','d','r','m') AND n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\'
         AND n.nspname <> 'information_schema'`)
     if (process.argv[2] === '--snapshot') {
       fs.writeFileSync(snapshotPath, JSON.stringify(objects.rows), {
@@ -69,7 +78,9 @@ async function main() {
     const before = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))
     if (!Array.isArray(before))
       throw new Error('Invalid migration object snapshot')
-    const priorOids = new Set(before.map((object) => object.oid))
+    const priorOids = new Set(
+      before.map((object) => `${object.class}:${object.oid}`),
+    )
     const approved = new Set(
       Object.values(policy)
         .flat()
@@ -77,7 +88,7 @@ async function main() {
     )
     for (const object of objects.rows) {
       if (
-        !priorOids.has(object.oid) &&
+        !priorOids.has(`${object.class}:${object.oid}`) &&
         (object.schema !== 'public' ||
           !approved.has(`${object.kind}:${object.name}`))
       ) {
