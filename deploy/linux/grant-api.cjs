@@ -29,6 +29,21 @@ async function main() {
       (!policy[name].length && !historical.has(name))
     )
       throw new Error('Migration has no explicit object grant')
+    for (const entry of policy[name]) {
+      const allowed =
+        entry.kind === 'table'
+          ? ['SELECT', 'INSERT', 'UPDATE', 'DELETE']
+          : entry.kind === 'sequence'
+            ? ['USAGE', 'SELECT']
+            : []
+      if (
+        !/^[a-z_][a-z0-9_]*$/.test(entry.name || '') ||
+        !Array.isArray(entry.privileges) ||
+        !entry.privileges.length ||
+        entry.privileges.some((p) => !allowed.includes(p))
+      )
+        throw new Error('Invalid API object grant')
+    }
   }
   if (process.argv[2] === '--check') return
   const client = new Client({ connectionString: process.env.POSTGRES_URL })
@@ -47,34 +62,18 @@ async function main() {
     const creator = await client.query(
       'SELECT current_user AS migration_creator',
     )
-    process.stdout.write(
-      `migration_creator=${creator.rows[0].migration_creator}\n`,
-    )
+    const audit = [`migration_creator=${creator.rows[0].migration_creator}`]
     const quotedRole = `"${role}"`
     await client.query(`GRANT USAGE ON SCHEMA public TO ${quotedRole}`)
     for (const entries of Object.values(policy)) {
-      if (!Array.isArray(entries)) throw new Error('Invalid API grant policy')
       for (const entry of entries) {
-        const allowed =
-          entry.kind === 'table'
-            ? ['SELECT', 'INSERT', 'UPDATE', 'DELETE']
-            : entry.kind === 'sequence'
-              ? ['USAGE', 'SELECT']
-              : []
-        if (
-          !/^[a-z_][a-z0-9_]*$/.test(entry.name || '') ||
-          !Array.isArray(entry.privileges) ||
-          !entry.privileges.length ||
-          entry.privileges.some((p) => !allowed.includes(p))
-        )
-          throw new Error('Invalid API object grant')
         const obj = await client.query(
           'SELECT c.oid, pg_get_userbyid(c.relowner) AS owner FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2',
           ['public', entry.name],
         )
         if (obj.rowCount !== 1) throw new Error('API grant object missing')
-        process.stdout.write(
-          `grant_object=${entry.name} owner=${obj.rows[0].owner} privileges=${entry.privileges.join(',')}\n`,
+        audit.push(
+          `grant_object=${entry.name} owner=${obj.rows[0].owner} privileges=${entry.privileges.join(',')}`,
         )
         await client.query(
           `GRANT ${entry.privileges.join(', ')} ON ${entry.kind.toUpperCase()} public."${entry.name}" TO ${quotedRole}`,
@@ -82,6 +81,7 @@ async function main() {
       }
     }
     await client.query('COMMIT')
+    process.stdout.write(`${audit.join('\n')}\n`)
   } catch (error) {
     await client.query('ROLLBACK')
     throw error
