@@ -327,6 +327,8 @@ SQL
     wait "$first" || result=$?
     [[ $result != 0 ]]
     [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 1 ]]
+    if bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/guard-concurrent.log" 2>&1; then echo 'failed supervisor allowed a second deployment' >&2; exit 1; fi
+    grep -Eq 'another deployment is running|deployment lock is held' "$root/guard-concurrent.log"
     [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
     [[ $(systemctl show -p LoadState --value honsen-procure.service) == masked ]]
     [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_new'") == f ]]
