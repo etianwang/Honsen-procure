@@ -507,11 +507,16 @@ DROP ROLE gate_new;
 SQL
     return
   elif [[ $scenario == interrupt || $scenario == interrupt_term ]]; then
+    existing_logs=$(find "$root/log" -maxdepth 1 -type f -name 'deploy-*.log' -printf '|%f|')
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
     reached=0
     for _ in {1..1000}; do
-      if grep -q 'step=old_stopped' "$root"/log/deploy-*.log 2>/dev/null; then reached=1; break; fi
+      for audit in "$root"/log/deploy-*.log; do
+        [[ -f $audit && $existing_logs != *"|${audit##*/}|"* ]] || continue
+        if grep -q 'step=old_stopped' "$audit"; then reached=1; break; fi
+      done
+      [[ $reached == 0 ]] || break
       kill -0 "$first" || break
       sleep .02
     done
