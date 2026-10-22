@@ -3,13 +3,13 @@
 set -euo pipefail
 : "${PGDATABASE:?}" "${POSTGRES_URL:?}"
 export POSTGRES_URL
-expected=$(psql -X -qAt -v ON_ERROR_STOP=1 -c "SELECT system_identifier::text || ':' || current_database() || ':' || (NOT pg_is_in_recovery())::text FROM pg_control_system()")
+expected=$(psql -X -qAt -v ON_ERROR_STOP=1 -c "SELECT system_identifier::text || ':' || current_database() || ':' || coalesce(inet_server_addr()::text, 'unix') || ':' || coalesce(inet_server_port()::text, 'unix') || ':' || (NOT pg_is_in_recovery())::text FROM pg_control_system()")
 actual=$(node <<'JS'
 const { Client } = require('pg')
 const client = new Client({ connectionString: process.env.POSTGRES_URL })
 async function main() {
   await client.connect()
-  const result = await client.query("SELECT system_identifier::text || ':' || current_database() || ':' || (NOT pg_is_in_recovery())::text AS identity FROM pg_control_system()")
+  const result = await client.query("SELECT system_identifier::text || ':' || current_database() || ':' || coalesce(inet_server_addr()::text, 'unix') || ':' || coalesce(inet_server_port()::text, 'unix') || ':' || (NOT pg_is_in_recovery())::text AS identity FROM pg_control_system()")
   process.stdout.write(result.rows[0].identity)
   await client.end()
 }
