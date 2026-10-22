@@ -183,7 +183,7 @@ EOF
   if [[ $scenario == success ]]; then
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
-    for _ in {1..100}; do flock -n /run/lock/honsen-procure-deploy.lock true || break; sleep .05; done
+    for _ in {1..100}; do flock -n /run/honsen-procure/deploy.lock true || break; sleep .05; done
     if bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/concurrent.log" 2>&1; then echo 'concurrent controller was accepted' >&2; exit 1; fi
     grep -q 'another deployment is running' "$root/concurrent.log"
     wait "$first" || result=$?

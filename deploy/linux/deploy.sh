@@ -4,6 +4,14 @@ set -euo pipefail
 umask 077
 [[ $(id -u) == 0 ]] || { echo 'root is required' >&2; exit 1; }
 [[ $# == 2 && $1 == --execute && -f $2 && ! -L $2 && $(stat -c %u "$2") == 0 && $(stat -c %a "$2") == 600 ]] || { echo 'explicit --execute and protected configuration required' >&2; exit 1; }
+[[ $2 == /* && $(realpath -e "$2") == "$2" ]] || { echo 'configuration path must be absolute and free of symlinks' >&2; exit 1; }
+dir=${2%/*}
+while :; do
+  mode=$(stat -c %a "$dir")
+  [[ $(stat -c %u "$dir") == 0 && $((8#$mode & 8#22)) == 0 ]] || { echo 'configuration parent is not protected' >&2; exit 1; }
+  [[ $dir == / ]] && break
+  dir=${dir%/*}; [[ -n $dir ]] || dir=/
+done
 # Configuration is trusted root-owned shell input.
 source "$2"
 [[ ${DEPLOY_AUTHORIZED:-no} == yes ]] || { echo 'deployment authorization required' >&2; exit 1; }
@@ -14,7 +22,10 @@ source "$2"
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 [[ $OFFSITE_STORAGE_ATTESTED == yes && $BACKUP_RETENTION_POLICY == retain-all && $BACKUP_RETENTION_DAYS =~ ^[1-9][0-9]*$ ]] || { echo 'offsite location and retain-all policy must be explicitly confirmed' >&2; exit 1; }
 [[ $RELEASE_SHA =~ ^[0-9a-f]{40}$ && $RELEASE_DIR == /* && -d $RELEASE_DIR && -d $AUDIT_DIR ]] || exit 2
-exec 9>/run/lock/honsen-procure-deploy.lock
+[[ ! -L /run/honsen-procure ]] || { echo 'deployment runtime directory is a symlink' >&2; exit 1; }
+install -d -m 700 -o root -g root /run/honsen-procure
+[[ ! -L /run/honsen-procure/deploy.lock ]] || { echo 'deployment lock is a symlink' >&2; exit 1; }
+exec 9>/run/honsen-procure/deploy.lock
 flock -n 9 || { echo 'another deployment is running' >&2; exit 1; }
 [[ $(git -C "$RELEASE_DIR" rev-parse HEAD) == "$RELEASE_SHA" && -z $(git -C "$RELEASE_DIR" status --porcelain --untracked-files=no) ]] || { echo 'release source mismatch or dirty' >&2; exit 1; }
 node "$script_dir/verify-artifact.cjs" "$RELEASE_DIR" "$RELEASE_SHA" "$RELEASE_MANIFEST" "$RELEASE_MANIFEST_SHA256"
