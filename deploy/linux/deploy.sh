@@ -51,6 +51,10 @@ export POSTGRES_URL PGDATABASE NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST
 # requires an operator to inspect the entire deployment before releasing it.
 lock_token=$(cat /proc/sys/kernel/random/uuid)
 bash "$script_dir/deployment-lock.sh" acquire "$lock_token"
+token_file=$(mktemp /run/honsen-procure/.deployment-token.XXXXXXXX)
+printf '%s\n' "$lock_token" > "$token_file"
+chmod 600 "$token_file"
+mv -f -- "$token_file" /run/honsen-procure/deployment-token
 log=$(mktemp "$AUDIT_DIR/deploy-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXXXX.log")
 chmod 600 "$log"
 [[ $(stat -c %a "$log") == 600 ]] || exit 1
@@ -64,7 +68,6 @@ failed() {
     set +e
     log_event "failed:$phase" || echo 'cannot write deployment audit' >&2
     if [[ $phase != preflight ]]; then
-      if [[ -n ${guard_unit:-} ]]; then systemctl stop "$guard_unit" >/dev/null 2>&1 || :; fi
       if ! bash "$script_dir/switch-ingress.sh" maintenance >/dev/null 2>&1; then
         systemctl stop "$NGINX_UNIT" >/dev/null 2>&1 || log_event ingress_stop_failed
       fi

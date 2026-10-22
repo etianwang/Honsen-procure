@@ -7,10 +7,12 @@ export NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT POSTGRES_U
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 event() { printf '%s step=traffic_watchdog:%s\n' "$(date -u +%FT%TZ)" "$1" >> "$audit"; }
 owns_lock() {
-  [[ $(PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=2000' psql -X -qAt -v ON_ERROR_STOP=1 -v token="$token" <<'SQL'
+  local result
+  result=$(PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=2000' psql -X -qAt -v ON_ERROR_STOP=1 -v token="$token" <<'SQL'
 SELECT count(*) FROM honsen_deployment.controller_lock WHERE token = :'token'::uuid;
 SQL
-  ) == 1 ]]
+  ) || return 2
+  [[ $result == 1 ]]
 }
 alive() {
   [[ -r /proc/$parent/stat ]] || return 1
@@ -19,7 +21,19 @@ alive() {
   [[ $(awk '{print $3}' <<< "$stat") != Z && $(awk '{print $22}' <<< "$stat") == "$start" ]]
 }
 recover() {
-  if ! owns_lock; then event 'recovery_abandoned:not_owner' || :; touch "$guard/failed"; return 1; fi
+  touch "$guard/failed"
+  # The controller owns this same host lock until its own cleanup finishes.
+  while alive; do sleep .05; done
+  exec 9>/run/honsen-procure/deploy.lock
+  flock -x 9 || { event 'recovery_abandoned:host_lock' || :; return 1; }
+  if [[ ! -f /run/honsen-procure/deployment-token || $(cat /run/honsen-procure/deployment-token) != "$token" ]]; then
+    event 'recovery_abandoned:not_owner' || :
+    return 1
+  fi
+  owns_lock
+  owner_status=$?
+  if [[ $owner_status == 1 ]]; then event 'recovery_abandoned:not_owner' || :; return 1; fi
+  if [[ $owner_status == 2 ]]; then event 'recovery_database_unavailable' || :; fi
   event "recovery_started:$1" || :
   if ! bash "$script_dir/switch-ingress.sh" maintenance; then
     systemctl stop "$NGINX_UNIT" || event ingress_stop_failed || :
@@ -32,7 +46,6 @@ recover() {
     event new_role_disable_failed || :
   fi
   event recovery_finished || :
-  touch "$guard/failed"
 }
 # A restart means the preceding service failed; never resume a live switch.
 if ! mkdir "$guard/started" 2>/dev/null; then recover watchdog_restart; exit 0; fi

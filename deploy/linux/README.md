@@ -94,6 +94,11 @@ reason in the release audit. Do not delete the row to clear an unknown live
 deployment. The implementation of full failure handling is still incomplete.
 
 The final ingress switch is supervised by a separate transient systemd service.
+The controller retains the database deployment lock until the supervisor has
+verified the completed release and exited successfully. Recovery takes the
+existing host lock and checks the current host token before changing ingress;
+this fallback relies on the V1 single-deployment-host boundary. A database
+connection failure does not by itself transfer ownership of the durable lock.
 It watches the controller and attempts to return ingress to maintenance, mask
 the API and disable its database role if the controller disappears or times
 out. A failed watchdog restart also enters recovery. The recovery audit and
