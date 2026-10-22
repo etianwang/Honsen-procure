@@ -27,6 +27,23 @@ probe_status() {
   done
   return 1
 }
+reload_and_drain() {
+  local master old_workers worker remaining
+  master=$(systemctl show -p MainPID --value "$NGINX_UNIT") || return 1
+  [[ $master =~ ^[1-9][0-9]*$ ]] || return 1
+  old_workers=$(pgrep -P "$master" || :)
+  [[ -n $old_workers ]] || return 1
+  systemctl reload "$NGINX_UNIT" || return 1
+  for _ in {1..50}; do
+    remaining=0
+    for worker in $old_workers; do
+      if kill -0 "$worker" 2>/dev/null; then remaining=1; break; fi
+    done
+    [[ $remaining == 0 ]] && return 0
+    sleep .1
+  done
+  return 1
+}
 if [[ $1 == maintenance ]]; then
   printf '%s\n' '# honsen-procure managed ingress' 'return 503;' > "$tmp"
   expected=503
@@ -37,9 +54,9 @@ fi
 chmod --reference="$INGRESS_INCLUDE" "$tmp"
 chown --reference="$INGRESS_INCLUDE" "$tmp"
 mv -f -- "$tmp" "$INGRESS_INCLUDE"
-if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT"; then
+if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! reload_and_drain; then
   mv -f -- "$old" "$INGRESS_INCLUDE"
-  if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT" || ! probe_status 503; then systemctl stop "$NGINX_UNIT" || true; fi
+  if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! reload_and_drain || ! probe_status 503; then systemctl stop "$NGINX_UNIT" || true; fi
   echo 'ingress switch failed' >&2
   exit 1
 fi
@@ -49,7 +66,7 @@ if ! probe_status "$expected"; then
   if [[ $1 == live ]]; then
     printf '%s\n' '# honsen-procure managed ingress' 'return 503;' > "$old"
     mv -f -- "$old" "$INGRESS_INCLUDE"
-    if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT" || ! probe_status 503; then systemctl stop "$NGINX_UNIT" || true; fi
+    if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! reload_and_drain || ! probe_status 503; then systemctl stop "$NGINX_UNIT" || true; fi
   fi
   echo "ingress probe failed: expected $expected" >&2
   exit 1
