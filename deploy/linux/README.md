@@ -15,6 +15,10 @@ application role; never put credentials in this repository or in audit logs.
 The migration runner requires a direct PostgreSQL session, not a transaction
 pool. `verify-database.sh` checks that its Node connection and the libpq
 connection used by the lock and backup target the same primary and database.
+The example configuration is `deploy.env.example`; create the real file outside
+the checkout, owned by root with mode 600. Export libpq environment variables in
+that file, and use dedicated secrets files or a protected environment. The
+example is intentionally not a working production configuration.
 
 The controller draft requires a local private backup and a verified copy on a
 different mounted filesystem. It additionally requires a remote filesystem and
