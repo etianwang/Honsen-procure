@@ -4,33 +4,42 @@ set -euo pipefail
 [[ ${HONSEN_DEPLOY_TEST:-} == disposable-ci && $(id -u) == 0 ]] || exit 2
 : "${TEST_NODE_DIR:?}" "${TEST_PG_PASSWORD:?}" "${TEST_REPO:?}"
 [[ $(ps -p 1 -o comm=) == systemd ]]
-for item in /var/lib/honsen-controller-test /opt/honsen-procure /etc/honsen-procure /var/lib/honsen-procure /usr/lib/systemd/system/honsen-procure.service; do
+for item in /var/lib/honsen-controller-test /opt/honsen-procure /etc/honsen-procure /run/honsen-procure /var/lib/honsen-procure /usr/lib/systemd/system/honsen-procure.service; do
   [[ ! -e $item && ! -L $item ]] || { echo "test path exists: $item" >&2; exit 1; }
 done
 [[ -c /dev/fuse ]] || { echo 'CI runner has no FUSE device for isolated remote backup' >&2; exit 1; }
 root=/var/lib/honsen-controller-test
 unit=/etc/systemd/system/honsen-controller-nginx.service
 restore=honsen-controller-e2e-restore
+[[ ! -e $unit && ! -L $unit ]] || exit 1
+[[ $(systemctl show -p LoadState --value honsen-procure.service) == not-found ]]
+[[ $(systemctl show -p LoadState --value honsen-controller-nginx.service) == not-found ]]
+if id honsen-procure >/dev/null 2>&1 || getent group honsen-procure >/dev/null; then exit 1; fi
+if docker inspect "$restore" >/dev/null 2>&1; then exit 1; fi
+[[ -z $(ss -H -ltn 'sport = :3000') && -z $(ss -H -ltn 'sport = :18443') ]]
 sshd_pid=
+created_user=0
+created_restore=0
 cleanup() {
   set +e
   systemctl stop honsen-procure.service honsen-controller-nginx.service >/dev/null 2>&1
   systemctl unmask --runtime honsen-procure.service >/dev/null 2>&1
   mountpoint -q "$root/remote" && fusermount3 -u "$root/remote"
   [[ -z $sshd_pid ]] || kill "$sshd_pid" 2>/dev/null
-  docker rm -f "$restore" >/dev/null 2>&1
+  [[ $created_restore == 0 ]] || docker rm -f "$restore" >/dev/null 2>&1
   rm -f /usr/lib/systemd/system/honsen-procure.service "$unit"
   systemctl daemon-reload >/dev/null 2>&1
   rm -rf -- "$root" /opt/honsen-procure /etc/honsen-procure /run/honsen-procure /var/lib/honsen-procure
-  userdel honsen-procure >/dev/null 2>&1
-  groupdel honsen-procure >/dev/null 2>&1
+  if [[ $created_user == 1 ]]; then
+    userdel honsen-procure >/dev/null 2>&1
+    groupdel honsen-procure >/dev/null 2>&1
+  fi
 }
 trap cleanup EXIT
-if id honsen-procure >/dev/null 2>&1 || getent group honsen-procure >/dev/null; then exit 1; fi
-[[ -z $(ss -H -ltn 'sport = :3000') && -z $(ss -H -ltn 'sport = :18443') ]]
 mkdir -p "$root" /opt/honsen-procure /etc/honsen-procure /run/honsen-procure
 chmod 755 "$root" /opt/honsen-procure /etc/honsen-procure
 useradd --system --user-group --no-create-home honsen-procure
+created_user=1
 git -c safe.directory="$TEST_REPO" clone --quiet --no-hardlinks "$TEST_REPO" "$root/release"
 rsync -a --exclude=.git "$TEST_REPO/" "$root/release/"
 chown -R root:root "$root/release"
@@ -62,6 +71,7 @@ sshd_pid=$!
 for _ in {1..50}; do ss -H -ltn 'sport = :12222' | grep -q . && break; sleep .1; done
 sshfs -p 12222 -o IdentityFile="$root/ssh/client",StrictHostKeyChecking=no,UserKnownHostsFile=/dev/null root@127.0.0.1:"$root/offsite" "$root/remote"
 docker run -d --name "$restore" -e POSTGRES_PASSWORD=isolated-test-only -p 127.0.0.1:54339:5432 postgres:16-alpine >/dev/null
+created_restore=1
 for _ in {1..100}; do docker exec "$restore" pg_isready -U postgres >/dev/null 2>&1 && break; sleep .2; done
 cat > "$root/pg_service.conf" <<EOF
 [restore]
