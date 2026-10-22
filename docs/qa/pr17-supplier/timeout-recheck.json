@@ -1,0 +1,88 @@
+{
+  "candidate": "5708b19caf019b29dae9f420380c6ae7316184a6",
+  "errors": [],
+  "requests": [
+    {
+      "url": "http://ipc.localhost/issue_local_captcha",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/issue_cloud_captcha",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/offline_login",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/sync_status",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/list_authorization_contexts",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/get_authorization_context",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/get_authorization_context",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/search_catalog",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/search_catalog",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/get_material_square_image",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/get_material_square_image",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/list_suppliers",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/save_supplier",
+      "status": 200
+    },
+    {
+      "url": "http://ipc.localhost/list_suppliers",
+      "status": 200
+    }
+  ],
+  "webview": {
+    "readyState": "complete",
+    "elapsedMs": 1711,
+    "invokeType": "function"
+  },
+  "contextReadyMs": 891,
+  "context": {
+    "countryId": "10000000-0000-4000-8000-000000000001",
+    "projectId": "10000000-0000-4000-8000-000000000002",
+    "projectName": "Synthetic OPA project",
+    "site": "Test site",
+    "departmentId": "10000000-0000-4000-8000-000000000003",
+    "departmentName": "Synthetic procurement",
+    "teamId": "10000000-0000-4000-8000-000000000004",
+    "teamName": "Synthetic team",
+    "currency": "XOF",
+    "primaryCurrency": "XOF",
+    "languagePair": "zh_fr"
+  },
+  "saveNoticeMs": 935,
+  "row": {
+    "name": "QA timing recheck",
+    "country_id": "10000000-0000-4000-8000-000000000001"
+  },
+  "outbox": 1,
+  "result": "PASS"
+}

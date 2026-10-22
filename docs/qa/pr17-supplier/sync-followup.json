@@ -1,0 +1,213 @@
+{
+  "candidate": "5708b19caf019b29dae9f420380c6ae7316184a6",
+  "exeSha256": "2fa075cfb3440a14949943eaafeaa56c89a0908b8bde696e7c1921d5f11fb4dc",
+  "supplierId": "26b26474-9939-40bc-b5c5-af35c595d150",
+  "checks": [
+    "two real EXEs, WebView2 and online Rust IPC login",
+    "supplier create accepted by PostgreSQL with country A",
+    "supplier edit accepted with country retained",
+    "authorized second device pulls edited supplier and linked quote"
+  ],
+  "calls": [
+    {
+      "phase": "launch-and-login",
+      "command": "issue_local_captcha",
+      "ok": true,
+      "value": {
+        "id": "950042b9-991b-4892-82f2-779ceb8dc9e7",
+        "question": "9 + 5 = ?",
+        "expires_at_unix_seconds": 1792712627
+      }
+    },
+    {
+      "phase": "launch-and-login",
+      "command": "issue_cloud_captcha",
+      "ok": true,
+      "value": {
+        "id": "ab65dfb4-21fc-4643-a40d-ee93a5f8eaae",
+        "question": "6 + 8 = ?"
+      }
+    },
+    {
+      "phase": "launch-and-login",
+      "command": "online_login",
+      "ok": true,
+      "value": {
+        "user_id": "10000000-0000-4000-8000-000000000013",
+        "username": "purchaser",
+        "roles": [
+          "administrator",
+          "purchaser"
+        ],
+        "requires_password_change": false
+      }
+    },
+    {
+      "phase": "launch-and-login",
+      "command": "issue_local_captcha",
+      "ok": true,
+      "value": {
+        "id": "ab7cb1f0-8332-4485-8ff4-779163dc32b4",
+        "question": "8 + 8 = ?",
+        "expires_at_unix_seconds": 1792712630
+      }
+    },
+    {
+      "phase": "launch-and-login",
+      "command": "issue_cloud_captcha",
+      "ok": true,
+      "value": {
+        "id": "58449c06-df35-4db2-8b57-944077e9c8ac",
+        "question": "1 + 8 = ?"
+      }
+    },
+    {
+      "phase": "launch-and-login",
+      "command": "online_login",
+      "ok": true,
+      "value": {
+        "user_id": "10000000-0000-4000-8000-000000000011",
+        "username": "engineer-a",
+        "roles": [
+          "engineer"
+        ],
+        "requires_password_change": false
+      }
+    },
+    {
+      "phase": "create-push",
+      "command": "save_supplier",
+      "ok": true,
+      "value": null
+    },
+    {
+      "phase": "create-push",
+      "command": "push_pending_sync",
+      "ok": true,
+      "value": {
+        "acceptedCount": 1,
+        "pendingCount": 0
+      }
+    },
+    {
+      "phase": "price-push",
+      "command": "add_material_price",
+      "ok": true,
+      "value": null
+    },
+    {
+      "phase": "price-push",
+      "command": "push_pending_sync",
+      "ok": true,
+      "value": {
+        "acceptedCount": 1,
+        "pendingCount": 0
+      }
+    },
+    {
+      "phase": "edit-push",
+      "command": "save_supplier",
+      "ok": true,
+      "value": null
+    },
+    {
+      "phase": "edit-push",
+      "command": "push_pending_sync",
+      "ok": true,
+      "value": {
+        "acceptedCount": 1,
+        "pendingCount": 0
+      }
+    },
+    {
+      "phase": "authorized-pull",
+      "command": "pull_sync",
+      "ok": true,
+      "value": {
+        "appliedCount": 3,
+        "nextCursor": "3"
+      }
+    },
+    {
+      "phase": "authorized-pull",
+      "command": "list_suppliers",
+      "ok": true,
+      "value": [
+        {
+          "id": "26b26474-9939-40bc-b5c5-af35c595d150",
+          "countryId": "10000000-0000-4000-8000-000000000001",
+          "businessCode": "QA-SYNC-SUP",
+          "name": "QA sync edited",
+          "contactName": null,
+          "address": null,
+          "city": null,
+          "country": null,
+          "phone": null,
+          "whatsapp": null,
+          "email": null,
+          "paymentTerms": null,
+          "deliveryLeadTime": null,
+          "isPreferred": false,
+          "isBlacklisted": false,
+          "isActive": true,
+          "version": 2
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000006",
+          "countryId": "10000000-0000-4000-8000-000000000001",
+          "businessCode": "TEST-SUPPLIER",
+          "name": "Synthetic catalog supplier",
+          "contactName": null,
+          "address": null,
+          "city": null,
+          "country": null,
+          "phone": null,
+          "whatsapp": null,
+          "email": null,
+          "paymentTerms": null,
+          "deliveryLeadTime": null,
+          "isPreferred": true,
+          "isBlacklisted": false,
+          "isActive": true,
+          "version": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "installations": [
+    "a42e3124-2ce2-42a4-a48d-74f5d0f8df88",
+    "3c055c74-11f2-45a2-b698-820ba285744f"
+  ],
+  "pull": {
+    "appliedCount": 3,
+    "nextCursor": "3"
+  },
+  "unauthorizedPull": {
+    "status": 200,
+    "entityTypes": [
+      "supplier",
+      "material_price",
+      "supplier"
+    ],
+    "count": 3
+  },
+  "unauthorizedPush": {
+    "status": 200,
+    "body": {
+      "results": [
+        {
+          "eventId": "009eb48d-3e82-468b-98b0-9e0e11157f26",
+          "status": "accepted",
+          "serverVersion": 3
+        }
+      ]
+    }
+  },
+  "serverAfterAttack": {
+    "version": "3",
+    "name": "QA unauthorized modification",
+    "countryId": "20000000-0000-4000-8000-000000000001"
+  },
+  "result": "QA_FAIL"
+}

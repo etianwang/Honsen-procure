@@ -1,0 +1,34 @@
+{
+  "candidate": "5708b19caf019b29dae9f420380c6ae7316184a6",
+  "errors": [],
+  "webview": {
+    "readyState": "complete",
+    "elapsedMs": 11910,
+    "invokeType": "function",
+    "slowestResources": [
+      {
+        "name": "http://127.0.0.1:1420/node_modules/.vite/deps/antd.js?v=6c3eac0d",
+        "ms": 4163
+      },
+      {
+        "name": "http://127.0.0.1:1420/node_modules/.vite/deps/lucide-react.js?v=6c3eac0d",
+        "ms": 3551
+      },
+      {
+        "name": "http://127.0.0.1:1420/node_modules/.vite/deps/client-B6T5C89C.js?v=6c3eac0d",
+        "ms": 3431
+      },
+      {
+        "name": "http://127.0.0.1:1420/src/App.css",
+        "ms": 3030
+      },
+      {
+        "name": "http://127.0.0.1:1420/src/lib/workflow-api.ts",
+        "ms": 3030
+      }
+    ]
+  },
+  "result": "FAIL",
+  "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 30000ms exceeded while waiting on the predicate\n    at captureRawStack (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright-core\\lib\\coreBundle.js:9282:17)\n    at callMatcherAsStep (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright\\lib\\matchers\\expect.js:13316:57)\n    at Object.toBe (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright\\lib\\matchers\\expect.js:13308:23)\n    at E:\\Project\\honsen-pr17-supplier-qa\\tests\\native\\pr17-timeout-diagnostic.mjs:48:167",
+  "failureBody": "H\nHONSEN\n\n采购工作台\n\n首页\n材料库\n采购申请单\n采购执行\n基础资料管理\n\n即将接入\n\n供应商与价格\n\nHONSEN Procure · 中文\n\n材料库总览\n当前授权范围\nSynthetic OPA project · Test site · Synthetic procurement · Synthetic team\n离线本地数据 · 待同步 1\n张\n采购员\n锁定\n材料库总览\n\n每种材料最多展示四家有效供应商报价；同币种才可在订单内比较。\n\n新增材料\n筛选\n供应商管理\n供应商已保存\n全部材料 · 1 项\n数据来自本地 SQLite\n材料\t型号 / 规格\t单位\t供应商报价（最多 4 家）\t操作\n\n▧\n合成测试电缆\n\tTEST-3X2.5 · 3 × 2.5 mm²\t米\t\nSynthetic catalog supplier · 首选\n¥12.34\n\t\n编辑材料\n维护报价\n\n采购员和管理员可新增、修改、停用材料及维护供应商价格。\n\n供应商管理\n编码\t供应商\t联系人\t状态\t操作\nQA-TIMING\tQA timing supplier\t—\t启用\t\n编辑供应商\n\nTEST-SUPPLIER\tSynthetic catalog supplier\t—\t启用\t\n编辑供应商\n关 闭\n新增供应商"
+}
