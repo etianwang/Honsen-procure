@@ -28,7 +28,7 @@ cleanup() {
     echo "controller fixture exited with status $status" >&2
     systemctl status honsen-procure.service honsen-controller-nginx.service --no-pager -l >&2
     journalctl -u honsen-procure.service -u honsen-controller-nginx.service --no-pager -n 120 >&2
-    for log in "$root"/old_api.log "$root"/old_writer.log "$root"/writer.log "$root"/backup.log "$root"/migration.log "$root"/readiness.log "$root"/traffic.log "$root"/success.log "$root"/repeat.log "$root"/concurrent.log "$root"/rogue.log; do
+    for log in "$root"/interrupt.log "$root"/start.log "$root"/old_api.log "$root"/old_writer.log "$root"/writer.log "$root"/backup.log "$root"/migration.log "$root"/readiness.log "$root"/traffic.log "$root"/success.log "$root"/repeat.log "$root"/concurrent.log "$root"/rogue.log; do
       if [[ -f $log ]]; then printf '\n--- %s ---\n' "${log##*/}" >&2; tail -n 30 "$log" >&2; fi
     done
   fi
@@ -181,7 +181,9 @@ SQL
   systemctl reload honsen-controller-nginx.service
   password=isolated-test-only
   [[ $scenario != readiness ]] || password=incorrect-test-password
-  printf 'PATH=%s:/usr/bin:/bin\nPOSTGRES_URL=postgresql://gate_new:%s@127.0.0.1:5432/%s\n' "$TEST_NODE_DIR" "$password" "$db" > /etc/honsen-procure/server.env
+  api_path="$TEST_NODE_DIR:/usr/bin:/bin"
+  [[ $scenario != start ]] || api_path=/nonexistent
+  printf 'PATH=%s\nPOSTGRES_URL=postgresql://gate_new:%s@127.0.0.1:5432/%s\n' "$api_path" "$password" "$db" > /etc/honsen-procure/server.env
   chmod 600 /etc/honsen-procure/server.env
   cat > "$root/inventory.json" <<EOF
 {"schema":1,"host":"$(hostname -f)","apiManager":"systemd:honsen-procure.service","ingress":"bt-nginx-only","oldRole":"gate_old","newRole":"gate_new","administrationFrozen":true,"otherWritersReviewed":true,"otherWriters":[]}
@@ -219,7 +221,35 @@ EOF
   chmod 600 "$root/config"
   [[ $scenario != traffic ]] || touch "$root/fail-live"
   result=0
-  if [[ $scenario == success ]]; then
+  if [[ $scenario == interrupt ]]; then
+    bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
+    first=$!
+    reached=0
+    for _ in {1..1000}; do
+      if grep -q 'step=old_stopped' "$root"/log/deploy-*.log 2>/dev/null; then reached=1; break; fi
+      kill -0 "$first" || break
+      sleep .02
+    done
+    [[ $reached == 1 ]] || { echo 'interruption checkpoint was not reached' >&2; exit 1; }
+    kill -KILL "$first"
+    wait "$first" || result=$?
+    [[ $result == 137 ]]
+    for _ in {1..100}; do
+      [[ $(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE usename IN ('gate_old','gate_new')") == 0 ]] && break
+      sleep .05
+    done
+    [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
+    [[ $(systemctl show -p LoadState --value honsen-procure.service) == masked ]]
+    [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 1 ]]
+    [[ $(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations) || '|' || (SELECT sum(value)::text FROM gate_sentinel)") == "$prior" ]]
+    PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -v db="$db" <<'SQL' >/dev/null
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();
+DROP DATABASE :"db";
+DROP ROLE gate_old;
+DROP ROLE gate_new;
+SQL
+    return
+  elif [[ $scenario == success ]]; then
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
     for _ in {1..100}; do flock -n /run/honsen-procure/deploy.lock true || break; sleep .05; done
@@ -262,6 +292,7 @@ SQL
       writer) expected_phase=fence ;;
       backup) expected_phase=backup ;;
       migration) expected_phase=migration ;;
+      start) expected_phase=readiness ;;
       readiness) expected_phase=readiness ;;
       traffic) expected_phase=traffic ;;
     esac
@@ -299,5 +330,5 @@ DROP ROLE gate_new;
 DROP ROLE IF EXISTS gate_parent;
 SQL
 }
-for case in old_api old_writer writer backup migration readiness traffic success; do run_case "$case"; done
+for case in interrupt old_api old_writer writer backup migration start readiness traffic success; do run_case "$case"; done
 echo 'real isolated controller scenarios and repeat deployment: PASS'
