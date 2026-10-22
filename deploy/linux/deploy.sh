@@ -82,13 +82,7 @@ bash "$script_dir/switch-ingress.sh" maintenance
 log_event maintenance
 phase=stop_old
 systemctl mask --runtime --now honsen-procure.service
-state=$(systemctl show -p ActiveState --value honsen-procure.service)
-[[ $state == inactive || $state == failed ]]
-[[ $(systemctl show -p MainPID --value honsen-procure.service) == 0 ]]
-if pgrep -x node >/dev/null; then echo 'Node process still running' >&2; exit 1; else [[ $? == 1 ]] || exit 1; fi
-if pgrep -f '[P]M2: God Daemon' >/dev/null; then echo 'PM2 is running' >&2; exit 1; else [[ $? == 1 ]] || exit 1; fi
-listeners=$(ss -H -ltn 'sport = :3000')
-[[ -z $listeners ]]
+bash "$script_dir/verify-stopped.sh"
 log_event old_stopped
 phase=fence
 psql -X -v ON_ERROR_STOP=1 -v old_role="$OLD_ROLE" -v new_role="$NEW_ROLE" -f "$script_dir/fence-writers.sql" >/dev/null
