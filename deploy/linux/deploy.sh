@@ -2,28 +2,25 @@
 # Deployment is restricted to a dedicated host and a dedicated direct DB administrator.
 set -euo pipefail
 umask 077
-# This controller is an incomplete checkpoint. Do not remove this guard until
-# the integration and failure-path acceptance tests in the handoff pass.
-echo 'Deployment controller is not validated and is disabled; see memory.md.' >&2
-exit 1
 [[ $(id -u) == 0 ]] || { echo 'root is required' >&2; exit 1; }
-[[ $# == 1 && -f $1 && ! -L $1 && $(stat -c %u "$1") == 0 && $(stat -c %a "$1") == 600 ]] || { echo 'root-owned mode-600 configuration required' >&2; exit 1; }
+[[ $# == 2 && $1 == --execute && -f $2 && ! -L $2 && $(stat -c %u "$2") == 0 && $(stat -c %a "$2") == 600 ]] || { echo 'explicit --execute and protected configuration required' >&2; exit 1; }
 # Configuration is trusted root-owned shell input.
-source "$1"
+source "$2"
+[[ ${DEPLOY_AUTHORIZED:-no} == yes ]] || { echo 'deployment authorization required' >&2; exit 1; }
 : "${POSTGRES_URL:?}" "${PGDATABASE:?}" "${OLD_ROLE:?}" "${NEW_ROLE:?}" "${RELEASE_DIR:?}" "${RELEASE_SHA:?}" "${BACKUP_DIR:?}" "${EXTERNAL_BACKUP_DIR:?}" "${AUDIT_DIR:?}" "${NGINX_BIN:?}" "${NGINX_UNIT:?}" "${INGRESS_INCLUDE:?}" "${INGRESS_HOST:?}" "${INGRESS_PORT:?}"
-: "${RESTORE_SERVICE:?}" "${PGSERVICEFILE:?}" "${PGPASSFILE:?}" "${BACKUP_RETENTION_DAYS:?}" "${OFFSITE_STORAGE_ATTESTED:?}"
+: "${RESTORE_SERVICE:?}" "${PGSERVICEFILE:?}" "${PGPASSFILE:?}" "${BACKUP_RETENTION_DAYS:?}" "${BACKUP_RETENTION_POLICY:?}" "${OFFSITE_STORAGE_ATTESTED:?}"
 : "${RELEASE_MANIFEST:?}" "${RELEASE_MANIFEST_SHA256:?}"
 : "${WRITER_INVENTORY:?}"
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-[[ $OFFSITE_STORAGE_ATTESTED == yes && $BACKUP_RETENTION_DAYS =~ ^[1-9][0-9]*$ ]] || { echo 'offsite location and retention must be explicitly confirmed' >&2; exit 1; }
+[[ $OFFSITE_STORAGE_ATTESTED == yes && $BACKUP_RETENTION_POLICY == retain-all && $BACKUP_RETENTION_DAYS =~ ^[1-9][0-9]*$ ]] || { echo 'offsite location and retain-all policy must be explicitly confirmed' >&2; exit 1; }
 [[ $RELEASE_SHA =~ ^[0-9a-f]{40}$ && $RELEASE_DIR == /* && -d $RELEASE_DIR && -d $AUDIT_DIR ]] || exit 2
+exec 9>/run/lock/honsen-procure-deploy.lock
+flock -n 9 || { echo 'another deployment is running' >&2; exit 1; }
 [[ $(git -C "$RELEASE_DIR" rev-parse HEAD) == "$RELEASE_SHA" && -z $(git -C "$RELEASE_DIR" status --porcelain --untracked-files=no) ]] || { echo 'release source mismatch or dirty' >&2; exit 1; }
 node "$script_dir/verify-artifact.cjs" "$RELEASE_DIR" "$RELEASE_SHA" "$RELEASE_MANIFEST" "$RELEASE_MANIFEST_SHA256"
 node "$script_dir/verify-writer-inventory.cjs" "$WRITER_INVENTORY" "$OLD_ROLE" "$NEW_ROLE" "$(hostname -f)"
 [[ $OLD_ROLE =~ ^[a-z_][a-z0-9_]*$ && $NEW_ROLE =~ ^[a-z_][a-z0-9_]*$ && $OLD_ROLE != "$NEW_ROLE" ]] || exit 2
 export POSTGRES_URL PGDATABASE NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT RESTORE_SERVICE PGSERVICEFILE PGPASSFILE
-exec 9>/run/lock/honsen-procure-deploy.lock
-flock -n 9 || { echo 'another deployment is running' >&2; exit 1; }
 # Both clients must target the same primary before any durable lock or mutation.
 (cd "$RELEASE_DIR" && bash "$script_dir/verify-database.sh")
 # The database lock remains after any interrupted or failed deployment. Recovery
@@ -101,6 +98,8 @@ bash "$script_dir/verify-restore.sh" "$external" >> "$log" 2>&1
 log_event backup_verified
 log_event "backup_local:$backup"
 log_event "backup_external:$external"
+backup_digest=$(sha256sum "$external")
+log_event "backup_sha256:${backup_digest%% *}"
 phase=migration
 (cd "$RELEASE_DIR" && npm run migrate --workspace @honsen/server >/dev/null 2>&1)
 # A second pass verifies all migration checksums and is also the idempotence gate.
@@ -116,8 +115,13 @@ mv -Tf /opt/honsen-procure/.current-next /opt/honsen-procure/current
 systemctl unmask --runtime honsen-procure.service
 systemctl start honsen-procure.service
 phase=readiness
-systemctl is-active --quiet honsen-procure.service
-curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3000/api/auth/captcha >/dev/null
+ready=0
+for _ in {1..50}; do
+  systemctl is-active --quiet honsen-procure.service || break
+  if curl --fail --silent --max-time 2 http://127.0.0.1:3000/api/auth/captcha >/dev/null; then ready=1; break; fi
+  sleep .2
+done
+[[ $ready == 1 ]] || { echo 'API did not become ready' >&2; exit 1; }
 api_pid=$(systemctl show -p MainPID --value honsen-procure.service)
 bash "$script_dir/verify-running-release.sh" "$api_pid" "$RELEASE_DIR"
 (cd "$RELEASE_DIR" && bash "$script_dir/verify-api-identity.sh" "$api_pid" "$NEW_ROLE")

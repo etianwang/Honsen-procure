@@ -29,3 +29,24 @@ SELECT (EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'old_role' AND NOT rolca
 SQL
 )
 [[ $roles == 1 ]]
+# This check is read-only: a repeat must not apply a newly missing migration.
+(cd "$RELEASE_DIR" && node <<'JS'
+const fs = require('node:fs')
+const crypto = require('node:crypto')
+const { Client } = require('pg')
+async function main() {
+  const files = fs.readdirSync('apps/server/migrations').filter(name => name.endsWith('.sql')).sort()
+  const client = new Client({ connectionString: process.env.POSTGRES_URL })
+  try {
+    await client.connect()
+    const rows = (await client.query('SELECT name, checksum FROM public.schema_migrations ORDER BY name')).rows
+    if (rows.length !== files.length) throw new Error('migration count differs')
+    for (let i = 0; i < files.length; i++) {
+      const digest = crypto.createHash('sha256').update(fs.readFileSync(`apps/server/migrations/${files[i]}`)).digest('hex')
+      if (rows[i].name !== files[i] || rows[i].checksum !== digest) throw new Error('migration history differs')
+    }
+  } finally { await client.end() }
+}
+main().catch(() => { process.stderr.write('deployment migration history does not match release\n'); process.exitCode = 1 })
+JS
+)

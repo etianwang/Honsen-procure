@@ -1,7 +1,8 @@
 # Linux deployment gate (unfinished)
 
-**The controller is disabled and must not be used for a release.** The helper
-scripts are checkpoints, not an independently accepted deployment procedure.
+**The controller is not independently accepted and must not be used for a
+production release.** It requires both `--execute` and `DEPLOY_AUTHORIZED=yes`
+in a root-owned mode-600 configuration, in addition to its safety checks.
 The V1 target is one Linux host, BT Nginx as the only public ingress, and a
 dedicated systemd unit for the API. Do not also manage that API with PM2.
 
@@ -51,9 +52,11 @@ history and two sync tables, and removes the temporary database. It deliberately
 does not establish full production recovery or verify role grants.
 
 Backups must be mode 600 and stored under directories inaccessible to other
-users. Set an approved retention period and arrange durable offsite retention;
-the controller draft does not delete expired backups or verify a storage
-provider's retention policy. Do not remove a backup needed for recovery. The
+users. The controller requires the conservative `retain-all` policy: it never
+deletes completed backups, including the last verified copy. Set the minimum
+approved retention period and separately enforce durable offsite retention;
+the controller cannot verify a storage provider's retention policy or physical
+location. Removal requires a separate reviewed recovery and retention process. The
 separate restore cluster must be disposable, contain no production data, and
 allow the verifier to create and drop its uniquely named verification database.
 Use libpq service and password files; restrict the password file to mode 600.
