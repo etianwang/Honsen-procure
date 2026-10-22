@@ -10,7 +10,7 @@ User=honsen-procure
 Group=honsen-procure
 WorkingDirectory=/opt/honsen-procure/current
 EnvironmentFile=/etc/honsen-procure/server.env
-ExecStart=/usr/bin/env node /opt/honsen-procure/current/apps/server/dist/index.js
+ExecStart=/usr/bin/env node --import=tsx /opt/honsen-procure/current/apps/server/dist/index.js
 Restart=no
 NoNewPrivileges=true
 PrivateTmp=true

@@ -22,6 +22,8 @@ trap cleanup EXIT
 useradd --system --user-group --no-create-home honsen-procure
 created_user=1
 mkdir -p /opt/honsen-procure/release/apps/server/dist /etc/honsen-procure /run/honsen-procure
+mkdir -p /opt/honsen-procure/release/node_modules
+cp -a node_modules/tsx node_modules/esbuild node_modules/@esbuild /opt/honsen-procure/release/node_modules/
 ln -s /opt/honsen-procure/release /opt/honsen-procure/current
 cp deploy/linux/honsen-procure.service "$unit"
 printf 'PATH=%s:/usr/bin:/bin\n' "$TEST_NODE_DIR" > /etc/honsen-procure/server.env
