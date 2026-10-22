@@ -35,7 +35,9 @@ phase=preflight
 failed() {
   result=$?
   if (( result != 0 )); then
-    log_event "failed:$phase"
+    # Audit failure must not prevent the remaining fail-closed actions.
+    set +e
+    log_event "failed:$phase" || echo 'cannot write deployment audit' >&2
     if [[ $phase != preflight ]]; then
       if ! bash "$script_dir/switch-ingress.sh" maintenance >/dev/null 2>&1; then
         systemctl stop "$NGINX_UNIT" >/dev/null 2>&1 || log_event ingress_stop_failed
@@ -125,7 +127,8 @@ marker=$(mktemp /var/lib/honsen-procure/.deployment.XXXXXXXX)
 printf '%s\n' "$RELEASE_SHA" > "$marker"
 chmod 600 "$marker"
 mv -f -- "$marker" /var/lib/honsen-procure/deployment.sha
-log_event success
+log_event traffic_activated
 bash "$script_dir/deployment-lock.sh" release "$lock_token"
 trap - EXIT
+log_event success || { echo "deployment is live but audit finalization failed: $log" >&2; exit 1; }
 printf 'deployment succeeded; audit: %s\n' "$log"
