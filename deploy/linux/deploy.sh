@@ -51,6 +51,7 @@ failed() {
 trap failed EXIT
 log_event start
 [[ -f "$RELEASE_DIR/apps/server/dist/index.js" && -f "$RELEASE_DIR/node_modules/tsx/dist/cli.mjs" ]] || { echo 'built server or migration runtime missing' >&2; exit 1; }
+bash "$script_dir/verify-systemd.sh" "$RELEASE_DIR/deploy/linux/honsen-procure.service"
 db_version=$(psql -X -Atqc 'SHOW server_version_num')
 [[ $db_version =~ ^16[0-9]{4}$ ]] || { echo 'PostgreSQL 16 required' >&2; exit 1; }
 log_event "postgres_version:$db_version"
@@ -70,11 +71,13 @@ bash "$script_dir/switch-ingress.sh" maintenance
 log_event maintenance
 phase=stop_old
 systemctl mask --runtime --now honsen-procure.service
-! systemctl is-active --quiet honsen-procure.service
+state=$(systemctl show -p ActiveState --value honsen-procure.service)
+[[ $state == inactive || $state == failed ]]
 [[ $(systemctl show -p MainPID --value honsen-procure.service) == 0 ]]
-! pgrep -x node >/dev/null
-! pgrep -f '[P]M2: God Daemon' >/dev/null
-[[ -z $(ss -H -ltn 'sport = :3000') ]]
+if pgrep -x node >/dev/null; then echo 'Node process still running' >&2; exit 1; else [[ $? == 1 ]] || exit 1; fi
+if pgrep -f '[P]M2: God Daemon' >/dev/null; then echo 'PM2 is running' >&2; exit 1; else [[ $? == 1 ]] || exit 1; fi
+listeners=$(ss -H -ltn 'sport = :3000')
+[[ -z $listeners ]]
 log_event old_stopped
 phase=fence
 psql -X -v ON_ERROR_STOP=1 -v old_role="$OLD_ROLE" -v new_role="$NEW_ROLE" -f "$script_dir/fence-writers.sql" >/dev/null
