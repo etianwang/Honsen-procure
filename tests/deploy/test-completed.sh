@@ -12,6 +12,7 @@ export PATH="$tmp/bin:$PATH"
 printf '# honsen-procure managed ingress\nproxy_pass http://127.0.0.1:3000;\n' > "$INGRESS_INCLUDE"
 cat > "$tmp/bin/systemctl" <<'SH'
 #!/usr/bin/env bash
+if [[ ${1:-} == show ]]; then printf '42\n'; fi
 exit "${TEST_SERVICE_STATUS:-0}"
 SH
 cat > "$tmp/bin/curl" <<'SH'
@@ -22,6 +23,11 @@ cat > "$tmp/bin/psql" <<'SH'
 #!/usr/bin/env bash
 cat >/dev/null
 printf '%s\n' "${TEST_ROLE_STATUS:-1}"
+SH
+cat > "$tmp/bin/node" <<'SH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'new|1'
 SH
 chmod 755 "$tmp/bin/"*
 verify() { bash deploy/linux/verify-completed.sh "$tmp/marker" "$tmp/current"; }

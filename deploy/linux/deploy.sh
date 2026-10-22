@@ -117,6 +117,8 @@ systemctl start honsen-procure.service
 phase=readiness
 systemctl is-active --quiet honsen-procure.service
 curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3000/api/auth/captcha >/dev/null
+api_pid=$(systemctl show -p MainPID --value honsen-procure.service)
+(cd "$RELEASE_DIR" && bash "$script_dir/verify-api-identity.sh" "$api_pid" "$NEW_ROLE")
 [[ $(psql -X -v role="$NEW_ROLE" -At <<'SQL'
 SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND usename = :'role';
 SQL
