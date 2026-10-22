@@ -1043,6 +1043,10 @@ pub struct CatalogPriceView {
     pub unit_price_minor: String,
     pub unit: String,
     pub effective_at: String,
+    pub is_blacklisted: bool,
+    pub payment_terms: Option<String>,
+    pub delivery_lead_time: Option<String>,
+    pub source_note: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -5314,6 +5318,10 @@ impl LocalAuthService {
                                 unit_price_minor: minor.to_string(),
                                 unit,
                                 effective_at,
+                                is_blacklisted: false,
+                                payment_terms: None,
+                                delivery_lead_time: None,
+                                source_note: None,
                             })
                         })
                         .collect::<Result<Vec<_>, AuthError>>()?;
@@ -5334,6 +5342,68 @@ impl LocalAuthService {
                 },
             )
             .collect()
+    }
+
+    pub fn list_catalog_prices(
+        &self,
+        material_id: Uuid,
+        project_id: Option<Uuid>,
+        after: Option<Uuid>,
+        include_blacklisted: bool,
+        now: SystemTime,
+    ) -> Result<Vec<CatalogPriceView>, AuthError> {
+        self.require_catalog_read(now)?;
+        if project_id.is_none() {
+            return Err(AuthError::InvalidInput);
+        }
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection.prepare(
+            "SELECT p.id, s.id, s.name, s.is_preferred, p.currency, p.unit_price_minor, p.unit, p.effective_at, s.is_blacklisted, s.payment_terms, s.delivery_lead_time, p.source_note
+             FROM local_material_prices p JOIN local_suppliers s ON s.id = p.supplier_id
+             JOIN local_materials m ON m.id = p.material_id
+             WHERE p.material_id = ?1 AND m.is_active = 1 AND m.deleted_at IS NULL AND p.is_active = 1 AND p.deleted_at IS NULL
+               AND s.country_id IS NOT NULL AND s.is_active = 1 AND (?6 OR s.is_blacklisted = 0) AND s.deleted_at IS NULL
+               AND (?2 IS NULL OR s.country_id = (SELECT country_id FROM local_projects WHERE id = ?2 AND is_active = 1 AND deleted_at IS NULL))
+               AND EXISTS (SELECT 1 FROM local_authorization_snapshots a JOIN local_projects ap ON ap.id = a.project_id AND ap.is_active = 1 AND ap.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?3 AND a.expires_at >= ?4 AND ap.country_id = s.country_id AND (?2 IS NULL OR a.project_id = ?2))
+             AND (?5 IS NULL OR p.id > ?5)
+             ORDER BY p.id LIMIT 25"
+        ).map_err(|_| AuthError::Database)?;
+        let results = statement
+            .query_map(
+                params![
+                    material_id.to_string(),
+                    project_id.map(|id| id.to_string()),
+                    account_id.to_string(),
+                    unix_seconds(now),
+                    after.map(|id| id.to_string()),
+                    include_blacklisted
+                ],
+                |row| {
+                    let price_id: String = row.get(0)?;
+                    let supplier_id: String = row.get(1)?;
+                    Ok(CatalogPriceView {
+                        price_id: Uuid::parse_str(&price_id)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        supplier_id: Uuid::parse_str(&supplier_id)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        supplier_name: row.get(2)?,
+                        is_preferred_supplier: row.get::<_, i64>(3)? != 0,
+                        currency: row.get(4)?,
+                        unit_price_minor: row.get::<_, i64>(5)?.to_string(),
+                        unit: row.get(6)?,
+                        effective_at: row.get(7)?,
+                        is_blacklisted: row.get::<_, i64>(8)? != 0,
+                        payment_terms: row.get(9)?,
+                        delivery_lead_time: row.get(10)?,
+                        source_note: row.get(11)?,
+                    })
+                },
+            )
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database);
+        results
     }
 
     pub fn list_suppliers(&self, now: SystemTime) -> Result<Vec<SupplierView>, AuthError> {
@@ -7285,6 +7355,24 @@ pub mod commands {
     ) -> Result<Vec<super::CatalogMaterialView>, CommandError> {
         auth.search_catalog(&query, project_id, SystemTime::now())
             .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_catalog_prices(
+        auth: State<'_, LocalAuthService>,
+        material_id: Uuid,
+        project_id: Option<Uuid>,
+        after: Option<Uuid>,
+        include_blacklisted: bool,
+    ) -> Result<Vec<super::CatalogPriceView>, CommandError> {
+        auth.list_catalog_prices(
+            material_id,
+            project_id,
+            after,
+            include_blacklisted,
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -17961,6 +18049,136 @@ mod tests {
             .unwrap();
         assert_eq!(ci_catalog[0].prices.len(), 1);
         assert_eq!(ci_catalog[0].prices[0].supplier_id, ci_supplier);
+        for i in 0..30 {
+            let supplier = Uuid::new_v4();
+            let price = Uuid::new_v4();
+            let connection = service.connection.lock().unwrap();
+            connection.execute("INSERT INTO local_suppliers (id, business_code, name, country_id, is_active, is_blacklisted, version) VALUES (?1, ?2, 'same name', ?3, 1, 0, 1)", params![supplier.to_string(), format!("PAGED-{i}"), ci.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'XOF', 100, 'bag', '2026-10-12', 1, 1)", params![price.to_string(), material.to_string(), supplier.to_string()]).unwrap();
+        }
+        let historical_id = Uuid::new_v4();
+        service.connection.lock().unwrap().execute("INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'XOF', 1, 'bag', '2025-01-01', 0, 1)", params![historical_id.to_string(), material.to_string(), ci_supplier.to_string()]).unwrap();
+        let usd_price = Uuid::new_v4();
+        service.connection.lock().unwrap().execute("INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'USD', 200, 'bag', '2026-10-12', 1, 1)", params![usd_price.to_string(), material.to_string(), ci_supplier.to_string()]).unwrap();
+        let first = service
+            .list_catalog_prices(material, Some(ci_project), None, false, now)
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_material_prices SET is_active = 0 WHERE id = ?1",
+                [first[0].price_id.to_string()],
+            )
+            .unwrap();
+        let second = service
+            .list_catalog_prices(
+                material,
+                Some(ci_project),
+                Some(first.last().unwrap().price_id),
+                false,
+                now,
+            )
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_material_prices SET is_active = 1 WHERE id = ?1",
+                [first[0].price_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(first.len(), 25);
+        assert_eq!(second.len(), 7);
+        assert_eq!(
+            first
+                .iter()
+                .chain(&second)
+                .map(|p| p.price_id)
+                .collect::<HashSet<_>>()
+                .len(),
+            32
+        );
+        assert!(
+            first
+                .iter()
+                .chain(&second)
+                .all(|p| p.price_id != historical_id)
+        );
+        assert!(
+            first
+                .iter()
+                .chain(&second)
+                .any(|p| p.price_id == usd_price && p.currency == "USD")
+        );
+        assert!(
+            service
+                .list_catalog_prices(material, Some(cm_project), None, false, now)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            service.list_catalog_prices(material, None, None, false, now),
+            Err(AuthError::InvalidInput)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 1 WHERE id = ?1",
+                [ci_supplier.to_string()],
+            )
+            .unwrap();
+        let selectable = service
+            .list_catalog_prices(material, Some(ci_project), None, false, now)
+            .unwrap();
+        let detail = service
+            .list_catalog_prices(material, Some(ci_project), None, true, now)
+            .unwrap();
+        let detail_next = service
+            .list_catalog_prices(
+                material,
+                Some(ci_project),
+                detail.last().map(|p| p.price_id),
+                true,
+                now,
+            )
+            .unwrap();
+        assert!(selectable.iter().all(|p| !p.is_blacklisted));
+        assert!(
+            detail
+                .iter()
+                .chain(&detail_next)
+                .any(|p| p.supplier_id == ci_supplier && p.is_blacklisted)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 0 WHERE id = ?1",
+                [ci_supplier.to_string()],
+            )
+            .unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute(
+                    "DELETE FROM local_material_prices WHERE id = ?1",
+                    [usd_price.to_string()],
+                )
+                .unwrap();
+            connection.execute("DELETE FROM local_material_prices WHERE supplier_id IN (SELECT id FROM local_suppliers WHERE business_code LIKE 'PAGED-%')", []).unwrap();
+            connection
+                .execute(
+                    "DELETE FROM local_suppliers WHERE business_code LIKE 'PAGED-%'",
+                    [],
+                )
+                .unwrap();
+        }
         assert_eq!(
             service.search_catalog("global", None, now).unwrap()[0]
                 .prices
@@ -18059,6 +18277,12 @@ mod tests {
             params![unix_seconds(now) - 2, unix_seconds(now) - 1, engineer.id.to_string(), cm_project.to_string()],
         ).unwrap();
         assert!(service.list_suppliers(now).unwrap().is_empty());
+        assert!(
+            service
+                .list_catalog_prices(material, Some(cm_project), None, false, now)
+                .unwrap()
+                .is_empty()
+        );
         let expired_catalog = service.search_catalog("global", None, now).unwrap();
         assert_eq!(expired_catalog.len(), 1);
         assert!(expired_catalog[0].prices.is_empty());

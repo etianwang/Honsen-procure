@@ -1,5 +1,6 @@
 import {
   calculateDraftTotals,
+  formatMoney,
   type RequisitionDraft,
   type RequisitionLine,
 } from '@honsen/shared'
@@ -8,7 +9,11 @@ import { Minus, Plus, Send } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { OrderWorkflowPanel } from '../components/OrderWorkflowPanel'
 import { RequisitionHistoryPanel } from '../components/RequisitionHistoryPanel'
-import type { CatalogApi, CatalogMaterialView } from '../lib/catalog-api'
+import type {
+  CatalogApi,
+  CatalogMaterialView,
+  CatalogPriceView,
+} from '../lib/catalog-api'
 import type {
   OwnerLinePricingInput,
   RequisitionApi,
@@ -30,7 +35,7 @@ export type RequisitionContext = Omit<
 
 type RequisitionPageProps = {
   api: RequisitionApi
-  catalogApi: Pick<CatalogApi, 'searchCatalog'>
+  catalogApi: Pick<CatalogApi, 'searchCatalog' | 'listCatalogPrices'>
   context: RequisitionContext
   workflowApi?: WorkflowApi
   canApprove?: boolean
@@ -178,12 +183,13 @@ function OwnerPricingFields({
           选择报价
           <Select
             aria-label="选择报价"
+            virtual={false}
             disabled={disabled || !line.materialId}
             value={pricing.materialPriceId ?? undefined}
             placeholder="请选择报价"
             options={(material?.prices ?? []).map((item) => ({
               value: item.priceId,
-              label: `${item.supplierName} · ${item.unitPriceMinor} ${item.currency}`,
+              label: `${item.supplierName} · ${formatMoney({ currency: item.currency, minor: item.unitPriceMinor }, 'zh-CN')}`,
             }))}
             onChange={(materialPriceId: string) => {
               const selected = material?.prices.find(
@@ -318,6 +324,13 @@ export function RequisitionPage({
   const [orderId, setOrderId] = useState(() => crypto.randomUUID())
   const [taxRateBasisPoints, setTaxRateBasisPoints] = useState('0')
   const [materials, setMaterials] = useState<CatalogMaterialView[]>([])
+  const [quotePages, setQuotePages] = useState<
+    Record<
+      string,
+      { prices: CatalogPriceView[]; more: boolean; after: string | null }
+    >
+  >({})
+  const [loadingQuotes, setLoadingQuotes] = useState(false)
   const [mode, setMode] = useState<ProcurementMode>('honsen_self_purchase')
   const [ownerPricing, setOwnerPricing] = useState<
     Record<string, OwnerPricing>
@@ -363,6 +376,41 @@ export function RequisitionPage({
         lineIndex === index ? { ...line, ...update } : line,
       ),
     )
+  }
+
+  async function loadQuotes(materialId: string, after: string | null) {
+    if (loadingQuotes && after !== null) return
+    setLoadingQuotes(true)
+    try {
+      const page = await catalogApi.listCatalogPrices(
+        materialId,
+        context.projectId,
+        after,
+      )
+      setQuotePages((current) => ({
+        ...current,
+        [materialId]: {
+          prices:
+            after === null
+              ? page
+              : [
+                  ...(current[materialId]?.prices ?? []),
+                  ...page.filter(
+                    (price) =>
+                      !current[materialId]?.prices.some(
+                        (old) => old.priceId === price.priceId,
+                      ),
+                  ),
+                ],
+          more: page.length === 25,
+          after: page.at(-1)?.priceId ?? after,
+        },
+      }))
+    } catch {
+      setMessage('无法读取供应商报价。')
+    } finally {
+      setLoadingQuotes(false)
+    }
   }
 
   function copyFromHistory(detail: RequisitionDetail) {
@@ -628,8 +676,15 @@ export function RequisitionPage({
                       const material = materials.find(
                         ({ id }) => id === materialId,
                       )
-                      if (material)
+                      if (material) {
                         updateLine(index, materialLine(line, material, mode))
+                        updateOwnerPricing(line.id, {
+                          materialPriceId: null,
+                          converted: null,
+                          final: null,
+                        })
+                        void loadQuotes(material.id, null)
+                      }
                     }}
                   />
                 </label>
@@ -654,9 +709,18 @@ export function RequisitionPage({
                 {mode === 'owner_self_purchase' ? (
                   <OwnerPricingFields
                     line={line}
-                    material={materials.find(
-                      ({ id }) => id === line.materialId,
-                    )}
+                    material={(() => {
+                      const material = materials.find(
+                        ({ id }) => id === line.materialId,
+                      )
+                      return (
+                        material && {
+                          ...material,
+                          prices:
+                            quotePages[material.id]?.prices ?? material.prices,
+                        }
+                      )
+                    })()}
                     primaryCurrency={editorContext.primaryCurrency}
                     pricing={ownerPricing[line.id] ?? newOwnerPricing()}
                     disabled={status === 'pending'}
@@ -665,6 +729,63 @@ export function RequisitionPage({
                       updateLine(index, { currency })
                     }
                   />
+                ) : null}
+                {mode === 'honsen_self_purchase' && line.materialId ? (
+                  <label>
+                    选择供应商报价
+                    <Select
+                      aria-label="选择供应商报价"
+                      virtual={false}
+                      disabled={status === 'pending'}
+                      value={
+                        (quotePages[line.materialId]?.prices ?? []).find(
+                          (price) =>
+                            price.supplierId === line.supplierId &&
+                            price.currency === line.currency &&
+                            price.unitPriceMinor === line.unitPriceMinor,
+                        )?.priceId
+                      }
+                      placeholder="选择供应商报价"
+                      options={(
+                        quotePages[line.materialId]?.prices ??
+                        materials.find((m) => m.id === line.materialId)
+                          ?.prices ??
+                        []
+                      ).map((price) => ({
+                        value: price.priceId,
+                        label: `${price.supplierName} · ${formatMoney({ currency: price.currency, minor: price.unitPriceMinor }, 'zh-CN')}`,
+                      }))}
+                      onChange={(priceId: string) => {
+                        const price = (
+                          quotePages[line.materialId!]?.prices ?? []
+                        ).find((item) => item.priceId === priceId)
+                        if (price)
+                          updateLine(index, {
+                            supplierId: price.supplierId,
+                            supplierSnapshot: {
+                              id: price.supplierId,
+                              name: price.supplierName,
+                            },
+                            unitPriceMinor: price.unitPriceMinor,
+                            currency: price.currency,
+                            unit: price.unit,
+                          })
+                      }}
+                    />
+                  </label>
+                ) : null}
+                {line.materialId && quotePages[line.materialId]?.more ? (
+                  <Button
+                    disabled={loadingQuotes}
+                    onClick={() =>
+                      void loadQuotes(
+                        line.materialId!,
+                        quotePages[line.materialId!].after,
+                      )
+                    }
+                  >
+                    加载更多报价
+                  </Button>
                 ) : null}
                 <label>
                   数量

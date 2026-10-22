@@ -203,6 +203,7 @@ fn main() {
             commands::save_material_image,
             commands::get_material_square_image,
             commands::search_catalog,
+            commands::list_catalog_prices,
             commands::list_suppliers,
             commands::save_project_defaults,
             commands::list_project_defaults,
