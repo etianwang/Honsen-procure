@@ -130,6 +130,9 @@ phase=migration
 (cd "$RELEASE_DIR" && npm run migrate --workspace @honsen/server >/dev/null 2>&1)
 [[ $(psql -X -Atqc "SELECT (to_regclass('public.schema_migrations') IS NOT NULL AND to_regclass('public.sync_entities') IS NOT NULL AND to_regclass('public.sync_events') IS NOT NULL)::int") == 1 ]]
 log_event migration_verified
+phase=permissions
+psql -X -v ON_ERROR_STOP=1 -v new_role="$NEW_ROLE" -f "$script_dir/grant-registry.sql" >/dev/null
+log_event registry_permissions_granted
 phase=activate
 psql -X -v ON_ERROR_STOP=1 -v old_role="$OLD_ROLE" -v new_role="$NEW_ROLE" -f "$script_dir/activate-new-role.sql" >/dev/null
 mkdir -p /run/honsen-procure
