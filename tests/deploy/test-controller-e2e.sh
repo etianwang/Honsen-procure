@@ -221,7 +221,32 @@ EOF
   chmod 600 "$root/config"
   [[ $scenario != traffic ]] || touch "$root/fail-live"
   result=0
-  if [[ $scenario == interrupt ]]; then
+  if [[ $scenario == interrupt_live ]]; then
+    bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
+    first=$!
+    reached=0
+    for _ in {1..3000}; do
+      if grep -q '^proxy_pass ' "$root/ingress.conf"; then reached=1; break; fi
+      kill -0 "$first" || break
+      sleep .01
+    done
+    [[ $reached == 1 ]] || { echo 'live-switch interruption checkpoint was not reached' >&2; exit 1; }
+    kill -KILL "$first"
+    wait "$first" || result=$?
+    [[ $result == 137 ]]
+    sleep 2
+    http_status=$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha || :)
+    echo "interrupted live switch: HTTP $http_status; lock $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock')"
+    [[ $http_status == 503 ]] || { echo 'unsafe: interrupted deployment left live ingress' >&2; exit 1; }
+    systemctl mask --runtime --now honsen-procure.service >/dev/null 2>&1 || :
+    PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -v db="$db" <<'SQL' >/dev/null
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();
+DROP DATABASE :"db";
+DROP ROLE gate_old;
+DROP ROLE gate_new;
+SQL
+    return
+  elif [[ $scenario == interrupt ]]; then
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
     reached=0
@@ -330,5 +355,5 @@ DROP ROLE gate_new;
 DROP ROLE IF EXISTS gate_parent;
 SQL
 }
-for case in interrupt old_api old_writer writer backup migration start readiness traffic success; do run_case "$case"; done
+for case in interrupt old_api old_writer writer backup migration start readiness traffic success interrupt_live; do run_case "$case"; done
 echo 'real isolated controller scenarios and repeat deployment: PASS'
