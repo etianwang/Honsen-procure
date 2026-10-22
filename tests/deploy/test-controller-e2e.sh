@@ -19,6 +19,7 @@ if docker inspect "$restore" >/dev/null 2>&1; then exit 1; fi
 [[ -z $(ss -H -ltn 'sport = :3000') && -z $(ss -H -ltn 'sport = :18443') ]]
 sshd_pid=
 rogue_pid=
+privilege_injector=
 created_user=0
 created_restore=0
 cleanup() {
@@ -34,6 +35,7 @@ cleanup() {
   fi
   systemctl stop honsen-procure.service honsen-controller-nginx.service >/dev/null 2>&1
   [[ -z $rogue_pid ]] || kill "$rogue_pid" 2>/dev/null
+  [[ -z $privilege_injector ]] || kill "$privilege_injector" 2>/dev/null
   systemctl unmask --runtime honsen-procure.service >/dev/null 2>&1
   mountpoint -q "$root/remote" && fusermount3 -u "$root/remote"
   [[ -z $sshd_pid ]] || kill "$sshd_pid" 2>/dev/null
@@ -305,7 +307,7 @@ SQL
   else
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 || result=$?
   fi
-  [[ $scenario != privileges ]] || wait "$privilege_injector"
+  if [[ $scenario == privileges ]]; then wait "$privilege_injector"; privilege_injector=; fi
   if [[ $scenario == success ]]; then
     [[ $result == 0 ]] || { cat "$root/$scenario.log"; exit 1; }
     audit_file=$(sed -n 's/.*; audit: //p' "$root/$scenario.log" | tail -n 1)
