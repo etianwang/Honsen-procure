@@ -22,5 +22,26 @@
       "name": "formal_issue_registry",
       "privileges": ["SELECT", "INSERT", "UPDATE"]
     }
+  ],
+  "007_category_code_conflict.sql": [
+    {
+      "kind": "routine",
+      "name": "guard_category_business_code",
+      "privileges": []
+    }
+  ],
+  "008_category_code_quarantine.sql": [
+    {
+      "kind": "table",
+      "name": "category_code_quarantine",
+      "privileges": ["SELECT", "UPDATE"]
+    }
+  ],
+  "009_category_code_repairs.sql": [
+    {
+      "kind": "table",
+      "name": "category_code_repairs",
+      "privileges": ["SELECT", "INSERT"]
+    }
   ]
 }

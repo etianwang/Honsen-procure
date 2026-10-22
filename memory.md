@@ -673,6 +673,7 @@ Build shared contracts and exact money/quantity helpers only:
 5. Before marking T01 done, run every quality gate and record exact commands/results in this file.
 
 <!-- Historical T04 checkpoints; superseded by independent QA at 9742e9c. -->
+
 ## T04 FIX2 checkpoint — INCOMPLETE
 
 - Rust category creation now enforces the existing shared business-code first-character rule; focused category test demonstrated `-CAT` was accepted before the change and passes afterward, including empty, 64- and 65-character boundaries. `cargo fmt --check` passed. This checkpoint is not independent QA and is not READY_FOR_RECHECK.
@@ -696,6 +697,7 @@ Build shared contracts and exact money/quantity helpers only:
 - **DEFERRED:** FIX2-C desktop recovery UI. **WARNING:** previous QA evidence applies only to its stated SHA; release gates unchanged.
 
 <!-- Historical Linux deployment checkpoints; superseded by PR #16 acceptance. -->
+
 ## Linux deployment gate checkpoint — 2026-10-22
 
 - Branch `codex/v1-linux-deployment-gate`, based on `d15a5f3039430819aa220bfa312f4db5be251c03`; current commit is identified by `git log -1`. T04 PR #15 is not merged and its source was not changed.
@@ -768,3 +770,10 @@ Build shared contracts and exact money/quantity helpers only:
 - Branch `codex/v1-linux-deployment-gate`; inspect `git log -1` and `git status --short` for the exact checkpoint and dirty state. Explicit per-migration object grants are applied using the migration connection and checked using the running API identity. New migration files without a reviewed object policy fail before migration. Existing historical objects outside the policy need provisioned permissions; this is not a general privilege audit. The isolated unreviewed-migration policy test passed locally.
 - A separate transient systemd traffic watchdog now supervises the live ingress switch, restores maintenance after controller loss and masks the API. At production-code SHA `a7776ee87ef4dfcedeb719494be743af224d086f`, GitHub run `39807154820` passed the real PostgreSQL 16, systemd and Nginx controller scenarios including pending migration, success, repeat and SIGKILL during live switching (HTTP 503 and lock held). Later commits extend role fencing, sequence and policy checks and fault injection; their exact final-SHA CI and those changes need independent fresh results.
 - BLOCKER until final CI and relevant real fault injection pass: validate role privilege failure, watchdog recovery and success on this exact checkpoint. WARNING: real BT panel, physical offsite storage and full-host/systemd failure recovery are unverified. DEFERRED: independent QA and production authorization. No production system was accessed.
+
+## PR #15 / PR #16 integration checkpoint — 2026-10-22
+
+- Candidate integrates T04 `dc414f18b5efba040ce4a20bacefb3d1a4de539c` with Linux baseline `49b54df6f9efb23e07df0fc52e6a3c82ec0b803f`; merge preserves both historical handoffs. No migration SQL or historical checksum changed.
+- Deployment policy explicitly grants quarantine SELECT/UPDATE and repair SELECT/INSERT. The controller checks the 007 trigger body, invoker mode, owner, signature, enabled attachment and schema CREATE restrictions, pins search path and revokes direct execution. Unknown routines remain rejected. Production still requires pre-existing historical-table grants and remains prohibited pending its separate release gates.
+- Focused isolated PostgreSQL 16 test creates a unique disposable database from 001–006, upgrades via the real runner, checks role grants, real sync push/pull and repair API, duplicate conflicts, forbidden DDL, unsafe function and missing permissions. The original PR #15 QA remains scoped to its original SHA.
+- BLOCKER: final CI and independent review for this candidate must pass before readiness. WARNING: no Windows A/B or complete deployment E2E was manually rerun. DEFERRED: production topology, offsite storage, recovery and production authorization.

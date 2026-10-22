@@ -46,6 +46,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - name: Verify T04 database deployment grants
+        run: TMPDIR="$RUNNER_TEMP" node tests/deploy/test-t04-grants.cjs
       - name: Verify Linux nginx and systemd ingress integration
         run: |
           sudo apt-get update
