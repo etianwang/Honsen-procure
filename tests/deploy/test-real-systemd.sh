@@ -7,6 +7,7 @@ set -euo pipefail
 unit=/usr/lib/systemd/system/honsen-procure.service
 for path in "$unit" /opt/honsen-procure /etc/honsen-procure /run/honsen-procure; do [[ ! -e $path && ! -L $path ]] || exit 1; done
 if id honsen-procure >/dev/null 2>&1; then exit 1; fi
+if getent group honsen-procure >/dev/null; then exit 1; fi
 [[ -z $(ss -H -ltn 'sport = :3000') ]] || exit 1
 created_user=0
 cleanup() {
@@ -15,10 +16,10 @@ cleanup() {
   rm -f -- "$unit"
   systemctl daemon-reload >/dev/null 2>&1 || :
   rm -rf -- /opt/honsen-procure /etc/honsen-procure /run/honsen-procure
-  if [[ $created_user == 1 ]]; then userdel honsen-procure || :; fi
+  if [[ $created_user == 1 ]]; then userdel honsen-procure || :; groupdel honsen-procure 2>/dev/null || :; fi
 }
 trap cleanup EXIT
-useradd --system --no-create-home honsen-procure
+useradd --system --user-group --no-create-home honsen-procure
 created_user=1
 mkdir -p /opt/honsen-procure/current/apps/server/dist /etc/honsen-procure /run/honsen-procure
 cp deploy/linux/honsen-procure.service "$unit"
