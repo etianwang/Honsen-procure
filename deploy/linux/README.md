@@ -43,6 +43,15 @@ the checkout, owned by root with mode 600. Export libpq environment variables in
 that file, and use dedicated secrets files or a protected environment. The
 example is intentionally not a working production configuration.
 
+`api-grant-policy.json` records reviewed object-specific grants for migrations.
+The migration connection's actual role applies those grants after migration;
+the audit records that role, object owners and granted privileges. New migration
+files require an explicit policy entry before migration can proceed. Default
+privileges do not replace this review: they depend on the object creator and
+could grant more access than a particular object needs. Readiness checks the
+policy using the running API's own database credentials. Historical objects
+not listed in the policy still require separately provisioned permissions.
+
 The controller draft requires a local private backup and a verified copy on a
 different mounted filesystem. It additionally requires a remote filesystem and
 an explicit operator assertion that it is offsite. The assertion is not proof
@@ -79,6 +88,15 @@ effects are understood may the operator use `deployment-lock.sh release TOKEN`
 with the same direct database configuration. Record the authorization and
 reason in the release audit. Do not delete the row to clear an unknown live
 deployment. The implementation of full failure handling is still incomplete.
+
+The final ingress switch is supervised by a separate transient systemd service.
+It watches the controller and attempts to return ingress to maintenance, mask
+the API and disable its database role if the controller disappears or times
+out. A failed watchdog restart also enters recovery. The recovery audit and
+durable database lock still require operator inspection. This is not evidence of
+recovery after an entire host or systemd failure; verify that case and actual BT
+configuration before production. The API unit's readiness marker is under
+`/run`, and therefore must be re-established deliberately after a reboot.
 
 Application rollback and database recovery are different operations. An older
 application must not be started against an upgraded schema without a separately
