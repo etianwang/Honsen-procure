@@ -18,6 +18,15 @@ chmod --reference="$INGRESS_INCLUDE" "$old"
 chown --reference="$INGRESS_INCLUDE" "$old"
 cleanup() { rm -f -- "$tmp" "$old"; }
 trap cleanup EXIT
+probe_status() {
+  local expected_status=$1 status=000
+  for _ in {1..20}; do
+    status=$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' --resolve "$INGRESS_HOST:$INGRESS_PORT:127.0.0.1" "https://$INGRESS_HOST:$INGRESS_PORT/api/auth/captcha") || status=000
+    [[ $status == "$expected_status" ]] && return 0
+    sleep .1
+  done
+  return 1
+}
 if [[ $1 == maintenance ]]; then
   printf '%s\n' '# honsen-procure managed ingress' 'return 503;' > "$tmp"
   expected=503
@@ -30,24 +39,18 @@ chown --reference="$INGRESS_INCLUDE" "$tmp"
 mv -f -- "$tmp" "$INGRESS_INCLUDE"
 if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT"; then
   mv -f -- "$old" "$INGRESS_INCLUDE"
-  if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT"; then systemctl stop "$NGINX_UNIT" || true; fi
+  if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT" || ! probe_status 503; then systemctl stop "$NGINX_UNIT" || true; fi
   echo 'ingress switch failed' >&2
   exit 1
 fi
-status=000
 # A successful reload can return before new workers have taken over.
-for _ in {1..20}; do
-  status=$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' --resolve "$INGRESS_HOST:$INGRESS_PORT:127.0.0.1" "https://$INGRESS_HOST:$INGRESS_PORT/api/auth/captcha") || status=000
-  [[ $status == "$expected" ]] && break
-  sleep .1
-done
-if [[ $status != "$expected" ]]; then
+if ! probe_status "$expected"; then
   # A failed live switch must not leave a live include on disk or in memory.
   if [[ $1 == live ]]; then
     printf '%s\n' '# honsen-procure managed ingress' 'return 503;' > "$old"
     mv -f -- "$old" "$INGRESS_INCLUDE"
-    if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT"; then systemctl stop "$NGINX_UNIT" || true; fi
+    if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT" || ! probe_status 503; then systemctl stop "$NGINX_UNIT" || true; fi
   fi
-  echo "ingress probe failed: expected $expected, got $status" >&2
+  echo "ingress probe failed: expected $expected" >&2
   exit 1
 fi
