@@ -29,6 +29,8 @@ cleanup() {
     echo "controller fixture exited with status $status" >&2
     systemctl status honsen-procure.service honsen-controller-nginx.service --no-pager -l >&2
     journalctl -u honsen-procure.service -u honsen-controller-nginx.service --no-pager -n 120 >&2
+    journalctl -u 'honsen-traffic-guard-*.service' --no-pager -n 120 >&2
+    for audit in "$root"/log/deploy-*.log; do [[ ! -f $audit ]] || tail -n 35 "$audit" >&2; done
     for log in "$root"/interrupt.log "$root"/interrupt_live.log "$root"/start.log "$root"/old_api.log "$root"/old_writer.log "$root"/writer.log "$root"/backup.log "$root"/migration.log "$root"/readiness.log "$root"/traffic.log "$root"/success.log "$root"/repeat.log "$root"/concurrent.log "$root"/rogue.log; do
       if [[ -f $log ]]; then printf '\n--- %s ---\n' "${log##*/}" >&2; tail -n 30 "$log" >&2; fi
     done

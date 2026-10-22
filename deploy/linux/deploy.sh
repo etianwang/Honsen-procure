@@ -195,7 +195,7 @@ for _ in {1..2400}; do
   [[ ! -e $guard/failed ]] || break
   if [[ -f $guard/confirmed ]] && [[ $(systemctl show -p ActiveState --value "$guard_unit") == inactive ]] &&
      [[ $(systemctl show -p Result --value "$guard_unit") == success ]] &&
-     [[ $(systemctl show -p ExecMainCode --value "$guard_unit") == 1 ]] &&
+     [[ $(systemctl show -p ExecMainCode --value "$guard_unit") =~ ^(exited|1)$ ]] &&
      [[ $(systemctl show -p ExecMainStatus --value "$guard_unit") == 0 ]]; then guard_finished=1; break; fi
   sleep .05
 done
