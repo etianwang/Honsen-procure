@@ -28,7 +28,7 @@ cleanup() {
     echo "controller fixture exited with status $status" >&2
     systemctl status honsen-procure.service honsen-controller-nginx.service --no-pager -l >&2
     journalctl -u honsen-procure.service -u honsen-controller-nginx.service --no-pager -n 120 >&2
-    for log in "$root"/interrupt.log "$root"/start.log "$root"/old_api.log "$root"/old_writer.log "$root"/writer.log "$root"/backup.log "$root"/migration.log "$root"/readiness.log "$root"/traffic.log "$root"/success.log "$root"/repeat.log "$root"/concurrent.log "$root"/rogue.log; do
+    for log in "$root"/interrupt.log "$root"/interrupt_live.log "$root"/start.log "$root"/old_api.log "$root"/old_writer.log "$root"/writer.log "$root"/backup.log "$root"/migration.log "$root"/readiness.log "$root"/traffic.log "$root"/success.log "$root"/repeat.log "$root"/concurrent.log "$root"/rogue.log; do
       if [[ -f $log ]]; then printf '\n--- %s ---\n' "${log##*/}" >&2; tail -n 30 "$log" >&2; fi
     done
   fi
@@ -159,6 +159,10 @@ SQL
     PGUSER=gate_old PGPASSWORD=isolated-test-only psql -X -v ON_ERROR_STOP=1 -c 'BEGIN; INSERT INTO gate_sentinel VALUES (1); ROLLBACK' >/dev/null
   fi
   if [[ $scenario == migration ]]; then psql -X -c "UPDATE schema_migrations SET checksum = repeat('0',64) WHERE name = (SELECT min(name) FROM schema_migrations)" >/dev/null; fi
+  # Exercise a real pending production migration, not only the no-op path.
+  if [[ $scenario == success ]]; then
+    psql -X -v ON_ERROR_STOP=1 -c "DROP TABLE formal_issue_registry; DELETE FROM schema_migrations WHERE name = '006_formal_issue_registry.sql'" >/dev/null
+  fi
   prior=$(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations) || '|' || (SELECT sum(value)::text FROM gate_sentinel)")
   ln -s "$root/release" /opt/honsen-procure/current
   printf 'PATH=%s:/usr/bin:/bin\nPOSTGRES_URL=postgresql://gate_old:isolated-test-only@127.0.0.1:5432/%s\n' "$TEST_NODE_DIR" "$db" > /etc/honsen-procure/server.env
@@ -291,6 +295,8 @@ SQL
     grep -Fq 'step=backup_verified' "$audit_file"
     grep -Fq 'step=migration_verified' "$audit_file"
     grep -Fq 'step=success' "$audit_file"
+    [[ $(psql -X -Atqc "SELECT (to_regclass('public.formal_issue_registry') IS NOT NULL AND EXISTS (SELECT 1 FROM schema_migrations WHERE name='006_formal_issue_registry.sql'))::int") == 1 ]]
+    PGUSER=gate_new PGPASSWORD=isolated-test-only psql -X -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM formal_issue_registry' >/dev/null || { echo 'new API role cannot read table created by migration' >&2; exit 1; }
     backup_count=$(find "$root/backup" -type f | wc -l)
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/repeat.log" 2>&1 || { cat "$root/repeat.log"; exit 1; }
     grep -q 'version already deployed' "$root/repeat.log"
@@ -344,7 +350,11 @@ SQL
       [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_old'") == f ]]
     fi
   fi
-  [[ $(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations) || '|' || (SELECT sum(value)::text FROM gate_sentinel)") == "$prior" ]]
+  if [[ $scenario == success ]]; then
+    [[ $(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations WHERE name <> '006_formal_issue_registry.sql') || '|' || (SELECT sum(value)::text FROM gate_sentinel)") == "$prior" ]]
+  else
+    [[ $(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations) || '|' || (SELECT sum(value)::text FROM gate_sentinel)") == "$prior" ]]
+  fi
   systemctl mask --runtime --now honsen-procure.service >/dev/null 2>&1 || :
   PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -v db="$db" <<'SQL' >/dev/null
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();

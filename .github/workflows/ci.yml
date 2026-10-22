@@ -57,10 +57,10 @@ jobs:
           sudo env TMPDIR=/var/lib/honsen-artifact-test "$(command -v node)" tests/deploy/test-writer-inventory.cjs
           sudo env HONSEN_DEPLOY_TEST=1 TEST_TMP=/var/lib/honsen-artifact-test bash tests/deploy/test-completed.sh
           sudo env HONSEN_DEPLOY_TEST=1 TEST_TMP=/var/lib/honsen-artifact-test bash tests/deploy/test-controller-authorization.sh
-          sudo env HONSEN_DEPLOY_TEST=disposable-ci TEST_NODE_DIR="$(dirname "$(command -v node)")" TEST_PG_PASSWORD="${{ github.run_id }}" TEST_REPO="$GITHUB_WORKSPACE" bash tests/deploy/test-controller-e2e.sh
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE qa_deployment_lock'
           env HONSEN_DEPLOY_TEST=1 PGHOST=127.0.0.1 PGPORT=5432 PGUSER=honsen_test PGPASSWORD='${{ github.run_id }}' PGDATABASE=qa_deployment_lock bash tests/deploy/test-deployment-lock.sh
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE qa_deployment_lock'
+          sudo env HONSEN_DEPLOY_TEST=disposable-ci TEST_NODE_DIR="$(dirname "$(command -v node)")" TEST_PG_PASSWORD="${{ github.run_id }}" TEST_REPO="$GITHUB_WORKSPACE" bash tests/deploy/test-controller-e2e.sh
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
       - if: always()
