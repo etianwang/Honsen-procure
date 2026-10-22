@@ -32,22 +32,18 @@ chmod 600 "$log"
 operator=$(id -un "${SUDO_UID:-0}")
 log_event() { printf '%s operator=%s sha=%s step=%s\n' "$(date -u +%FT%TZ)" "$operator" "$RELEASE_SHA" "$1" >> "$log"; }
 phase=preflight
-new_activated=0
 failed() {
   result=$?
   if (( result != 0 )); then
     log_event "failed:$phase"
     if [[ $phase != preflight ]]; then
-      systemctl mask --runtime --now honsen-procure.service >/dev/null 2>&1 || true
-      rm -f -- /run/honsen-procure/deployment-ready
-      if [[ $new_activated == 1 ]]; then
-        psql -X -v ON_ERROR_STOP=1 -v role="$NEW_ROLE" >/dev/null 2>&1 <<'SQL' || log_event new_role_disable_failed
-ALTER ROLE :"role" NOLOGIN;
-SQL
-      fi
       if ! bash "$script_dir/switch-ingress.sh" maintenance >/dev/null 2>&1; then
-        systemctl stop "$NGINX_UNIT" >/dev/null 2>&1 || true
+        systemctl stop "$NGINX_UNIT" >/dev/null 2>&1 || log_event ingress_stop_failed
       fi
+      systemctl mask --runtime --now honsen-procure.service >/dev/null 2>&1 || log_event api_stop_failed
+      rm -f -- /run/honsen-procure/deployment-ready
+      PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=2000' \
+        psql -X -v ON_ERROR_STOP=1 -v role="$NEW_ROLE" -f "$script_dir/disable-role.sql" >/dev/null 2>&1 || log_event new_role_disable_failed
     fi
     echo "deployment failed at $phase; audit: $log" >&2
   fi
@@ -98,7 +94,6 @@ phase=migration
 log_event migration_verified
 phase=activate
 psql -X -v ON_ERROR_STOP=1 -v old_role="$OLD_ROLE" -v new_role="$NEW_ROLE" -f "$script_dir/activate-new-role.sql" >/dev/null
-new_activated=1
 mkdir -p /run/honsen-procure
 ln -sT "$RELEASE_DIR" /opt/honsen-procure/.current-next
 mv -Tf /opt/honsen-procure/.current-next /opt/honsen-procure/current

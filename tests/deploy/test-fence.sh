@@ -77,3 +77,15 @@ psql -X -v ON_ERROR_STOP=1 -v old_role="$old" -v new_role="$new" -f deploy/linux
 PGUSER="$new" psql -X -v ON_ERROR_STOP=1 -v t="$table" <<'SQL' >/dev/null
 INSERT INTO :"t" VALUES (2);
 SQL
+PGUSER="$new" psql -X -c 'SELECT pg_sleep(30)' >/dev/null 2>&1 &
+new_pid=$!
+for _ in {1..100}; do
+  if [[ $(psql -X -At -v role="$new" <<'SQL'
+SELECT count(*) FROM pg_stat_activity WHERE usename = :'role';
+SQL
+) -gt 0 ]]; then break; fi
+  sleep 0.05
+done
+psql -X -v ON_ERROR_STOP=1 -v role="$new" -f deploy/linux/disable-role.sql >/dev/null
+if wait "$new_pid"; then echo 'new session survived failure fencing' >&2; exit 1; fi
+if PGUSER="$new" psql -X -c 'SELECT 1' >/dev/null 2>&1; then echo 'new role still accepts login' >&2; exit 1; fi
