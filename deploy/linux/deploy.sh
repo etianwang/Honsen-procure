@@ -10,14 +10,18 @@ exit 1
 [[ $# == 1 && -f $1 && ! -L $1 && $(stat -c %u "$1") == 0 && $(stat -c %a "$1") == 600 ]] || { echo 'root-owned mode-600 configuration required' >&2; exit 1; }
 # Configuration is trusted root-owned shell input.
 source "$1"
-: "${POSTGRES_URL:?}" "${OLD_ROLE:?}" "${NEW_ROLE:?}" "${RELEASE_DIR:?}" "${RELEASE_SHA:?}" "${BACKUP_DIR:?}" "${EXTERNAL_BACKUP_DIR:?}" "${AUDIT_DIR:?}" "${NGINX_BIN:?}" "${NGINX_UNIT:?}" "${INGRESS_INCLUDE:?}" "${INGRESS_HOST:?}" "${INGRESS_PORT:?}"
+: "${POSTGRES_URL:?}" "${PGDATABASE:?}" "${OLD_ROLE:?}" "${NEW_ROLE:?}" "${RELEASE_DIR:?}" "${RELEASE_SHA:?}" "${BACKUP_DIR:?}" "${EXTERNAL_BACKUP_DIR:?}" "${AUDIT_DIR:?}" "${NGINX_BIN:?}" "${NGINX_UNIT:?}" "${INGRESS_INCLUDE:?}" "${INGRESS_HOST:?}" "${INGRESS_PORT:?}"
 [[ $RELEASE_SHA =~ ^[0-9a-f]{40}$ && $RELEASE_DIR == /* && -d $RELEASE_DIR && -d $AUDIT_DIR ]] || exit 2
 [[ $(git -C "$RELEASE_DIR" rev-parse HEAD) == "$RELEASE_SHA" && -z $(git -C "$RELEASE_DIR" status --porcelain --untracked-files=no) ]] || { echo 'release source mismatch or dirty' >&2; exit 1; }
 [[ $OLD_ROLE =~ ^[a-z_][a-z0-9_]*$ && $NEW_ROLE =~ ^[a-z_][a-z0-9_]*$ && $OLD_ROLE != "$NEW_ROLE" ]] || exit 2
-export POSTGRES_URL PGDATABASE="$POSTGRES_URL" NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT
+export POSTGRES_URL PGDATABASE NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 exec 9>/run/lock/honsen-procure-deploy.lock
 flock -n 9 || { echo 'another deployment is running' >&2; exit 1; }
+# The database lock remains after any interrupted or failed deployment. Recovery
+# requires an operator to inspect the entire deployment before releasing it.
+lock_token=$(cat /proc/sys/kernel/random/uuid)
+bash "$script_dir/deployment-lock.sh" acquire "$lock_token"
 log=$(mktemp "$AUDIT_DIR/deploy-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXXXX.log")
 chmod 600 "$log"
 [[ $(stat -c %a "$log") == 600 ]] || exit 1
@@ -104,5 +108,6 @@ log_event readiness_passed
 phase=traffic
 bash "$script_dir/switch-ingress.sh" live
 log_event success
+bash "$script_dir/deployment-lock.sh" release "$lock_token"
 trap - EXIT
 printf 'deployment succeeded; audit: %s\n' "$log"
