@@ -50,10 +50,10 @@ fi
 psql -X -v ON_ERROR_STOP=1 -v old="$old" -v new="$new" <<'SQL' >/dev/null
 REVOKE :"old" FROM :"new";
 SQL
-PGUSER="$old" psql -X -v ON_ERROR_STOP=1 -v t="$table" <<'SQL' >/dev/null
+PGUSER="$old" PGPASSWORD=isolated-test-only psql -X -v ON_ERROR_STOP=1 -v t="$table" <<'SQL' >/dev/null
 INSERT INTO :"t" VALUES (1);
 SQL
-PGUSER="$old" psql -X -c 'SELECT pg_sleep(30)' >/dev/null 2>&1 &
+PGUSER="$old" PGPASSWORD=isolated-test-only psql -X -c 'SELECT pg_sleep(30)' >/dev/null 2>&1 &
 old_pid=$!
 for _ in {1..100}; do
   if [[ $(psql -X -At -v old="$old" <<'SQL'
@@ -70,14 +70,14 @@ psql -X -v ON_ERROR_STOP=1 -v old_role="$old" -v new_role="$new" -f deploy/linux
 if wait "$old_pid"; then
   echo 'existing old role connection unexpectedly survived' >&2; exit 1
 fi
-if PGUSER="$old" psql -X -c 'SELECT 1' >/dev/null 2>&1; then
+if PGUSER="$old" PGPASSWORD=isolated-test-only psql -X -c 'SELECT 1' >/dev/null 2>&1; then
   echo 'old role unexpectedly connected after fencing' >&2; exit 1
 fi
 psql -X -v ON_ERROR_STOP=1 -v old_role="$old" -v new_role="$new" -f deploy/linux/activate-new-role.sql >/dev/null
-PGUSER="$new" psql -X -v ON_ERROR_STOP=1 -v t="$table" <<'SQL' >/dev/null
+PGUSER="$new" PGPASSWORD=isolated-test-only psql -X -v ON_ERROR_STOP=1 -v t="$table" <<'SQL' >/dev/null
 INSERT INTO :"t" VALUES (2);
 SQL
-PGUSER="$new" psql -X -c 'SELECT pg_sleep(30)' >/dev/null 2>&1 &
+PGUSER="$new" PGPASSWORD=isolated-test-only psql -X -c 'SELECT pg_sleep(30)' >/dev/null 2>&1 &
 new_pid=$!
 for _ in {1..100}; do
   if [[ $(psql -X -At -v role="$new" <<'SQL'
@@ -88,4 +88,4 @@ SQL
 done
 psql -X -v ON_ERROR_STOP=1 -v role="$new" -f deploy/linux/disable-role.sql >/dev/null
 if wait "$new_pid"; then echo 'new session survived failure fencing' >&2; exit 1; fi
-if PGUSER="$new" psql -X -c 'SELECT 1' >/dev/null 2>&1; then echo 'new role still accepts login' >&2; exit 1; fi
+if PGUSER="$new" PGPASSWORD=isolated-test-only psql -X -c 'SELECT 1' >/dev/null 2>&1; then echo 'new role still accepts login' >&2; exit 1; fi
