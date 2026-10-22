@@ -1,0 +1,54 @@
+Note: switching to '1e71f13f5068742950ef6efbb94a918d727e251e'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+controller scenario: privileges
+NOTICE:  role "gate_unexpected" does not exist, skipping
+NOTICE:  role "gate_parent" does not exist, skipping
+controller scenario: success
+BEGIN
+INSERT 0 1
+UPDATE 1
+ nextval 
+---------
+       1
+(1 row)
+
+ROLLBACK
+QA role insert, update and sequence usage: PASS
+API grant policy failed: Migration created an object without a reviewed API grant
+API grant policy failed: Migration created an object without a reviewed API grant
+NOTICE:  role "gate_unexpected" does not exist, skipping
+NOTICE:  role "gate_parent" does not exist, skipping
+controller scenario: interrupt
+/home/runner/work/Honsen-procure/Honsen-procure/qa/qa-recheck/controller-recheck.sh: line 525:  8654 Killed                  bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" > "$root/$scenario.log" 2>&1
+controller scenario: interrupt_term
+controller scenario: interrupt_live
+/home/runner/work/Honsen-procure/Honsen-procure/qa/qa-recheck/controller-recheck.sh: line 491: 10570 Killed                  bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" > "$root/$scenario.log" 2>&1
+interrupted live switch: HTTP 503; lock 1
+controller scenario: handoff_kill
+/home/runner/work/Honsen-procure/Honsen-procure/qa/qa-recheck/controller-recheck.sh: line 327: 12625 Killed                  bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" > "$root/$scenario.log" 2>&1
+controller scenario: handoff_term
+controller scenario: post_release_kill
+/home/runner/work/Honsen-procure/Honsen-procure/qa/qa-recheck/controller-recheck.sh: line 365: 16432 Killed                  bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" > "$root/$scenario.log" 2>&1
+Running as unit: honsen-stale-guard-test.service; invocation ID: ae2b55ecd59348759f1c7d7db5b04704
+controller scenario: post_release_term
+Running as unit: honsen-stale-guard-test.service; invocation ID: b1b22ba88c4d4e2e98ca2a736c8e7baf
+controller scenario: guard_kill
+controller scenario: guard_confirm_kill
+controller scenario: guard_db_down
+/home/runner/work/Honsen-procure/Honsen-procure/qa/qa-recheck/controller-recheck.sh: line 419: 24982 Killed                  bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" > "$root/$scenario.log" 2>&1
+real isolated controller scenarios and repeat deployment: PASS
