@@ -84,6 +84,7 @@ bash "$script_dir/switch-ingress.sh" maintenance
 log_event maintenance
 phase=stop_old
 systemctl mask --runtime --now honsen-procure.service
+[[ $(systemctl show -p LoadState --value honsen-procure.service) == masked ]] || { echo 'API unit could not be masked' >&2; exit 1; }
 bash "$script_dir/verify-stopped.sh"
 log_event old_stopped
 phase=fence
