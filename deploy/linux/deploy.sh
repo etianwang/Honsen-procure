@@ -52,6 +52,17 @@ trap failed EXIT
 log_event start
 [[ -f "$RELEASE_DIR/apps/server/dist/index.js" && -f "$RELEASE_DIR/node_modules/tsx/dist/cli.mjs" ]] || { echo 'built server or migration runtime missing' >&2; exit 1; }
 bash "$script_dir/verify-systemd.sh" "$RELEASE_DIR/deploy/linux/honsen-procure.service"
+export RELEASE_SHA RELEASE_DIR OLD_ROLE NEW_ROLE
+if bash "$script_dir/verify-completed.sh" /var/lib/honsen-procure/deployment.sha /opt/honsen-procure/current; then
+  log_event already_deployed
+  bash "$script_dir/deployment-lock.sh" release "$lock_token"
+  trap - EXIT
+  printf 'version already deployed; audit: %s\n' "$log"
+  exit 0
+else
+  status=$?
+  [[ $status == 3 ]] || { echo 'recorded deployment failed verification' >&2; exit 1; }
+fi
 db_version=$(psql -X -Atqc 'SHOW server_version_num')
 [[ $db_version =~ ^16[0-9]{4}$ ]] || { echo 'PostgreSQL 16 required' >&2; exit 1; }
 log_event "postgres_version:$db_version"
@@ -113,6 +124,11 @@ SQL
 log_event readiness_passed
 phase=traffic
 bash "$script_dir/switch-ingress.sh" live
+install -d -m 700 -o root -g root /var/lib/honsen-procure
+marker=$(mktemp /var/lib/honsen-procure/.deployment.XXXXXXXX)
+printf '%s\n' "$RELEASE_SHA" > "$marker"
+chmod 600 "$marker"
+mv -f -- "$marker" /var/lib/honsen-procure/deployment.sha
 log_event success
 bash "$script_dir/deployment-lock.sh" release "$lock_token"
 trap - EXIT
