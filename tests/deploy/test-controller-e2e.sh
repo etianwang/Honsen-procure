@@ -182,6 +182,7 @@ wait_guard_finished() {
   for _ in {1..1200}; do
     state=$(systemctl show -p ActiveState --value "honsen-traffic-guard-$token.service")
     [[ $state == inactive || $state == failed ]] && return 0
+    [[ $state == active && $(systemctl show -p SubState --value "honsen-traffic-guard-$token.service") == exited ]] && return 0
     sleep .1
   done
   echo 'traffic supervisor failed to finish recovery' >&2
