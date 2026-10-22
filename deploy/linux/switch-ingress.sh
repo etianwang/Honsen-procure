@@ -34,7 +34,7 @@ if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT"; then
   echo 'ingress switch failed' >&2
   exit 1
 fi
-status=$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' -H "Host: $INGRESS_HOST" "http://127.0.0.1:$INGRESS_PORT/api/auth/captcha") || status=000
+status=$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' --resolve "$INGRESS_HOST:$INGRESS_PORT:127.0.0.1" "https://$INGRESS_HOST:$INGRESS_PORT/api/auth/captcha") || status=000
 if [[ $status != "$expected" ]]; then
   # A failed live switch must not leave a live include on disk or in memory.
   if [[ $1 == live ]]; then
