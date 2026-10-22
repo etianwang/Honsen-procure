@@ -11,10 +11,12 @@ exit 1
 # Configuration is trusted root-owned shell input.
 source "$1"
 : "${POSTGRES_URL:?}" "${PGDATABASE:?}" "${OLD_ROLE:?}" "${NEW_ROLE:?}" "${RELEASE_DIR:?}" "${RELEASE_SHA:?}" "${BACKUP_DIR:?}" "${EXTERNAL_BACKUP_DIR:?}" "${AUDIT_DIR:?}" "${NGINX_BIN:?}" "${NGINX_UNIT:?}" "${INGRESS_INCLUDE:?}" "${INGRESS_HOST:?}" "${INGRESS_PORT:?}"
+: "${RESTORE_SERVICE:?}" "${PGSERVICEFILE:?}" "${PGPASSFILE:?}" "${BACKUP_RETENTION_DAYS:?}" "${OFFSITE_STORAGE_ATTESTED:?}"
+[[ $OFFSITE_STORAGE_ATTESTED == yes && $BACKUP_RETENTION_DAYS =~ ^[1-9][0-9]*$ ]] || { echo 'offsite location and retention must be explicitly confirmed' >&2; exit 1; }
 [[ $RELEASE_SHA =~ ^[0-9a-f]{40}$ && $RELEASE_DIR == /* && -d $RELEASE_DIR && -d $AUDIT_DIR ]] || exit 2
 [[ $(git -C "$RELEASE_DIR" rev-parse HEAD) == "$RELEASE_SHA" && -z $(git -C "$RELEASE_DIR" status --porcelain --untracked-files=no) ]] || { echo 'release source mismatch or dirty' >&2; exit 1; }
 [[ $OLD_ROLE =~ ^[a-z_][a-z0-9_]*$ && $NEW_ROLE =~ ^[a-z_][a-z0-9_]*$ && $OLD_ROLE != "$NEW_ROLE" ]] || exit 2
-export POSTGRES_URL PGDATABASE NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT
+export POSTGRES_URL PGDATABASE NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT RESTORE_SERVICE PGSERVICEFILE PGPASSFILE
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 exec 9>/run/lock/honsen-procure-deploy.lock
 flock -n 9 || { echo 'another deployment is running' >&2; exit 1; }
@@ -64,6 +66,9 @@ elif [[ -e /opt/honsen-procure/current ]]; then
   echo 'current release is not a symlink' >&2; exit 1
 fi
 [[ -d $BACKUP_DIR && -d $EXTERNAL_BACKUP_DIR ]] || exit 1
+offsite_type=$(findmnt -n -o FSTYPE --target "$EXTERNAL_BACKUP_DIR")
+[[ $offsite_type == nfs || $offsite_type == nfs4 || $offsite_type == cifs || $offsite_type == fuse.sshfs ]] || { echo 'offsite backup must use a supported remote filesystem' >&2; exit 1; }
+log_event "backup_retention_days:$BACKUP_RETENTION_DAYS"
 phase=maintenance
 bash "$script_dir/switch-ingress.sh" maintenance
 log_event maintenance
@@ -81,6 +86,7 @@ log_event writers_fenced
 phase=backup
 backup=$(bash "$script_dir/backup.sh" "$BACKUP_DIR")
 external=$(bash "$script_dir/verify-external-backup.sh" "$backup" "$EXTERNAL_BACKUP_DIR")
+bash "$script_dir/verify-restore.sh" "$external" >> "$log" 2>&1
 log_event backup_verified
 log_event "backup_local:$backup"
 log_event "backup_external:$external"
