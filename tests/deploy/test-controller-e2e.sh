@@ -76,6 +76,10 @@ if [[ -e $root/check-release-owner && " $* " == *' token='* ]]; then
       echo 'unsafe release: traffic supervisor remains active' >&2
       exit 1
     fi
+    if [[ -f $root/pause-release ]]; then
+      printf '%s\n' "$$" > "$root/release-waiting"
+      while [[ ! -f $root/release-resume ]]; do sleep .05; done
+    fi
     echo 'release observed with supervisor stopped' >&2
   fi
   /usr/bin/psql "$@" < "$input"
@@ -328,13 +332,25 @@ SQL
     return
   elif [[ $scenario == success ]]; then
     touch "$root/check-release-owner"
+    touch "$root/pause-release"
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
     for _ in {1..100}; do flock -n /run/honsen-procure/deploy.lock true || break; sleep .05; done
     if bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/concurrent.log" 2>&1; then echo 'concurrent controller was accepted' >&2; exit 1; fi
     grep -q 'another deployment is running' "$root/concurrent.log"
+    reached=0
+    for _ in {1..3000}; do
+      if [[ -f $root/release-waiting ]]; then reached=1; break; fi
+      kill -0 "$first" || break
+      sleep .01
+    done
+    [[ $reached == 1 ]] || { echo 'lock-release handoff checkpoint was not reached' >&2; exit 1; }
+    [[ $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock') == 1 ]]
+    if bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/handoff-concurrent.log" 2>&1; then echo 'handoff accepted another controller' >&2; exit 1; fi
+    grep -q 'another deployment is running' "$root/handoff-concurrent.log"
+    touch "$root/release-resume"
     wait "$first" || result=$?
-    rm -f "$root/check-release-owner"
+    rm -f "$root/check-release-owner" "$root/pause-release" "$root/release-waiting" "$root/release-resume"
   else
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 || result=$?
   fi

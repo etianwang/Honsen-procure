@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Runs in a systemd transient service, independently of the deploying shell.
 set -uo pipefail
-config=$1 parent=$2 start=$3 guard=$4 audit=$5
+config=$1 parent=$2 start=$3 guard=$4 audit=$5 token=$6
 source "$config"
-export NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT
+export NGINX_BIN NGINX_UNIT INGRESS_INCLUDE INGRESS_HOST INGRESS_PORT POSTGRES_URL RELEASE_SHA RELEASE_MANIFEST_SHA256 RELEASE_DIR OLD_ROLE NEW_ROLE
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 event() { printf '%s step=traffic_watchdog:%s\n' "$(date -u +%FT%TZ)" "$1" >> "$audit"; }
+owns_lock() {
+  [[ $(PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=2000' psql -X -qAt -v ON_ERROR_STOP=1 -v token="$token" <<'SQL'
+SELECT count(*) FROM honsen_deployment.controller_lock WHERE token = :'token'::uuid;
+SQL
+  ) == 1 ]]
+}
 alive() {
   [[ -r /proc/$parent/stat ]] || return 1
   local stat
@@ -13,6 +19,7 @@ alive() {
   [[ $(awk '{print $3}' <<< "$stat") != Z && $(awk '{print $22}' <<< "$stat") == "$start" ]]
 }
 recover() {
+  if ! owns_lock; then event 'recovery_abandoned:not_owner' || :; touch "$guard/failed"; return 1; fi
   event "recovery_started:$1" || :
   if ! bash "$script_dir/switch-ingress.sh" maintenance; then
     systemctl stop "$NGINX_UNIT" || event ingress_stop_failed || :
@@ -53,9 +60,12 @@ if [[ ! -e $guard/ready ]]; then
   exit 0
 fi
 for _ in {1..2400}; do
-  if [[ -f $guard/committed ]]; then
-    if event committed; then exit 0; fi
-    recover audit_failed
+  if [[ -f $guard/commit-request ]]; then
+    if alive && owns_lock && bash "$script_dir/verify-completed.sh" /var/lib/honsen-procure/deployment.sha /opt/honsen-procure/current && alive && owns_lock && event confirmed; then
+      touch "$guard/confirmed"
+      exit 0
+    fi
+    recover confirmation_failed
     exit 0
   fi
   if ! alive; then recover controller_lost; exit 0; fi

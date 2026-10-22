@@ -171,7 +171,7 @@ guard=$(mktemp -d "$AUDIT_DIR/.traffic-guard.XXXXXXXX")
 guard_unit="honsen-traffic-guard-$lock_token.service"
 parent_start=$(awk '{print $22}' "/proc/$$/stat")
 systemd-run --unit "$guard_unit" --property=Type=exec --property=Restart=on-failure --property=RestartSec=1 \
-  /bin/bash "$script_dir/traffic-watchdog.sh" "$2" "$$" "$parent_start" "$guard" "$log" >/dev/null
+  /bin/bash "$script_dir/traffic-watchdog.sh" "$2" "$$" "$parent_start" "$guard" "$log" "$lock_token" >/dev/null
 traffic_ready=0
 for _ in {1..2400}; do
   [[ ! -e $guard/failed ]] || break
@@ -186,8 +186,21 @@ printf '%s\n%s\n' "$RELEASE_SHA" "$RELEASE_MANIFEST_SHA256" > "$marker"
 chmod 600 "$marker"
 mv -f -- "$marker" /var/lib/honsen-procure/deployment.sha
 log_event traffic_activated
+touch "$guard/commit-request"
+guard_finished=0
+for _ in {1..2400}; do
+  [[ ! -e $guard/failed ]] || break
+  if [[ -f $guard/confirmed ]] && [[ $(systemctl show -p ActiveState --value "$guard_unit") == inactive ]] &&
+     [[ $(systemctl show -p Result --value "$guard_unit") == success ]] &&
+     [[ $(systemctl show -p ExecMainCode --value "$guard_unit") == 1 ]] &&
+     [[ $(systemctl show -p ExecMainStatus --value "$guard_unit") == 0 ]]; then guard_finished=1; break; fi
+  sleep .05
+done
+[[ $guard_finished == 1 ]] || { echo 'traffic supervisor did not finish confirmation' >&2; exit 1; }
+log_event supervisor_complete
+# From this point no controller or supervisor may perform recovery: the
+# confirmed supervisor has exited, and releasing the lock is the last mutation.
+trap - EXIT TERM INT
 bash "$script_dir/deployment-lock.sh" release "$lock_token"
-touch "$guard/committed"
 log_event success
-trap - EXIT
 printf 'deployment succeeded; audit: %s\n' "$log"
