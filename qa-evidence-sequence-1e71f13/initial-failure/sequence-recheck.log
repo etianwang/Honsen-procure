@@ -1,0 +1,129 @@
+Note: switching to '52990729c8b93df0d132b31bdc8f7f72b83ae71d'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+controller scenario: privileges
+npm notice
+npm notice New major version of npm available! 11.16.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+pending migration: 007_qa_sequence.sql (table and owned sequence absent)
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=start
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=postgres_version:160015
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=previous_sha:52990729c8b93df0d132b31bdc8f7f72b83ae71d
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_retention_days:30
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=maintenance
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=old_stopped
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=writers_fenced
+separate-cluster restore verified
+2026-10-22T17:28:09Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_verified
+2026-10-22T17:28:09Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_local:/var/lib/honsen-controller-test/backup/honsen-pg-20261022T172808Z-xEpHw6OR.dump
+2026-10-22T17:28:09Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_external:/var/lib/honsen-controller-test/remote/.honsen-pg-FGQQZ5Ku.dump
+2026-10-22T17:28:09Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_sha256:4453749d2862e362d4972b5cd529db37258a8b9c759afcaa2e0a2ef3f3cac6a0
+2026-10-22T17:28:10Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=migration_verified
+migration_creator=honsen_test
+grant_object=server_change_log owner=honsen_test privileges=SELECT,INSERT,UPDATE
+grant_object=server_change_log_sequence_seq owner=honsen_test privileges=USAGE
+grant_object=formal_issue_registry owner=honsen_test privileges=SELECT,INSERT,UPDATE
+grant_object=qa_sequence_items owner=honsen_test privileges=SELECT,INSERT
+grant_object=qa_sequence_items_id_seq owner=honsen_test privileges=USAGE
+2026-10-22T17:28:10Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=api_permissions_granted
+2026-10-22T17:28:10Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=new_role_activated
+2026-10-22T17:28:11Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=failed:readiness
+revoked sequence USAGE rejected at readiness, HTTPS 503: PASS
+NOTICE:  schema "honsen_deployment" already exists, skipping
+NOTICE:  relation "controller_lock" already exists, skipping
+unknown systemd unit or override
+deployment failed at preflight; audit: /var/lib/honsen-controller-test/log/deploy-20261022T172812Z-jS6wspDI.log
+controller fixture exited with status 1
+○ honsen-procure.service
+     Loaded: masked (Reason: Unit honsen-procure.service is masked.)
+     Active: inactive (dead)
+
+Oct 22 17:28:06 runnervm8k3b6 systemd[1]: Started honsen-procure.service - Honsen Procure API.
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: Stopping honsen-procure.service...
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: honsen-procure.service: Deactivated successfully.
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: Stopped honsen-procure.service.
+Oct 22 17:28:10 runnervm8k3b6 systemd[1]: Started honsen-procure.service - Honsen Procure API.
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: Stopping honsen-procure.service...
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: honsen-procure.service: Deactivated successfully.
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: Stopped honsen-procure.service.
+
+● honsen-controller-nginx.service - Disposable controller test nginx
+     Loaded: loaded (/etc/systemd/system/honsen-controller-nginx.service; static)
+     Active: active (running) since Thu 2026-10-22 17:28:05 UTC; 6s ago
+   Main PID: 4236 (nginx)
+      Tasks: 2 (limit: 19138)
+     Memory: 3.8M (peak: 5.1M)
+        CPU: 34ms
+     CGroup: /system.slice/honsen-controller-nginx.service
+             ├─4236 "nginx: master process /usr/sbin/nginx -c /var/lib/honsen-controller-test/nginx.conf -g daemon off;"
+             └─5740 "nginx: worker process"
+
+Oct 22 17:28:05 runnervm8k3b6 systemd[1]: Started honsen-controller-nginx.service - Disposable controller test nginx.
+Oct 22 17:28:07 runnervm8k3b6 systemd[1]: Reloading honsen-controller-nginx.service - Disposable controller test nginx...
+Oct 22 17:28:07 runnervm8k3b6 nginx[4410]: 2026/10/22 17:28:07 [notice] 4410#4410: signal process started
+Oct 22 17:28:07 runnervm8k3b6 systemd[1]: Reloaded honsen-controller-nginx.service - Disposable controller test nginx.
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: Reloading honsen-controller-nginx.service - Disposable controller test nginx...
+Oct 22 17:28:08 runnervm8k3b6 nginx[4659]: 2026/10/22 17:28:08 [notice] 4659#4659: signal process started
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: Reloaded honsen-controller-nginx.service - Disposable controller test nginx.
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: Reloading honsen-controller-nginx.service - Disposable controller test nginx...
+Oct 22 17:28:11 runnervm8k3b6 nginx[5738]: 2026/10/22 17:28:11 [notice] 5738#5738: signal process started
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: Reloaded honsen-controller-nginx.service - Disposable controller test nginx.
+Oct 22 17:28:05 runnervm8k3b6 systemd[1]: Started honsen-controller-nginx.service - Disposable controller test nginx.
+Oct 22 17:28:06 runnervm8k3b6 systemd[1]: Started honsen-procure.service - Honsen Procure API.
+Oct 22 17:28:07 runnervm8k3b6 systemd[1]: Reloading honsen-controller-nginx.service - Disposable controller test nginx...
+Oct 22 17:28:07 runnervm8k3b6 nginx[4410]: 2026/10/22 17:28:07 [notice] 4410#4410: signal process started
+Oct 22 17:28:07 runnervm8k3b6 systemd[1]: Reloaded honsen-controller-nginx.service - Disposable controller test nginx.
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: Reloading honsen-controller-nginx.service - Disposable controller test nginx...
+Oct 22 17:28:08 runnervm8k3b6 nginx[4659]: 2026/10/22 17:28:08 [notice] 4659#4659: signal process started
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: Reloaded honsen-controller-nginx.service - Disposable controller test nginx.
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: Stopping honsen-procure.service...
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: honsen-procure.service: Deactivated successfully.
+Oct 22 17:28:08 runnervm8k3b6 systemd[1]: Stopped honsen-procure.service.
+Oct 22 17:28:10 runnervm8k3b6 systemd[1]: Started honsen-procure.service - Honsen Procure API.
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: Reloading honsen-controller-nginx.service - Disposable controller test nginx...
+Oct 22 17:28:11 runnervm8k3b6 nginx[5738]: 2026/10/22 17:28:11 [notice] 5738#5738: signal process started
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: Reloaded honsen-controller-nginx.service - Disposable controller test nginx.
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: Stopping honsen-procure.service...
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: honsen-procure.service: Deactivated successfully.
+Oct 22 17:28:11 runnervm8k3b6 systemd[1]: Stopped honsen-procure.service.
+Failed to add filter for units: No data available
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=start
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=postgres_version:160015
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=previous_sha:52990729c8b93df0d132b31bdc8f7f72b83ae71d
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_retention_days:30
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=maintenance
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=old_stopped
+2026-10-22T17:28:08Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=writers_fenced
+separate-cluster restore verified
+2026-10-22T17:28:09Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_verified
+2026-10-22T17:28:09Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_local:/var/lib/honsen-controller-test/backup/honsen-pg-20261022T172808Z-xEpHw6OR.dump
+2026-10-22T17:28:09Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_external:/var/lib/honsen-controller-test/remote/.honsen-pg-FGQQZ5Ku.dump
+2026-10-22T17:28:09Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=backup_sha256:4453749d2862e362d4972b5cd529db37258a8b9c759afcaa2e0a2ef3f3cac6a0
+2026-10-22T17:28:10Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=migration_verified
+migration_creator=honsen_test
+grant_object=server_change_log owner=honsen_test privileges=SELECT,INSERT,UPDATE
+grant_object=server_change_log_sequence_seq owner=honsen_test privileges=USAGE
+grant_object=formal_issue_registry owner=honsen_test privileges=SELECT,INSERT,UPDATE
+grant_object=qa_sequence_items owner=honsen_test privileges=SELECT,INSERT
+grant_object=qa_sequence_items_id_seq owner=honsen_test privileges=USAGE
+2026-10-22T17:28:10Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=api_permissions_granted
+2026-10-22T17:28:10Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=new_role_activated
+2026-10-22T17:28:11Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=failed:readiness
+2026-10-22T17:28:12Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=start
+2026-10-22T17:28:12Z operator=runner sha=52990729c8b93df0d132b31bdc8f7f72b83ae71d step=failed:preflight

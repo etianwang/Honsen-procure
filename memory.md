@@ -2,6 +2,11 @@
 
 **Last updated:** 2026-10-20
 
+## PR #16 sequence permission independent QA — CLOSED in isolated scope (2026-10-22)
+
+- Production SHA `1e71f13f5068742950ef6efbb94a918d727e251e`; QA driver checkpoint `e665eec949c175838172860cf41ad85a7b73a499` on `codex/qa-v1-linux-deployment-final`. Focused GitHub Linux PostgreSQL 16 run 39823043334 passed; see `qa-evidence-sequence-1e71f13/REPORT.md` for commands, fixture SHA, earlier fixture failure and evidence. No production schema or data changed; the synthetic migration existed only in the disposable runner.
+- Original P1-01 and P1-02 are CLOSED only for the independently tested isolated scopes. **DEFERRED:** final code review, BT production topology and real offsite storage acceptance. **WARNING:** host reboot and actual production role provisioning were not tested. No other application suites were rerun because this was a targeted sequence check.
+
 ## T10-D / G4 production draft-order conflict resolver — READY_FOR_RECHECK (2026-10-20)
 
 - **Scope and implementation:** on isolated branch `codex/t10d-g4-order-conflicts` from `c3eca9b57e4a9b6d4438cb548d3fdf4b01bcbc45`, the real administrator/super-administrator shell now mounts `SyncConflictPanel`; it displays local/server payloads, server version and operation, requires a reason, and invokes a new trusted `resolve_purchase_order_conflict` command. The generic resolver still excludes `purchase_order`. The dedicated command accepts only an owned, unresolved draft `upsert` conflict whose local and server workflow states are both `draft`: `use_server` reuses the existing Pull projector; `replace_draft` supersedes the rejected Outbox event, persists the selected server version, creates one new Outbox event against it, and appends the reason/payload audit. The original conflict and rejected Outbox remain. Repeated resolution finds no unresolved conflict and creates no duplicate event. Cancelled/formal/non-draft orders are rejected before any mutation. No migration or protocol/toolbox-contract change.
