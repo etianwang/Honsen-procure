@@ -31,7 +31,7 @@ if id honsen-procure >/dev/null 2>&1 || getent group honsen-procure >/dev/null; 
 mkdir -p "$root" /opt/honsen-procure /etc/honsen-procure /run/honsen-procure
 chmod 755 "$root" /opt/honsen-procure /etc/honsen-procure
 useradd --system --user-group --no-create-home honsen-procure
-git clone --quiet --no-hardlinks "$TEST_REPO" "$root/release"
+git -c safe.directory="$TEST_REPO" clone --quiet --no-hardlinks "$TEST_REPO" "$root/release"
 rsync -a --exclude=.git "$TEST_REPO/" "$root/release/"
 chown -R root:root "$root/release"
 chmod -R go-w "$root/release"
@@ -205,8 +205,20 @@ UPDATE schema_migrations SET checksum = :'checksum' WHERE name = (SELECT min(nam
 SQL
   else
     [[ $result != 0 ]] || { echo 'fault was accepted' >&2; exit 1; }
+    case $scenario in
+      writer) expected_phase=fence ;;
+      backup) expected_phase=backup ;;
+      migration) expected_phase=migration ;;
+      readiness) expected_phase=readiness ;;
+      traffic) expected_phase=traffic ;;
+    esac
+    grep -q "deployment failed at $expected_phase" "$root/$scenario.log" || { cat "$root/$scenario.log"; exit 1; }
     [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
     [[ $(systemctl show -p LoadState --value honsen-procure.service) == masked ]]
+    [[ $(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE usename IN ('gate_old','gate_new')") == 0 ]]
+    if [[ $scenario != writer ]]; then
+      [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_old'") == f ]]
+    fi
   fi
   [[ $(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations) || '|' || (SELECT sum(value)::text FROM gate_sentinel)") == "$prior" ]]
   systemctl mask --runtime --now honsen-procure.service >/dev/null 2>&1 || :
