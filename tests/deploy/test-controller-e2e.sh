@@ -61,6 +61,30 @@ rsync -a --exclude=.git "$TEST_REPO/" "$root/release/"
 chown -R root:root "$root/release"
 chmod -R go-w "$root/release"
 export PATH="$TEST_NODE_DIR:/usr/sbin:/usr/bin:/sbin:/bin"
+mkdir -p "$root/wrappers"
+cat > "$root/wrappers/psql" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+root=/var/lib/honsen-controller-test
+if [[ -e $root/check-release-owner && " $* " == *' token='* ]]; then
+  input=$(mktemp "$root/psql-input.XXXXXXXX")
+  trap 'rm -f "$input"' EXIT
+  cat > "$input"
+  if grep -q '^DELETE FROM honsen_deployment.controller_lock' "$input"; then
+    for arg in "$@"; do [[ $arg != token=* ]] || token=${arg#token=}; done
+    if systemctl is-active --quiet "honsen-traffic-guard-$token.service"; then
+      echo 'unsafe release: traffic supervisor remains active' >&2
+      exit 1
+    fi
+    echo 'release observed with supervisor stopped' >&2
+  fi
+  /usr/bin/psql "$@" < "$input"
+  exit $?
+fi
+exec /usr/bin/psql "$@"
+SH
+chmod 755 "$root/wrappers/psql"
+export PATH="$root/wrappers:$PATH"
 sha=$(git -C "$root/release" rev-parse HEAD)
 manifest_digest=$(node "$root/release/deploy/linux/create-artifact-manifest.cjs" "$root/release" "$root/manifest.json")
 cp "$root/release/deploy/linux/honsen-procure.service" /usr/lib/systemd/system/honsen-procure.service
@@ -303,12 +327,14 @@ DROP ROLE gate_new;
 SQL
     return
   elif [[ $scenario == success ]]; then
+    touch "$root/check-release-owner"
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
     for _ in {1..100}; do flock -n /run/honsen-procure/deploy.lock true || break; sleep .05; done
     if bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/concurrent.log" 2>&1; then echo 'concurrent controller was accepted' >&2; exit 1; fi
     grep -q 'another deployment is running' "$root/concurrent.log"
     wait "$first" || result=$?
+    rm -f "$root/check-release-owner"
   else
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 || result=$?
   fi
