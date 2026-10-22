@@ -18,17 +18,19 @@ if id honsen-procure >/dev/null 2>&1 || getent group honsen-procure >/dev/null; 
 if docker inspect "$restore" >/dev/null 2>&1; then exit 1; fi
 [[ -z $(ss -H -ltn 'sport = :3000') && -z $(ss -H -ltn 'sport = :18443') ]]
 sshd_pid=
+rogue_pid=
 created_user=0
 created_restore=0
 cleanup() {
   status=$?
   set +e
   if (( status != 0 )); then
-    for log in "$root"/writer.log "$root"/backup.log "$root"/migration.log "$root"/readiness.log "$root"/traffic.log "$root"/success.log "$root"/repeat.log "$root"/concurrent.log; do
+    for log in "$root"/old_api.log "$root"/old_writer.log "$root"/writer.log "$root"/backup.log "$root"/migration.log "$root"/readiness.log "$root"/traffic.log "$root"/success.log "$root"/repeat.log "$root"/concurrent.log "$root"/rogue.log; do
       if [[ -f $log ]]; then printf '\n--- %s ---\n' "${log##*/}" >&2; tail -n 30 "$log" >&2; fi
     done
   fi
   systemctl stop honsen-procure.service honsen-controller-nginx.service >/dev/null 2>&1
+  [[ -z $rogue_pid ]] || kill "$rogue_pid" 2>/dev/null
   systemctl unmask --runtime honsen-procure.service >/dev/null 2>&1
   mountpoint -q "$root/remote" && fusermount3 -u "$root/remote"
   [[ -z $sshd_pid ]] || kill "$sshd_pid" 2>/dev/null
@@ -146,8 +148,13 @@ GRANT USAGE ON SCHEMA public TO gate_old, gate_new;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO gate_old, gate_new;
 CREATE TABLE gate_sentinel (value integer NOT NULL);
 INSERT INTO gate_sentinel VALUES (7);
+GRANT INSERT ON gate_sentinel TO gate_old;
 SQL
   if [[ $scenario == writer ]]; then psql -X -c 'CREATE ROLE gate_unexpected LOGIN' >/dev/null; fi
+  if [[ $scenario == old_writer ]]; then
+    psql -X -v ON_ERROR_STOP=1 -c 'CREATE ROLE gate_parent NOLOGIN; GRANT gate_parent TO gate_old' >/dev/null
+    PGUSER=gate_old PGPASSWORD=isolated-test-only psql -X -v ON_ERROR_STOP=1 -c 'BEGIN; INSERT INTO gate_sentinel VALUES (1); ROLLBACK' >/dev/null
+  fi
   if [[ $scenario == migration ]]; then psql -X -c "UPDATE schema_migrations SET checksum = repeat('0',64) WHERE name = (SELECT min(name) FROM schema_migrations)" >/dev/null; fi
   prior=$(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations) || '|' || (SELECT sum(value)::text FROM gate_sentinel)")
   ln -s "$root/release" /opt/honsen-procure/current
@@ -157,6 +164,16 @@ SQL
   systemctl start honsen-procure.service
   for _ in {1..100}; do curl --silent --fail http://127.0.0.1:3000/api/auth/captcha >/dev/null && break; sleep .1; done
   curl --silent --fail http://127.0.0.1:3000/api/auth/captcha >/dev/null
+  if [[ $scenario == old_api ]]; then
+    (cd "$root/release" && exec env PG_TEST_URL="postgresql://gate_old:isolated-test-only@127.0.0.1:5432/$db?application_name=gate_rogue" node -e 'const {Client}=require("pg"); const c=new Client({connectionString:process.env.PG_TEST_URL}); c.connect().then(()=>setInterval(()=>{},1000)).catch(e=>{console.error(e);process.exit(1)})') >"$root/rogue.log" 2>&1 &
+    rogue_pid=$!
+    for _ in {1..100}; do
+      [[ $(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE usename='gate_old' AND application_name='gate_rogue'") == 1 ]] && break
+      kill -0 "$rogue_pid"
+      sleep .1
+    done
+    [[ $(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE usename='gate_old' AND application_name='gate_rogue'") == 1 ]]
+  fi
   printf '# honsen-procure managed ingress\nreturn 503;\n' > "$root/ingress.conf"
   systemctl reload honsen-controller-nginx.service
   password=isolated-test-only
@@ -211,8 +228,20 @@ EOF
   fi
   if [[ $scenario == success ]]; then
     [[ $result == 0 ]] || { cat "$root/$scenario.log"; exit 1; }
+    audit_file=$(sed -n 's/.*; audit: //p' "$root/$scenario.log" | tail -n 1)
+    [[ $audit_file == "$root/log/"* && -f $audit_file && ! -L $audit_file ]]
+    grep -Fq 'step=backup_verified' "$audit_file"
+    grep -Fq 'step=migration_verified' "$audit_file"
+    grep -Fq 'step=success' "$audit_file"
+    backup_count=$(find "$root/backup" -type f | wc -l)
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/repeat.log" 2>&1 || { cat "$root/repeat.log"; exit 1; }
     grep -q 'version already deployed' "$root/repeat.log"
+    [[ $(find "$root/backup" -type f | wc -l) == "$backup_count" ]]
+    audit_file=$(sed -n 's/.*; audit: //p' "$root/repeat.log" | tail -n 1)
+    [[ $audit_file == "$root/log/"* && -f $audit_file && ! -L $audit_file ]]
+    grep -Fq 'step=already_deployed' "$audit_file"
+    systemctl is-active --quiet honsen-procure.service
+    [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_old'") == f ]]
     [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 200 ]]
     saved_checksum=$(psql -X -Atqc 'SELECT checksum FROM schema_migrations ORDER BY name LIMIT 1')
     psql -X -c "UPDATE schema_migrations SET checksum = repeat('0',64) WHERE name = (SELECT min(name) FROM schema_migrations)" >/dev/null
@@ -225,6 +254,8 @@ SQL
   else
     [[ $result != 0 ]] || { echo 'fault was accepted' >&2; exit 1; }
     case $scenario in
+      old_api) expected_phase=stop_old ;;
+      old_writer) expected_phase=fence ;;
       writer) expected_phase=fence ;;
       backup) expected_phase=backup ;;
       migration) expected_phase=migration ;;
@@ -232,10 +263,25 @@ SQL
       traffic) expected_phase=traffic ;;
     esac
     grep -q "deployment failed at $expected_phase" "$root/$scenario.log" || { cat "$root/$scenario.log"; exit 1; }
+    audit_file=$(sed -n 's/.*; audit: //p' "$root/$scenario.log" | tail -n 1)
+    [[ $audit_file == "$root/log/"* && -f $audit_file && ! -L $audit_file ]]
+    grep -Fq "step=failed:$expected_phase" "$audit_file"
     [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
     [[ $(systemctl show -p LoadState --value honsen-procure.service) == masked ]]
-    [[ $(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE usename IN ('gate_old','gate_new')") == 0 ]]
-    if [[ $scenario != writer ]]; then
+    [[ ! -e /run/honsen-procure/deployment-ready ]]
+    if [[ $scenario == old_api ]]; then
+      kill -0 "$rogue_pid"
+      [[ $(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE usename='gate_old'") -ge 1 ]]
+      kill "$rogue_pid"
+      wait "$rogue_pid" 2>/dev/null || :
+      rogue_pid=
+    else
+      [[ $(psql -X -Atqc "SELECT count(*) FROM pg_stat_activity WHERE usename IN ('gate_old','gate_new')") == 0 ]]
+    fi
+    if [[ $scenario == old_writer ]]; then
+      [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_old'") == t ]]
+      PGUSER=gate_old PGPASSWORD=isolated-test-only psql -X -v ON_ERROR_STOP=1 -c 'BEGIN; INSERT INTO gate_sentinel VALUES (1); ROLLBACK' >/dev/null
+    elif [[ $scenario != writer && $scenario != old_api ]]; then
       [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_old'") == f ]]
     fi
   fi
@@ -247,7 +293,8 @@ DROP DATABASE :"db";
 DROP ROLE IF EXISTS gate_unexpected;
 DROP ROLE gate_old;
 DROP ROLE gate_new;
+DROP ROLE IF EXISTS gate_parent;
 SQL
 }
-for case in writer backup migration readiness traffic success; do run_case "$case"; done
+for case in old_api old_writer writer backup migration readiness traffic success; do run_case "$case"; done
 echo 'real isolated controller scenarios and repeat deployment: PASS'
