@@ -224,6 +224,19 @@ export CURL_CA_BUNDLE=$root/cert.pem NO_PROXY=honsen.test,127.0.0.1
 EOF
   chmod 600 "$root/config"
   [[ $scenario != traffic ]] || touch "$root/fail-live"
+  if [[ $scenario == privileges ]]; then
+    (
+      for _ in {1..3000}; do
+        if [[ $(psql -X -Atqc "SELECT rolcanlogin FROM pg_roles WHERE rolname='gate_new'") == t ]]; then
+          psql -X -v ON_ERROR_STOP=1 -c 'REVOKE INSERT ON formal_issue_registry FROM gate_new' >/dev/null
+          exit 0
+        fi
+        sleep .01
+      done
+      exit 1
+    ) &
+    privilege_injector=$!
+  fi
   result=0
   if [[ $scenario == interrupt_live ]]; then
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
@@ -288,6 +301,7 @@ SQL
   else
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 || result=$?
   fi
+  [[ $scenario != privileges ]] || wait "$privilege_injector"
   if [[ $scenario == success ]]; then
     [[ $result == 0 ]] || { cat "$root/$scenario.log"; exit 1; }
     audit_file=$(sed -n 's/.*; audit: //p' "$root/$scenario.log" | tail -n 1)
@@ -325,6 +339,7 @@ SQL
       migration) expected_phase=migration ;;
       start) expected_phase=readiness ;;
       readiness) expected_phase=readiness ;;
+      privileges) expected_phase=readiness ;;
       traffic) expected_phase=traffic ;;
     esac
     grep -q "deployment failed at $expected_phase" "$root/$scenario.log" || { cat "$root/$scenario.log"; exit 1; }
@@ -365,5 +380,5 @@ DROP ROLE gate_new;
 DROP ROLE IF EXISTS gate_parent;
 SQL
 }
-for case in interrupt old_api old_writer writer backup migration start readiness traffic success interrupt_live; do run_case "$case"; done
+for case in interrupt old_api old_writer writer backup migration start readiness privileges traffic success interrupt_live; do run_case "$case"; done
 echo 'real isolated controller scenarios and repeat deployment: PASS'
