@@ -7,6 +7,17 @@ dedicated systemd unit for the API. Do not also manage that API with PM2.
 
 ## Database and backups
 
+Build the release in a root-owned directory whose contents and ancestors are
+not writable by other users. Run `node deploy/linux/create-artifact-manifest.cjs
+RELEASE_DIR OUTPUT` with an output path outside the release. It records the Git
+commit and hashes release files, including ignored build outputs and
+dependencies, and rejects symlinks outside the release. Transfer the printed
+manifest SHA-256 through a trusted independent channel and configure it in the
+protected deployment configuration. A digest supplied alongside an untrusted
+bundle does not authenticate that bundle. The controller checks the manifest
+digest and complete inventory before proceeding. Keep the release immutable
+from verification through execution.
+
 Use separate application login roles for old and new releases and a dedicated
 deployment administrator. The administrator must be the only trusted identity
 allowed to change role privileges, database ownership, or the deployment lock

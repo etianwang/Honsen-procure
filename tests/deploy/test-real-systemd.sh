@@ -21,7 +21,8 @@ cleanup() {
 trap cleanup EXIT
 useradd --system --user-group --no-create-home honsen-procure
 created_user=1
-mkdir -p /opt/honsen-procure/current/apps/server/dist /etc/honsen-procure /run/honsen-procure
+mkdir -p /opt/honsen-procure/release/apps/server/dist /etc/honsen-procure /run/honsen-procure
+ln -s /opt/honsen-procure/release /opt/honsen-procure/current
 cp deploy/linux/honsen-procure.service "$unit"
 printf 'PATH=%s:/usr/bin:/bin\n' "$TEST_NODE_DIR" > /etc/honsen-procure/server.env
 cat > /opt/honsen-procure/current/apps/server/dist/index.js <<'JS'
@@ -36,6 +37,9 @@ for _ in {1..50}; do
   sleep .1
 done
 curl --silent --fail http://127.0.0.1:3000/ >/dev/null
+api_pid=$(systemctl show -p MainPID --value honsen-procure.service)
+bash deploy/linux/verify-running-release.sh "$api_pid" /opt/honsen-procure/release
+if bash deploy/linux/verify-running-release.sh "$api_pid" /opt/honsen-procure; then echo 'incorrect release was accepted' >&2; exit 1; fi
 if bash deploy/linux/verify-stopped.sh; then echo 'running API was accepted as stopped' >&2; exit 1; fi
 systemctl mask --runtime --now honsen-procure.service
 [[ $(systemctl show -p LoadState --value honsen-procure.service) == masked ]]

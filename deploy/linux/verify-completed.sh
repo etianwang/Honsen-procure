@@ -14,6 +14,7 @@ recorded=$(cat "$marker")
 systemctl is-active --quiet honsen-procure.service
 pid=$(systemctl show -p MainPID --value honsen-procure.service)
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+bash "$script_dir/verify-running-release.sh" "$pid" "$RELEASE_DIR"
 (cd "$RELEASE_DIR" && bash "$script_dir/verify-api-identity.sh" "$pid" "$NEW_ROLE")
 [[ $(cat "$INGRESS_INCLUDE") == $'# honsen-procure managed ingress\nproxy_pass http://127.0.0.1:3000;' ]] || exit 1
 status=$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' --resolve "$INGRESS_HOST:$INGRESS_PORT:127.0.0.1" "https://$INGRESS_HOST:$INGRESS_PORT/api/auth/captcha")

@@ -52,6 +52,8 @@ jobs:
           sudo apt-get install -y nginx
           sudo env HONSEN_DEPLOY_TEST=1 TEST_WORK_DIR="$RUNNER_TEMP" bash tests/deploy/test-real-nginx.sh
           sudo env HONSEN_DEPLOY_TEST=1 TEST_NODE_DIR="$(dirname "$(command -v node)")" bash tests/deploy/test-real-systemd.sh
+          sudo install -d -m 700 /opt/honsen-artifact-test
+          sudo env TMPDIR=/opt/honsen-artifact-test "$(command -v node)" tests/deploy/test-artifact.cjs
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
       - if: always()
