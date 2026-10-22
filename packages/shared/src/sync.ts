@@ -1,5 +1,15 @@
 import { z } from 'zod'
 import { uuidSchema } from './contracts.js'
+import { materialCategorySchema } from './master-data.js'
+
+export const categoryRepairRequestSchema = z.strictObject({
+  requestId: uuidSchema,
+  categoryId: uuidSchema,
+  expectedVersion: z.number().int().min(1),
+  newBusinessCode: materialCategorySchema.shape.businessCode,
+  reason: z.string().trim().min(1).max(1000),
+})
+export type CategoryRepairRequest = z.infer<typeof categoryRepairRequestSchema>
 
 export const syncEntityTypeSchema = z.enum([
   'country',

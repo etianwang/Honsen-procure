@@ -53,8 +53,10 @@ policy using the running API's own database credentials. Historical objects
 not listed in the policy still require separately provisioned permissions.
 The controller snapshots database object identities before migration and rejects
 new or recreated tables, views and sequences without a corresponding policy.
-It also blocks newly created routines and user-defined types until the grant
-policy is extended and independently reviewed for those object kinds.
+It allows only the reviewed category trigger function from migration 007: the
+controller verifies its body, owner, invoker security and public schema CREATE
+restrictions, fixes its search path and revokes direct execution from PUBLIC and
+the API role. Other newly created routines and user-defined types remain blocked.
 
 The controller draft requires a local private backup and a verified copy on a
 different mounted filesystem. It additionally requires a remote filesystem and

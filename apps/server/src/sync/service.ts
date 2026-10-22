@@ -1,5 +1,7 @@
 import {
   exchangeRateSchema,
+  categoryRepairRequestSchema,
+  materialCategorySchema,
   projectDefaultsSchema,
   referenceMasterDataSchema,
   uuidSchema,
@@ -61,6 +63,30 @@ const rfqPayloadSchema = z.strictObject({
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
+
+  async listCategoryQuarantine(actor: SyncActor) {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    )
+      throw new CategoryRepairError('FORBIDDEN')
+    if (!this.store.listCategoryQuarantine)
+      throw new CategoryRepairError('UNAVAILABLE')
+    return this.store.listCategoryQuarantine()
+  }
+
+  async repairCategory(actor: SyncActor, input: unknown) {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    )
+      throw new CategoryRepairError('FORBIDDEN')
+    const request = categoryRepairRequestSchema.parse(input)
+    if (!this.store.repairCategory) throw new CategoryRepairError('UNAVAILABLE')
+    return this.store.repairCategory({ actor, request })
+  }
 
   async push(actor: SyncActor, input: unknown): Promise<SyncPushResponse> {
     const request = syncPushRequestSchema.parse(input)
@@ -133,6 +159,17 @@ export class SyncService {
     }
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
+    if (event.entityType === 'material_category') {
+      const payload = referencePayload(event.payload)
+      return (
+        event.operation === 'upsert' &&
+        actor.roles.some(
+          (role) => role === 'administrator' || role === 'super_administrator',
+        ) &&
+        payload.id === event.entityId &&
+        materialCategorySchema.safeParse(payload).success
+      )
+    }
     if (
       referenceMasterDataTypes.includes(
         event.entityType as (typeof referenceMasterDataTypes)[number],
@@ -271,6 +308,12 @@ export class SyncService {
       previousCountryId === nextCountryId ||
       !(await this.store.hasProjectBusinessUse(event.entityId))
     )
+  }
+}
+
+export class CategoryRepairError extends Error {
+  constructor(public readonly code: 'FORBIDDEN' | 'UNAVAILABLE' | 'CONFLICT') {
+    super(code)
   }
 }
 

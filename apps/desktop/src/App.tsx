@@ -27,6 +27,8 @@ import { RfqFixturePage } from './pages/RfqFixturePage'
 import { ReceiptFixturePage } from './pages/ReceiptFixturePage'
 import { SyncConflictFixturePage } from './pages/SyncConflictFixturePage'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
+import { CategoryRepairPanel } from './components/CategoryRepairPanel'
+import { tauriCategoryRepairApi } from './lib/category-repair-api'
 import { tauriSyncApi } from './lib/sync-api'
 import { ProcurementExecutionPage } from './pages/ProcurementExecutionPage'
 import { AuthorizationManagementPage } from './pages/AuthorizationManagementPage'
@@ -514,7 +516,10 @@ function App() {
           ) : page === 'conflicts' &&
             session &&
             (role === 'administrator' || role === 'super_administrator') ? (
-            <SyncConflictPanel api={tauriSyncApi} />
+            <>
+              <SyncConflictPanel api={tauriSyncApi} />
+              <CategoryRepairPanel api={tauriCategoryRepairApi} />
+            </>
           ) : page === 'authorization' &&
             session &&
             (role === 'administrator' || role === 'super_administrator') ? (

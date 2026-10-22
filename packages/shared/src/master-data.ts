@@ -55,6 +55,17 @@ const activeReferenceSchema = z.object({
   isActive: z.boolean(),
 })
 
+export const materialCategorySchema = activeReferenceSchema.extend({
+  // Unlike other master data, category codes are immutable and compared
+  // byte-for-byte by the desktop database; do not normalize whitespace.
+  businessCode: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/),
+  version: z.number().int().min(1),
+})
+
 export const referenceMasterDataSchema = z.discriminatedUnion('kind', [
   activeReferenceSchema.extend({
     kind: z.literal('country'),

@@ -557,6 +557,33 @@ test('administrator can create, edit and disable a unit offline', async ({
   await expect(browserErrors).toEqual([])
 })
 
+test('administrator can create, rename and disable a material category offline', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByRole('tab', { name: '材料分类' }).click()
+  await page.getByLabel('材料分类代码').fill('fixture-electrical')
+  await page.getByLabel('材料分类名称').fill('Electrical')
+  await page.getByRole('button', { name: '新增材料分类' }).click()
+  await expect(
+    page.getByLabel('编辑材料分类名称-fixture-electrical'),
+  ).toHaveValue('Electrical')
+  await page
+    .getByLabel('编辑材料分类名称-fixture-electrical')
+    .fill('Electrical revised')
+  await page.getByLabel('编辑材料分类名称-fixture-electrical').blur()
+  await expect(
+    page.getByLabel('编辑材料分类名称-fixture-electrical'),
+  ).toHaveValue('Electrical revised')
+  await page.getByRole('button', { name: /停\s*用/ }).click()
+  await expect(page.getByRole('button', { name: /启\s*用/ })).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
 test('administrator can create, rename and disable a tax template offline', async ({
   page,
 }) => {
@@ -1672,6 +1699,30 @@ test('administrator resolves a sync conflict through the accessible control', as
     '冲突已解决，并保留审计记录。',
   )
   await expect(page.getByText('没有待处理的同步冲突。')).toBeVisible()
+})
+
+test('administrator repairs a local category conflict with an explicit reason', async ({
+  page,
+}) => {
+  await page.goto('/?test=sync-conflict')
+  await expect(page.getByText('冲突分类 CAT-OLD')).toBeVisible()
+  await page.getByLabel('分类新编码').fill('CAT-NEW')
+  await page.getByLabel('分类修复原因').fill('编码重复')
+  await page.getByRole('button', { name: '修复本地分类' }).click()
+  await expect(
+    page.getByText('已保留原事件并生成新的待同步事件。'),
+  ).toBeVisible()
+  await expect(page.getByText('冲突分类 CAT-OLD')).toHaveCount(0)
+})
+
+test('administrator can retry an uncertain remote repair after reload', async ({
+  page,
+}) => {
+  await page.goto('/?test=sync-conflict&pending=1')
+  await expect(page.getByText(/待确认的云端修复/)).toBeVisible()
+  await page.getByRole('button', { name: '重试待确认修复' }).click()
+  await expect(page.getByText('云端修复已确认，桌面同步已完成。')).toBeVisible()
+  await expect(page.getByText(/待确认的云端修复/)).toHaveCount(0)
 })
 
 test('cross-account conflict resolution stays visible and gives an actionable error', async ({

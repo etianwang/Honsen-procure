@@ -224,10 +224,39 @@ pub struct SupplierInput {
 #[serde(rename_all = "camelCase")]
 pub struct MaterialCategoryInput {
     pub id: Uuid,
+    #[serde(alias = "business_code")]
     pub business_code: String,
     pub name: String,
+    #[serde(alias = "is_active")]
     pub is_active: bool,
     pub version: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryQuarantineView {
+    pub category_id: Uuid,
+    pub business_code: String,
+    pub name: String,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCategoryConflictView {
+    pub event_id: Uuid,
+    pub category_id: Uuid,
+    pub business_code: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CategoryRepairInput {
+    pub category_id: Uuid,
+    pub expected_version: i64,
+    pub new_business_code: String,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -1116,6 +1145,13 @@ pub enum ReferenceMasterDataInput {
         version: i64,
     },
     Unit {
+        id: Uuid,
+        business_code: String,
+        name: String,
+        is_active: bool,
+        version: i64,
+    },
+    MaterialCategory {
         id: Uuid,
         business_code: String,
         name: String,
@@ -2197,6 +2233,22 @@ impl LocalAuthService {
         {
             records.push(row.map_err(|_| AuthError::Database)?);
         }
+        let mut categories = connection.prepare("SELECT id, business_code, name, is_active, version FROM local_material_categories WHERE deleted_at IS NULL ORDER BY name").map_err(|_| AuthError::Database)?;
+        for row in categories
+            .query_map([], |row| {
+                Ok(ReferenceMasterDataInput::MaterialCategory {
+                    id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    business_code: row.get(1)?,
+                    name: row.get(2)?,
+                    is_active: row.get::<_, i64>(3)? != 0,
+                    version: row.get(4)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+        {
+            records.push(row.map_err(|_| AuthError::Database)?);
+        }
         Ok(records)
     }
 
@@ -2270,7 +2322,14 @@ impl LocalAuthService {
         record: ReferenceMasterDataInput,
         now: SystemTime,
     ) -> Result<(), AuthError> {
-        self.require_master_data_mutation(now)?;
+        if matches!(record, ReferenceMasterDataInput::MaterialCategory { .. }) {
+            match self.require_role(Role::Administrator, now) {
+                Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+                result => result?,
+            }
+        } else {
+            self.require_master_data_mutation(now)?;
+        }
         let actor_id = self.active_session_user_id()?;
         let (entity_type, entity_id) = match &record {
             ReferenceMasterDataInput::Country { id, .. } => ("country", *id),
@@ -2279,8 +2338,25 @@ impl LocalAuthService {
             ReferenceMasterDataInput::Department { id, .. } => ("department", *id),
             ReferenceMasterDataInput::Team { id, .. } => ("team", *id),
             ReferenceMasterDataInput::Unit { id, .. } => ("unit", *id),
+            ReferenceMasterDataInput::MaterialCategory { id, .. } => ("material_category", *id),
         };
-        let payload = serde_json::to_string(&record).map_err(|_| AuthError::InvalidInput)?;
+        let payload = match &record {
+            ReferenceMasterDataInput::MaterialCategory {
+                id,
+                business_code,
+                name,
+                is_active,
+                version,
+            } => serde_json::to_string(&MaterialCategoryInput {
+                id: *id,
+                business_code: business_code.clone(),
+                name: name.clone(),
+                is_active: *is_active,
+                version: *version,
+            }),
+            _ => serde_json::to_string(&record),
+        }
+        .map_err(|_| AuthError::InvalidInput)?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         let audit_prior_active = match entity_type {
@@ -2332,6 +2408,14 @@ impl LocalAuthService {
                 )
                 .optional()
                 .map_err(|_| AuthError::Database)?,
+            "material_category" => transaction
+                .query_row(
+                    "SELECT is_active FROM local_material_categories WHERE id = ?1",
+                    [entity_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?,
             _ => None,
         };
         let audit_next_active = match &record {
@@ -2341,6 +2425,7 @@ impl LocalAuthService {
             | ReferenceMasterDataInput::Unit { is_active, .. }
             | ReferenceMasterDataInput::Department { is_active, .. }
             | ReferenceMasterDataInput::Team { is_active, .. } => Some(*is_active),
+            ReferenceMasterDataInput::MaterialCategory { is_active, .. } => Some(*is_active),
         };
         match record {
             ReferenceMasterDataInput::Country {
@@ -2475,10 +2560,29 @@ impl LocalAuthService {
                 )?;
                 transaction.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
             }
+            ReferenceMasterDataInput::MaterialCategory {
+                id,
+                business_code,
+                name,
+                is_active,
+                version,
+            } => {
+                validate_reference(&business_code, &name, version)?;
+                if !valid_business_code(&business_code) {
+                    return Err(AuthError::InvalidInput);
+                }
+                assert_immutable_local_business_code(
+                    &transaction,
+                    "local_material_categories",
+                    id,
+                    &business_code,
+                )?;
+                transaction.execute("INSERT INTO local_material_categories (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, is_active as i64, version]).map_err(|_| AuthError::Database)?;
+            }
         }
         if matches!(
             entity_type,
-            "country" | "project" | "site" | "unit" | "department" | "team"
+            "country" | "project" | "site" | "unit" | "department" | "team" | "material_category"
         ) {
             let action = match (audit_prior_active, audit_next_active) {
                 (None, _) => "create",
@@ -5309,13 +5413,101 @@ impl LocalAuthService {
             .collect()
     }
 
+    pub fn list_local_category_conflicts(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<LocalCategoryConflictView>, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        let actor = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut query = connection.prepare("SELECT o.event_id, o.entity_id, c.business_code, c.name FROM local_sync_outbox o JOIN local_material_categories c ON c.id = o.entity_id WHERE o.owner_account_id = ?1 AND o.entity_type = 'material_category' AND o.last_error = 'CATEGORY_CODE_CONFLICT' AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY o.created_at, o.rowid").map_err(|_| AuthError::Database)?;
+        query
+            .query_map([actor.to_string()], |row| {
+                Ok(LocalCategoryConflictView {
+                    event_id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    category_id: Uuid::parse_str(&row.get::<_, String>(1)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    business_code: row.get(2)?,
+                    name: row.get(3)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
+    pub fn repair_local_category_conflict(
+        &self,
+        old_event: Uuid,
+        new_code: &str,
+        reason: &str,
+        now: SystemTime,
+    ) -> Result<Uuid, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        if !valid_business_code(new_code) || !valid_required_text(reason, 1000) {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let tx = connection.transaction().map_err(|_| AuthError::Database)?;
+        require_transaction_account(&tx, actor)?;
+        let existing: Option<(String, String, String, String)> = tx.query_row("SELECT new_event_id, actor_id, new_business_code, reason FROM local_category_code_repairs WHERE old_event_id = ?1", [old_event.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).optional().map_err(|_| AuthError::Database)?;
+        if let Some((id, owner, code, saved_reason)) = existing {
+            if owner != actor.to_string() || code != new_code || saved_reason != reason {
+                return Err(AuthError::InvalidInput);
+            }
+            return Uuid::parse_str(&id).map_err(|_| AuthError::Database);
+        }
+        let entity: Option<(String, i64)> = tx.query_row("SELECT entity_id, base_version FROM local_sync_outbox WHERE event_id = ?1 AND owner_account_id = ?2 AND entity_type = 'material_category' AND last_error = 'CATEGORY_CODE_CONFLICT' AND acknowledged_at IS NULL AND superseded_at IS NULL", params![old_event.to_string(), actor.to_string()], |row| Ok((row.get(0)?, row.get(1)?))).optional().map_err(|_| AuthError::Database)?;
+        let (entity_id, base_version) = entity.ok_or(AuthError::InvalidInput)?;
+        if base_version != 0 {
+            return Err(AuthError::InvalidInput);
+        }
+        let other_owner: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (owner_account_id IS NULL OR owner_account_id <> ?2))", params![entity_id, actor.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if other_owner {
+            return Err(AuthError::SyncAccountBoundary);
+        }
+        let (old_code, name, active, version): (String, String, i64, i64) = tx.query_row("SELECT business_code, name, is_active, version FROM local_material_categories WHERE id = ?1 AND deleted_at IS NULL", [&entity_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::InvalidInput)?;
+        if old_code == new_code {
+            return Err(AuthError::InvalidInput);
+        }
+        let id = Uuid::parse_str(&entity_id).map_err(|_| AuthError::Database)?;
+        let payload = serde_json::to_string(&MaterialCategoryInput {
+            id,
+            business_code: new_code.into(),
+            name,
+            is_active: active != 0,
+            version: version + 1,
+        })
+        .map_err(|_| AuthError::Database)?;
+        tx.execute(
+            "UPDATE local_material_categories SET business_code = ?2, version = ?3 WHERE id = ?1",
+            params![entity_id, new_code, version + 1],
+        )
+        .map_err(|_| AuthError::Database)?;
+        let new_event = Uuid::new_v4();
+        tx.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id) VALUES (?1, 'material_category', ?2, 'upsert', 0, ?3, ?4, ?5)", params![new_event.to_string(), entity_id, payload, unix_seconds(now), actor.to_string()]).map_err(|_| AuthError::Database)?;
+        tx.execute("INSERT INTO local_category_code_repairs (old_event_id, new_event_id, actor_id, old_business_code, new_business_code, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![old_event.to_string(), new_event.to_string(), actor.to_string(), old_code, new_code, reason, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        tx.execute("INSERT INTO local_category_code_repair_events (event_id, repair_event_id) SELECT event_id, ?1 FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?2 AND owner_account_id = ?3 AND event_id <> ?4 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = local_sync_outbox.event_id)", params![old_event.to_string(), entity_id, actor.to_string(), new_event.to_string()]).map_err(|_| AuthError::Database)?;
+        tx.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, previous_json, next_json, created_at) VALUES (?1, ?2, 'material_category', ?3, 'edit', ?4, ?5, ?6)", params![Uuid::new_v4().to_string(), actor.to_string(), entity_id, serde_json::json!({"businessCode": old_code, "reason": reason}).to_string(), payload, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+        tx.commit().map_err(|_| AuthError::Database)?;
+        Ok(new_event)
+    }
+
     pub fn sync_status(&self, now: SystemTime) -> Result<SyncStatusView, AuthError> {
         self.require_catalog_read(now)?;
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
             .query_row(
-                "SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1)",
+                "SELECT (SELECT COUNT(*) FROM local_sync_outbox o WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1)",
                 [account_id.to_string()],
                 |row| Ok(SyncStatusView {
                     pending_count: row.get(0)?,
@@ -5339,7 +5531,7 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT event_id, entity_type, entity_id, operation, base_version, payload_json FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY created_at, rowid LIMIT ?2")
+            .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = blocked.event_id)) ORDER BY o.created_at, o.rowid LIMIT ?2")
             .map_err(|_| AuthError::Database)?
             .query_map(params![account_id.to_string(), limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -5379,6 +5571,16 @@ impl LocalAuthService {
                 params![acknowledgement.event_id.to_string(), account_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional().map_err(|_| AuthError::Database)?;
             if let Some((entity_type, entity_id)) = entity {
+                if entity_type == "material_category"
+                    && acknowledgement.error_code.as_deref() == Some("CATEGORY_CODE_CONFLICT")
+                    && matches!(
+                        acknowledgement.status.as_str(),
+                        "conflict" | "validation_error"
+                    )
+                {
+                    transaction.execute("UPDATE local_sync_outbox SET last_error = 'CATEGORY_CODE_CONFLICT' WHERE event_id = ?1", [acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                    continue;
+                }
                 match acknowledgement.status.as_str() {
                     "accepted" if acknowledgement.server_version.unwrap_or(-1) >= 1 => {
                         transaction.execute("UPDATE local_sync_outbox SET acknowledged_at = ?2, last_error = NULL WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
@@ -5469,7 +5671,7 @@ impl LocalAuthService {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String, Option<String>)> = transaction.query_row(
-                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
+                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
                 params![change.entity_type, change.entity_id.to_string(), account_id_text],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).optional().map_err(|_| AuthError::Database)?;
@@ -5493,13 +5695,19 @@ impl LocalAuthService {
                 "INSERT INTO local_sync_remote_entities (entity_type, entity_id, operation, server_version, payload_json, changed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(entity_type, entity_id) DO UPDATE SET operation = excluded.operation, server_version = excluded.server_version, payload_json = excluded.payload_json, changed_at = excluded.changed_at WHERE excluded.server_version >= local_sync_remote_entities.server_version",
                 params![change.entity_type, change.entity_id.to_string(), change.operation, change.version, remote_payload, change.changed_at],
             ).map_err(|_| AuthError::Database)?;
+            if quarantine_category_projection(&transaction, change)? {
+                continue;
+            }
+            apply_pull_category_repair(&transaction, change)?;
             project_remote_catalog_change(&transaction, change, now)?;
             project_remote_master_data_change(&transaction, change, now)?;
+            transaction.execute("DELETE FROM local_sync_projection_quarantine WHERE entity_type = ?1 AND entity_id = ?2", params![change.entity_type, change.entity_id.to_string()]).map_err(|_| AuthError::Database)?;
             transaction.execute(
                 "INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)",
                 params![change.entity_type, change.entity_id.to_string(), change.version],
             ).map_err(|_| AuthError::Database)?;
         }
+        replay_quarantined_category_dependents(&transaction, now)?;
         project_staged_purchase_orders(&transaction, now)?;
         project_staged_rfqs(&transaction, now)?;
         project_staged_order_comments(&transaction)?;
@@ -5798,6 +6006,156 @@ impl LocalAuthService {
         Ok(account_id)
     }
 
+    pub fn list_pending_remote_category_repairs(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<CategoryRepairInput>, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        let actor = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut query = connection.prepare("SELECT category_id, expected_version, new_business_code, reason FROM local_remote_category_repair_intents WHERE actor_id = ?1 AND status = 'pending' ORDER BY created_at, rowid").map_err(|_| AuthError::Database)?;
+        query
+            .query_map([actor.to_string()], |row| {
+                Ok(CategoryRepairInput {
+                    category_id: Uuid::parse_str(&row.get::<_, String>(0)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    expected_version: row.get(1)?,
+                    new_business_code: row.get(2)?,
+                    reason: row.get(3)?,
+                })
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)
+    }
+
+    pub async fn list_remote_category_quarantine(
+        &self,
+        now: SystemTime,
+    ) -> Result<Vec<CategoryQuarantineView>, AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        let request = self.sync_request(now)?;
+        self.refresh_authorization_for_session(&request, now)
+            .await?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        let base =
+            std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+        let response = self
+            .https_client()?
+            .get(sync_endpoint_from(&base, "category-quarantine")?)
+            .bearer_auth(&request.token)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.reject_sync_session(request.session)?;
+        }
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AuthError::Forbidden);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        self.verify_test_sync_origin(&response)?;
+        let rows = response
+            .json::<Vec<CategoryQuarantineView>>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        Ok(rows)
+    }
+
+    pub async fn repair_remote_category(
+        &self,
+        input: CategoryRepairInput,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        match self.require_role(Role::Administrator, now) {
+            Err(AuthError::Forbidden) => self.require_role(Role::SuperAdministrator, now)?,
+            result => result?,
+        }
+        if input.expected_version < 1
+            || !valid_business_code(&input.new_business_code)
+            || !valid_required_text(&input.reason, 1000)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let request = self.sync_request(now)?;
+        self.refresh_authorization_for_session(&request, now)
+            .await?;
+        let request_id = {
+            let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            Self::require_request_session(&connection, request.session)?;
+            let tx = connection.transaction().map_err(|_| AuthError::Database)?;
+            let prior: Option<String> = tx.query_row("SELECT request_id FROM local_remote_category_repair_intents WHERE actor_id = ?1 AND category_id = ?2 AND expected_version = ?3 AND new_business_code = ?4 AND reason = ?5 AND status IN ('pending', 'accepted') ORDER BY created_at DESC LIMIT 1", params![request.session.account_id.to_string(), input.category_id.to_string(), input.expected_version, input.new_business_code, input.reason], |row| row.get(0)).optional().map_err(|_| AuthError::Database)?;
+            let id = if let Some(id) = prior {
+                id
+            } else {
+                let has_pending: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM local_remote_category_repair_intents WHERE actor_id = ?1 AND category_id = ?2 AND status = 'pending')", params![request.session.account_id.to_string(), input.category_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+                if has_pending {
+                    return Err(AuthError::InvalidInput);
+                }
+                let id = Uuid::new_v4().to_string();
+                tx.execute("INSERT INTO local_remote_category_repair_intents (request_id, actor_id, category_id, expected_version, new_business_code, reason, status, created_at) VALUES (?1,?2,?3,?4,?5,?6,'pending',?7)", params![id, request.session.account_id.to_string(), input.category_id.to_string(), input.expected_version, input.new_business_code, input.reason, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                id
+            };
+            tx.commit().map_err(|_| AuthError::Database)?;
+            id
+        };
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        let base =
+            std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+        let response = self.https_client()?.post(sync_endpoint_from(&base, "category-repairs")?).bearer_auth(&request.token).json(&serde_json::json!({"requestId": request_id, "categoryId": input.category_id, "expectedVersion": input.expected_version, "newBusinessCode": input.new_business_code, "reason": input.reason})).send().await.map_err(|_| AuthError::SyncTransport)?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.reject_sync_session(request.session)?;
+        }
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AuthError::Forbidden);
+        }
+        if response.status() == reqwest::StatusCode::CONFLICT {
+            let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            Self::require_request_session(&connection, request.session)?;
+            connection.execute("UPDATE local_remote_category_repair_intents SET status = 'conflict' WHERE request_id = ?1", [&request_id]).map_err(|_| AuthError::Database)?;
+            return Err(AuthError::InvalidInput);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        self.verify_test_sync_origin(&response)?;
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        if result.get("categoryId").and_then(|v| v.as_str())
+            != Some(input.category_id.to_string().as_str())
+            || result.get("version").and_then(|v| v.as_i64()) != Some(input.expected_version + 1)
+        {
+            return Err(AuthError::SyncTransport);
+        }
+        {
+            let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            Self::require_request_session(&connection, request.session)?;
+            connection.execute("UPDATE local_remote_category_repair_intents SET status = 'accepted' WHERE request_id = ?1", [&request_id]).map_err(|_| AuthError::Database)?;
+        }
+        self.pull_sync_https(now).await?;
+        Ok(())
+    }
+
     pub async fn push_pending_https(&self, now: SystemTime) -> Result<SyncPushView, AuthError> {
         let request = self.sync_request(now)?;
         let account_id = request.session.account_id;
@@ -5808,7 +6166,8 @@ impl LocalAuthService {
         if events.is_empty() {
             return Ok(SyncPushView {
                 accepted_count: 0,
-                pending_count: 0,
+                pending_count: usize::try_from(self.sync_status(now)?.pending_count)
+                    .map_err(|_| AuthError::Database)?,
             });
         }
         self.ensure_active_sync_account(account_id)?;
@@ -5874,7 +6233,8 @@ impl LocalAuthService {
         self.ensure_active_sync_account(account_id)?;
         Ok(SyncPushView {
             accepted_count,
-            pending_count: self.pending_sync_events(100, now)?.len(),
+            pending_count: usize::try_from(self.sync_status(now)?.pending_count)
+                .map_err(|_| AuthError::Database)?,
         })
     }
 
@@ -6472,6 +6832,57 @@ pub mod commands {
         auth: State<'_, LocalAuthService>,
     ) -> Result<super::SyncStatusView, CommandError> {
         auth.sync_status(SystemTime::now()).map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_local_category_conflicts(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::LocalCategoryConflictView>, CommandError> {
+        auth.list_local_category_conflicts(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn repair_local_category_conflict(
+        auth: State<'_, LocalAuthService>,
+        event_id: Uuid,
+        new_business_code: String,
+        reason: String,
+    ) -> Result<Uuid, CommandError> {
+        auth.repair_local_category_conflict(
+            event_id,
+            &new_business_code,
+            &reason,
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_pending_remote_category_repairs(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::CategoryRepairInput>, CommandError> {
+        auth.list_pending_remote_category_repairs(SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn list_remote_category_quarantine(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::CategoryQuarantineView>, CommandError> {
+        auth.list_remote_category_quarantine(SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub async fn repair_remote_category(
+        auth: State<'_, LocalAuthService>,
+        input: super::CategoryRepairInput,
+    ) -> Result<(), CommandError> {
+        auth.repair_remote_category(input, SystemTime::now())
+            .await
+            .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -7121,6 +7532,26 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0047_sync_account_pull_state",
             include_str!("../migrations/0047_sync_account_pull_state.sql"),
         ),
+        (
+            "0048_material_category_audit",
+            include_str!("../migrations/0048_material_category_audit.sql"),
+        ),
+        (
+            "0049_material_category_audit_compat",
+            include_str!("../migrations/0049_material_category_audit_compat.sql"),
+        ),
+        (
+            "0050_sync_projection_quarantine",
+            include_str!("../migrations/0050_sync_projection_quarantine.sql"),
+        ),
+        (
+            "0051_local_category_code_repairs",
+            include_str!("../migrations/0051_local_category_code_repairs.sql"),
+        ),
+        (
+            "0052_remote_category_repair_intents",
+            include_str!("../migrations/0052_remote_category_repair_intents.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -7135,6 +7566,34 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             Some(value) if value == checksum => continue,
             Some(_) => return Err(AuthError::Database),
             None => {
+                if migration.0 == "0048_material_category_audit" {
+                    // Apply 0049 instead of the faulty, not-yet-applied 0048 without fabricating its checksum record.
+                    let sql = include_str!("../migrations/0049_material_category_audit_compat.sql");
+                    let version = "0049_material_category_audit_compat";
+                    let compat_checksum = format!("{:x}", Sha256::digest(sql.as_bytes()));
+                    let recorded: Option<String> = connection
+                        .query_row(
+                            "SELECT checksum FROM local_schema_migrations WHERE version = ?1",
+                            [version],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(|_| AuthError::Database)?;
+                    match recorded {
+                        Some(value) if value == compat_checksum => continue,
+                        Some(_) => return Err(AuthError::Database),
+                        None => {
+                            let transaction =
+                                connection.transaction().map_err(|_| AuthError::Database)?;
+                            transaction
+                                .execute_batch(sql)
+                                .map_err(|_| AuthError::Database)?;
+                            transaction.execute("INSERT INTO local_schema_migrations (version, checksum, applied_at) VALUES (?1, ?2, ?3)", params![version, compat_checksum, unix_seconds(SystemTime::now())]).map_err(|_| AuthError::Database)?;
+                            transaction.commit().map_err(|_| AuthError::Database)?;
+                            continue;
+                        }
+                    }
+                }
                 if migration.0 == "0045_procurement_expenditures" {
                     let legacy_checksum = connection
                         .query_row(
@@ -7701,6 +8160,171 @@ fn is_directly_resolvable_sync_entity(entity_type: &str) -> bool {
             | "material_price"
             | "order_comment"
     )
+}
+
+fn quarantine_category_projection(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+) -> Result<bool, AuthError> {
+    if change.operation != "upsert" {
+        return Ok(false);
+    }
+    let blocked = match change.entity_type.as_str() {
+        "material_category" => {
+            let category: MaterialCategoryInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if category.id != change.entity_id {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_reference(&category.business_code, &category.name, category.version)?;
+            if change
+                .payload
+                .get("__categoryQuarantine")
+                .and_then(|value| value.as_bool())
+                == Some(true)
+            {
+                transaction.execute("INSERT INTO local_sync_projection_quarantine (entity_type, entity_id, dependency_id, reason, server_version) VALUES (?1, ?2, ?2, 'SERVER_CATEGORY_QUARANTINE', ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET reason = excluded.reason, dependency_id = excluded.dependency_id, server_version = excluded.server_version WHERE excluded.server_version >= local_sync_projection_quarantine.server_version", params![change.entity_type, category.id.to_string(), change.version]).map_err(|_| AuthError::Database)?;
+                return Ok(true);
+            }
+            let conflicting_id: Option<String> = transaction.query_row(
+                "SELECT id FROM local_material_categories WHERE business_code = ?1 AND id <> ?2 LIMIT 1",
+                params![category.business_code, category.id.to_string()], |row| row.get(0),
+            ).optional().map_err(|_| AuthError::Database)?;
+            conflicting_id.map(|id| ("CATEGORY_CODE_CONFLICT", id))
+        }
+        "material" => {
+            let material: MaterialInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if material.id != change.entity_id {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_material(&material)?;
+            if let Some(category_id) = material.category_id {
+                let ready: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM local_material_categories WHERE id = ?1) AND NOT EXISTS(SELECT 1 FROM local_sync_projection_quarantine WHERE entity_type = 'material_category' AND entity_id = ?1)",
+                    [category_id.to_string()], |row| row.get(0),
+                ).map_err(|_| AuthError::Database)?;
+                (!ready).then(|| ("CATEGORY_DEPENDENCY", category_id.to_string()))
+            } else {
+                None
+            }
+        }
+        "material_price" => {
+            let price: MaterialPriceInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            if price.id != change.entity_id {
+                return Err(AuthError::InvalidInput);
+            }
+            validate_material_price(&price)?;
+            let ready: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_materials WHERE id = ?1) AND NOT EXISTS(SELECT 1 FROM local_sync_projection_quarantine WHERE entity_type = 'material' AND entity_id = ?1)",
+                [price.material_id.to_string()], |row| row.get(0),
+            ).map_err(|_| AuthError::Database)?;
+            (!ready).then(|| ("MATERIAL_DEPENDENCY", price.material_id.to_string()))
+        }
+        _ => None,
+    };
+    if let Some((reason, dependency)) = blocked {
+        transaction.execute(
+            "INSERT INTO local_sync_projection_quarantine (entity_type, entity_id, dependency_id, reason, server_version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(entity_type, entity_id) DO UPDATE SET dependency_id = excluded.dependency_id, reason = excluded.reason, server_version = excluded.server_version WHERE excluded.server_version >= local_sync_projection_quarantine.server_version",
+            params![change.entity_type, change.entity_id.to_string(), dependency, reason, change.version],
+        ).map_err(|_| AuthError::Database)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn apply_pull_category_repair(
+    transaction: &Transaction<'_>,
+    change: &SyncPullChangeInput,
+) -> Result<(), AuthError> {
+    if change.entity_type != "material_category" || change.operation != "upsert" {
+        return Ok(());
+    }
+    let category: MaterialCategoryInput =
+        serde_json::from_value(change.payload.clone()).map_err(|_| AuthError::InvalidInput)?;
+    let current: Option<String> = transaction
+        .query_row(
+            "SELECT business_code FROM local_material_categories WHERE id = ?1",
+            [category.id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| AuthError::Database)?;
+    if let Some(old_code) = current.filter(|old| old != &category.business_code) {
+        let marker = change
+            .payload
+            .get("__categoryRepair")
+            .ok_or(AuthError::ImmutableBusinessCode)?;
+        let request_id = marker
+            .get("requestId")
+            .and_then(|value| value.as_str())
+            .ok_or(AuthError::ImmutableBusinessCode)?;
+        if Uuid::parse_str(request_id).is_err()
+            || marker
+                .get("oldBusinessCode")
+                .and_then(|value| value.as_str())
+                != Some(old_code.as_str())
+            || marker
+                .get("newBusinessCode")
+                .and_then(|value| value.as_str())
+                != Some(category.business_code.as_str())
+        {
+            return Err(AuthError::ImmutableBusinessCode);
+        }
+        transaction
+            .execute(
+                "UPDATE local_material_categories SET business_code = ?2 WHERE id = ?1",
+                params![category.id.to_string(), category.business_code],
+            )
+            .map_err(|_| AuthError::Database)?;
+    }
+    Ok(())
+}
+
+fn replay_quarantined_category_dependents(
+    transaction: &Transaction<'_>,
+    now: SystemTime,
+) -> Result<(), AuthError> {
+    for entity_type in ["material_category", "material", "material_price"] {
+        let mut statement = transaction.prepare(
+            "SELECT r.entity_id, r.operation, r.server_version, r.payload_json, r.changed_at FROM local_sync_projection_quarantine q JOIN local_sync_remote_entities r ON r.entity_type = q.entity_type AND r.entity_id = q.entity_id WHERE q.entity_type = ?1 ORDER BY q.entity_id",
+        ).map_err(|_| AuthError::Database)?;
+        let rows = statement
+            .query_map([entity_type], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database)?;
+        drop(statement);
+        for (id, operation, version, payload, changed_at) in rows {
+            let change = SyncPullChangeInput {
+                cursor: "0".into(),
+                entity_type: entity_type.into(),
+                entity_id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
+                operation,
+                version,
+                payload: serde_json::from_str(&payload).map_err(|_| AuthError::Database)?,
+                changed_at,
+            };
+            if quarantine_category_projection(transaction, &change)? {
+                continue;
+            }
+            apply_pull_category_repair(transaction, &change)?;
+            project_remote_catalog_change(transaction, &change, now)?;
+            project_remote_master_data_change(transaction, &change, now)?;
+            transaction.execute("DELETE FROM local_sync_projection_quarantine WHERE entity_type = ?1 AND entity_id = ?2", params![entity_type, id]).map_err(|_| AuthError::Database)?;
+            transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![entity_type, id, version]).map_err(|_| AuthError::Database)?;
+        }
+    }
+    Ok(())
 }
 
 fn project_remote_master_data_change(
@@ -8664,6 +9288,9 @@ fn project_remote_reference_master_data(
             assert_immutable_local_business_code(transaction, "local_units", *id, business_code)?;
             transaction.execute("INSERT INTO local_units (id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET name = excluded.name, is_active = excluded.is_active, version = excluded.version, deleted_at = NULL", params![id.to_string(), business_code, name, *is_active as i64, change.version]).map_err(|_| AuthError::Database)?;
         }
+        // Categories have their own Pull projector because they are not part of
+        // the legacy reference-master-data contract.
+        ReferenceMasterDataInput::MaterialCategory { .. } => return Err(AuthError::InvalidInput),
     }
     Ok(())
 }
@@ -9001,7 +9628,7 @@ fn insert_local_sync_outbox(
         .unwrap_or(0);
     let pending_count: i64 = transaction
         .query_row(
-            "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL",
+            "SELECT COUNT(*) FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)",
             params![entity_type, entity_id.to_string()],
             |row| row.get(0),
         )
@@ -11892,6 +12519,264 @@ mod tests {
     }
 
     #[test]
+    fn category_audit_upgrade_preserves_existing_exchange_rate_history() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0043_exchange_rate_audit.sql"))
+            .unwrap();
+        connection.execute("DELETE FROM local_schema_migrations WHERE version = '0048_material_category_audit'", []).unwrap();
+        connection.execute("DELETE FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", []).unwrap();
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, previous_json, next_json, created_at) VALUES ('old-rate', 'actor', 'exchange_rate', 'rate', 'create', NULL, '{\"rate\":1}', 42)", []).unwrap();
+
+        migrate(&mut connection).unwrap();
+        let saved: (String, String, i64) = connection.query_row("SELECT entity_type, next_json, created_at FROM local_master_data_audit_entries WHERE id = 'old-rate'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(saved, ("exchange_rate".into(), "{\"rate\":1}".into(), 42));
+        migrate(&mut connection).unwrap();
+        let old_marker: i64 = connection.query_row("SELECT count(*) FROM local_schema_migrations WHERE version = '0048_material_category_audit'", [], |row| row.get(0)).unwrap();
+        assert_eq!(old_marker, 0);
+    }
+
+    #[test]
+    fn category_audit_upgrade_accepts_original_0048_checksum() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .execute_batch(include_str!(
+                "../migrations/0048_material_category_audit.sql"
+            ))
+            .unwrap();
+        connection.execute("DELETE FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", []).unwrap();
+        let old_checksum = format!(
+            "{:x}",
+            Sha256::digest(
+                include_str!("../migrations/0048_material_category_audit.sql").as_bytes()
+            )
+        );
+        connection.execute("INSERT INTO local_schema_migrations (version, checksum, applied_at) VALUES ('0048_material_category_audit', ?1, 42)", [&old_checksum]).unwrap();
+        migrate(&mut connection).unwrap();
+        let saved: (String, i64) = connection.query_row("SELECT checksum, applied_at FROM local_schema_migrations WHERE version = '0048_material_category_audit'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(saved, (old_checksum, 42));
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('rate', 'actor', 'exchange_rate', 'id', 'create', '{}', 1)", []).unwrap();
+    }
+
+    #[test]
+    fn category_audit_upgrade_rolls_back_on_failure() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/0043_exchange_rate_audit.sql"))
+            .unwrap();
+        connection.execute("DELETE FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", []).unwrap();
+        connection.execute("INSERT INTO local_master_data_audit_entries (id, actor_id, entity_type, entity_id, action, next_json, created_at) VALUES ('rate', 'actor', 'exchange_rate', 'id', 'create', '{}', 1)", []).unwrap();
+        connection
+            .execute_batch("CREATE TRIGGER reject_0049 BEFORE INSERT ON local_schema_migrations WHEN NEW.version = '0049_material_category_audit_compat' BEGIN SELECT RAISE(ABORT, 'injected failure'); END;")
+            .unwrap();
+        assert_eq!(migrate(&mut connection), Err(AuthError::Database));
+        let count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM local_master_data_audit_entries WHERE id = 'rate'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let count: i64 = connection.query_row("SELECT count(*) FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn duplicate_category_pull_preserves_material_and_advances_cursor() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: account_id,
+                    username: "category-pull".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "category-pull",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        grant_new_test_scope(&service, account_id, Uuid::new_v4(), now);
+        let first = Uuid::new_v4();
+        let duplicate = Uuid::new_v4();
+        let material_id = Uuid::new_v4();
+        let category = |id| {
+            serde_json::to_value(ReferenceMasterDataInput::MaterialCategory {
+                id,
+                business_code: "CAT-DUP".into(),
+                name: "Fixture".into(),
+                is_active: true,
+                version: 1,
+            })
+            .unwrap()
+        };
+        let material = MaterialInput {
+            id: material_id,
+            sku: Some("MAT-DUP".into()),
+            category_id: Some(duplicate),
+            name_zh: "fixture".into(),
+            name_fr: None,
+            aliases: vec![],
+            brand: None,
+            model: "fixture".into(),
+            specification: "fixture".into(),
+            unit: "pcs".into(),
+            notes: None,
+            is_active: true,
+            version: 1,
+        };
+        let change = |cursor: &str, entity_type: &str, entity_id, payload| SyncPullChangeInput {
+            cursor: cursor.into(),
+            entity_type: entity_type.into(),
+            entity_id,
+            operation: "upsert".into(),
+            version: 1,
+            payload,
+            changed_at: "2026-10-21T00:00:00Z".into(),
+        };
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![
+                        change("1", "material_category", first, category(first)),
+                        change("2", "material_category", duplicate, category(duplicate)),
+                        change(
+                            "3",
+                            "material",
+                            material_id,
+                            serde_json::to_value(material).unwrap(),
+                        ),
+                    ],
+                    next_cursor: "3".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let cursor: String = connection
+            .query_row(
+                "SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1",
+                [account_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cursor, "3");
+        let material_json: String = connection.query_row("SELECT payload_json FROM local_sync_remote_entities WHERE entity_type = 'material' AND entity_id = ?1", [material_id.to_string()], |row| row.get(0)).unwrap();
+        let saved: MaterialInput = serde_json::from_str(&material_json).unwrap();
+        assert_eq!(saved.category_id, Some(duplicate));
+        let quarantined: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_projection_quarantine WHERE entity_id IN (?1, ?2)",
+                params![duplicate.to_string(), material_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(quarantined, 2);
+        drop(connection);
+        let repaired = ReferenceMasterDataInput::MaterialCategory {
+            id: duplicate,
+            business_code: "CAT-REPAIRED".into(),
+            name: "Fixture".into(),
+            is_active: true,
+            version: 2,
+        };
+        let mut repair_change = change(
+            "4",
+            "material_category",
+            duplicate,
+            serde_json::to_value(repaired).unwrap(),
+        );
+        repair_change.version = 2;
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![repair_change],
+                    next_cursor: "4".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let reference: String = connection
+            .query_row(
+                "SELECT category_id FROM local_materials WHERE id = ?1",
+                [material_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reference, duplicate.to_string());
+        let remaining: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM local_sync_projection_quarantine WHERE entity_id IN (?1, ?2)",
+                params![duplicate.to_string(), material_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
+        drop(connection);
+        let mut first_repair = change(
+            "5",
+            "material_category",
+            first,
+            serde_json::json!({
+                "id": first, "businessCode": "CAT-FIRST-NEW", "name": "Fixture", "isActive": true, "version": 2,
+                "__categoryRepair": { "requestId": Uuid::new_v4(), "oldBusinessCode": "CAT-DUP", "newBusinessCode": "CAT-FIRST-NEW" }
+            }),
+        );
+        first_repair.version = 2;
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![first_repair],
+                    next_cursor: "5".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let code: String = connection
+            .query_row(
+                "SELECT business_code FROM local_material_categories WHERE id = ?1",
+                [first.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(code, "CAT-FIRST-NEW");
+    }
+
+    #[test]
+    fn material_category_push_payload_can_be_projected_on_pull() {
+        let record = ReferenceMasterDataInput::MaterialCategory {
+            id: Uuid::new_v4(),
+            business_code: "CAT-1".into(),
+            name: "Fixture".into(),
+            is_active: true,
+            version: 1,
+        };
+        let payload = serde_json::to_value(record).unwrap();
+        let category: MaterialCategoryInput = serde_json::from_value(payload).unwrap();
+        assert_eq!(category.business_code, "CAT-1");
+        assert!(category.is_active);
+    }
+
+    #[test]
     fn pull_continues_only_after_a_full_advancing_page() {
         let change = SyncPullChangeInput {
             cursor: "501".into(),
@@ -14698,6 +15583,169 @@ mod tests {
     }
 
     #[test]
+    fn material_categories_are_authorized_audited_and_never_deleted() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let id = Uuid::new_v4();
+        let category = |name: &str, is_active: bool, version: i64| {
+            ReferenceMasterDataInput::MaterialCategory {
+                id,
+                business_code: "fixture-category".into(),
+                name: name.into(),
+                is_active,
+                version,
+            }
+        };
+        service
+            .cache_verified_account(account(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "engineer",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_reference_master_data(category("Electrical", true, 1), now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: Uuid::new_v4(),
+                    username: "purchaser".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "purchaser",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_reference_master_data(category("Electrical", true, 1), now),
+            Err(AuthError::Forbidden)
+        );
+        service.lock().unwrap();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: Uuid::new_v4(),
+                    username: "administrator".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "administrator",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        for code in [
+            "-CAT".to_owned(),
+            "_CAT".to_owned(),
+            "".to_owned(),
+            "A".repeat(65),
+        ] {
+            assert_eq!(
+                service.save_reference_master_data(
+                    ReferenceMasterDataInput::MaterialCategory {
+                        id: Uuid::new_v4(),
+                        business_code: code,
+                        name: "Invalid code".into(),
+                        is_active: true,
+                        version: 1,
+                    },
+                    now
+                ),
+                Err(AuthError::InvalidInput)
+            );
+        }
+        service
+            .save_reference_master_data(
+                ReferenceMasterDataInput::MaterialCategory {
+                    id: Uuid::new_v4(),
+                    business_code: "A".repeat(64),
+                    name: "Maximum code".into(),
+                    is_active: true,
+                    version: 1,
+                },
+                now,
+            )
+            .unwrap();
+        service
+            .save_reference_master_data(category("Electrical", true, 1), now)
+            .unwrap();
+        service
+            .save_reference_master_data(category("Electrical revised", true, 2), now)
+            .unwrap();
+        service
+            .save_reference_master_data(category("Electrical revised", false, 3), now)
+            .unwrap();
+        assert!(
+            service
+                .list_reference_master_data(now)
+                .unwrap()
+                .contains(&category("Electrical revised", false, 3))
+        );
+        assert_eq!(
+            service.save_reference_master_data(
+                ReferenceMasterDataInput::MaterialCategory {
+                    id,
+                    business_code: "changed".into(),
+                    name: "Electrical revised".into(),
+                    is_active: false,
+                    version: 4
+                },
+                now
+            ),
+            Err(AuthError::ImmutableBusinessCode)
+        );
+        let connection = service.connection.lock().unwrap();
+        let actions: Vec<String> = connection.prepare("SELECT action FROM local_master_data_audit_entries WHERE entity_type = 'material_category' AND entity_id = ?1 ORDER BY rowid").unwrap().query_map([id.to_string()], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
+        assert_eq!(actions, ["create", "edit", "disable"]);
+        let category_row: (String, i64) = connection
+            .query_row(
+                "SELECT name, is_active FROM local_material_categories WHERE id = ?1",
+                [id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(category_row, ("Electrical revised".into(), 0));
+        let outbox_count: i64 = connection.query_row("SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?1", [id.to_string()], |row| row.get(0)).unwrap();
+        assert_eq!(outbox_count, 3);
+        let payload: String = connection.query_row("SELECT payload_json FROM local_sync_outbox WHERE entity_type = 'material_category' AND entity_id = ?1 ORDER BY rowid LIMIT 1", [id.to_string()], |row| row.get(0)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(json["businessCode"], "fixture-category");
+        assert_eq!(json["isActive"], true);
+        assert!(json.get("business_code").is_none());
+    }
+
+    #[test]
     fn organization_master_data_validates_parent_and_audits_offline_changes() {
         let service = LocalAuthService::open_in_memory().unwrap();
         let now = SystemTime::now();
@@ -17034,6 +18082,156 @@ mod tests {
         drop(connection);
         drop(service);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn administrator_recovers_category_conflict_without_losing_events() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let user = CachedAccount {
+            roles: vec![Role::Administrator],
+            ..account()
+        };
+        service
+            .cache_verified_account(user.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &user.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let category_id = Uuid::new_v4();
+        let old_event = Uuid::new_v4();
+        {
+            let connection = service.connection.lock().unwrap();
+            connection.execute("INSERT INTO local_remote_category_repair_intents (request_id, actor_id, category_id, expected_version, new_business_code, reason, status, created_at) VALUES (?1, ?2, ?3, 1, 'CAT-RETRY', 'network retry', 'pending', ?4)", params![Uuid::new_v4().to_string(), user.id.to_string(), category_id.to_string(), unix_seconds(now)]).unwrap();
+            connection.execute("INSERT INTO local_material_categories (id, business_code, name, is_active, version) VALUES (?1, 'CAT-OLD', 'Fixture', 1, 1)", [category_id.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_sync_outbox (event_id, entity_type, entity_id, operation, base_version, payload_json, created_at, owner_account_id, last_error) VALUES (?1, 'material_category', ?2, 'upsert', 0, '{}', ?3, ?4, 'CATEGORY_CODE_CONFLICT')", params![old_event.to_string(), category_id.to_string(), unix_seconds(now), user.id.to_string()]).unwrap();
+        }
+        let intents = service.list_pending_remote_category_repairs(now).unwrap();
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].category_id, category_id);
+        assert_eq!(intents[0].new_business_code, "CAT-RETRY");
+        let new_event = service
+            .repair_local_category_conflict(old_event, "CAT-NEW", "resolve duplicate", now)
+            .unwrap();
+        assert_ne!(old_event, new_event);
+        assert_eq!(
+            service
+                .repair_local_category_conflict(old_event, "CAT-NEW", "resolve duplicate", now)
+                .unwrap(),
+            new_event
+        );
+        let pending = service.pending_sync_events(100, now).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event_id, new_event);
+        assert_eq!(pending[0].base_version, 0);
+        let connection = service.connection.lock().unwrap();
+        let old: (Option<i64>, Option<i64>, String) = connection.query_row("SELECT acknowledged_at, superseded_at, last_error FROM local_sync_outbox WHERE event_id = ?1", [old_event.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(old, (None, None, "CATEGORY_CODE_CONFLICT".into()));
+        let link: String = connection
+            .query_row(
+                "SELECT new_event_id FROM local_category_code_repairs WHERE old_event_id = ?1",
+                [old_event.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(link, new_event.to_string());
+        drop(connection);
+        let engineer = CachedAccount {
+            username: "other-engineer".into(),
+            ..account()
+        };
+        service
+            .cache_verified_account(engineer.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &engineer.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service.repair_local_category_conflict(
+                old_event,
+                "CAT-OTHER",
+                "resolve duplicate",
+                now
+            ),
+            Err(AuthError::Forbidden)
+        );
+    }
+
+    #[test]
+    fn category_code_conflict_keeps_outbox_recoverable() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let user = account();
+        service
+            .cache_verified_account(user.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &user.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let event_id = Uuid::new_v4();
+        let category_id = Uuid::new_v4();
+        let unrelated_id = Uuid::new_v4();
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let tx = connection.transaction().unwrap();
+            insert_local_sync_outbox(
+                &tx,
+                "material_category",
+                category_id,
+                "{\"businessCode\":\"CAT-1\"}",
+                now,
+            )
+            .unwrap();
+            tx.execute("UPDATE local_sync_outbox SET event_id = ?1 WHERE rowid = (SELECT MAX(rowid) FROM local_sync_outbox)", [event_id.to_string()]).unwrap();
+            insert_local_sync_outbox(&tx, "material_category", category_id, "{}", now).unwrap();
+            insert_local_sync_outbox(&tx, "material", unrelated_id, "{}", now).unwrap();
+            tx.commit().unwrap();
+        }
+        service
+            .apply_sync_acknowledgements(
+                vec![SyncAcknowledgementInput {
+                    event_id,
+                    status: "validation_error".into(),
+                    server_version: None,
+                    error_code: Some("CATEGORY_CODE_CONFLICT".into()),
+                    server_payload: None,
+                    server_operation: None,
+                }],
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let row: (Option<i64>, Option<i64>, Option<String>) = connection.query_row(
+            "SELECT acknowledged_at, superseded_at, last_error FROM local_sync_outbox WHERE event_id = ?1",
+            [event_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(row, (None, None, Some("CATEGORY_CODE_CONFLICT".into())));
+        drop(connection);
+        let pending = service.pending_sync_events(100, now).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].entity_id, unrelated_id);
+        assert_eq!(service.sync_status(now).unwrap().pending_count, 3);
     }
 
     #[test]

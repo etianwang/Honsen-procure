@@ -30,6 +30,300 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     await pool!.end()
   })
 
+  it('serializes simultaneous repairs of the same duplicate group', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const ids = [randomUUID(), randomUUID(), randomUUID()]
+    const code = `CAT-${randomUUID()}`
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId: randomUUID(),
+    }
+    const client = await pool!.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query("SET LOCAL session_replication_role = 'replica'")
+      for (const id of ids) {
+        await client.query(
+          "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('material_category', $1, 1, $2, $3)",
+          [
+            id,
+            {
+              id,
+              businessCode: code,
+              name: 'Fixture',
+              isActive: true,
+              version: 1,
+            },
+            actorId,
+          ],
+        )
+        await client.query(
+          'INSERT INTO category_code_quarantine (entity_id, business_code) VALUES ($1, $2)',
+          [id, code],
+        )
+      }
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+    const requests = ids.slice(0, 2).map((categoryId) => ({
+      requestId: randomUUID(),
+      categoryId,
+      expectedVersion: 1,
+      newBusinessCode: `CAT-${randomUUID()}`,
+      reason: 'concurrent repair',
+    }))
+    const results = await Promise.all(
+      requests.map((request) => store.repairCategory({ actor, request })),
+    )
+    expect(results.map((result) => result.version)).toEqual([2, 2])
+    const states = await pool!.query(
+      'SELECT status FROM category_code_quarantine WHERE entity_id = ANY($1::uuid[])',
+      [ids],
+    )
+    expect(states.rows.map((row) => row.status)).toEqual([
+      'resolved',
+      'resolved',
+      'resolved',
+    ])
+  })
+
+  it('repairs a quarantined duplicate without changing its UUID or material references and replays idempotently', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const first = randomUUID(),
+      duplicate = randomUUID(),
+      material = randomUUID()
+    const code = `CAT-${randomUUID()}`
+    const installationId = randomUUID()
+    const actor = {
+      id: actorId,
+      roles: ['administrator' as const],
+      installationId,
+    }
+    const request = {
+      requestId: randomUUID(),
+      categoryId: duplicate,
+      expectedVersion: 1,
+      newBusinessCode: `CAT-${randomUUID()}`,
+      reason: 'legacy duplicate',
+    }
+    const client = await pool!.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query("SET LOCAL session_replication_role = 'replica'")
+      for (const id of [first, duplicate])
+        await client.query(
+          "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('material_category', $1, 1, $2, $3)",
+          [
+            id,
+            {
+              id,
+              businessCode: code,
+              name: 'Fixture',
+              isActive: true,
+              version: 1,
+            },
+            actorId,
+          ],
+        )
+      await client.query(
+        "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('material', $1, 1, $2, $3)",
+        [material, { id: material, categoryId: duplicate }, actorId],
+      )
+      await client.query(
+        'INSERT INTO category_code_quarantine (entity_id, business_code) VALUES ($1, $3), ($2, $3)',
+        [first, duplicate, code],
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+    const quarantined = await store.listCategoryQuarantine()
+    expect(quarantined).toContainEqual({
+      categoryId: duplicate,
+      businessCode: code,
+      name: 'Fixture',
+      version: 1,
+    })
+    const result = await store.repairCategory({ actor, request })
+    expect(result).toEqual({ categoryId: duplicate, version: 2 })
+    expect(await store.repairCategory({ actor, request })).toEqual(result)
+    await expect(
+      store.repairCategory({
+        actor,
+        request: { ...request, reason: 'different' },
+      }),
+    ).rejects.toThrow()
+    const category = await pool!.query(
+      "SELECT entity_id, version, payload_json FROM sync_entities WHERE entity_type = 'material_category' AND entity_id = $1",
+      [duplicate],
+    )
+    expect(category.rows[0]).toMatchObject({
+      entity_id: duplicate,
+      version: '2',
+      payload_json: { id: duplicate, businessCode: request.newBusinessCode },
+    })
+    const ref = await pool!.query(
+      "SELECT payload_json->>'categoryId' AS category_id FROM sync_entities WHERE entity_type = 'material' AND entity_id = $1",
+      [material],
+    )
+    expect(ref.rows[0].category_id).toBe(duplicate)
+    const audit = await pool!.query(
+      'SELECT count(*) AS count FROM category_code_repairs WHERE request_id = $1',
+      [request.requestId],
+    )
+    expect(audit.rows[0].count).toBe('1')
+    const pulled = await store.pullChanges({ actor, cursor: '0', limit: 500 })
+    const repairChange = pulled.changes.find(
+      (change) => change.entityId === duplicate && change.version === 2,
+    )
+    expect(repairChange?.payload.__categoryRepair).toMatchObject({
+      requestId: request.requestId,
+      oldBusinessCode: code,
+      newBusinessCode: request.newBusinessCode,
+    })
+    const survivor = await pool!.query(
+      'SELECT status FROM category_code_quarantine WHERE entity_id = $1',
+      [first],
+    )
+    expect(survivor.rows[0].status).toBe('resolved')
+    expect(pulled.changes.some((change) => change.entityId === first)).toBe(
+      true,
+    )
+    const forged = await store.pushEvent({
+      actorId,
+      installationId,
+      event: {
+        eventId: randomUUID(),
+        entityType: 'material_category',
+        entityId: duplicate,
+        operation: 'upsert',
+        baseVersion: 2,
+        payload: {
+          id: duplicate,
+          businessCode: `CAT-${randomUUID()}`,
+          name: 'Fixture',
+          isActive: true,
+          version: 3,
+          __categoryRepair: {
+            requestId: randomUUID(),
+            oldBusinessCode: request.newBusinessCode,
+            newBusinessCode: 'FORGED',
+          },
+        },
+      },
+    })
+    expect(forged.status).toBe('validation_error')
+  })
+
+  it('serializes distinct category IDs competing for one code and replays the conflict', async () => {
+    const store = new PostgresSyncStore(pool!)
+    const businessCode = `CAT-${randomUUID()}`
+    const installationId = randomUUID()
+    const makeInput = () => {
+      const id = randomUUID()
+      return {
+        actorId,
+        installationId,
+        event: {
+          eventId: randomUUID(),
+          entityType: 'material_category' as const,
+          entityId: id,
+          operation: 'upsert' as const,
+          baseVersion: 0,
+          payload: {
+            id,
+            businessCode,
+            name: 'Fixture',
+            isActive: true,
+            version: 1,
+          },
+        },
+      }
+    }
+    const inputs = [makeInput(), makeInput()]
+    const results = await Promise.all(
+      inputs.map((input) => store.pushEvent(input)),
+    )
+    expect(
+      results.filter((result) => result.status === 'accepted'),
+    ).toHaveLength(1)
+    const loser = results.findIndex(
+      (result) => result.errorCode === 'CATEGORY_CODE_CONFLICT',
+    )
+    expect(loser).toBeGreaterThanOrEqual(0)
+    expect(await store.pushEvent(inputs[loser]!)).toMatchObject({
+      eventId: inputs[loser]!.event.eventId,
+      status: 'validation_error',
+      errorCode: 'CATEGORY_CODE_CONFLICT',
+    })
+    const rows = await pool!.query(
+      "SELECT entity_id FROM sync_entities WHERE entity_type = 'material_category' AND payload_json->>'businessCode' = $1",
+      [businessCode],
+    )
+    expect(rows.rowCount).toBe(1)
+    const winner = inputs[loser === 0 ? 1 : 0]!
+    expect(await store.pushEvent(winner)).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(
+      await store.pushEvent({
+        ...winner,
+        event: {
+          ...winner.event,
+          eventId: randomUUID(),
+          baseVersion: 1,
+          payload: {
+            ...winner.event.payload,
+            name: 'Renamed',
+            isActive: false,
+            version: 2,
+          },
+        },
+      }),
+    ).toMatchObject({ status: 'accepted', serverVersion: 2 })
+    expect(
+      await store.pushEvent({
+        ...winner,
+        event: { ...winner.event, eventId: randomUUID(), baseVersion: 0 },
+      }),
+    ).toMatchObject({ status: 'conflict', serverVersion: 2 })
+    const rejectedEffects = await pool!.query(
+      `SELECT (SELECT count(*) FROM sync_events WHERE event_id = $1 AND result_status = 'validation_error' AND result_error_code = 'CATEGORY_CODE_CONFLICT') AS rejected,
+              (SELECT count(*) FROM server_change_log WHERE entity_id = $2) AS changes`,
+      [inputs[loser]!.event.eventId, inputs[loser]!.event.entityId],
+    )
+    expect(rejectedEffects.rows[0]).toMatchObject({
+      rejected: '1',
+      changes: '0',
+    })
+    const pulled = await store.pullChanges({
+      actor: { id: actorId, roles: ['administrator'], installationId },
+      cursor: '0',
+      limit: 500,
+    })
+    expect(
+      pulled.changes.filter(
+        (change) => change.entityId === winner.event.entityId,
+      ),
+    ).toMatchObject([
+      { entityType: 'material_category', version: 1 },
+      {
+        entityType: 'material_category',
+        version: 2,
+        payload: { name: 'Renamed', isActive: false },
+      },
+    ])
+  })
+
   it('keeps RFQ snapshots immutable across retry, status transitions and stale writes', async () => {
     const store = new PostgresSyncStore(pool!)
     const service = new SyncService(store)
