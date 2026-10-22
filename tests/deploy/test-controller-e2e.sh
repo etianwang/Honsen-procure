@@ -262,6 +262,10 @@ EOF
     http_status=$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha || :)
     echo "interrupted live switch: HTTP $http_status; lock $(psql -X -Atqc 'SELECT count(*) FROM honsen_deployment.controller_lock')"
     [[ $http_status == 503 ]] || { echo 'unsafe: interrupted deployment left live ingress' >&2; exit 1; }
+    audit_file=$(ls -t "$root"/log/deploy-*.log | head -n 1)
+    grep -q 'step=traffic_watchdog:recovery_started' "$audit_file"
+    ! grep -q 'step=success' "$audit_file"
+    [[ ! -e /var/lib/honsen-procure/deployment.sha ]]
     systemctl mask --runtime --now honsen-procure.service >/dev/null 2>&1 || :
     PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -v db="$db" <<'SQL' >/dev/null
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db' AND pid <> pg_backend_pid();

@@ -182,8 +182,8 @@ printf '%s\n%s\n' "$RELEASE_SHA" "$RELEASE_MANIFEST_SHA256" > "$marker"
 chmod 600 "$marker"
 mv -f -- "$marker" /var/lib/honsen-procure/deployment.sha
 log_event traffic_activated
-log_event success
 bash "$script_dir/deployment-lock.sh" release "$lock_token"
 touch "$guard/committed"
+log_event success
 trap - EXIT
 printf 'deployment succeeded; audit: %s\n' "$log"
