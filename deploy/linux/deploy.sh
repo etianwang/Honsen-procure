@@ -70,6 +70,7 @@ failed() {
       fi
       systemctl mask --runtime --now honsen-procure.service >/dev/null 2>&1 || log_event api_stop_failed
       rm -f -- /run/honsen-procure/deployment-ready
+      if [[ $phase == traffic ]]; then rm -f -- /var/lib/honsen-procure/deployment.sha; fi
       PGCONNECT_TIMEOUT=5 PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=2000' \
         psql -X -v ON_ERROR_STOP=1 -v role="$NEW_ROLE" -f "$script_dir/disable-role.sql" >/dev/null 2>&1 || log_event new_role_disable_failed
     fi
