@@ -61,6 +61,13 @@ ExecReload=/usr/sbin/nginx -c $tmp/nginx.conf -s reload
 EOF
 systemctl daemon-reload
 systemctl start "$unit"
+# Type=simple returns before nginx has bound its socket and written its PID.
+for _ in {1..50}; do
+  [[ $(curl --silent --output /dev/null --write-out '%{http_code}' --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha || :) == 503 ]] && break
+  systemctl is-active --quiet "$unit"
+  sleep .1
+done
+[[ $(curl --silent --output /dev/null --write-out '%{http_code}' --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
 python3 -m http.server 3000 --bind 127.0.0.1 --directory "$tmp/www" > "$tmp/backend.log" 2>&1 &
 backend_pid=$!
 for _ in {1..50}; do
