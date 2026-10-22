@@ -88,6 +88,16 @@ fi
 exec /usr/bin/psql "$@"
 SH
 chmod 755 "$root/wrappers/psql"
+cat > "$root/wrappers/touch" <<'SH'
+#!/usr/bin/env bash
+root=/var/lib/honsen-controller-test
+if [[ $# == 1 && $1 == */.traffic-guard.*/confirmed && -f $root/pause-confirm ]]; then
+  /usr/bin/touch "$root/confirm-waiting"
+  while [[ ! -f $root/confirm-resume ]]; do sleep .05; done
+fi
+exec /usr/bin/touch "$@"
+SH
+chmod 755 "$root/wrappers/touch"
 export PATH="$root/wrappers:$PATH"
 sha=$(git -C "$root/release" rev-parse HEAD)
 manifest_digest=$(node "$root/release/deploy/linux/create-artifact-manifest.cjs" "$root/release" "$root/manifest.json")
@@ -180,7 +190,7 @@ run_case() {
   echo "controller scenario: $scenario"
   systemctl stop honsen-procure.service >/dev/null 2>&1 || :
   systemctl unmask --runtime honsen-procure.service >/dev/null 2>&1 || :
-  rm -f /run/honsen-procure/deployment-ready /opt/honsen-procure/current /opt/honsen-procure/.current-next "$root/fail-live" "$root/pause-live" "$root/live-waiting" "$root/live-resume" "$root/check-release-owner" "$root/pause-release" "$root/release-waiting" "$root/release-resume"
+  rm -f /run/honsen-procure/deployment-ready /opt/honsen-procure/current /opt/honsen-procure/.current-next "$root/fail-live" "$root/pause-live" "$root/live-waiting" "$root/live-resume" "$root/pause-confirm" "$root/confirm-waiting" "$root/confirm-resume" "$root/check-release-owner" "$root/pause-release" "$root/release-waiting" "$root/release-resume"
   rm -rf /var/lib/honsen-procure
   PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db" >/dev/null
   export PGDATABASE=$db
@@ -245,6 +255,7 @@ EOF
   cat > "$root/config" <<EOF
 DEPLOY_AUTHORIZED=yes
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=honsen_test PGDATABASE=$db PGPASSWORD=$TEST_PG_PASSWORD
+export PATH=$root/wrappers:$TEST_NODE_DIR:/usr/sbin:/usr/bin:/sbin:/bin
 POSTGRES_URL=$url
 OLD_ROLE=gate_old
 NEW_ROLE=gate_new
@@ -323,13 +334,14 @@ DROP ROLE gate_old;
 DROP ROLE gate_new;
 SQL
     return
-  elif [[ $scenario == guard_kill ]]; then
-    touch "$root/pause-live"
+  elif [[ $scenario == guard_kill || $scenario == guard_confirm_kill ]]; then
+    checkpoint="$root/live-waiting"
+    if [[ $scenario == guard_kill ]]; then touch "$root/pause-live"; else touch "$root/pause-confirm"; checkpoint="$root/confirm-waiting"; fi
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/$scenario.log" 2>&1 &
     first=$!
     reached=0
     for _ in {1..3000}; do
-      if [[ -f $root/live-waiting ]]; then reached=1; break; fi
+      if [[ -f $checkpoint ]]; then reached=1; break; fi
       kill -0 "$first" || break
       sleep .01
     done
@@ -527,5 +539,5 @@ DROP ROLE gate_new;
 DROP ROLE IF EXISTS gate_parent;
 SQL
 }
-for case in interrupt old_api old_writer writer backup migration start readiness privileges traffic success interrupt_live handoff_kill guard_kill; do run_case "$case"; done
+for case in interrupt old_api old_writer writer backup migration start readiness privileges traffic success interrupt_live handoff_kill guard_kill guard_confirm_kill; do run_case "$case"; done
 echo 'real isolated controller scenarios and repeat deployment: PASS'
