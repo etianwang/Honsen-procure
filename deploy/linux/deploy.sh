@@ -130,6 +130,9 @@ backup_digest=$(sha256sum "$external")
 log_event "backup_sha256:${backup_digest%% *}"
 phase=migration
 (cd "$RELEASE_DIR" && NEW_ROLE="$NEW_ROLE" node "$script_dir/grant-api.cjs" --check)
+MIGRATION_OBJECT_SNAPSHOT=$(mktemp "$AUDIT_DIR/.migration-objects.XXXXXXXX")
+export MIGRATION_OBJECT_SNAPSHOT
+(cd "$RELEASE_DIR" && NEW_ROLE="$NEW_ROLE" node "$script_dir/grant-api.cjs" --snapshot)
 (cd "$RELEASE_DIR" && npm run migrate --workspace @honsen/server >/dev/null 2>&1)
 # A second pass verifies all migration checksums and is also the idempotence gate.
 (cd "$RELEASE_DIR" && npm run migrate --workspace @honsen/server >/dev/null 2>&1)

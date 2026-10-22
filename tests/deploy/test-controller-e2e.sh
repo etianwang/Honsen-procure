@@ -322,6 +322,13 @@ SQL
     grep -Fq 'step=success' "$audit_file"
     [[ $(psql -X -Atqc "SELECT (to_regclass('public.formal_issue_registry') IS NOT NULL AND EXISTS (SELECT 1 FROM schema_migrations WHERE name='006_formal_issue_registry.sql'))::int") == 1 ]]
     PGUSER=gate_new PGPASSWORD=isolated-test-only psql -X -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM formal_issue_registry' >/dev/null || { echo 'new API role cannot read table created by migration' >&2; exit 1; }
+    psql -X -v ON_ERROR_STOP=1 -c 'CREATE ROLE gate_policy NOLOGIN' >/dev/null
+    (cd "$root/release" && POSTGRES_URL="$url" NEW_ROLE=gate_policy MIGRATION_OBJECT_SNAPSHOT="$root/policy-snapshot" node deploy/linux/grant-api.cjs --snapshot)
+    psql -X -v ON_ERROR_STOP=1 -c 'CREATE TABLE gate_unreviewed (id integer)' >/dev/null
+    if (cd "$root/release" && POSTGRES_URL="$url" NEW_ROLE=gate_policy MIGRATION_OBJECT_SNAPSHOT="$root/policy-snapshot" node deploy/linux/grant-api.cjs); then
+      echo 'new object without a grant policy was accepted' >&2; exit 1
+    fi
+    psql -X -v ON_ERROR_STOP=1 -c 'DROP TABLE gate_unreviewed; DROP ROLE gate_policy' >/dev/null
     backup_count=$(find "$root/backup" -type f | wc -l)
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/repeat.log" 2>&1 || { cat "$root/repeat.log"; exit 1; }
     grep -q 'version already deployed' "$root/repeat.log"

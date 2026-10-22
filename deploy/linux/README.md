@@ -51,6 +51,8 @@ privileges do not replace this review: they depend on the object creator and
 could grant more access than a particular object needs. Readiness checks the
 policy using the running API's own database credentials. Historical objects
 not listed in the policy still require separately provisioned permissions.
+The controller snapshots database object identities before migration and rejects
+new or recreated tables, views and sequences without a corresponding policy.
 
 The controller draft requires a local private backup and a verified copy on a
 different mounted filesystem. It additionally requires a remote filesystem and

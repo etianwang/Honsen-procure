@@ -46,10 +46,46 @@ async function main() {
     }
   }
   if (process.argv[2] === '--check') return
+  const snapshotPath = process.env.MIGRATION_OBJECT_SNAPSHOT
+  if (!snapshotPath || !path.isAbsolute(snapshotPath))
+    throw new Error('Missing protected migration object snapshot')
   const client = new Client({ connectionString: process.env.POSTGRES_URL })
   await client.connect()
   try {
     await client.query('BEGIN')
+    const objects =
+      await client.query(`SELECT c.oid::text, n.nspname AS schema, c.relname AS name,
+      CASE WHEN c.relkind = 'S' THEN 'sequence' ELSE 'table' END AS kind
+      FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE c.relkind IN ('r','p','v','m','S') AND n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\'
+        AND n.nspname <> 'information_schema'`)
+    if (process.argv[2] === '--snapshot') {
+      fs.writeFileSync(snapshotPath, JSON.stringify(objects.rows), {
+        mode: 0o600,
+      })
+      await client.query('COMMIT')
+      return
+    }
+    const before = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))
+    if (!Array.isArray(before))
+      throw new Error('Invalid migration object snapshot')
+    const priorOids = new Set(before.map((object) => object.oid))
+    const approved = new Set(
+      Object.values(policy)
+        .flat()
+        .map((entry) => `${entry.kind}:${entry.name}`),
+    )
+    for (const object of objects.rows) {
+      if (
+        !priorOids.has(object.oid) &&
+        (object.schema !== 'public' ||
+          !approved.has(`${object.kind}:${object.name}`))
+      ) {
+        throw new Error(
+          'Migration created an object without a reviewed API grant',
+        )
+      }
+    }
     const roleState = await client.query(
       'SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname=$1',
       [role],
