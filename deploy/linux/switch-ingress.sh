@@ -34,7 +34,13 @@ if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT"; then
   echo 'ingress switch failed' >&2
   exit 1
 fi
-status=$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' --resolve "$INGRESS_HOST:$INGRESS_PORT:127.0.0.1" "https://$INGRESS_HOST:$INGRESS_PORT/api/auth/captcha") || status=000
+status=000
+# A successful reload can return before new workers have taken over.
+for _ in {1..20}; do
+  status=$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' --resolve "$INGRESS_HOST:$INGRESS_PORT:127.0.0.1" "https://$INGRESS_HOST:$INGRESS_PORT/api/auth/captcha") || status=000
+  [[ $status == "$expected" ]] && break
+  sleep .1
+done
 if [[ $status != "$expected" ]]; then
   # A failed live switch must not leave a live include on disk or in memory.
   if [[ $1 == live ]]; then
@@ -42,6 +48,6 @@ if [[ $status != "$expected" ]]; then
     mv -f -- "$old" "$INGRESS_INCLUDE"
     if ! "$NGINX_BIN" -t >/dev/null 2>&1 || ! systemctl reload "$NGINX_UNIT"; then systemctl stop "$NGINX_UNIT" || true; fi
   fi
-  echo 'ingress probe failed' >&2
+  echo "ingress probe failed: expected $expected, got $status" >&2
   exit 1
 fi

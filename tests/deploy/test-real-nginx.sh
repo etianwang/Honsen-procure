@@ -63,11 +63,14 @@ for _ in {1..50}; do
   kill -0 "$backend_pid"
   sleep .1
 done
+echo 'checking maintenance ingress'
 bash deploy/linux/switch-ingress.sh maintenance
+echo 'checking live ingress'
 bash deploy/linux/switch-ingress.sh live
 kill "$backend_pid"
 wait "$backend_pid" || :
 backend_pid=
+echo 'checking dead backend failure'
 if bash deploy/linux/switch-ingress.sh live; then echo 'dead backend was accepted' >&2; exit 1; fi
 [[ $(curl --silent --output /dev/null --write-out '%{http_code}' --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
 echo 'real nginx and systemd ingress integration: PASS'
