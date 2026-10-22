@@ -64,6 +64,34 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
     const installationA = randomUUID()
     const headersA = await session(accountA, installationA)
     const headersB = await session(accountB, randomUUID())
+    const countryId = randomUUID(),
+      projectId = randomUUID(),
+      departmentId = randomUUID(),
+      teamId = randomUUID()
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'fixture', 'UTC')",
+      [countryId, `G1-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'fixture', 'site', 'department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `G1-${projectId}`],
+    )
+    await pool!.query(
+      "INSERT INTO departments (id, business_code, name) VALUES ($1, $2, 'fixture')",
+      [departmentId, `G1-${departmentId}`],
+    )
+    await pool!.query(
+      "INSERT INTO teams (id, department_id, business_code, name) VALUES ($1, $2, $3, 'fixture')",
+      [teamId, departmentId, `G1-${teamId}`],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [accountA, projectId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+      [accountA, projectId, departmentId, teamId],
+    )
     const cursor = (
       await pool!.query<{ cursor: string }>(
         'SELECT COALESCE(MAX(sequence), 0)::text AS cursor FROM server_change_log',
@@ -77,7 +105,7 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
       baseVersion: 0,
       payload: {
         applicantId: accountA,
-        projectId: randomUUID(),
+        projectId,
         workflowStatus: 'draft',
         notes: 'G1 private source fixture',
       },

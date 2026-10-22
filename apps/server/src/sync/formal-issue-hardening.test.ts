@@ -72,6 +72,14 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
       [engineerId, projectId, departmentId, teamId],
     )
+    await pool!.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [actorId, projectId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+      [actorId, projectId, departmentId, teamId],
+    )
   }, 60_000)
 
   afterAll(async () => {

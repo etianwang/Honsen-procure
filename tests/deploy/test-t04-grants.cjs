@@ -54,7 +54,7 @@ async function main() {
     }
     await db.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
     await db.query(
-      `GRANT SELECT ON user_project_bindings, projects TO "${role}"`,
+      `GRANT SELECT ON user_project_bindings, user_project_scope_bindings, projects, departments, teams TO "${role}"`,
     )
     await db.query(
       `GRANT SELECT, INSERT, UPDATE ON sync_entities, sync_events, audit_entries TO "${role}"`,

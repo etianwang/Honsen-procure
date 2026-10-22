@@ -236,6 +236,249 @@ export class PostgresSyncStore implements SyncStore {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `${input.event.entityType}:${input.event.entityId}`,
       ])
+      if (['supplier', 'material_price'].includes(input.event.entityType)) {
+        const stored = await client.query<StoredEntity>(
+          'SELECT version, payload_json, is_deleted FROM sync_entities WHERE entity_type = $1 AND entity_id = $2 FOR UPDATE',
+          [input.event.entityType, input.event.entityId],
+        )
+        const previous = stored.rows[0]?.payload_json
+        const next = input.event.payload
+        const country =
+          input.event.entityType === 'supplier'
+            ? previous
+              ? (previous.countryId ?? previous.country_id)
+              : (next.countryId ?? next.country_id)
+            : null
+        let allowed = false
+        if (input.event.entityType === 'supplier') {
+          const nextCountry = next.countryId ?? next.country_id
+          allowed =
+            typeof country === 'string' &&
+            (input.event.operation !== 'upsert' ||
+              (nextCountry === country &&
+                (next.countryId === undefined || next.countryId === country) &&
+                (next.country_id === undefined || next.country_id === country)))
+        } else {
+          const supplierId =
+            previous?.supplierId ??
+            previous?.supplier_id ??
+            next.supplierId ??
+            next.supplier_id
+          const materialId =
+            previous?.materialId ??
+            previous?.material_id ??
+            next.materialId ??
+            next.material_id
+          if (
+            typeof supplierId === 'string' &&
+            typeof materialId === 'string' &&
+            (input.event.operation !== 'upsert' ||
+              ((next.supplierId ?? next.supplier_id) === supplierId &&
+                (next.materialId ?? next.material_id) === materialId &&
+                (next.supplierId === undefined ||
+                  next.supplierId === supplierId) &&
+                (next.supplier_id === undefined ||
+                  next.supplier_id === supplierId) &&
+                (next.materialId === undefined ||
+                  next.materialId === materialId) &&
+                (next.material_id === undefined ||
+                  next.material_id === materialId)))
+          ) {
+            const relations = await client.query<{ country_id: string }>(
+              `SELECT COALESCE(s.payload_json->>'countryId', s.payload_json->>'country_id') AS country_id
+               FROM sync_entities s JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = $2 AND (NOT m.is_deleted OR $3::boolean)
+               WHERE s.entity_type = 'supplier' AND s.entity_id::text = $1 AND (NOT s.is_deleted OR $3::boolean) FOR SHARE OF s, m`,
+              [supplierId, materialId, !!previous],
+            )
+            const supplierCountry = relations.rows[0]?.country_id
+            if (
+              supplierCountry &&
+              (next.countryId == null || next.countryId === supplierCountry) &&
+              (next.country_id == null || next.country_id === supplierCountry)
+            ) {
+              const binding = await client.query(
+                `SELECT 1 FROM user_project_bindings b JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+                 JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+                 JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+                 JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+                 WHERE b.user_id = $1 AND b.deleted_at IS NULL AND p.country_id::text = $2 FOR SHARE OF b, p, scope, d, t`,
+                [input.actorId, supplierCountry],
+              )
+              allowed = (binding.rowCount ?? 0) > 0
+            }
+          }
+        }
+        if (allowed && input.event.entityType === 'supplier') {
+          const binding = await client.query(
+            `SELECT 1 FROM user_project_bindings b JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+             JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+             JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+             JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+             WHERE b.user_id = $1 AND b.deleted_at IS NULL AND p.country_id::text = $2 FOR SHARE OF b, p, scope, d, t`,
+            [input.actorId, country],
+          )
+          allowed = (binding.rowCount ?? 0) > 0
+        }
+        if (!allowed) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
+      if (input.event.entityType === 'purchase_order') {
+        const existing = await client.query<StoredEntity>(
+          "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1 FOR UPDATE",
+          [input.event.entityId],
+        )
+        const previous = existing.rows[0]?.payload_json
+        const next = input.event.payload
+        const projectId = previous?.projectId ?? next.projectId
+        const scope =
+          typeof projectId === 'string'
+            ? await client.query<{ country_id: string }>(
+                `SELECT p.country_id::text AS country_id FROM user_project_bindings b
+           JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+           JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+           JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+           JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+           WHERE b.user_id = $1 AND b.deleted_at IS NULL AND p.id::text = $2 FOR SHARE OF b, p, scope, d, t`,
+                [input.actorId, projectId],
+              )
+            : null
+        const countryId = scope?.rows[0]?.country_id
+        let allowed =
+          !!countryId &&
+          (input.event.operation !== 'upsert' ||
+            (next.projectId === projectId &&
+              (next.countryId === undefined || next.countryId === countryId) &&
+              (previous?.countryId === undefined ||
+                previous.countryId === countryId)))
+        if (allowed && typeof next.supplierId === 'string') {
+          const supplier = await client.query(
+            `SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1 AND (NOT is_deleted OR $3::boolean)
+             AND COALESCE(payload_json->>'countryId', payload_json->>'country_id') = $2 FOR SHARE`,
+            [
+              next.supplierId,
+              countryId,
+              previous?.supplierId === next.supplierId,
+            ],
+          )
+          allowed = supplier.rowCount === 1
+        }
+        if (allowed && Array.isArray(next.lines)) {
+          for (const line of next.lines) {
+            if (!line || typeof line !== 'object') {
+              allowed = false
+              break
+            }
+            const item = line as Record<string, unknown>
+            const priceId = item.ownerCatalogPriceId ?? item.materialPriceId
+            if (typeof priceId === 'string') {
+              const retained =
+                Array.isArray(previous?.lines) &&
+                previous.lines.some((old) => {
+                  if (!old || typeof old !== 'object') return false
+                  const priorLine = old as Record<string, unknown>
+                  return (
+                    typeof item.id === 'string' &&
+                    priorLine.id === item.id &&
+                    (priorLine.ownerCatalogPriceId ??
+                      priorLine.materialPriceId) === priceId
+                  )
+                })
+              const price = await client.query(
+                `SELECT 1 FROM sync_entities price JOIN sync_entities supplier
+                 ON supplier.entity_type = 'supplier' AND supplier.entity_id::text = COALESCE(price.payload_json->>'supplierId', price.payload_json->>'supplier_id') AND (NOT supplier.is_deleted OR $4::boolean)
+                 WHERE price.entity_type = 'material_price' AND price.entity_id::text = $1 AND (NOT price.is_deleted OR $4::boolean)
+                   AND COALESCE(supplier.payload_json->>'countryId', supplier.payload_json->>'country_id') = $2
+                   AND ($3::text IS NULL OR COALESCE(price.payload_json->>'materialId', price.payload_json->>'material_id') = $3)
+                 FOR SHARE OF price, supplier`,
+                [
+                  priceId,
+                  countryId,
+                  typeof item.materialId === 'string' ? item.materialId : null,
+                  retained,
+                ],
+              )
+              if (price.rowCount !== 1) {
+                allowed = false
+                break
+              }
+            }
+          }
+        }
+        if (!allowed) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
+      if (
+        ['rfq', 'order_comment', 'receipt'].includes(input.event.entityType)
+      ) {
+        const existing = await client.query<StoredEntity>(
+          'SELECT version, payload_json FROM sync_entities WHERE entity_type = $1 AND entity_id = $2 FOR UPDATE',
+          [input.event.entityType, input.event.entityId],
+        )
+        const previous = existing.rows[0]?.payload_json
+        const next = input.event.payload
+        const field =
+          input.event.entityType === 'rfq' ? 'sourceOrderId' : 'orderId'
+        const orderId = previous?.[field] ?? next[field]
+        const scope =
+          typeof orderId === 'string'
+            ? await client.query<{ project_id: string; country_id: string }>(
+                `SELECT p.id::text AS project_id, p.country_id::text AS country_id FROM sync_entities o
+           JOIN projects p ON p.id::text = o.payload_json->>'projectId' AND p.is_active AND p.deleted_at IS NULL
+           JOIN user_project_bindings b ON b.project_id = p.id AND b.user_id = $2 AND b.deleted_at IS NULL
+           JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+           JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+           JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+           WHERE o.entity_type = 'purchase_order' AND o.entity_id::text = $1 AND NOT o.is_deleted
+             AND (o.payload_json->>'countryId' IS NULL OR o.payload_json->>'countryId' = p.country_id::text)
+           FOR SHARE OF o, p, b, scope, d, t`,
+                [orderId, input.actorId],
+              )
+            : null
+        const project = scope?.rows[0]
+        let allowed =
+          !!project &&
+          (input.event.operation !== 'upsert' ||
+            (next[field] === orderId && next.projectId === project.project_id))
+        if (allowed && input.event.entityType === 'rfq') {
+          const supplierId = previous?.supplierId ?? next.supplierId
+          const supplier = await client.query(
+            `SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1 AND (NOT is_deleted OR $3::boolean)
+             AND COALESCE(payload_json->>'countryId', payload_json->>'country_id') = $2 FOR SHARE`,
+            [
+              supplierId,
+              project?.country_id,
+              !!previous && previous.supplierId === supplierId,
+            ],
+          )
+          allowed =
+            supplier.rowCount === 1 &&
+            (input.event.operation !== 'upsert' ||
+              next.supplierId === supplierId)
+        }
+        if (!allowed) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
       const prior = await client.query<StoredEvent>(
         `SELECT event_id, result_status, result_error_code, server_version, origin_account_id,
                 origin_installation_id, origin_status
@@ -742,6 +985,23 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      const persistedPayload =
+        deleted &&
+        current &&
+        [
+          'supplier',
+          'material_price',
+          'purchase_order',
+          'rfq',
+          'order_comment',
+          'receipt',
+        ].includes(input.event.entityType)
+          ? current.payload_json
+          : (defaultsPayload ??
+            ratePayload ??
+            taxPayload ??
+            unitPayload ??
+            input.event.payload)
       await client.query('SAVEPOINT category_entity_write')
       try {
         await client.query(
@@ -759,11 +1019,7 @@ export class PostgresSyncStore implements SyncStore {
             input.event.entityId,
             serverVersion,
             deleted,
-            defaultsPayload ??
-              ratePayload ??
-              taxPayload ??
-              unitPayload ??
-              input.event.payload,
+            persistedPayload,
             input.actorId,
           ],
         )
@@ -826,11 +1082,7 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           input.event.operation,
           serverVersion,
-          defaultsPayload ??
-            ratePayload ??
-            taxPayload ??
-            unitPayload ??
-            input.event.payload,
+          persistedPayload,
           input.actorId,
         ],
       )
@@ -1096,7 +1348,9 @@ export class PostgresSyncStore implements SyncStore {
       prior.rows[0].country_id !== countryId
     ) {
       const used = await client.query(
-        `SELECT 1 FROM sync_entities WHERE entity_type = 'purchase_order'
+        `SELECT 1 FROM user_project_bindings WHERE project_id::text = $1 AND deleted_at IS NULL
+         UNION ALL
+         SELECT 1 FROM sync_entities WHERE entity_type = 'purchase_order'
          AND is_deleted = FALSE AND
            (payload_json->>'projectId' = $1 OR payload_json->>'project_id' = $1) LIMIT 1`,
         [event.entityId],
@@ -1647,11 +1901,6 @@ export class PostgresSyncStore implements SyncStore {
     cursor: string
     limit: number
   }): Promise<{ changes: SyncChange[]; nextCursor: string }> {
-    const canReadAll = input.actor.roles.some((role) =>
-      ['super_administrator', 'administrator', 'purchaser', 'viewer'].includes(
-        role,
-      ),
-    )
     const result = await this.pool.query<{
       sequence: string
       entity_type: SyncChange['entityType']
@@ -1673,44 +1922,50 @@ export class PostgresSyncStore implements SyncStore {
        LEFT JOIN category_code_quarantine q ON c.entity_type = 'material_category' AND q.entity_id = c.entity_id
        WHERE c.sequence > $1
          AND (
-           $2
-           OR c.entity_type = ANY($3::text[])
+           c.entity_type = ANY($2::text[])
            OR (
              c.entity_type = 'supplier'
              AND EXISTS (
                SELECT 1 FROM user_project_bindings b
                JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
-               WHERE b.user_id = $4 AND b.deleted_at IS NULL
-                 AND p.country_id::text = c.payload_json->>'countryId'
+               JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+               JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+               JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+               JOIN sync_entities supplier ON supplier.entity_type = 'supplier' AND supplier.entity_id = c.entity_id
+               WHERE b.user_id = $3 AND b.deleted_at IS NULL
+                 AND p.country_id::text = COALESCE(c.payload_json->>'countryId', c.payload_json->>'country_id')
+                 AND p.country_id::text = COALESCE(supplier.payload_json->>'countryId', supplier.payload_json->>'country_id')
              )
            )
            OR (
              c.entity_type = 'material_price'
              AND EXISTS (
                SELECT 1 FROM sync_entities supplier
-               JOIN user_project_bindings b ON b.user_id = $4 AND b.deleted_at IS NULL
+               JOIN user_project_bindings b ON b.user_id = $3 AND b.deleted_at IS NULL
                JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+               JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+               JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+               JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
                WHERE supplier.entity_type = 'supplier'
-                 AND supplier.entity_id::text = c.payload_json->>'supplierId'
-                 AND p.country_id::text = supplier.payload_json->>'countryId'
+                 AND supplier.entity_id::text = COALESCE(c.payload_json->>'supplierId', c.payload_json->>'supplier_id')
+                 AND p.country_id::text = COALESCE(supplier.payload_json->>'countryId', supplier.payload_json->>'country_id')
              )
            )
-           OR EXISTS (
+           OR (c.entity_type NOT IN ('supplier', 'material_price') AND EXISTS (
              SELECT 1 FROM user_project_bindings b
-             WHERE b.user_id = $4
+             JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+             JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+             JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+             JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+             WHERE b.user_id = $3
                AND b.deleted_at IS NULL
                AND b.project_id::text = c.payload_json->>'projectId'
-           )
+               AND (c.entity_type <> 'purchase_order' OR c.payload_json->>'countryId' IS NULL OR c.payload_json->>'countryId' = p.country_id::text)
+           ))
          )
        ORDER BY c.sequence
-       LIMIT $5`,
-      [
-        input.cursor,
-        canReadAll,
-        globallyVisibleEntityTypes,
-        input.actor.id,
-        input.limit,
-      ],
+       LIMIT $4`,
+      [input.cursor, globallyVisibleEntityTypes, input.actor.id, input.limit],
     )
     const changes = result.rows.map((row) => {
       const payload = { ...row.payload_json }
@@ -1766,6 +2021,8 @@ export class PostgresSyncStore implements SyncStore {
       `SELECT 1 FROM sync_entities
        WHERE entity_type = 'purchase_order' AND is_deleted = FALSE
          AND (payload_json->>'projectId' = $1 OR payload_json->>'project_id' = $1)
+       UNION ALL
+       SELECT 1 FROM user_project_bindings WHERE project_id::text = $1 AND deleted_at IS NULL
        LIMIT 1`,
       [projectId],
     )
