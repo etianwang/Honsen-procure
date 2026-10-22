@@ -1,0 +1,21 @@
+{
+  "001_auth_and_master_data.sql": [],
+  "002_project_defaults_and_master_data.sql": [],
+  "003_sync.sql": [
+    {
+      "kind": "sequence",
+      "name": "server_change_log_sequence_seq",
+      "privileges": ["USAGE"]
+    }
+  ],
+  "004_authorization_scopes.sql": [],
+  "005_nullable_project_default_contact.sql": [],
+  "005_sync_event_origin.sql": [],
+  "006_formal_issue_registry.sql": [
+    {
+      "kind": "table",
+      "name": "formal_issue_registry",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    }
+  ]
+}

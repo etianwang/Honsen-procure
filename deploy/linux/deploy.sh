@@ -128,14 +128,15 @@ log_event "backup_external:$external"
 backup_digest=$(sha256sum "$external")
 log_event "backup_sha256:${backup_digest%% *}"
 phase=migration
+(cd "$RELEASE_DIR" && NEW_ROLE="$NEW_ROLE" node "$script_dir/grant-api.cjs" --check)
 (cd "$RELEASE_DIR" && npm run migrate --workspace @honsen/server >/dev/null 2>&1)
 # A second pass verifies all migration checksums and is also the idempotence gate.
 (cd "$RELEASE_DIR" && npm run migrate --workspace @honsen/server >/dev/null 2>&1)
 [[ $(psql -X -Atqc "SELECT (to_regclass('public.schema_migrations') IS NOT NULL AND to_regclass('public.sync_entities') IS NOT NULL AND to_regclass('public.sync_events') IS NOT NULL)::int") == 1 ]]
 log_event migration_verified
 phase=permissions
-psql -X -v ON_ERROR_STOP=1 -v new_role="$NEW_ROLE" -f "$script_dir/grant-registry.sql" >/dev/null
-log_event registry_permissions_granted
+(cd "$RELEASE_DIR" && NEW_ROLE="$NEW_ROLE" node "$script_dir/grant-api.cjs" >> "$log")
+log_event api_permissions_granted
 phase=activate
 psql -X -v ON_ERROR_STOP=1 -v old_role="$OLD_ROLE" -v new_role="$NEW_ROLE" -f "$script_dir/activate-new-role.sql" >/dev/null
 mkdir -p /run/honsen-procure
