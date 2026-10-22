@@ -195,6 +195,14 @@ EOF
     bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/repeat.log" 2>&1 || { cat "$root/repeat.log"; exit 1; }
     grep -q 'version already deployed' "$root/repeat.log"
     [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 200 ]]
+    saved_checksum=$(psql -X -Atqc 'SELECT checksum FROM schema_migrations ORDER BY name LIMIT 1')
+    psql -X -c "UPDATE schema_migrations SET checksum = repeat('0',64) WHERE name = (SELECT min(name) FROM schema_migrations)" >/dev/null
+    if bash "$root/release/deploy/linux/deploy.sh" --execute "$root/config" >"$root/repeat-drift.log" 2>&1; then echo 'repeat accepted migration drift' >&2; exit 1; fi
+    grep -q 'recorded deployment failed verification' "$root/repeat-drift.log"
+    systemctl is-active --quiet honsen-procure.service
+    psql -X -v checksum="$saved_checksum" <<'SQL' >/dev/null
+UPDATE schema_migrations SET checksum = :'checksum' WHERE name = (SELECT min(name) FROM schema_migrations);
+SQL
   else
     [[ $result != 0 ]] || { echo 'fault was accepted' >&2; exit 1; }
     [[ $(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --cacert "$root/cert.pem" --resolve honsen.test:18443:127.0.0.1 https://honsen.test:18443/api/auth/captcha) == 503 ]]
