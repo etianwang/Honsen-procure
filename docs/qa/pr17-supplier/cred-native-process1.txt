@@ -1,0 +1,2 @@
+case=0 target_if_created=Q1DEF60C target_length=8 type=1 blob_size=1 persist=3 username=synthetic credential_flags=0 api_flags=0 return=1 error=0 deleted=1 delete_error=0 present_after_delete=0 read_error=1168 bits=64
+case=1 target_if_created=none target_length=47 type=1 blob_size=64 persist=3 username=synthetic credential_flags=0 api_flags=0 return=0 error=8 deleted=0 delete_error=0 present_after_delete=0 read_error=0 bits=64
