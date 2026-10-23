@@ -611,19 +611,42 @@ export function RequisitionPage({
         />
       ) : null}
       <Card className="card" title="材料明细">
-        <label>
-          采购模式
-          <Select
-            aria-label="采购模式"
-            disabled={status === 'pending'}
-            value={mode}
-            options={[
-              { value: 'owner_self_purchase', label: '业主自行采购' },
-              { value: 'honsen_self_purchase', label: '弘盛自行采购' },
-            ]}
-            onChange={(value: ProcurementMode) => setMode(value)}
-          />
-        </label>
+        <fieldset className="procurement-mode" disabled={status === 'pending'}>
+          <legend>采购模式</legend>
+          <div className="procurement-mode-options">
+            {(
+              [
+                [
+                  'honsen_self_purchase',
+                  '弘盛自行采购',
+                  '由弘盛执行采购，可按供应商生成采购单。',
+                ],
+                [
+                  'owner_self_purchase',
+                  '业主自行采购',
+                  '由业主自行采购，弘盛记录需求。',
+                ],
+              ] as const
+            ).map(([value, title, description]) => (
+              <label
+                className={`procurement-mode-option ${mode === value ? 'selected' : ''}`}
+                key={value}
+              >
+                <input
+                  type="radio"
+                  name="procurement-mode"
+                  value={value}
+                  checked={mode === value}
+                  onChange={() => setMode(value)}
+                />
+                <span>
+                  <strong>{title}</strong>
+                  <small>{description}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <label>
           税率（基点）
           <Input
