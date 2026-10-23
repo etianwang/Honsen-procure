@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { SyncEvent } from '@honsen/shared'
 import { runMigrations } from '../db/migration-runner.js'
 import { PostgresSyncStore } from './postgres-store.js'
+import { SyncService } from './service.js'
 
 const pool = process.env.TEST_DATABASE_URL
   ? new Pool({ connectionString: process.env.TEST_DATABASE_URL })
@@ -128,8 +129,21 @@ describe.skipIf(!pool)('catalog quote push', () => {
         await push('supplier', supplier, {
           id: supplier,
           countryId: country,
+          businessCode: `SUP-${supplier}`,
+          name: 'fixture supplier',
+          contactName: null,
+          address: null,
+          city: null,
+          country: null,
+          phone: null,
+          whatsapp: null,
+          email: null,
+          paymentTerms: null,
+          deliveryLeadTime: null,
+          isPreferred: false,
           isActive: true,
           isBlacklisted: false,
+          version: 1,
         })
       ).status,
     ).toBe('accepted')
@@ -137,6 +151,66 @@ describe.skipIf(!pool)('catalog quote push', () => {
   })
   afterAll(async () => {
     await pool!.end()
+  })
+  it('rejects incomplete and forged catalog payloads without logging changes', async () => {
+    const supplierId = randomUUID()
+    const priceId = randomUUID()
+    const service = new SyncService(store!)
+    const events = [
+      {
+        eventId: randomUUID(),
+        entityType: 'supplier',
+        entityId: supplierId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: { id: supplierId, countryId: country },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'material_price',
+        entityId: priceId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: { ...quote, id: randomUUID() },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'material_price',
+        entityId: randomUUID(),
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: { supplierId: supplier, materialId: material },
+      },
+    ]
+    const result = await service.push(
+      { id: actor, roles: ['purchaser'], installationId: installation },
+      { deviceId: installation, events },
+    )
+    expect(result.results).toHaveLength(3)
+    expect(
+      result.results.every(
+        (item) =>
+          item.status === 'validation_error' &&
+          item.errorCode === 'INVALID_CATALOG_PAYLOAD',
+      ),
+    ).toBe(true)
+    const ids = events.map((event) => event.entityId)
+    expect(
+      (
+        await pool!.query(
+          'SELECT 1 FROM sync_entities WHERE entity_id = ANY($1::uuid[])',
+          [ids],
+        )
+      ).rowCount,
+    ).toBe(0)
+    expect(
+      (
+        await pool!.query(
+          'SELECT 1 FROM server_change_log WHERE entity_id = ANY($1::uuid[])',
+          [ids],
+        )
+      ).rowCount,
+    ).toBe(0)
   })
   it('persists identity and rejects a superseded quote on submission', async () => {
     expect((await push('purchase_order', order, data)).status).toBe('accepted')

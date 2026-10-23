@@ -8376,7 +8376,15 @@ fn quarantine_category_projection(
                 "SELECT EXISTS(SELECT 1 FROM local_materials WHERE id = ?1) AND NOT EXISTS(SELECT 1 FROM local_sync_projection_quarantine WHERE entity_type = 'material' AND entity_id = ?1)",
                 [price.material_id.to_string()], |row| row.get(0),
             ).map_err(|_| AuthError::Database)?;
-            (!ready).then(|| ("MATERIAL_DEPENDENCY", price.material_id.to_string()))
+            if !ready {
+                Some(("MATERIAL_DEPENDENCY", price.material_id.to_string()))
+            } else {
+                let supplier_ready: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM local_suppliers WHERE id = ?1) AND NOT EXISTS(SELECT 1 FROM local_sync_projection_quarantine WHERE entity_type = 'supplier' AND entity_id = ?1)",
+                    [price.supplier_id.to_string()], |row| row.get(0),
+                ).map_err(|_| AuthError::Database)?;
+                (!supplier_ready).then(|| ("SUPPLIER_DEPENDENCY", price.supplier_id.to_string()))
+            }
         }
         _ => None,
     };
@@ -12781,6 +12789,170 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         let count: i64 = connection.query_row("SELECT count(*) FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn price_waits_for_missing_supplier_and_replays() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: account_id,
+                    username: "supplier-dependency".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "supplier-dependency",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let material_id = Uuid::new_v4();
+        let supplier_id = Uuid::new_v4();
+        let price_id = Uuid::new_v4();
+        let material = MaterialInput {
+            id: material_id,
+            sku: None,
+            category_id: None,
+            name_zh: "Material".into(),
+            name_fr: None,
+            aliases: vec![],
+            brand: None,
+            model: "Model".into(),
+            specification: "Spec".into(),
+            unit: "pcs".into(),
+            notes: None,
+            is_active: true,
+            version: 1,
+        };
+        let supplier = SupplierInput {
+            id: supplier_id,
+            business_code: "SUP-TEST".into(),
+            name: "Supplier".into(),
+            country_id: None,
+            contact_name: None,
+            address: None,
+            city: None,
+            country: None,
+            phone: None,
+            whatsapp: None,
+            email: None,
+            payment_terms: None,
+            delivery_lead_time: None,
+            is_preferred: false,
+            is_blacklisted: false,
+            is_active: true,
+            version: 1,
+        };
+        let price = MaterialPriceInput {
+            id: price_id,
+            material_id,
+            supplier_id,
+            currency: "USD".into(),
+            unit_price_minor: "123".into(),
+            unit: "pcs".into(),
+            effective_at: "2026-01-01".into(),
+            source_note: None,
+            version: 1,
+        };
+        let change = |cursor: &str, entity_type: &str, entity_id, payload| SyncPullChangeInput {
+            cursor: cursor.into(),
+            entity_type: entity_type.into(),
+            entity_id,
+            operation: "upsert".into(),
+            version: 1,
+            payload,
+            changed_at: "2026-10-21T00:00:00Z".into(),
+        };
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![
+                        change(
+                            "1",
+                            "material",
+                            material_id,
+                            serde_json::to_value(material).unwrap(),
+                        ),
+                        change(
+                            "2",
+                            "material_price",
+                            price_id,
+                            serde_json::to_value(price).unwrap(),
+                        ),
+                    ],
+                    next_cursor: "2".into(),
+                },
+                now,
+            )
+            .unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            let reason: String = connection
+                .query_row(
+                    "SELECT reason FROM local_sync_projection_quarantine WHERE entity_id = ?1",
+                    [price_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(reason, "SUPPLIER_DEPENDENCY");
+            let cursor: String = connection.query_row(
+                "SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1",
+                [account_id.to_string()], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(cursor, "2");
+            let count: i64 = connection
+                .query_row(
+                    "SELECT count(*) FROM local_suppliers WHERE id = ?1",
+                    [supplier_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![change(
+                        "3",
+                        "supplier",
+                        supplier_id,
+                        serde_json::to_value(supplier).unwrap(),
+                    )],
+                    next_cursor: "3".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let actual: String = connection
+            .query_row(
+                "SELECT supplier_id FROM local_material_prices WHERE id = ?1",
+                [price_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(actual, supplier_id.to_string());
+        let count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM local_sync_projection_quarantine WHERE entity_id = ?1",
+                [price_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 0);
     }
 
