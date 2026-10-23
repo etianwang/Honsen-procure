@@ -670,6 +670,7 @@ pub struct SyncStatusView {
     pub pending_count: i64,
     pub conflict_count: i64,
     pub quarantined_count: i64,
+    pub quote_rejected_count: i64,
     pub last_success_at: Option<i64>,
 }
 
@@ -1620,7 +1621,7 @@ impl LocalAuthService {
             .lock()
             .map_err(|_| AuthError::Database)?
             .query_row(
-                "SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL",
+                "SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL)",
                 [account_id.to_string()],
                 |row| row.get(0),
             )
@@ -5524,7 +5525,7 @@ impl LocalAuthService {
         }
         let actor = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        let mut query = connection.prepare("SELECT o.event_id, o.entity_id, c.business_code, c.name FROM local_sync_outbox o JOIN local_material_categories c ON c.id = o.entity_id WHERE o.owner_account_id = ?1 AND o.entity_type = 'material_category' AND o.last_error = 'CATEGORY_CODE_CONFLICT' AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND COALESCE(o.last_error, '') <> 'QUOTE_UNAVAILABLE' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY o.created_at, o.rowid").map_err(|_| AuthError::Database)?;
+        let mut query = connection.prepare("SELECT o.event_id, o.entity_id, c.business_code, c.name FROM local_sync_outbox o JOIN local_material_categories c ON c.id = o.entity_id WHERE o.owner_account_id = ?1 AND o.entity_type = 'material_category' AND o.last_error = 'CATEGORY_CODE_CONFLICT' AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND o.rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY o.created_at, o.rowid").map_err(|_| AuthError::Database)?;
         query
             .query_map([actor.to_string()], |row| {
                 Ok(LocalCategoryConflictView {
@@ -5608,13 +5609,14 @@ impl LocalAuthService {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
             .query_row(
-                "SELECT (SELECT COUNT(*) FROM local_sync_outbox o WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1)",
+                "SELECT (SELECT COUNT(*) FROM local_sync_outbox o WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL) AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1), (SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND rejected_at IS NOT NULL AND quote_recovery_event_id IS NULL AND last_error = 'QUOTE_UNAVAILABLE')",
                 [account_id.to_string()],
                 |row| Ok(SyncStatusView {
                     pending_count: row.get(0)?,
                     conflict_count: row.get(1)?,
                     quarantined_count: row.get(2)?,
                     last_success_at: row.get(3)?,
+                    quote_rejected_count: row.get(4)?,
                 }),
             )
             .map_err(|_| AuthError::Database)
@@ -5632,7 +5634,7 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = blocked.event_id)) ORDER BY o.created_at, o.rowid LIMIT ?2")
+            .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND o.rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = blocked.event_id)) ORDER BY o.created_at, o.rowid LIMIT ?2")
             .map_err(|_| AuthError::Database)?
             .query_map(params![account_id.to_string(), limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -5668,7 +5670,7 @@ impl LocalAuthService {
         require_transaction_account(&transaction, account_id)?;
         for acknowledgement in acknowledgements {
             let entity: Option<(String, String)> = transaction.query_row(
-                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND owner_account_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL",
+                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND owner_account_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL AND rejected_at IS NULL",
                 params![acknowledgement.event_id.to_string(), account_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional().map_err(|_| AuthError::Database)?;
             if let Some((entity_type, entity_id)) = entity {
@@ -5676,7 +5678,11 @@ impl LocalAuthService {
                     && acknowledgement.status == "validation_error"
                     && acknowledgement.error_code.as_deref() == Some("QUOTE_UNAVAILABLE")
                 {
-                    transaction.execute("UPDATE local_sync_outbox SET last_error = 'QUOTE_UNAVAILABLE' WHERE event_id = ?1", [acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                    transaction.execute("UPDATE local_sync_outbox SET last_error = 'QUOTE_UNAVAILABLE', rejected_at = ?2 WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                    transaction.execute("UPDATE local_sync_outbox SET base_version = base_version - 1 WHERE owner_account_id = ?1 AND entity_type = ?2 AND entity_id = ?3 AND acknowledged_at IS NULL AND superseded_at IS NULL AND rejected_at IS NULL AND rowid > (SELECT rowid FROM local_sync_outbox WHERE event_id = ?4)", params![account_id.to_string(), entity_type, entity_id, acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                    continue;
+                }
+                if acknowledgement.error_code.as_deref() == Some("QUOTE_PREDECESSOR_REJECTED") {
                     continue;
                 }
                 if entity_type == "material_category"
@@ -5692,6 +5698,9 @@ impl LocalAuthService {
                 match acknowledgement.status.as_str() {
                     "accepted" if acknowledgement.server_version.unwrap_or(-1) >= 1 => {
                         transaction.execute("UPDATE local_sync_outbox SET acknowledged_at = ?2, last_error = NULL WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                        if entity_type == "purchase_order" {
+                            transaction.execute("UPDATE local_sync_outbox SET quote_recovery_event_id = ?1 WHERE owner_account_id = ?2 AND entity_type = 'purchase_order' AND entity_id = ?3 AND rejected_at IS NOT NULL AND quote_recovery_event_id IS NULL AND rowid < (SELECT rowid FROM local_sync_outbox WHERE event_id = ?1) AND EXISTS (SELECT 1 FROM local_sync_outbox recovered WHERE recovered.event_id = ?1 AND json_extract(recovered.payload_json, '$.workflowStatus') = 'pending_confirmation')", params![acknowledgement.event_id.to_string(), account_id.to_string(), entity_id]).map_err(|_| AuthError::Database)?;
+                        }
                         transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![entity_type, entity_id, acknowledgement.server_version]).map_err(|_| AuthError::Database)?;
                     }
                     "validation_error" => {
@@ -5779,7 +5788,7 @@ impl LocalAuthService {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String, Option<String>)> = transaction.query_row(
-                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
+                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL) AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
                 params![change.entity_type, change.entity_id.to_string(), account_id_text],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).optional().map_err(|_| AuthError::Database)?;
@@ -8600,7 +8609,7 @@ fn project_remote_purchase_order_change(
     }
     // Old staged rows are replayed on every page too, including pages for other entities.
     let pending: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL)",
+        "SELECT EXISTS(SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL))",
         [change.entity_id.to_string()], |row| row.get(0),
     ).map_err(|_| AuthError::Database)?;
     if pending {
@@ -8701,7 +8710,7 @@ fn project_remote_purchase_order_change(
         if let Some(order) = &order {
             if order.procurement_mode.as_deref() == Some("owner_self_purchase") {
                 transaction.execute(
-                    "UPDATE local_purchase_orders SET procurement_mode = 'owner_self_purchase', version = ?2, updated_at = ?3 WHERE id = ?1 AND version < ?2 AND procurement_mode IS NULL AND parent_order_id IS NULL AND workflow_status IN ('confirmed', 'approved') AND country_id = ?4 AND project_id = ?5 AND NOT EXISTS (SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL) AND NOT EXISTS (SELECT 1 FROM local_rfqs WHERE source_order_id = ?1) AND NOT EXISTS (SELECT 1 FROM local_purchase_orders child WHERE child.parent_order_id = ?1 AND child.deleted_at IS NULL)",
+                    "UPDATE local_purchase_orders SET procurement_mode = 'owner_self_purchase', version = ?2, updated_at = ?3 WHERE id = ?1 AND version < ?2 AND procurement_mode IS NULL AND parent_order_id IS NULL AND workflow_status IN ('confirmed', 'approved') AND country_id = ?4 AND project_id = ?5 AND NOT EXISTS (SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL)) AND NOT EXISTS (SELECT 1 FROM local_rfqs WHERE source_order_id = ?1) AND NOT EXISTS (SELECT 1 FROM local_purchase_orders child WHERE child.parent_order_id = ?1 AND child.deleted_at IS NULL)",
                     params![change.entity_id.to_string(), change.version, unix_seconds(now), order.country_id.to_string(), order.project_id.to_string()],
                 ).map_err(|_| AuthError::Database)?;
             }
@@ -9768,7 +9777,7 @@ fn insert_local_sync_outbox(
         .unwrap_or(0);
     let pending_count: i64 = transaction
         .query_row(
-            "SELECT COUNT(*) FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)",
+            "SELECT COUNT(*) FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL AND rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)",
             params![entity_type, entity_id.to_string()],
             |row| row.get(0),
         )
@@ -18582,6 +18591,84 @@ mod tests {
             ),
             Err(AuthError::Forbidden)
         );
+    }
+
+    #[test]
+    fn rejected_quote_event_retains_evidence_and_rebases_later_order_events() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let user = account();
+        service
+            .cache_verified_account(user.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &user.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let order = Uuid::new_v4();
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let tx = connection.transaction().unwrap();
+            insert_local_sync_outbox(&tx, "purchase_order", order, "{}", now).unwrap();
+            insert_local_sync_outbox(
+                &tx,
+                "purchase_order",
+                order,
+                r#"{"workflowStatus":"pending_confirmation"}"#,
+                now,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        };
+        let events = service.pending_sync_events(100, now).unwrap();
+        let rejected = events[0].event_id;
+        let ack = SyncAcknowledgementInput {
+            event_id: rejected,
+            status: "validation_error".into(),
+            server_version: None,
+            error_code: Some("QUOTE_UNAVAILABLE".into()),
+            server_payload: None,
+            server_operation: None,
+        };
+        service
+            .apply_sync_acknowledgements(vec![ack.clone()], now)
+            .unwrap();
+        service.apply_sync_acknowledgements(vec![ack], now).unwrap();
+        let pending = service.pending_sync_events(100, now).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event_id, events[1].event_id);
+        assert_eq!(pending[0].base_version, 0);
+        let connection = service.connection.lock().unwrap();
+        let row: (Option<i64>, Option<i64>, Option<i64>, String) = connection.query_row("SELECT acknowledged_at, superseded_at, rejected_at, last_error FROM local_sync_outbox WHERE event_id = ?1", [rejected.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap();
+        assert!(row.0.is_none() && row.1.is_none() && row.2.is_some());
+        assert_eq!(row.3, "QUOTE_UNAVAILABLE");
+        drop(connection);
+        assert_eq!(service.sync_status(now).unwrap().quote_rejected_count, 1);
+        service
+            .apply_sync_acknowledgements(
+                vec![SyncAcknowledgementInput {
+                    event_id: events[1].event_id,
+                    status: "accepted".into(),
+                    server_version: Some(1),
+                    error_code: None,
+                    server_payload: None,
+                    server_operation: None,
+                }],
+                now,
+            )
+            .unwrap();
+        let status = service.sync_status(now).unwrap();
+        assert_eq!(status.quote_rejected_count, 0);
+        assert_eq!(status.pending_count, 0);
+        let connection = service.connection.lock().unwrap();
+        let recovered: String = connection.query_row("SELECT quote_recovery_event_id FROM local_sync_outbox WHERE event_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL", [rejected.to_string()], |row| row.get(0)).unwrap();
+        assert_eq!(recovered, events[1].event_id.to_string());
     }
 
     #[test]

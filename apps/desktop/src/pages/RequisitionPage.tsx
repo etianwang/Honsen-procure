@@ -545,7 +545,11 @@ export function RequisitionPage({
       }
       setMessage('草稿已自动保存到本机')
     } catch (error) {
-      setMessage(isQuoteUnavailable(error) ? '所选报价已失效或不可用，请重新选择；原草稿已保留。' : '保存失败，请检查订单内容；原草稿已保留。')
+      setMessage(
+        isQuoteUnavailable(error)
+          ? '所选报价已失效或不可用，请重新选择；原草稿已保留。'
+          : '保存失败，请检查订单内容；原草稿已保留。',
+      )
     }
   }
 
@@ -564,7 +568,11 @@ export function RequisitionPage({
       setStatus('pending')
       setMessage('采购申请已提交，状态：待确认')
     } catch (error) {
-      setMessage(isQuoteUnavailable(error) ? '所选报价已失效或不可用，请重新选择；原草稿已保留。' : '提交失败，请检查订单内容。')
+      setMessage(
+        isQuoteUnavailable(error)
+          ? '所选报价已失效或不可用，请重新选择；原草稿已保留。'
+          : '提交失败，请检查订单内容。',
+      )
     }
   }
 
@@ -941,5 +949,10 @@ export function RequisitionPage({
 }
 
 function isQuoteUnavailable(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'quote_unavailable'
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'quote_unavailable'
+  )
 }

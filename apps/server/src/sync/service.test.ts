@@ -78,6 +78,33 @@ function purchaseOrderEvent(applicantId = engineer.id) {
 }
 
 describe('SyncService', () => {
+  it('does not process later order events after a quote rejection in the same batch', async () => {
+    class RejectedQuoteStore extends FixtureStore {
+      override async pushEvent(
+        input: Parameters<SyncStore['pushEvent']>[0],
+      ): Promise<SyncEventResult> {
+        this.pushed += 1
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+          errorCode: 'QUOTE_UNAVAILABLE',
+        }
+      }
+    }
+    const store = new RejectedQuoteStore()
+    const first = purchaseOrderEvent()
+    const second = { ...first, eventId: randomUUID(), baseVersion: 1 }
+    const result = await new SyncService(store).push(engineer, {
+      deviceId: engineer.installationId,
+      events: [first, second],
+    })
+    expect(store.pushed).toBe(1)
+    expect(result.results.map((item) => item.errorCode)).toEqual([
+      'QUOTE_UNAVAILABLE',
+      'QUOTE_PREDECESSOR_REJECTED',
+    ])
+  })
   it('rejects whitespace in category codes without changing their case', async () => {
     const store = new FixtureStore()
     const service = new SyncService(store)

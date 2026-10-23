@@ -10,6 +10,7 @@ export type SyncState = {
   pendingCount?: number
   conflictCount?: number
   quarantinedCount?: number
+  quoteRejectedCount?: number
   lastSuccessAt?: number | null
 }
 
@@ -17,6 +18,7 @@ type SyncStatus = {
   pendingCount: number
   conflictCount: number
   quarantinedCount: number
+  quoteRejectedCount?: number
   lastSuccessAt: number | null
 }
 

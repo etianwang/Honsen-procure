@@ -188,6 +188,9 @@ export function AppShell({
               {syncState?.conflictCount
                 ? ` · 未解决冲突 ${syncState.conflictCount}`
                 : ''}
+              {syncState?.quoteRejectedCount
+                ? ` · ${syncState.quoteRejectedCount} 项报价失效，请撤回采购单并重新选价`
+                : ''}
               {syncState?.quarantinedCount
                 ? ` · 待归属旧事件 ${syncState.quarantinedCount}`
                 : ''}
