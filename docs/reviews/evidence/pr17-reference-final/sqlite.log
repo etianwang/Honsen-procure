@@ -1,0 +1,16 @@
+warning: linker stdout: 正在创建库 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running unittests src\lib.rs (E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 4 tests
+test tests::reference_sync_rejects_ambiguous_fields_and_forged_metadata ... ok
+test tests::reference_sync_accepts_both_contracts_with_trusted_envelope_metadata ... ok
+test tests::reference_sync_invalid_contract_rolls_back_page_and_keeps_real_references ... ok
+test tests::reference_sync_postgres_history_replays_after_restart ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out; finished in 14.62s
+

@@ -19800,4 +19800,5 @@ mod tests {
     }
 
     include!("reference_sync_tests.rs");
+    include!("pr17_independent_tests.rs");
 }

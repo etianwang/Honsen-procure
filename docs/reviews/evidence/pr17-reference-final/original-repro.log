@@ -1,0 +1,15 @@
+   Compiling honsen-materials-desktop-core v0.0.0-development (E:\Honsen-PR17-Final-Review\apps\desktop\src-tauri)
+warning: linker stdout: 正在创建库 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.92s
+     Running unittests src\lib.rs (E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 1 test
+attempt=1, result=Ok(()), incremental=504, replay=Some(("8e782e451de765bca9303694952420c120f98417a724c21cbf6c083b42d7b35a", "502", "518"))
+test tests::pr17_independent_postgres_transcript_survives_sqlite_restart_and_repair ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 102 filtered out; finished in 11.28s
+

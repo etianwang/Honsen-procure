@@ -1,0 +1,28 @@
+{
+  "productionSha": "2b95a47653958754d5b278cb4d02be023bf846c4",
+  "sqliteFile": "E:\\Honsen-PR17-Independent-P1-runtime\\temp\\independent-pr17-498ff1e5-8fcd-4b45-9581-079e296a27be.sqlite",
+  "sqliteVersion": "3.50.4",
+  "transcriptSha256": "9b0d47588932a669e0f1f8cc4d45c87c5b09467eb9e9d4695c160fdd1ca82e31",
+  "beforeCursor": "504",
+  "replayPages": [
+    [500, "502"],
+    [16, "518"]
+  ],
+  "incrementalCursor": "519",
+  "restoredReplayPages": [
+    [500, "502"],
+    [17, "519"]
+  ],
+  "finalCursor": "526",
+  "replayState": ["519", "519", 1],
+  "foreignKeyErrors": [],
+  "retainedCounts": {
+    "local_sync_outbox": 1,
+    "local_purchase_orders": 2,
+    "local_purchase_order_items": 1,
+    "local_master_data_audit_entries": 1
+  },
+  "lateQuote": ["a30d2f2c-7b9a-4691-8dbe-eb11694a2b4a", 27, 1],
+  "recoveredVersion": 2,
+  "sqliteSha256": "a951cab51a7f742bb472ed1efb5fdc042548658ae3a21b073749c12e39a2c936"
+}

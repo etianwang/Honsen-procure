@@ -1,5 +1,7 @@
 # Roadmap and Development Tasks
 
+2026-10-23 targeted independent QA at production `2b95a47653958754d5b278cb4d02be023bf846c4`: the historical reference-contract P1 from `4d486cdf` independently PASS (fresh PostgreSQL 16.15 authenticated driver 3/3; original failure harness 1/1; file-SQLite reference/restart/rollback tests 4/4; missing-supplier replay 1/1). [Independent evidence](reviews/PR17-REFERENCE-TARGETED-INDEPENDENT-QA.md). APPROVED_WITH_RELEASE_HOLD: PR #17 may leave Draft and enter READY_TO_MERGE approval; no Draft/merge/deploy action taken. Windows real EXE revoked-access online re-login remains NOT PASSED and blocks V1 production release; all original parent/milestone gates remain unchanged. Earlier builder handoffs below are historical and superseded only for this bounded defect.
+
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.
 
 ## Current delivery path — 2026-10-19
