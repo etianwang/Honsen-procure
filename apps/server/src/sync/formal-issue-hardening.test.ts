@@ -287,6 +287,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
 
   it('preserves an issued offline snapshot and audits a revoked catalog quote', async () => {
     const f = fixture(111)
+    const supplierId = randomUUID()
     const line = {
       ...f.approved.lines[0],
       ownerQuoteSource: 'catalog_price',
@@ -294,7 +295,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       ownerManualReferenceReason: null,
       materialId: randomUUID(),
       supplierSnapshotJson: JSON.stringify({
-        id: randomUUID(),
+        id: supplierId,
         name: 'fixture',
       }),
       unit: 'pcs',
@@ -305,6 +306,36 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       ...f.issued,
       lines: [line],
       formalSnapshotJson: JSON.stringify(approved),
+    }
+    for (const [entityType, entityId, payload] of [
+      ['material', line.materialId, { id: line.materialId, isActive: true }],
+      ['supplier', supplierId, { id: supplierId, countryId, isActive: true }],
+      [
+        'material_price',
+        line.ownerCatalogPriceId,
+        {
+          id: line.ownerCatalogPriceId,
+          supplierId,
+          materialId: line.materialId,
+        },
+      ],
+    ] as const) {
+      expect(
+        (
+          await store.pushEvent({
+            event: {
+              eventId: randomUUID(),
+              entityType,
+              entityId,
+              operation: 'upsert',
+              baseVersion: 0,
+              payload,
+            },
+            installationId,
+            actorId: engineerId,
+          })
+        ).status,
+      ).toBe('accepted')
     }
     expect(
       (
@@ -324,6 +355,10 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         })
       ).status,
     ).toBe('accepted')
+    await pool!.query(
+      `UPDATE sync_entities SET is_deleted = true WHERE entity_type = 'material_price' AND entity_id = $1`,
+      [line.ownerCatalogPriceId],
+    )
     expect(
       (
         await store.pushEvent({

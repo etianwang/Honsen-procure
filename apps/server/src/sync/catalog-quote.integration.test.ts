@@ -111,6 +111,14 @@ describe.skipIf(!pool)('catalog quote push', () => {
       `INSERT INTO user_project_scope_bindings(user_id,project_id,department_id,team_id) VALUES ($1,$2,$3,$4)`,
       [actor, project, department, team],
     )
+    await pool!.query(
+      `INSERT INTO user_project_bindings(user_id,project_id) VALUES ($1,$2)`,
+      [buyer, project],
+    )
+    await pool!.query(
+      `INSERT INTO user_project_scope_bindings(user_id,project_id,department_id,team_id) VALUES ($1,$2,$3,$4)`,
+      [buyer, project, department, team],
+    )
     expect(
       (await push('material', material, { id: material, isActive: true }))
         .status,
@@ -248,7 +256,7 @@ describe.skipIf(!pool)('catalog quote push', () => {
           countryId: randomUUID(),
         })
       ).errorCode,
-    ).toBe('QUOTE_UNAVAILABLE')
+    ).toBe('FORBIDDEN')
     const manual = {
       ...lineData,
       catalogPriceId: null,
@@ -275,7 +283,7 @@ describe.skipIf(!pool)('catalog quote push', () => {
           lines: [manual],
         })
       ).errorCode,
-    ).toBe('QUOTE_UNAVAILABLE')
+    ).toBe('FORBIDDEN')
     const client = await pool!.connect()
     try {
       await client.query('BEGIN')
