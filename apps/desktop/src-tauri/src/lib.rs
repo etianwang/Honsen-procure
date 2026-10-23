@@ -16198,6 +16198,29 @@ mod tests {
             service.submit_requisition_draft(draft.id, now),
             Err(AuthError::QuoteUnavailable)
         );
+        let mut manual = draft.clone();
+        manual.id = Uuid::new_v4();
+        manual.lines[0].id = Uuid::new_v4();
+        manual.lines[0].catalog_price_id = None;
+        manual.lines[0].price_source = Some("manual".into());
+        manual.lines[0].unit_price_minor = "999".into();
+        service.save_requisition_draft(manual.clone(), now).unwrap();
+        service
+            .set_procurement_mode(manual.id, "honsen_self_purchase".into(), now)
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 1 WHERE id = ?1",
+                ["10000000-0000-4000-8000-000000000006"],
+            )
+            .unwrap();
+        assert_eq!(
+            service.submit_requisition_draft(manual.id, now),
+            Err(AuthError::QuoteUnavailable)
+        );
         let connection = service.connection.lock().unwrap();
         let (status, stored_price): (String, Option<String>) = connection.query_row("SELECT o.workflow_status, i.catalog_price_id FROM local_purchase_orders o JOIN local_purchase_order_items i ON i.order_id = o.id WHERE o.id = ?1", [draft.id.to_string()], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
         assert_eq!(status, "draft");

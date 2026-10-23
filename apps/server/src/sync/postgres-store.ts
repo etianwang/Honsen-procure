@@ -551,6 +551,17 @@ export class PostgresSyncStore implements SyncStore {
           await client.query('COMMIT')
           return result
         }
+        if (
+          input.event.payload.formallyIssuedAt != null &&
+          current?.payload_json.formallyIssuedAt == null &&
+          (await ownerQuoteDiscrepancy(client, input.event.payload))
+        ) {
+          await client.query(
+            `INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action, reason)
+             VALUES (gen_random_uuid(), $1, 'purchase_order', $2, 'issued_quote_verification_discrepancy', $3)`,
+            [input.actorId, input.event.entityId, input.event.eventId],
+          )
+        }
       }
 
       const serverVersion = currentVersion + 1
@@ -2190,6 +2201,59 @@ function canonicalProjectDefaultsPayload(
   return parsed.data
 }
 
+async function ownerQuoteDiscrepancy(
+  client: PoolClient,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  if (
+    payload.procurementMode !== 'owner_self_purchase' ||
+    !Array.isArray(payload.lines)
+  )
+    return false
+  for (const item of payload.lines) {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      Array.isArray(item) ||
+      item.ownerQuoteSource !== 'catalog_price'
+    )
+      continue
+    let supplier: unknown
+    try {
+      supplier = JSON.parse(item.supplierSnapshotJson)
+    } catch {
+      return true
+    }
+    if (!supplier || typeof supplier !== 'object' || Array.isArray(supplier))
+      return true
+    const supplierId = (supplier as Record<string, unknown>).id
+    const result = await client.query(
+      `SELECT 1 FROM sync_entities p
+       JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = p.payload_json->>'supplierId' AND NOT s.is_deleted
+       JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = p.payload_json->>'materialId' AND NOT m.is_deleted
+       WHERE p.entity_type = 'material_price' AND p.entity_id::text = $1 AND NOT p.is_deleted
+         AND p.payload_json->>'materialId' = $2 AND p.payload_json->>'supplierId' = $3
+         AND p.payload_json->>'currency' = $4 AND p.payload_json->>'unit' = $5 AND p.payload_json->>'unitPriceMinor' = $6
+         AND s.payload_json->>'countryId' = $7 AND s.payload_json->>'isActive' = 'true' AND s.payload_json->>'isBlacklisted' = 'false'
+         AND m.payload_json->>'isActive' = 'true'
+         AND p.entity_id::text = (SELECT c.entity_id::text FROM server_change_log c WHERE c.entity_type = 'material_price'
+           AND c.payload_json->>'materialId' = $2 AND c.payload_json->>'supplierId' = $3 AND c.payload_json->>'currency' = $4
+           ORDER BY c.sequence DESC LIMIT 1)`,
+      [
+        item.ownerCatalogPriceId,
+        item.materialId,
+        supplierId,
+        item.currency,
+        item.unit,
+        item.ownerSourceUnitPriceMinor,
+        payload.countryId,
+      ],
+    )
+    if (result.rowCount !== 1) return true
+  }
+  return false
+}
+
 // The shared advisory lock serializes quote/supplier writes with this verification.
 async function validCatalogQuotes(
   client: PoolClient,
@@ -2208,6 +2272,10 @@ async function validCatalogQuotes(
       'completed',
       'completed_with_conditions',
     ].includes(String(previous.workflowStatus)) &&
+    previous.countryId === event.payload.countryId &&
+    previous.projectId === event.payload.projectId &&
+    previous.departmentId === event.payload.departmentId &&
+    previous.teamId === event.payload.teamId &&
     isDeepStrictEqual(previous.lines, event.payload.lines)
   )
     return true
