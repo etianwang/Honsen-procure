@@ -6,6 +6,8 @@ The authoritative execution order and mandatory per-task DOM testing gate are in
 
 2026-10-22: a T05 supplier-country editor repair is under independent recheck; no parent or milestone status changes. See the latest `memory.md` handoff.
 
+2026-10-23: PR #17's two confirmed P1 repairs now have production implementations and PostgreSQL 16/SQLite builder evidence: durable authorization history replay and complete catalog validation with audited historical recovery. See [repair evidence](reviews/PR17-SYNC-P1-REPAIR.md). Independent recheck of these two defects remains required; PR #17 stays Draft. Real Windows EXE online re-login after revocation is still a mandatory V1 production-release security hold, not a passed QA item. All original parent/milestone gates remain open as previously recorded.
+
 M0–M4 and their original objectives below are preserved; dated progress paragraphs are historical checkpoints, not additional queues. The [current delivery register](BUILD-TASKS.md#current-delivery-register--2026-10-19) owns remaining-task status and G1–G10 mappings; the [v1.0 closure plan](planning/V1-DELIVERY-CLOSURE-PLAN.md) is a short navigation index, not another task master.
 
 **Current local integration:** the containing checkpoint merges QA HEAD `ff7bff6f421cb71448deff017bba7a8f0485070a` with management `e5e46362e51966d3fb3da1e040c42f866ff0a40e`; it already inherits FIX2 `13b22ff` and G2 `6e0a2a6`. No production change or repeated cherry-pick; current test evidence is in [memory](../memory.md). The source-branch descriptions below are historical. FIX2/G2/NATIVE-008 CLOSED and G1/T10/T10-SEC-001/P1/Formal hold OPEN remain unchanged; no merge into main or new development is authorized.

@@ -29,6 +29,7 @@ export type SyncStore = {
     event: SyncEvent
     installationId: string
     actorId: string
+    recoveryReason?: string
   }): Promise<SyncEventResult>
   pullChanges(input: {
     actor: SyncActor

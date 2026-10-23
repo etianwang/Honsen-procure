@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Pool } from 'pg'
 import { runMigrations } from '../db/migration-runner.js'
 import { PostgresSyncStore } from '../sync/postgres-store.js'
+import { materialFixture } from '../sync/catalog-fixtures.js'
 import { PostgresMasterDataStore } from './postgres-store.js'
 import { MasterDataError } from './service.js'
 
@@ -440,7 +441,11 @@ describe.skipIf(!testPool)('PostgresMasterDataStore integration', () => {
       await earlierWriter.query('BEGIN')
       await earlierWriter.query(
         "INSERT INTO server_change_log (entity_type, entity_id, operation, version, payload_json, actor_id) VALUES ('material', $1, 'upsert', 1, $2, $3)",
-        [materialId, { nameZh: 'Earlier fixture' }, actorId],
+        [
+          materialId,
+          { ...materialFixture(materialId), nameZh: 'Earlier fixture' },
+          actorId,
+        ],
       )
       save = new PostgresMasterDataStore(observedPool).saveReferenceData(
         {

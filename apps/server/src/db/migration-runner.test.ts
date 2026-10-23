@@ -45,6 +45,68 @@ describe.skipIf(!pool)('PostgreSQL migrations', () => {
     ])
   })
 
+  it('retains legacy history with null country and orphaned quote references', async () => {
+    const client = await pool!.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('CREATE SCHEMA catalog_quarantine_migration_test')
+      await client.query(
+        'SET LOCAL search_path TO catalog_quarantine_migration_test, public',
+      )
+      await client.query(`CREATE TABLE sync_events(event_id UUID PRIMARY KEY);
+        CREATE TABLE countries(id UUID PRIMARY KEY);
+        CREATE TABLE sync_entities(entity_type TEXT, entity_id UUID);
+        CREATE TABLE server_change_log(sequence BIGINT PRIMARY KEY,entity_type TEXT,entity_id UUID,operation TEXT,version BIGINT,payload_json JSONB);`)
+      const supplier = '00000000-0000-4000-8000-000000000123'
+      const price = '00000000-0000-4000-8000-000000000124'
+      const payload = {
+        id: supplier,
+        countryId: null,
+        businessCode: 'OLD',
+        name: 'Old',
+        isActive: true,
+        isBlacklisted: false,
+        isPreferred: false,
+        version: 1,
+      }
+      await client.query(
+        "INSERT INTO server_change_log VALUES(1,'supplier',$1,'upsert',1,$2),(2,'material_price',$3,'upsert',1,$4)",
+        [
+          supplier,
+          payload,
+          price,
+          {
+            id: price,
+            materialId: supplier,
+            supplierId: supplier,
+            currency: 'USD',
+            unitPriceMinor: '1',
+            unit: 'pcs',
+            effectiveAt: '2026-01-01',
+            version: 1,
+          },
+        ],
+      )
+      await client.query(
+        await readFile(
+          new URL(
+            '../../migrations/010_catalog_sync_quarantine.sql',
+            import.meta.url,
+          ),
+          'utf8',
+        ),
+      )
+      const retained = await client.query(
+        'SELECT original_payload FROM catalog_sync_quarantine ORDER BY change_sequence',
+      )
+      expect(retained.rowCount).toBe(2)
+      expect(retained.rows[0]?.original_payload).toEqual(payload)
+    } finally {
+      await client.query('ROLLBACK')
+      client.release()
+    }
+  })
+
   it('waits for the database lock before running migrations', async () => {
     const client = await pool!.connect()
     let released = false

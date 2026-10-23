@@ -5832,9 +5832,15 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         for change in &page.changes {
+            if invalid_catalog_projection(change) {
+                transaction.execute(
+                    "INSERT INTO local_sync_catalog_quarantine(account_id,cursor,entity_type,entity_id,server_version,original_payload_json,reason) VALUES(?1,?2,?3,?4,?5,?6,'MANUAL_REVIEW_REQUIRED') ON CONFLICT DO NOTHING",
+                    params![account_id_text,change.cursor,change.entity_type,change.entity_id.to_string(),change.version,change.payload.to_string()],
+                ).map_err(|_| AuthError::Database)?;
+            }
             let newer: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM local_sync_remote_entities WHERE entity_type = ?1 AND entity_id = ?2 AND server_version > ?3) OR EXISTS(SELECT 1 FROM local_sync_entity_versions WHERE entity_type = ?1 AND entity_id = ?2 AND server_version > ?3)",
-                params![change.entity_type, change.entity_id.to_string(), change.version], |row| row.get(0),
+                "SELECT EXISTS(SELECT 1 FROM local_sync_remote_entities WHERE entity_type = ?1 AND entity_id = ?2 AND (server_version > ?3 OR (server_version = ?3 AND CAST(source_cursor AS INTEGER) > ?4))) OR EXISTS(SELECT 1 FROM local_sync_entity_versions WHERE entity_type = ?1 AND entity_id = ?2 AND server_version > ?3)",
+                params![change.entity_type, change.entity_id.to_string(), change.version, parse_sync_cursor(&change.cursor)?], |row| row.get(0),
             ).map_err(|_| AuthError::Database)?;
             if newer {
                 continue;
@@ -5863,8 +5869,8 @@ impl LocalAuthService {
                 continue;
             }
             transaction.execute(
-                "INSERT INTO local_sync_remote_entities (entity_type, entity_id, operation, server_version, payload_json, changed_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(entity_type, entity_id) DO UPDATE SET operation = excluded.operation, server_version = excluded.server_version, payload_json = excluded.payload_json, changed_at = excluded.changed_at WHERE excluded.server_version >= local_sync_remote_entities.server_version",
-                params![change.entity_type, change.entity_id.to_string(), change.operation, change.version, remote_payload, change.changed_at],
+                "INSERT INTO local_sync_remote_entities (entity_type, entity_id, operation, server_version, payload_json, changed_at, source_cursor) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(entity_type, entity_id) DO UPDATE SET operation = excluded.operation, server_version = excluded.server_version, payload_json = excluded.payload_json, changed_at = excluded.changed_at, source_cursor = excluded.source_cursor WHERE excluded.server_version >= local_sync_remote_entities.server_version",
+                params![change.entity_type, change.entity_id.to_string(), change.operation, change.version, remote_payload, change.changed_at, change.cursor],
             ).map_err(|_| AuthError::Database)?;
             if quarantine_category_projection(&transaction, change)? {
                 continue;
@@ -5873,6 +5879,9 @@ impl LocalAuthService {
             project_remote_catalog_change(&transaction, change, now)?;
             project_remote_master_data_change(&transaction, change, now)?;
             transaction.execute("DELETE FROM local_sync_projection_quarantine WHERE entity_type = ?1 AND entity_id = ?2", params![change.entity_type, change.entity_id.to_string()]).map_err(|_| AuthError::Database)?;
+            if change.operation == "upsert" {
+                transaction.execute("UPDATE local_sync_catalog_quarantine SET recovered_version = ?3 WHERE entity_type = ?1 AND entity_id = ?2 AND server_version < ?3 AND recovered_version IS NULL", params![change.entity_type,change.entity_id.to_string(),change.version]).map_err(|_| AuthError::Database)?;
+            }
             transaction.execute(
                 "INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)",
                 params![change.entity_type, change.entity_id.to_string(), change.version],
@@ -7821,6 +7830,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0054_authorization_replay",
             include_str!("../migrations/0054_authorization_replay.sql"),
         ),
+        (
+            "0055_catalog_history_quarantine",
+            include_str!("../migrations/0055_catalog_history_quarantine.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -8337,7 +8350,7 @@ fn project_remote_catalog_change(
             if let Some(country_id) = supplier.country_id {
                 let country_exists: bool = transaction
                     .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM local_countries WHERE id = ?1 AND deleted_at IS NULL)",
+                        "SELECT EXISTS(SELECT 1 FROM local_countries WHERE id = ?1)",
                         [country_id.to_string()],
                         |row| row.get(0),
                     )
@@ -8381,28 +8394,34 @@ fn project_remote_catalog_change(
                 return Err(AuthError::InvalidInput);
             }
             let unit_price_minor = validate_material_price(&price)?;
-            transaction
-                .execute(
-                    "UPDATE local_material_prices SET is_active = 0
+            let superseded: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_sync_remote_entities WHERE entity_type = 'material_price' AND entity_id <> ?1 AND json_extract(payload_json,'$.materialId') = ?2 AND json_extract(payload_json,'$.supplierId') = ?3 AND json_extract(payload_json,'$.currency') = ?4 AND CAST(source_cursor AS INTEGER) > ?5)",
+                params![price.id.to_string(),price.material_id.to_string(),price.supplier_id.to_string(),price.currency,parse_sync_cursor(&change.cursor)?],|row|row.get(0),
+            ).map_err(|_| AuthError::Database)?;
+            if !superseded {
+                transaction
+                    .execute(
+                        "UPDATE local_material_prices SET is_active = 0
                      WHERE material_id = ?1 AND supplier_id = ?2 AND currency = ?3 AND id <> ?4
                        AND is_active = 1 AND deleted_at IS NULL",
-                    params![
-                        price.material_id.to_string(),
-                        price.supplier_id.to_string(),
-                        price.currency,
-                        price.id.to_string()
-                    ],
-                )
-                .map_err(|_| AuthError::Database)?;
+                        params![
+                            price.material_id.to_string(),
+                            price.supplier_id.to_string(),
+                            price.currency,
+                            price.id.to_string()
+                        ],
+                    )
+                    .map_err(|_| AuthError::Database)?;
+            }
             transaction
                 .execute(
                     "INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, source_note, is_active, version)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?9)
                      ON CONFLICT(id) DO UPDATE SET material_id = excluded.material_id, supplier_id = excluded.supplier_id,
                        currency = excluded.currency, unit_price_minor = excluded.unit_price_minor, unit = excluded.unit,
-                       effective_at = excluded.effective_at, source_note = excluded.source_note, is_active = 1,
+                       effective_at = excluded.effective_at, source_note = excluded.source_note, is_active = excluded.is_active,
                        version = excluded.version, deleted_at = NULL",
-                    params![price.id.to_string(), price.material_id.to_string(), price.supplier_id.to_string(), price.currency, unit_price_minor, price.unit, price.effective_at, price.source_note, change.version],
+                    params![price.id.to_string(), price.material_id.to_string(), price.supplier_id.to_string(), price.currency, unit_price_minor, price.unit, price.effective_at, price.source_note, change.version, (!superseded) as i64],
                 )
                 .map_err(|_| AuthError::Database)?;
         }
@@ -8431,12 +8450,39 @@ fn is_directly_resolvable_sync_entity(entity_type: &str) -> bool {
     )
 }
 
+fn invalid_catalog_projection(change: &SyncPullChangeInput) -> bool {
+    if change.operation != "upsert" {
+        return false;
+    }
+    if change.payload.get("__catalogQuarantine").is_some() {
+        return true;
+    }
+    match change.entity_type.as_str() {
+        "material" => serde_json::from_value::<MaterialInput>(change.payload.clone())
+            .ok()
+            .is_none_or(|value| value.id != change.entity_id || validate_material(&value).is_err()),
+        "supplier" => serde_json::from_value::<SupplierInput>(change.payload.clone())
+            .ok()
+            .is_none_or(|value| value.id != change.entity_id || validate_supplier(&value).is_err()),
+        "material_price" => serde_json::from_value::<MaterialPriceInput>(change.payload.clone())
+            .ok()
+            .is_none_or(|value| {
+                value.id != change.entity_id || validate_material_price(&value).is_err()
+            }),
+        _ => false,
+    }
+}
+
 fn quarantine_category_projection(
     transaction: &Transaction<'_>,
     change: &SyncPullChangeInput,
 ) -> Result<bool, AuthError> {
     if change.operation != "upsert" {
         return Ok(false);
+    }
+    if invalid_catalog_projection(change) {
+        transaction.execute("INSERT INTO local_sync_projection_quarantine(entity_type,entity_id,dependency_id,reason,server_version) VALUES(?1,?2,NULL,'INVALID_CATALOG_PAYLOAD',?3) ON CONFLICT(entity_type,entity_id) DO UPDATE SET reason = excluded.reason, dependency_id = NULL, server_version = excluded.server_version WHERE excluded.server_version >= local_sync_projection_quarantine.server_version",params![change.entity_type,change.entity_id.to_string(),change.version]).map_err(|_| AuthError::Database)?;
+        return Ok(true);
     }
     let blocked = match change.entity_type.as_str() {
         "material_category" => {
@@ -8478,6 +8524,47 @@ fn quarantine_category_projection(
                 None
             }
         }
+        "supplier" => {
+            let supplier: SupplierInput = serde_json::from_value(change.payload.clone())
+                .map_err(|_| AuthError::InvalidInput)?;
+            let duplicate: Option<String> = transaction
+                .query_row(
+                    "SELECT id FROM local_suppliers WHERE business_code = ?1 AND id <> ?2 LIMIT 1",
+                    params![supplier.business_code, supplier.id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?;
+            if let Some(id) = duplicate {
+                Some(("SUPPLIER_CODE_CONFLICT", id))
+            } else if let Some(country_id) = supplier.country_id {
+                let ready: bool = transaction
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM local_countries WHERE id = ?1)",
+                        [country_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| AuthError::Database)?;
+                if !ready {
+                    Some(("COUNTRY_DEPENDENCY", country_id.to_string()))
+                } else {
+                    let prior: Option<String> = transaction
+                        .query_row(
+                            "SELECT country_id FROM local_suppliers WHERE id = ?1",
+                            [supplier.id.to_string()],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(|_| AuthError::Database)?
+                        .flatten();
+                    prior
+                        .filter(|value| value != &country_id.to_string())
+                        .map(|value| ("SUPPLIER_COUNTRY_CONFLICT", value))
+                }
+            } else {
+                None
+            }
+        }
         "material_price" => {
             let price: MaterialPriceInput = serde_json::from_value(change.payload.clone())
                 .map_err(|_| AuthError::InvalidInput)?;
@@ -8502,6 +8589,12 @@ fn quarantine_category_projection(
         _ => None,
     };
     if let Some((reason, dependency)) = blocked {
+        if matches!(
+            reason,
+            "SUPPLIER_CODE_CONFLICT" | "SUPPLIER_COUNTRY_CONFLICT"
+        ) {
+            transaction.execute("INSERT INTO local_sync_catalog_quarantine(account_id,cursor,entity_type,entity_id,server_version,original_payload_json,reason) SELECT user_id,?1,?2,?3,?4,?5,?6 FROM local_session WHERE user_id IS NOT NULL ON CONFLICT DO NOTHING",params![change.cursor,change.entity_type,change.entity_id.to_string(),change.version,change.payload.to_string(),reason]).map_err(|_| AuthError::Database)?;
+        }
         transaction.execute(
             "INSERT INTO local_sync_projection_quarantine (entity_type, entity_id, dependency_id, reason, server_version) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(entity_type, entity_id) DO UPDATE SET dependency_id = excluded.dependency_id, reason = excluded.reason, server_version = excluded.server_version WHERE excluded.server_version >= local_sync_projection_quarantine.server_version",
             params![change.entity_type, change.entity_id.to_string(), dependency, reason, change.version],
@@ -8563,9 +8656,14 @@ fn replay_quarantined_category_dependents(
     transaction: &Transaction<'_>,
     now: SystemTime,
 ) -> Result<(), AuthError> {
-    for entity_type in ["material_category", "material", "material_price"] {
+    for entity_type in [
+        "material_category",
+        "material",
+        "supplier",
+        "material_price",
+    ] {
         let mut statement = transaction.prepare(
-            "SELECT r.entity_id, r.operation, r.server_version, r.payload_json, r.changed_at FROM local_sync_projection_quarantine q JOIN local_sync_remote_entities r ON r.entity_type = q.entity_type AND r.entity_id = q.entity_id WHERE q.entity_type = ?1 ORDER BY q.entity_id",
+            "SELECT r.entity_id, r.operation, r.server_version, r.payload_json, r.changed_at, r.source_cursor FROM local_sync_projection_quarantine q JOIN local_sync_remote_entities r ON r.entity_type = q.entity_type AND r.entity_id = q.entity_id WHERE q.entity_type = ?1 ORDER BY CAST(r.source_cursor AS INTEGER), q.entity_id",
         ).map_err(|_| AuthError::Database)?;
         let rows = statement
             .query_map([entity_type], |row| {
@@ -8575,15 +8673,16 @@ fn replay_quarantined_category_dependents(
                     row.get::<_, i64>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             })
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| AuthError::Database)?;
         drop(statement);
-        for (id, operation, version, payload, changed_at) in rows {
+        for (id, operation, version, payload, changed_at, cursor) in rows {
             let change = SyncPullChangeInput {
-                cursor: "0".into(),
+                cursor,
                 entity_type: entity_type.into(),
                 entity_id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
                 operation,
@@ -8598,6 +8697,7 @@ fn replay_quarantined_category_dependents(
             project_remote_catalog_change(transaction, &change, now)?;
             project_remote_master_data_change(transaction, &change, now)?;
             transaction.execute("DELETE FROM local_sync_projection_quarantine WHERE entity_type = ?1 AND entity_id = ?2", params![entity_type, id]).map_err(|_| AuthError::Database)?;
+            transaction.execute("UPDATE local_sync_catalog_quarantine SET recovered_version = ?3 WHERE entity_type = ?1 AND entity_id = ?2 AND server_version <= ?3 AND recovered_version IS NULL",params![entity_type,id,version]).map_err(|_| AuthError::Database)?;
             transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![entity_type, id, version]).map_err(|_| AuthError::Database)?;
         }
     }
@@ -10765,6 +10865,8 @@ mod tests {
                 }],
                 next_cursor: "3".into(),
             };
+            // Bad catalog history is now quarantined; a real cursor fault must still roll back the page.
+            *service.test_fail_before_pull_cursor_write.lock().unwrap() = true;
             assert!(service.apply_sync_pull_page(broken, now).is_err());
             assert_eq!(service.pull_cursor_for_account(second.id).unwrap(), "0");
             let staged: i64 = service
@@ -12906,6 +13008,134 @@ mod tests {
     }
 
     #[test]
+    fn malformed_catalog_history_is_retained_and_recovers_without_blocking_pull() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let account = account();
+        service
+            .cache_verified_account(account.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &account.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let material = Uuid::new_v4();
+        let supplier = Uuid::new_v4();
+        let price = Uuid::new_v4();
+        let change =
+            |cursor: &str, entity_type: &str, entity_id, version, payload| SyncPullChangeInput {
+                cursor: cursor.into(),
+                entity_type: entity_type.into(),
+                entity_id,
+                operation: "upsert".into(),
+                version,
+                payload,
+                changed_at: "2026-10-23T00:00:00Z".into(),
+            };
+        let broken = serde_json::json!({"name":"Incomplete supplier","__catalogQuarantine":"INVALID_CATALOG_PAYLOAD"});
+        service.apply_sync_pull_page(SyncPullPageInput {changes:vec![
+            change("1","supplier",supplier,1,broken.clone()),
+            change("2","material_price",price,1,serde_json::json!({"supplierId":supplier,"__catalogQuarantine":"INVALID_CATALOG_PAYLOAD"})),
+            change("3","material",material,1,serde_json::json!({"id":material,"nameZh":"M","aliases":[],"model":"M","specification":"S","unit":"pcs","isActive":true,"version":1})),
+        ],next_cursor:"3".into()},now).unwrap();
+        assert_eq!(service.pull_cursor_for_account(account.id).unwrap(), "3");
+        let recovered_supplier = serde_json::json!({"id":supplier,"businessCode":"RECOVERED","name":"Recovered supplier","isPreferred":false,"isBlacklisted":false,"isActive":true,"version":2});
+        service.apply_sync_pull_page(SyncPullPageInput {changes:vec![
+            change("4","supplier",supplier,2,recovered_supplier.clone()),
+            change("5","material_price",price,2,serde_json::json!({"id":price,"materialId":material,"supplierId":supplier,"currency":"USD","unitPriceMinor":"123","unit":"pcs","effectiveAt":"2026-01-01","version":2})),
+        ],next_cursor:"5".into()},now).unwrap();
+        let connection = service.connection.lock().unwrap();
+        let original: String = connection.query_row("SELECT original_payload_json FROM local_sync_catalog_quarantine WHERE entity_id = ?1",[supplier.to_string()],|row| row.get(0)).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&original).unwrap(),
+            broken
+        );
+        let recovered: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM local_sync_catalog_quarantine WHERE recovered_version = 2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(recovered, 2);
+        let saved: i64 = connection
+            .query_row(
+                "SELECT unit_price_minor FROM local_material_prices WHERE id = ?1",
+                [price.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved, 123);
+        drop(connection);
+        let mut tombstone = change("6", "supplier", supplier, 3, serde_json::json!({}));
+        tombstone.operation = "soft_delete".into();
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![
+                        tombstone,
+                        change("7", "supplier", supplier, 2, recovered_supplier.clone()),
+                    ],
+                    next_cursor: "7".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let deleted: i64 = connection
+            .query_row(
+                "SELECT deleted_at IS NOT NULL FROM local_suppliers WHERE id = ?1",
+                [supplier.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(deleted, 1);
+        drop(connection);
+        let duplicate_id = Uuid::new_v4();
+        let mut duplicate = recovered_supplier;
+        duplicate["id"] = serde_json::json!(duplicate_id);
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![change("8", "supplier", duplicate_id, 1, duplicate.clone())],
+                    next_cursor: "8".into(),
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(service.pull_cursor_for_account(account.id).unwrap(), "8");
+        let connection = service.connection.lock().unwrap();
+        let reason: String = connection
+            .query_row(
+                "SELECT reason FROM local_sync_projection_quarantine WHERE entity_id = ?1",
+                [duplicate_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reason, "SUPPLIER_CODE_CONFLICT");
+        drop(connection);
+        duplicate["businessCode"] = serde_json::json!("RECOVERED-SECOND");
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![change("9", "supplier", duplicate_id, 2, duplicate)],
+                    next_cursor: "9".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let evidence: i64 = connection.query_row("SELECT count(*) FROM local_sync_catalog_quarantine WHERE entity_id = ?1 AND recovered_version = 2",[duplicate_id.to_string()],|row|row.get(0)).unwrap();
+        assert_eq!(evidence, 1);
+    }
+
+    #[test]
     fn authorization_replay_survives_restart_and_preserves_incremental_state() {
         let path = std::env::temp_dir().join(format!("scope-replay-{}.sqlite", Uuid::new_v4()));
         let now = SystemTime::now();
@@ -13009,6 +13239,25 @@ mod tests {
             service.pending_sync_replay(account.id).unwrap(),
             Some((version.clone(), "500".into(), "1000".into()))
         );
+        *service.test_fail_before_pull_cursor_write.lock().unwrap() = true;
+        assert_eq!(
+            service.apply_sync_pull_page_with_replay(
+                SyncPullPageInput {
+                    changes: vec![change(501, "supplier", supplier_id, supplier.clone())],
+                    next_cursor: "501".into()
+                },
+                now,
+                account.id,
+                None,
+                Some(&version)
+            ),
+            Err(AuthError::Database)
+        );
+        assert_eq!(
+            service.pending_sync_replay(account.id).unwrap().unwrap().1,
+            "500"
+        );
+        assert_eq!(service.pull_cursor_for_account(account.id).unwrap(), "1000");
         service
             .apply_sync_pull_page_with_replay(
                 SyncPullPageInput {
@@ -13122,7 +13371,8 @@ mod tests {
             .unwrap();
         let material_id = Uuid::new_v4();
         let supplier_id = Uuid::new_v4();
-        let price_id = Uuid::new_v4();
+        let price_id = Uuid::parse_str("f0000000-0000-4000-8000-000000000001").unwrap();
+        let latest_id = Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();
         let material = MaterialInput {
             id: material_id,
             sku: None,
@@ -13168,6 +13418,11 @@ mod tests {
             source_note: None,
             version: 1,
         };
+        let latest = MaterialPriceInput {
+            id: latest_id,
+            unit_price_minor: "456".into(),
+            ..price.clone()
+        };
         let change = |cursor: &str, entity_type: &str, entity_id, payload| SyncPullChangeInput {
             cursor: cursor.into(),
             entity_type: entity_type.into(),
@@ -13193,8 +13448,14 @@ mod tests {
                             price_id,
                             serde_json::to_value(price).unwrap(),
                         ),
+                        change(
+                            "3",
+                            "material_price",
+                            latest_id,
+                            serde_json::to_value(latest).unwrap(),
+                        ),
                     ],
-                    next_cursor: "2".into(),
+                    next_cursor: "3".into(),
                 },
                 now,
             )
@@ -13213,7 +13474,7 @@ mod tests {
                 "SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1",
                 [account_id.to_string()], |row| row.get(0),
             ).unwrap();
-            assert_eq!(cursor, "2");
+            assert_eq!(cursor, "3");
             let count: i64 = connection
                 .query_row(
                     "SELECT count(*) FROM local_suppliers WHERE id = ?1",
@@ -13227,12 +13488,12 @@ mod tests {
             .apply_sync_pull_page(
                 SyncPullPageInput {
                     changes: vec![change(
-                        "3",
+                        "4",
                         "supplier",
                         supplier_id,
                         serde_json::to_value(supplier).unwrap(),
                     )],
-                    next_cursor: "3".into(),
+                    next_cursor: "4".into(),
                 },
                 now,
             )
@@ -13254,6 +13515,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+        let active: String = connection.query_row("SELECT id FROM local_material_prices WHERE material_id = ?1 AND is_active = 1 AND deleted_at IS NULL", [material_id.to_string()], |row| row.get(0)).unwrap();
+        assert_eq!(active, latest_id.to_string());
     }
 
     #[test]

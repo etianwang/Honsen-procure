@@ -2,6 +2,8 @@
 
 ## Global completion gate
 
+2026-10-23 PR #17 P1-01/P1-02 (B): implemented durable authorized-history replay, complete supplier/quote validation, dependency/collision quarantine and reasoned administrator recovery. [Builder evidence and recovery boundaries](reviews/PR17-SYNC-P1-REPAIR.md) cover PostgreSQL 16 and real SQLite. The two defects require independent targeted recheck before closure; PR #17 remains Draft and no parent/milestone checkbox changes. Windows EXE online re-login after revocation remains a NOT PASSED V1 production-release security gate under the user's approved gate adjustment.
+
 2026-10-22 T05 supplier maintenance defect (B): the supplier editor omitted the required country UUID. The candidate passes the selected authorization-context country for creation and retains the listed supplier's country on edit; Rust still authorizes the country. This is a bounded repair pending independent recheck, not renewed acceptance of T05, T04 or any milestone. See the latest `memory.md` handoff.
 
 Every task is a separately reviewable vertical slice: **IMPLEMENT → TARGETED TEST → INDEPENDENT RECHECK → CLOSE**. The original dependency table below is retained. Missing implementation/security prerequisites or external authority block the affected slice; open final-acceptance prerequisites block parent closure, not every safe independent implementation. Disputed boundaries require approval. Historical partial work is not acceptance.

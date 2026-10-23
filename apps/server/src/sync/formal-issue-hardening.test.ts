@@ -4,6 +4,11 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
 import { PostgresSyncStore } from './postgres-store.js'
 import { SyncService } from './service.js'
+import {
+  materialFixture,
+  supplierFixture,
+  priceFixture,
+} from './catalog-fixtures.js'
 
 const pool = process.env.TEST_DATABASE_URL
   ? new Pool({ connectionString: process.env.TEST_DATABASE_URL })
@@ -308,15 +313,18 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       formalSnapshotJson: JSON.stringify(approved),
     }
     for (const [entityType, entityId, payload] of [
-      ['material', line.materialId, { id: line.materialId, isActive: true }],
-      ['supplier', supplierId, { id: supplierId, countryId, isActive: true }],
+      ['material', line.materialId, materialFixture(line.materialId)],
+      ['supplier', supplierId, supplierFixture(supplierId, countryId)],
       [
         'material_price',
         line.ownerCatalogPriceId,
         {
-          id: line.ownerCatalogPriceId,
-          supplierId,
-          materialId: line.materialId,
+          ...priceFixture(
+            line.ownerCatalogPriceId,
+            line.materialId,
+            supplierId,
+          ),
+          unitPriceMinor: '100',
         },
       ],
     ] as const) {

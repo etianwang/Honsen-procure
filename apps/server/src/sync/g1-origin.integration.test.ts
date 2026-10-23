@@ -9,6 +9,7 @@ import { runMigrations } from '../db/migration-runner.js'
 import { PostgresAuthStore } from '../db/postgres-auth-store.js'
 import { PostgresSyncStore } from './postgres-store.js'
 import { SyncService } from './service.js'
+import { materialFixture } from './catalog-fixtures.js'
 
 const pool = process.env.TEST_DATABASE_URL
   ? new Pool({ connectionString: process.env.TEST_DATABASE_URL })
@@ -171,7 +172,7 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
         headers: { ...headersB, 'x-installation-id': installationA },
       })
       expect(pull.statusCode).toBe(200)
-      expect(syncPullResponseSchema.parse(pull.json())).toEqual({
+      expect(syncPullResponseSchema.parse(pull.json())).toMatchObject({
         changes: [],
         nextCursor: cursor,
       })
@@ -236,13 +237,17 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
     const installationId = randomUUID()
     const headersA = await session(accountA, installationId)
     const headersB = await session(accountB, installationId)
+    const materialId = randomUUID()
     const event = {
       eventId: randomUUID(),
       entityType: 'material',
-      entityId: randomUUID(),
+      entityId: materialId,
       operation: 'upsert',
       baseVersion: 0,
-      payload: { nameZh: 'G1 authorized global material' },
+      payload: {
+        ...materialFixture(materialId),
+        nameZh: 'G1 authorized global material',
+      },
     }
     const push = (headers: { authorization: string }, events: unknown[]) =>
       api.inject({
@@ -284,7 +289,7 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
         ...event,
         eventId: randomUUID(),
         baseVersion: 1,
-        payload: { nameZh: 'G1 legitimate account B update' },
+        payload: { ...event.payload, nameZh: 'G1 legitimate account B update' },
       }
       expect(
         syncPushResponseSchema.parse((await push(headersB, [next])).json())
@@ -311,13 +316,17 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
     const installationA = randomUUID()
     const installationB = randomUUID()
     const headersA = await session(accountId, installationA)
+    const materialId = randomUUID()
     const event = {
       eventId: randomUUID(),
       entityType: 'material',
-      entityId: randomUUID(),
+      entityId: materialId,
       operation: 'upsert',
       baseVersion: 0,
-      payload: { nameZh: 'G1 shared global fixture' },
+      payload: {
+        ...materialFixture(materialId),
+        nameZh: 'G1 shared global fixture',
+      },
     }
     const push = (headers: { authorization: string }, events: unknown[]) =>
       api.inject({
@@ -349,7 +358,10 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
         ...event,
         eventId: randomUUID(),
         baseVersion: 1,
-        payload: { nameZh: 'G1 legitimate replacement installation' },
+        payload: {
+          ...event.payload,
+          nameZh: 'G1 legitimate replacement installation',
+        },
       }
       const accepted = await push(headersB, [next])
       expect(

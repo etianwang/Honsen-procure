@@ -1,4 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import {
+  materialFixture,
+  supplierFixture,
+  priceFixture,
+} from './catalog-fixtures.js'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
@@ -4194,20 +4199,24 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     const materialId = randomUUID()
     await pool!.query(
       "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('material', $1, 1, $2, $3)",
-      [materialId, { id: materialId }, actorId],
+      [materialId, materialFixture(materialId), actorId],
     )
     for (const [entityType, entityId, payload] of [
-      ['supplier', supplierA, { countryId: countryA, name: 'A' }],
-      ['supplier', supplierB, { countryId: countryB, name: 'B' }],
       [
-        'material_price',
-        priceA,
-        { supplierId: supplierA, materialId, unitPriceMinor: '1' },
+        'supplier',
+        supplierA,
+        { ...supplierFixture(supplierA, countryA), name: 'A' },
       ],
+      [
+        'supplier',
+        supplierB,
+        { ...supplierFixture(supplierB, countryB), name: 'B' },
+      ],
+      ['material_price', priceA, priceFixture(priceA, materialId, supplierA)],
       [
         'material_price',
         priceB,
-        { supplierId: supplierB, materialId, unitPriceMinor: '2' },
+        { ...priceFixture(priceB, materialId, supplierB), unitPriceMinor: '2' },
       ],
     ] as const) {
       const result = await store.pushEvent({
@@ -4266,7 +4275,10 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
             entityId: supplierB,
             operation: 'upsert',
             baseVersion: 1,
-            payload: { countryId: countryA, name: 'forged' },
+            payload: {
+              ...supplierFixture(supplierB, countryA),
+              name: 'forged',
+            },
           },
         ],
       },
@@ -4284,7 +4296,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         entityId: supplierA,
         operation: 'upsert',
         baseVersion: 1,
-        payload: { countryId: countryA, name: 'updated A' },
+        payload: { ...supplierFixture(supplierA, countryA), name: 'updated A' },
       },
     })
     expect(ownEdit.status).toBe('accepted')
@@ -4300,7 +4312,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
         entityId: supplierA,
         operation: 'upsert',
         baseVersion: 2,
-        payload: { countryId: countryB, name: 'invalid' },
+        payload: { ...supplierFixture(supplierA, countryB), name: 'invalid' },
       },
     })
     expect(countryChange.status).toBe('validation_error')

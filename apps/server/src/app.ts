@@ -280,6 +280,29 @@ export function createApp(
         throw error
       }
     })
+    app.post('/api/sync/catalog-repairs', async (request, reply) => {
+      try {
+        if (typeof request.headers.authorization !== 'string')
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        const response = await sync.repairCatalog(
+          await authenticateRequest(request),
+          request.body,
+        )
+        if (response.status === 'accepted') {
+          const hint = JSON.stringify({ type: 'dataset-changed' })
+          for (const socket of sockets) socket.send(hint)
+        }
+        return response
+      } catch (error) {
+        if (error instanceof AuthenticationError)
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        if (error instanceof CategoryRepairError)
+          return reply.status(403).send({ code: error.code })
+        if (error instanceof z.ZodError)
+          return reply.status(400).send({ code: 'INVALID_REQUEST' })
+        throw error
+      }
+    })
     app.post('/api/sync/push', async (request, reply) => {
       try {
         const account = await authenticateRequest(request)

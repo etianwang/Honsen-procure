@@ -1,19 +1,29 @@
 import { z } from 'zod'
 import { uuidSchema } from './contracts.js'
 import { currencySchema, minorAmountSchema } from './money.js'
+import { businessCodeSchema } from './master-data.js'
 
-const optionalText = z.string().trim().max(1000).nullable()
+const catalogText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .refine(
+      (value) => new TextEncoder().encode(value).length <= max,
+      'Text exceeds the desktop UTF-8 byte limit.',
+    )
+const optionalText = catalogText(1000).min(1).nullable()
 
 export const materialSchema = z.object({
   id: uuidSchema,
-  sku: z.string().trim().min(1).max(128).nullable(),
-  nameZh: z.string().trim().min(1).max(255),
-  nameFr: z.string().trim().min(1).max(255).nullable(),
-  aliases: z.array(z.string().trim().min(1).max(255)).max(50),
+  sku: catalogText(128).min(1).nullable(),
+  nameZh: catalogText(255).min(1),
+  nameFr: catalogText(255).min(1).nullable(),
+  aliases: z.array(catalogText(255).min(1)).max(50),
   brand: optionalText,
-  model: z.string().trim().min(1).max(255),
-  specification: z.string().trim().min(1).max(2000),
-  unit: z.string().trim().min(1).max(64),
+  model: catalogText(255).min(1),
+  specification: catalogText(2000).min(1),
+  unit: catalogText(64).min(1),
   notes: optionalText,
   isActive: z.boolean(),
   version: z.number().int().min(1),
@@ -22,15 +32,19 @@ export const materialSchema = z.object({
 export const supplierSchema = z.object({
   id: uuidSchema,
   countryId: uuidSchema,
-  businessCode: z.string().trim().min(1).max(64),
-  name: z.string().trim().min(1).max(255),
+  businessCode: businessCodeSchema,
+  name: catalogText(255).min(1),
   contactName: optionalText,
   address: optionalText,
   city: optionalText,
   country: optionalText,
   phone: optionalText,
   whatsapp: optionalText,
-  email: z.email().max(255).nullable(),
+  email: z
+    .email()
+    .max(255)
+    .refine((value) => new TextEncoder().encode(value).length <= 255)
+    .nullable(),
   paymentTerms: optionalText,
   deliveryLeadTime: optionalText,
   isPreferred: z.boolean(),
@@ -44,11 +58,20 @@ export const materialPriceSchema = z.object({
   materialId: uuidSchema,
   supplierId: uuidSchema,
   currency: currencySchema,
-  unitPriceMinor: minorAmountSchema.refine((value) => BigInt(value) >= 0n, {
-    message: 'Unit price must be non-negative.',
-  }),
-  unit: z.string().trim().min(1).max(64),
-  effectiveAt: z.string().date(),
+  unitPriceMinor: minorAmountSchema.refine(
+    (value) =>
+      value.length <= 19 &&
+      /^(0|[1-9]\d*)$/.test(value) &&
+      BigInt(value) <= 9223372036854775807n,
+    {
+      message: 'Unit price must fit a non-negative signed 64-bit integer.',
+    },
+  ),
+  unit: catalogText(64).min(1),
+  effectiveAt: z
+    .string()
+    .date()
+    .refine((value) => value >= '2000-01-01'),
   sourceNote: optionalText,
   version: z.number().int().min(1),
 })
