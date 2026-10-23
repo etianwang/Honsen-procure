@@ -14,6 +14,10 @@ export type CatalogPriceView = {
   unitPriceMinor: string
   unit: string
   effectiveAt: string
+  isBlacklisted?: boolean
+  paymentTerms?: string | null
+  deliveryLeadTime?: string | null
+  sourceNote?: string | null
 }
 
 export type CatalogMaterialView = {
@@ -64,6 +68,12 @@ export type CatalogApi = {
     query: string,
     projectId?: string,
   ): Promise<CatalogMaterialView[]>
+  listCatalogPrices(
+    materialId: string,
+    projectId: string | undefined,
+    after: string | null,
+    includeBlacklisted?: boolean,
+  ): Promise<CatalogPriceView[]>
   saveMaterial(material: Material): Promise<void>
   listSuppliers(): Promise<SupplierView[]>
   saveSupplier(supplier: Supplier): Promise<void>
@@ -89,6 +99,18 @@ export const tauriCatalogApi: CatalogApi = {
     tauriInvoke()<CatalogMaterialView[]>('search_catalog', {
       query,
       projectId,
+    }),
+  listCatalogPrices: (
+    materialId,
+    projectId,
+    after,
+    includeBlacklisted = false,
+  ) =>
+    tauriInvoke()<CatalogPriceView[]>('list_catalog_prices', {
+      materialId,
+      projectId,
+      after,
+      includeBlacklisted,
     }),
   saveMaterial: (material) =>
     tauriInvoke()<void>('save_material', { material }),

@@ -203,6 +203,7 @@ fn main() {
             commands::save_material_image,
             commands::get_material_square_image,
             commands::search_catalog,
+            commands::list_catalog_prices,
             commands::list_suppliers,
             commands::save_project_defaults,
             commands::list_project_defaults,
@@ -1678,6 +1679,8 @@ fn native_sync_draft(order_id: Uuid, applicant_id: Uuid) -> RequisitionDraftInpu
         lines: vec![RequisitionLineInput {
             id: Uuid::new_v4(),
             material_id: None,
+            catalog_price_id: None,
+            price_source: None,
             material_snapshot: MaterialSnapshotInput {
                 name_zh: "Native sync fixture".into(),
                 name_fr: None,

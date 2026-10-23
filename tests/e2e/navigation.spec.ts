@@ -35,7 +35,32 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
     Object.assign(window, {
       __TAURI__: {
         core: {
-          invoke(command: string, args?: { input?: Record<string, unknown> }) {
+          invoke(
+            command: string,
+            args?: {
+              input?: Record<string, unknown>
+              after?: string | null
+              projectId?: string
+            },
+          ) {
+            if (command === 'list_catalog_prices') {
+              Object.assign(window, { __quoteProject: args?.projectId })
+              return Promise.resolve(
+                Array.from({ length: 26 }, (_, index) => ({
+                  priceId: `quote-${index}`,
+                  supplierId: `supplier-${index}`,
+                  supplierName: `supplier ${index}`,
+                  isPreferredSupplier: false,
+                  currency: 'XOF',
+                  unitPriceMinor: '1250',
+                  unit: '件',
+                  effectiveAt: '2026-10-12',
+                })).slice(
+                  args?.after ? Number(args.after.split('-').at(-1)) + 1 : 0,
+                  args?.after ? Number(args.after.split('-').at(-1)) + 26 : 25,
+                ),
+              )
+            }
             if (command === 'search_catalog')
               return Promise.resolve([
                 {
@@ -64,8 +89,9 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
                   ],
                 },
               ])
-            if (command === 'save_requisition_draft')
+            if (command === 'save_requisition_draft') {
               return Promise.resolve({ totalMinor: '0' })
+            }
             if (command === 'set_procurement_mode') {
               Object.assign(window, { __procurementMode: args?.mode })
               return Promise.resolve()
@@ -97,11 +123,10 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
   await page.getByText('业主自行采购', { exact: true }).click()
   await page.getByLabel('材料').click()
   await page.getByText('业主报价材料 · OP-01', { exact: true }).click()
+  await page.getByRole('button', { name: '加载更多报价' }).click()
   await expect(page.getByLabel('选择报价')).toHaveValue('')
   await page.getByLabel('选择报价').click()
-  await page
-    .getByText('owner fixture supplier · 1250 XOF', { exact: true })
-    .click()
+  await page.getByText(/supplier 25 ·/).click()
   await page.getByRole('textbox', { name: '加价' }).fill('1000')
   await page.getByRole('button', { name: '保存草稿' }).click()
   await expect(page.getByLabel('换算参考单价（只读）')).toHaveValue('1250')
@@ -117,7 +142,7 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
           }
         ).__ownerPricingInput?.lines?.[0]?.quoteSource?.materialPriceId,
     ),
-  ).resolves.toBe('00000000-0000-4000-8000-000000000902')
+  ).resolves.toBe('quote-25')
   await expect(browserErrors).toEqual([])
 })
 
@@ -275,7 +300,7 @@ test('regular requisition page completes owner pricing rejection and resubmissio
   await page.getByLabel('材料').click()
   await page.getByText('跨币种业主材料 · OPA-CNY', { exact: true }).click()
   await page.getByLabel('选择报价').click()
-  await page.getByText('审批报价供应商 · 1234 CNY', { exact: true }).click()
+  await page.getByText(/审批报价供应商 ·/).click()
   await page.getByLabel('CNY → XOF 锁定汇率').fill('76.5')
   await page.getByRole('textbox', { name: '加价', exact: true }).fill('1000')
   await page.getByRole('button', { name: '保存草稿' }).click()
@@ -2194,4 +2219,115 @@ test('administrator queries and changes cloud-scoped bindings from desktop UI', 
   await expect(page.getByText('授权范围已原子修改。')).toBeVisible()
   await page.getByRole('button', { name: '撤销' }).click()
   await expect(page.getByText('授权已撤销。')).toBeVisible()
+})
+
+test('catalog details and Honsen draft can reach later quote pages', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const prices = Array.from({ length: 26 }, (_, i) => ({
+      priceId: `p-${i}`,
+      supplierId: `s-${i}`,
+      supplierName: `Vendor ${i}`,
+      isPreferredSupplier: false,
+      currency: 'XOF',
+      unitPriceMinor: String(1000 + i),
+      unit: '件',
+      effectiveAt: '2026-10-12',
+    }))
+    const material = {
+      id: '00000000-0000-4000-8000-000000000901',
+      sku: null,
+      nameZh: '分页材料',
+      nameFr: null,
+      aliases: [],
+      brand: null,
+      model: 'PAGE',
+      specification: 'fixture',
+      unit: '件',
+      notes: null,
+      version: 1,
+      prices: prices.slice(0, 4),
+    }
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              after?: string | null
+              projectId?: string
+              draft?: unknown
+            },
+          ) {
+            if (command === 'search_catalog') return Promise.resolve([material])
+            if (command === 'list_catalog_prices') {
+              Object.assign(window, { __pagedProject: args?.projectId })
+              return Promise.resolve(
+                prices.slice(
+                  args?.after ? Number(args.after.split('-').at(-1)) + 1 : 0,
+                  args?.after ? Number(args.after.split('-').at(-1)) + 26 : 25,
+                ),
+              )
+            }
+            if (command === 'get_material_square_image')
+              return Promise.resolve(null)
+            if (command === 'save_requisition_draft') {
+              Object.assign(window, { __pagedDraft: args?.draft })
+              return Promise.resolve({ totalMinor: '0' })
+            }
+            return Promise.resolve()
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await page.getByRole('button', { name: '查看全部报价' }).click()
+  await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(page.getByText(/Vendor 25 ·/)).toBeVisible()
+  await page.getByRole('button', { name: '上一页' }).click()
+  await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: '采购申请单' }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('分页材料 · PAGE', { exact: true }).click()
+  await page.getByRole('button', { name: '加载更多报价' }).click()
+  await page.getByLabel('选择供应商报价').click()
+  await page.getByText(/Vendor 25 ·/).click()
+  await expect(page.getByLabel('单价（最小货币单位）')).toHaveValue('1025')
+  await page.getByLabel('数量').fill('3')
+  await page.getByRole('button', { name: '保存草稿' }).click()
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __pagedDraft?: {
+              lines: Array<{
+                supplierId: string
+                quantity: string
+                unitPriceMinor: string
+                currency: string
+              }>
+            }
+          }
+        ).__pagedDraft?.lines[0],
+    ),
+  ).resolves.toMatchObject({
+    supplierId: 's-25',
+    catalogPriceId: 'p-25',
+    priceSource: 'catalog',
+    quantity: '3',
+    unitPriceMinor: '1025',
+    currency: 'XOF',
+  })
+  await expect(
+    page.evaluate(
+      () => (window as Window & { __pagedProject?: string }).__pagedProject,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000102')
 })

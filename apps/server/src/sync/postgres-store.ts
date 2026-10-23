@@ -230,6 +230,17 @@ export class PostgresSyncStore implements SyncStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      if (
+        ['material', 'material_price', 'supplier', 'purchase_order'].includes(
+          input.event.entityType,
+        )
+      ) {
+        await client.query(
+          input.event.entityType === 'purchase_order'
+            ? "SELECT pg_advisory_xact_lock(hashtextextended('catalog-quote-write', 0))"
+            : "SELECT pg_advisory_xact_lock_shared(hashtextextended('catalog-quote-write', 0))",
+        )
+      }
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         input.event.eventId,
       ])
@@ -442,6 +453,21 @@ export class PostgresSyncStore implements SyncStore {
         }
       }
       if (input.event.entityType === 'purchase_order') {
+        if (
+          !(await validCatalogQuotes(
+            client,
+            input.event,
+            current?.payload_json,
+          ))
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'QUOTE_UNAVAILABLE',
+          }
+        }
         if (!(await validParentWithExistingRfqs(client, input.event))) {
           await client.query('ROLLBACK')
           return {
@@ -524,6 +550,17 @@ export class PostgresSyncStore implements SyncStore {
           await this.recordConflict(client, input, formal, result)
           await client.query('COMMIT')
           return result
+        }
+        if (
+          input.event.payload.formallyIssuedAt != null &&
+          current?.payload_json.formallyIssuedAt == null &&
+          (await ownerQuoteDiscrepancy(client, input.event.payload))
+        ) {
+          await client.query(
+            `INSERT INTO audit_entries (id, actor_id, entity_type, entity_id, action, reason)
+             VALUES (gen_random_uuid(), $1, 'purchase_order', $2, 'issued_quote_verification_discrepancy', $3)`,
+            [input.actorId, input.event.entityId, input.event.eventId],
+          )
         }
       }
 
@@ -2162,4 +2199,225 @@ function canonicalProjectDefaultsPayload(
   })
   if (!parsed.success || parsed.data.projectId !== event.entityId) return null
   return parsed.data
+}
+
+async function ownerQuoteDiscrepancy(
+  client: PoolClient,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  if (
+    payload.procurementMode !== 'owner_self_purchase' ||
+    !Array.isArray(payload.lines)
+  )
+    return false
+  for (const item of payload.lines) {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      Array.isArray(item) ||
+      item.ownerQuoteSource !== 'catalog_price'
+    )
+      continue
+    let supplier: unknown
+    try {
+      supplier = JSON.parse(item.supplierSnapshotJson)
+    } catch {
+      return true
+    }
+    if (!supplier || typeof supplier !== 'object' || Array.isArray(supplier))
+      return true
+    const supplierId = (supplier as Record<string, unknown>).id
+    const result = await client.query(
+      `SELECT 1 FROM sync_entities p
+       JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = p.payload_json->>'supplierId' AND NOT s.is_deleted
+       JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = p.payload_json->>'materialId' AND NOT m.is_deleted
+       WHERE p.entity_type = 'material_price' AND p.entity_id::text = $1 AND NOT p.is_deleted
+         AND p.payload_json->>'materialId' = $2 AND p.payload_json->>'supplierId' = $3
+         AND p.payload_json->>'currency' = $4 AND p.payload_json->>'unit' = $5 AND p.payload_json->>'unitPriceMinor' = $6
+         AND s.payload_json->>'countryId' = $7 AND s.payload_json->>'isActive' = 'true' AND s.payload_json->>'isBlacklisted' = 'false'
+         AND m.payload_json->>'isActive' = 'true'
+         AND p.entity_id::text = (SELECT c.entity_id::text FROM server_change_log c WHERE c.entity_type = 'material_price'
+           AND c.payload_json->>'materialId' = $2 AND c.payload_json->>'supplierId' = $3 AND c.payload_json->>'currency' = $4
+           ORDER BY c.sequence DESC LIMIT 1)`,
+      [
+        item.ownerCatalogPriceId,
+        item.materialId,
+        supplierId,
+        item.currency,
+        item.unit,
+        item.ownerSourceUnitPriceMinor,
+        payload.countryId,
+      ],
+    )
+    if (result.rowCount !== 1) return true
+  }
+  return false
+}
+
+// The shared advisory lock serializes quote/supplier writes with this verification.
+async function validCatalogQuotes(
+  client: PoolClient,
+  event: SyncEvent,
+  previous?: Record<string, unknown>,
+): Promise<boolean> {
+  if (event.operation !== 'upsert' || event.payload.formallyIssuedAt != null)
+    return true
+  if (
+    previous &&
+    [
+      'approved',
+      'confirmed',
+      'executing',
+      'receiving',
+      'completed',
+      'completed_with_conditions',
+    ].includes(String(previous.workflowStatus)) &&
+    previous.countryId === event.payload.countryId &&
+    previous.projectId === event.payload.projectId &&
+    previous.departmentId === event.payload.departmentId &&
+    previous.teamId === event.payload.teamId &&
+    isDeepStrictEqual(previous.lines, event.payload.lines)
+  )
+    return true
+  const currentLines = Array.isArray(previous?.lines) ? previous.lines : []
+  const previousCatalog = currentLines.some(
+    (line: unknown) =>
+      line &&
+      typeof line === 'object' &&
+      !Array.isArray(line) &&
+      (line as Record<string, unknown>).catalogPriceId != null,
+  )
+  if (event.payload.procurementMode === 'owner_self_purchase')
+    return (
+      !previousCatalog &&
+      (!Array.isArray(event.payload.lines) ||
+        event.payload.lines.every(
+          (line: unknown) =>
+            !line ||
+            typeof line !== 'object' ||
+            Array.isArray(line) ||
+            (line as Record<string, unknown>).catalogPriceId == null,
+        ))
+    )
+  const lines = event.payload.lines
+  if (!Array.isArray(lines))
+    return (
+      !previousCatalog &&
+      event.payload.workflowStatus !== 'pending_confirmation'
+    )
+  for (const value of lines) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return false
+    const line = value as Record<string, unknown>
+    const old = currentLines.find(
+      (item: unknown) =>
+        item &&
+        typeof item === 'object' &&
+        !Array.isArray(item) &&
+        (item as Record<string, unknown>).id === line.id,
+    ) as Record<string, unknown> | undefined
+    if (
+      event.payload.workflowStatus === 'pending_confirmation' &&
+      old?.catalogPriceId &&
+      line.catalogPriceId !== old.catalogPriceId
+    )
+      return false
+    if (
+      line.priceSource != null &&
+      line.priceSource !== 'catalog' &&
+      line.priceSource !== 'manual'
+    )
+      return false
+    if ((line.priceSource === 'catalog') !== (line.catalogPriceId != null))
+      return false
+    if (line.catalogPriceId == null && line.priceSource == null) {
+      if (
+        line.materialId != null &&
+        line.supplierSnapshotJson != null &&
+        (!old ||
+          old.catalogPriceId != null ||
+          old.priceSource != null ||
+          old.materialId !== line.materialId ||
+          old.supplierSnapshotJson !== line.supplierSnapshotJson ||
+          old.currency !== line.currency ||
+          old.unit !== line.unit ||
+          old.unitPriceMinor !== line.unitPriceMinor)
+      )
+        return false
+      continue
+    }
+    if (line.supplierSnapshotJson == null && line.priceSource === 'manual')
+      continue
+    if (
+      typeof line.supplierSnapshotJson !== 'string' ||
+      (line.priceSource === 'catalog' && typeof line.materialId !== 'string')
+    )
+      return false
+    let supplier: unknown
+    try {
+      supplier = JSON.parse(line.supplierSnapshotJson)
+    } catch {
+      return false
+    }
+    if (!supplier || typeof supplier !== 'object' || Array.isArray(supplier))
+      return false
+    const supplierId = (supplier as Record<string, unknown>).id
+    if (
+      typeof supplierId !== 'string' ||
+      typeof event.payload.countryId !== 'string'
+    )
+      return false
+    const scope = await client.query(
+      `SELECT 1 FROM projects p
+      JOIN user_project_bindings b ON b.project_id = p.id AND b.user_id::text = $1 AND b.deleted_at IS NULL
+      JOIN user_project_scope_bindings a ON a.project_id = p.id AND a.user_id = b.user_id AND a.deleted_at IS NULL
+        AND a.department_id::text = $3 AND a.team_id::text = $4
+      WHERE p.id::text = $2 AND p.country_id::text = $5 AND p.is_active AND p.deleted_at IS NULL
+      FOR SHARE OF p, b, a`,
+      [
+        event.payload.applicantId,
+        event.payload.projectId,
+        event.payload.departmentId,
+        event.payload.teamId,
+        event.payload.countryId,
+      ],
+    )
+    if (scope.rowCount !== 1) return false
+    if (line.priceSource === 'manual') {
+      const allowedSupplier = await client.query(
+        `SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1 AND NOT is_deleted
+         AND payload_json->>'countryId' = $2 AND payload_json->>'isActive' = 'true' AND payload_json->>'isBlacklisted' = 'false'`,
+        [supplierId, event.payload.countryId],
+      )
+      if (allowedSupplier.rowCount !== 1) return false
+      continue
+    }
+    const result = await client.query(
+      `SELECT 1 FROM sync_entities p
+      JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = p.payload_json->>'supplierId' AND NOT s.is_deleted
+      JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = p.payload_json->>'materialId' AND NOT m.is_deleted
+      WHERE p.entity_type = 'material_price' AND p.entity_id::text = $1 AND NOT p.is_deleted
+        AND p.payload_json->>'materialId' = $2 AND p.payload_json->>'supplierId' = $3
+        AND p.payload_json->>'currency' = $4 AND p.payload_json->>'unit' = $5
+        AND p.payload_json->>'unitPriceMinor' = $6 AND s.payload_json->>'countryId' = $7
+        AND s.payload_json->>'isActive' = 'true'
+        AND s.payload_json->>'isBlacklisted' = 'false'
+        AND m.payload_json->>'isActive' = 'true'
+        AND p.entity_id::text = (SELECT c.entity_id::text FROM server_change_log c
+          WHERE c.entity_type = 'material_price' AND c.payload_json->>'materialId' = $2
+            AND c.payload_json->>'supplierId' = $3 AND c.payload_json->>'currency' = $4
+          ORDER BY c.sequence DESC LIMIT 1)`,
+      [
+        line.catalogPriceId,
+        line.materialId,
+        supplierId,
+        line.currency,
+        line.unit,
+        line.unitPriceMinor,
+        event.payload.countryId,
+      ],
+    )
+    if (result.rowCount !== 1) return false
+  }
+  return true
 }

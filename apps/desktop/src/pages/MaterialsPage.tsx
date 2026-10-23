@@ -9,7 +9,7 @@ import {
   Spin,
   Switch,
 } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Plus, Search, SlidersHorizontal } from 'lucide-react'
 import {
   formatMoney,
@@ -21,6 +21,7 @@ import {
   tauriCatalogApi,
   type CatalogApi,
   type CatalogMaterialView,
+  type CatalogPriceView,
   type SupplierView,
 } from '../lib/catalog-api'
 import {
@@ -29,7 +30,11 @@ import {
 } from '../components/MaterialImageCropper'
 import { canEditMaterials, type UserRole } from '../lib/permissions'
 
-type MaterialsPageProps = { role: UserRole; api?: CatalogApi }
+type MaterialsPageProps = {
+  role: UserRole
+  projectId?: string
+  api?: CatalogApi
+}
 type MaterialFormValues = {
   sku?: string
   nameZh: string
@@ -69,11 +74,13 @@ type PriceFormValues = {
 
 export function MaterialsPage({
   role,
+  projectId,
   api = tauriCatalogApi,
 }: MaterialsPageProps) {
   const canEdit = canEditMaterials(role)
   const [query, setQuery] = useState('')
   const [materials, setMaterials] = useState<CatalogMaterialView[] | null>(null)
+  const [loadedProject, setLoadedProject] = useState<string | undefined>()
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -84,6 +91,14 @@ export function MaterialsPage({
   >(null)
   const [quoteMaterial, setQuoteMaterial] =
     useState<CatalogMaterialView | null>(null)
+  const [detailMaterial, setDetailMaterial] =
+    useState<CatalogMaterialView | null>(null)
+  const [detailPrices, setDetailPrices] = useState<CatalogPriceView[]>([])
+  const [detailCursors, setDetailCursors] = useState<(string | null)[]>([null])
+  const [detailPage, setDetailPage] = useState(0)
+  const [detailMore, setDetailMore] = useState(false)
+  const [detailBusy, setDetailBusy] = useState(false)
+  const detailRequest = useRef(0)
   const [imageDraft, setImageDraft] = useState<MaterialImageDraft | null>(null)
   const [suppliers, setSuppliers] = useState<SupplierView[]>([])
   const [saving, setSaving] = useState(false)
@@ -93,18 +108,24 @@ export function MaterialsPage({
 
   useEffect(() => {
     let isCurrent = true
+    if (!projectId) {
+      return () => {
+        isCurrent = false
+      }
+    }
     api
-      .searchCatalog(query)
+      .searchCatalog(query, projectId)
       .then((result) => {
         if (!isCurrent) return
         setError(null)
         setMaterials(result)
+        setLoadedProject(projectId)
       })
       .catch(() => isCurrent && setError('无法读取本地材料库'))
     return () => {
       isCurrent = false
     }
-  }, [api, query, reloadKey])
+  }, [api, projectId, query, reloadKey])
 
   useEffect(() => {
     if (!editor) return
@@ -280,6 +301,32 @@ export function MaterialsPage({
     await loadSuppliers()
   }
 
+  async function loadDetailPrices(
+    material: CatalogMaterialView,
+    after: string | null,
+    page: number,
+  ) {
+    const request = ++detailRequest.current
+    setDetailBusy(true)
+    try {
+      if (!projectId) throw new Error('missing project')
+      const prices = await api.listCatalogPrices(
+        material.id,
+        projectId,
+        after,
+        true,
+      )
+      if (request !== detailRequest.current) return
+      setDetailPrices(prices)
+      setDetailPage(page)
+      setDetailMore(prices.length === 25)
+    } catch {
+      if (request === detailRequest.current) setError('无法读取供应商报价')
+    } finally {
+      if (request === detailRequest.current) setDetailBusy(false)
+    }
+  }
+
   async function savePrice(values: PriceFormValues) {
     if (!quoteMaterial) return
     const price: MaterialPrice = {
@@ -348,9 +395,11 @@ export function MaterialsPage({
           onClose={() => setNotice(null)}
         />
       )}
-      {error ? (
+      {!projectId ? (
+        <Alert type="error" title="请选择有效的授权项目以查看报价" showIcon />
+      ) : error ? (
         <Alert type="error" title={error} showIcon />
-      ) : materials === null ? (
+      ) : materials === null || loadedProject !== projectId ? (
         <Spin aria-label="正在搜索材料" />
       ) : (
         <CatalogTable
@@ -359,6 +408,12 @@ export function MaterialsPage({
           canEdit={canEdit}
           onEdit={openEditor}
           onAddPrice={openPriceEditor}
+          onDetails={(material) => {
+            setDetailMaterial(material)
+            setDetailPrices([])
+            setDetailCursors([null])
+            void loadDetailPrices(material, null, 0)
+          }}
         />
       )}
       <p className="access-note">
@@ -366,6 +421,58 @@ export function MaterialsPage({
           ? '采购员和管理员可新增、修改、停用材料及维护供应商价格。'
           : '工程师与查看者仅可搜索和查看材料及供应商价格。'}
       </p>
+      <Modal
+        title="材料报价详情"
+        open={detailMaterial !== null}
+        onCancel={() => {
+          detailRequest.current++
+          setDetailMaterial(null)
+        }}
+        footer={null}
+      >
+        {detailPrices.map((price) => (
+          <p key={price.priceId}>
+            {price.supplierName} · {price.isPreferredSupplier ? '首选 · ' : ''}
+            {price.isBlacklisted ? '黑名单 · ' : ''}
+            {formatMoney(
+              { currency: price.currency, minor: price.unitPriceMinor },
+              'zh-CN',
+            )}{' '}
+            · {price.unit} · {price.effectiveAt} ·{' '}
+            {price.deliveryLeadTime ?? '—'} · {price.paymentTerms ?? '—'} ·{' '}
+            {price.sourceNote ?? '—'}
+          </p>
+        ))}
+        <Button
+          disabled={detailBusy || detailPage === 0}
+          onClick={() =>
+            detailMaterial &&
+            void loadDetailPrices(
+              detailMaterial,
+              detailCursors[detailPage - 1],
+              detailPage - 1,
+            )
+          }
+        >
+          上一页
+        </Button>
+        <Button
+          disabled={detailBusy || !detailMore}
+          onClick={() =>
+            detailMaterial &&
+            (() => {
+              const after = detailPrices.at(-1)?.priceId ?? null
+              setDetailCursors((current) => [
+                ...current.slice(0, detailPage + 1),
+                after,
+              ])
+              void loadDetailPrices(detailMaterial, after, detailPage + 1)
+            })()
+          }
+        >
+          下一页
+        </Button>
+      </Modal>
       <Modal
         title={editor === 'new' ? '新增材料' : '编辑材料'}
         open={editor !== null}
@@ -649,12 +756,14 @@ function CatalogTable({
   canEdit,
   onEdit,
   onAddPrice,
+  onDetails,
 }: {
   materials: CatalogMaterialView[]
   api: CatalogApi
   canEdit: boolean
   onEdit: (material: CatalogMaterialView) => void
   onAddPrice: (material: CatalogMaterialView) => void
+  onDetails: (material: CatalogMaterialView) => void
 }) {
   return (
     <Card
@@ -677,7 +786,7 @@ function CatalogTable({
               <th>型号 / 规格</th>
               <th>单位</th>
               <th>供应商报价（最多 4 家）</th>
-              {canEdit && <th>操作</th>}
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -720,16 +829,21 @@ function CatalogTable({
                     )}
                   </div>
                 </td>
-                {canEdit && (
-                  <td>
-                    <Button type="link" onClick={() => onEdit(material)}>
-                      编辑材料
-                    </Button>
-                    <Button type="link" onClick={() => onAddPrice(material)}>
-                      维护报价
-                    </Button>
-                  </td>
-                )}
+                <td>
+                  <Button type="link" onClick={() => onDetails(material)}>
+                    查看全部报价
+                  </Button>
+                  {canEdit && (
+                    <>
+                      <Button type="link" onClick={() => onEdit(material)}>
+                        编辑材料
+                      </Button>
+                      <Button type="link" onClick={() => onAddPrice(material)}>
+                        维护报价
+                      </Button>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

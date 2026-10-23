@@ -102,6 +102,9 @@ const previewRequisitionApi: RequisitionApi = {
 }
 
 const previewCatalogApi = {
+  async listCatalogPrices() {
+    return []
+  },
   async searchCatalog() {
     return [
       {
@@ -447,7 +450,9 @@ function App() {
             />
           ) : page === 'materials' ? (
             <MaterialsPage
+              key={requisitionContext?.projectId}
               role={session ? role : 'purchaser'}
+              projectId={requisitionContext?.projectId}
               api={
                 (
                   window as Window & {
@@ -457,6 +462,7 @@ function App() {
                   ? undefined
                   : {
                       searchCatalog: async () => [],
+                      listCatalogPrices: async () => [],
                       saveMaterial: async () => {},
                       listSuppliers: async () => [],
                       saveSupplier: async () => {},
