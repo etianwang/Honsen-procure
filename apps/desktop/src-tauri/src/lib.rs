@@ -15951,6 +15951,32 @@ mod tests {
     }
 
     #[test]
+    fn stale_selected_catalog_quote_cannot_be_submitted() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        service.bootstrap_test_profile("test-engineer-a", "test-engineer-b", "test-purchaser", now).unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service.offline_login("purchaser", "test-purchaser", captcha.id, answer(&captcha.question), now).unwrap();
+        let id = |s: &str| Uuid::parse_str(s).unwrap();
+        let draft = RequisitionDraftInput {
+            id: Uuid::new_v4(), display_no: "TEST-STALE".into(),
+            country_id: id("10000000-0000-4000-8000-000000000001"), project_id: id("10000000-0000-4000-8000-000000000002"),
+            site: "Test site".into(), department_id: id("10000000-0000-4000-8000-000000000003"), team_id: id("10000000-0000-4000-8000-000000000004"),
+            applicant_id: id("10000000-0000-4000-8000-000000000013"), currency: "CNY".into(), primary_currency: "CNY".into(), language_pair: "zh_fr".into(), urgency: "normal".into(), urgency_reason: None,
+            order_date: "2026-10-12".into(), delivery_address: "Test site".into(), expected_delivery_date: None, notes: None,
+            order_discount: AdjustmentInput::FixedMinor { minor: "0".into() }, order_freight: AdjustmentInput::FixedMinor { minor: "0".into() }, tax_rate_basis_points: 0,
+            lines: vec![RequisitionLineInput { id: Uuid::new_v4(), material_id: Some(id("10000000-0000-4000-8000-000000000005")),
+                material_snapshot: MaterialSnapshotInput { name_zh: "synthetic".into(), name_fr: None, model: "test".into(), specification: "test".into() },
+                supplier_id: Some(id("10000000-0000-4000-8000-000000000006")), currency: "CNY".into(), quantity: "1".into(), unit: "米".into(), unit_price_minor: "1234".into(),
+                line_discount: AdjustmentInput::FixedMinor { minor: "0".into() }, line_freight: AdjustmentInput::FixedMinor { minor: "0".into() }, freight_included: false, sort_order: 0 }],
+        };
+        service.save_requisition_draft(draft.clone(), now).unwrap();
+        service.set_procurement_mode(draft.id, "honsen_self_purchase".into(), now).unwrap();
+        service.connection.lock().unwrap().execute("UPDATE local_material_prices SET is_active = 0 WHERE id = ?1", ["10000000-0000-4000-8000-000000000007"]).unwrap();
+        assert!(service.submit_requisition_draft(draft.id, now).is_err());
+    }
+
+    #[test]
     fn catalog_writes_are_role_protected_and_price_changes_keep_history() {
         let service = LocalAuthService::open_in_memory().unwrap();
         let now = SystemTime::now();
