@@ -37,6 +37,7 @@ export type CatalogMaterialView = {
 
 export type SupplierView = {
   id: string
+  countryId: string
   businessCode: string
   name: string
   contactName: string | null

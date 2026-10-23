@@ -64,6 +64,14 @@ export const syncPushResponseSchema = z.object({
 export const syncPullQuerySchema = z.object({
   cursor: z.string().regex(/^\d+$/).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
+  replayUntil: z
+    .string()
+    .regex(/^\d{1,19}$/)
+    .optional(),
+  authorizationVersion: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 })
 
 export const syncChangeSchema = z.object({
@@ -79,6 +87,11 @@ export const syncChangeSchema = z.object({
 export const syncPullResponseSchema = z.object({
   changes: z.array(syncChangeSchema),
   nextCursor: z.string().regex(/^\d+$/),
+  authorizationVersion: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  replayUntil: z.string().regex(/^\d+$/).optional(),
 })
 
 export type SyncEvent = z.infer<typeof syncEventSchema>

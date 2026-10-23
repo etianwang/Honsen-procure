@@ -919,6 +919,7 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
     const supplier = {
       id: '00000000-0000-4000-8000-000000000002',
       businessCode: 'SUP-001',
+      countryId: '00000000-0000-4000-8000-000000000103',
       name: 'fixture active supplier',
       contactName: null,
       address: null,
@@ -940,7 +941,7 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
           invoke(
             command: string,
             args?: {
-              supplier?: { name?: string }
+              supplier?: { name?: string; countryId?: string }
               price?: { unitPriceMinor?: string }
             },
           ) {
@@ -949,6 +950,7 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
             if (command === 'save_supplier') {
               Object.assign(window, {
                 __supplierSaveName: args?.supplier?.name,
+                __supplierSaveCountry: args?.supplier?.countryId,
               })
               return Promise.resolve()
             }
@@ -980,6 +982,22 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
         (window as Window & { __supplierSaveName?: string }).__supplierSaveName,
     ),
   ).resolves.toBe('新建测试供应商')
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __supplierSaveCountry?: string })
+          .__supplierSaveCountry,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000101')
+  await page.getByRole('button', { name: '编辑供应商' }).click()
+  await page.getByRole('button', { name: '保存供应商' }).click()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __supplierSaveCountry?: string })
+          .__supplierSaveCountry,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000103')
   await page.getByRole('button', { name: '关闭供应商管理' }).click()
 
   await page.getByRole('button', { name: '维护报价' }).click()

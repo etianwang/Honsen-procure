@@ -106,6 +106,15 @@ describe('sync API', () => {
         payload,
       })
       expect(anonymous.statusCode).toBe(401)
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/sync/catalog-repairs',
+            payload,
+          })
+        ).statusCode,
+      ).toBe(401)
       const captcha = (
         await app.inject({ method: 'GET', url: '/api/auth/captcha' })
       ).json<{ id: string; question: string }>()
@@ -130,6 +139,16 @@ describe('sync API', () => {
         payload,
       })
       expect(forbidden.statusCode).toBe(403)
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/sync/catalog-repairs',
+            headers: { authorization: `Bearer ${token}` },
+            payload,
+          })
+        ).statusCode,
+      ).toBe(403)
       const list = await app.inject({
         method: 'GET',
         url: '/api/sync/category-quarantine',

@@ -4,6 +4,11 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
 import { PostgresSyncStore } from './postgres-store.js'
 import { SyncService } from './service.js'
+import {
+  materialFixture,
+  supplierFixture,
+  priceFixture,
+} from './catalog-fixtures.js'
 
 const pool = process.env.TEST_DATABASE_URL
   ? new Pool({ connectionString: process.env.TEST_DATABASE_URL })
@@ -71,6 +76,14 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
     await pool!.query(
       'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
       [engineerId, projectId, departmentId, teamId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [actorId, projectId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+      [actorId, projectId, departmentId, teamId],
     )
   }, 60_000)
 
@@ -279,6 +292,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
 
   it('preserves an issued offline snapshot and audits a revoked catalog quote', async () => {
     const f = fixture(111)
+    const supplierId = randomUUID()
     const line = {
       ...f.approved.lines[0],
       ownerQuoteSource: 'catalog_price',
@@ -286,7 +300,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       ownerManualReferenceReason: null,
       materialId: randomUUID(),
       supplierSnapshotJson: JSON.stringify({
-        id: randomUUID(),
+        id: supplierId,
         name: 'fixture',
       }),
       unit: 'pcs',
@@ -297,6 +311,39 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       ...f.issued,
       lines: [line],
       formalSnapshotJson: JSON.stringify(approved),
+    }
+    for (const [entityType, entityId, payload] of [
+      ['material', line.materialId, materialFixture(line.materialId)],
+      ['supplier', supplierId, supplierFixture(supplierId, countryId)],
+      [
+        'material_price',
+        line.ownerCatalogPriceId,
+        {
+          ...priceFixture(
+            line.ownerCatalogPriceId,
+            line.materialId,
+            supplierId,
+          ),
+          unitPriceMinor: '100',
+        },
+      ],
+    ] as const) {
+      expect(
+        (
+          await store.pushEvent({
+            event: {
+              eventId: randomUUID(),
+              entityType,
+              entityId,
+              operation: 'upsert',
+              baseVersion: 0,
+              payload,
+            },
+            installationId,
+            actorId: engineerId,
+          })
+        ).status,
+      ).toBe('accepted')
     }
     expect(
       (
@@ -316,6 +363,10 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
         })
       ).status,
     ).toBe('accepted')
+    await pool!.query(
+      `UPDATE sync_entities SET is_deleted = true WHERE entity_type = 'material_price' AND entity_id = $1`,
+      [line.ownerCatalogPriceId],
+    )
     expect(
       (
         await store.pushEvent({

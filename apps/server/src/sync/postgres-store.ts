@@ -6,10 +6,12 @@ import {
 } from '@honsen/shared'
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
 import { isDeepStrictEqual } from 'node:util'
+import { createHash } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import { formalShortCode, parseFormalIssue } from './formal-issue.js'
 import type { SyncActor, SyncStore } from './types.js'
 import { CategoryRepairError } from './service.js'
+import { catalogPayload, catalogTypes } from './catalog-payload.js'
 
 const globallyVisibleEntityTypes = [
   'country',
@@ -226,10 +228,62 @@ export class PostgresSyncStore implements SyncStore {
     event: SyncEvent
     installationId: string
     actorId: string
+    recoveryReason?: string
   }): Promise<SyncEventResult> {
+    if (
+      ['supplier', 'material_price'].includes(input.event.entityType) &&
+      input.event.payload.id !== undefined &&
+      (typeof input.event.payload.id !== 'string' ||
+        input.event.payload.id.toLowerCase() !==
+          input.event.entityId.toLowerCase())
+    ) {
+      return {
+        eventId: input.event.eventId,
+        status: 'validation_error',
+        serverVersion: null,
+        errorCode: 'INVALID_CATALOG_PAYLOAD',
+      }
+    }
+    if (
+      input.event.operation === 'upsert' &&
+      ['supplier', 'material_price'].includes(input.event.entityType)
+    ) {
+      const payload = catalogPayload(
+        input.event.entityType,
+        input.event.entityId,
+        input.event.payload,
+      )
+      if (!payload)
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+          errorCode: 'INVALID_CATALOG_PAYLOAD',
+        }
+      input = { ...input, event: { ...input.event, payload } }
+    }
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      if (input.recoveryReason !== undefined) {
+        const administrator = await client.query(
+          "SELECT 1 FROM user_roles r JOIN users u ON u.id = r.user_id AND u.is_enabled AND u.deleted_at IS NULL WHERE r.user_id = $1 AND r.role = 'administrator'",
+          [input.actorId],
+        )
+        if (
+          !input.recoveryReason.trim() ||
+          input.recoveryReason.length > 1000 ||
+          administrator.rowCount !== 1
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
       if (
         ['material', 'material_price', 'supplier', 'purchase_order'].includes(
           input.event.entityType,
@@ -247,6 +301,301 @@ export class PostgresSyncStore implements SyncStore {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `${input.event.entityType}:${input.event.entityId}`,
       ])
+      if (['supplier', 'material_price'].includes(input.event.entityType)) {
+        const stored = await client.query<StoredEntity>(
+          'SELECT version, payload_json, is_deleted FROM sync_entities WHERE entity_type = $1 AND entity_id = $2 FOR UPDATE',
+          [input.event.entityType, input.event.entityId],
+        )
+        const previous = stored.rows[0]?.payload_json
+        const next = input.event.payload
+        let country =
+          input.event.entityType === 'supplier'
+            ? previous
+              ? (previous.countryId ?? previous.country_id)
+              : (next.countryId ?? next.country_id)
+            : null
+        if (typeof country === 'string') country = country.toLowerCase()
+        if (input.recoveryReason && input.event.entityType === 'supplier') {
+          const knownCountry = await client.query(
+            'SELECT 1 FROM countries WHERE id::text = $1',
+            [typeof country === 'string' ? country : null],
+          )
+          if (!knownCountry.rowCount) country = next.countryId
+        }
+        let allowed = false
+        if (input.event.entityType === 'supplier') {
+          const nextCountry = next.countryId ?? next.country_id
+          allowed =
+            typeof country === 'string' &&
+            (input.event.operation !== 'upsert' ||
+              (nextCountry === country &&
+                (next.countryId === undefined || next.countryId === country) &&
+                (next.country_id === undefined || next.country_id === country)))
+        } else {
+          let supplierId =
+            previous?.supplierId ??
+            previous?.supplier_id ??
+            next.supplierId ??
+            next.supplier_id
+          let materialId =
+            previous?.materialId ??
+            previous?.material_id ??
+            next.materialId ??
+            next.material_id
+          if (typeof supplierId === 'string')
+            supplierId = supplierId.toLowerCase()
+          if (typeof materialId === 'string')
+            materialId = materialId.toLowerCase()
+          if (input.recoveryReason) {
+            const known = await client.query<{
+              supplier: boolean
+              material: boolean
+            }>(
+              "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1) AS supplier, EXISTS(SELECT 1 FROM sync_entities WHERE entity_type = 'material' AND entity_id::text = $2) AS material",
+              [
+                typeof supplierId === 'string' ? supplierId : null,
+                typeof materialId === 'string' ? materialId : null,
+              ],
+            )
+            if (!known.rows[0]!.supplier) supplierId = next.supplierId
+            if (!known.rows[0]!.material) materialId = next.materialId
+          }
+          if (
+            typeof supplierId === 'string' &&
+            typeof materialId === 'string' &&
+            (input.event.operation !== 'upsert' ||
+              ((next.supplierId ?? next.supplier_id) === supplierId &&
+                (next.materialId ?? next.material_id) === materialId &&
+                (next.supplierId === undefined ||
+                  next.supplierId === supplierId) &&
+                (next.supplier_id === undefined ||
+                  next.supplier_id === supplierId) &&
+                (next.materialId === undefined ||
+                  next.materialId === materialId) &&
+                (next.material_id === undefined ||
+                  next.material_id === materialId)))
+          ) {
+            const relations = await client.query<{
+              country_id: string
+              supplier_payload: Record<string, unknown>
+              material_payload: Record<string, unknown>
+            }>(
+              `SELECT LOWER(COALESCE(s.payload_json->>'countryId', s.payload_json->>'country_id')) AS country_id, s.payload_json AS supplier_payload, m.payload_json AS material_payload
+               FROM sync_entities s JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = $2 AND (NOT m.is_deleted OR $3::boolean)
+               WHERE s.entity_type = 'supplier' AND s.entity_id::text = $1 AND (NOT s.is_deleted OR $3::boolean) FOR SHARE OF s, m`,
+              [supplierId, materialId, !!previous],
+            )
+            const supplierCountry = relations.rows[0]?.country_id
+            if (
+              input.event.operation === 'upsert' &&
+              relations.rows[0] &&
+              (!catalogPayload(
+                'supplier',
+                supplierId,
+                relations.rows[0].supplier_payload,
+              ) ||
+                !catalogPayload(
+                  'material',
+                  materialId,
+                  relations.rows[0].material_payload,
+                ))
+            ) {
+              await client.query('ROLLBACK')
+              return {
+                eventId: input.event.eventId,
+                status: 'validation_error',
+                serverVersion: null,
+                errorCode: 'INVALID_CATALOG_REFERENCE',
+              }
+            }
+            if (
+              supplierCountry &&
+              (next.countryId == null || next.countryId === supplierCountry) &&
+              (next.country_id == null || next.country_id === supplierCountry)
+            ) {
+              const binding = await client.query(
+                `SELECT 1 FROM user_project_bindings b JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+                 JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+                 JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+                 JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+                 WHERE b.user_id = $1 AND b.deleted_at IS NULL AND p.country_id::text = $2 FOR SHARE OF b, p, scope, d, t`,
+                [input.actorId, supplierCountry],
+              )
+              allowed = (binding.rowCount ?? 0) > 0
+            }
+          }
+        }
+        if (allowed && input.event.entityType === 'supplier') {
+          const binding = await client.query(
+            `SELECT 1 FROM user_project_bindings b JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+             JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+             JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+             JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+             WHERE b.user_id = $1 AND b.deleted_at IS NULL AND p.country_id::text = $2 FOR SHARE OF b, p, scope, d, t`,
+            [input.actorId, country],
+          )
+          allowed = (binding.rowCount ?? 0) > 0
+        }
+        if (!allowed) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
+      if (input.event.entityType === 'purchase_order') {
+        const existing = await client.query<StoredEntity>(
+          "SELECT version, payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1 FOR UPDATE",
+          [input.event.entityId],
+        )
+        const previous = existing.rows[0]?.payload_json
+        const next = input.event.payload
+        const projectId = previous?.projectId ?? next.projectId
+        const scope =
+          typeof projectId === 'string'
+            ? await client.query<{ country_id: string }>(
+                `SELECT p.country_id::text AS country_id FROM user_project_bindings b
+           JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+           JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+           JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+           JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+           WHERE b.user_id = $1 AND b.deleted_at IS NULL AND p.id::text = $2 FOR SHARE OF b, p, scope, d, t`,
+                [input.actorId, projectId],
+              )
+            : null
+        const countryId = scope?.rows[0]?.country_id
+        let allowed =
+          !!countryId &&
+          (input.event.operation !== 'upsert' ||
+            (next.projectId === projectId &&
+              (next.countryId === undefined || next.countryId === countryId) &&
+              (previous?.countryId === undefined ||
+                previous.countryId === countryId)))
+        if (allowed && typeof next.supplierId === 'string') {
+          const supplier = await client.query(
+            `SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1 AND (NOT is_deleted OR $3::boolean)
+             AND COALESCE(payload_json->>'countryId', payload_json->>'country_id') = $2 FOR SHARE`,
+            [
+              next.supplierId,
+              countryId,
+              previous?.supplierId === next.supplierId,
+            ],
+          )
+          allowed = supplier.rowCount === 1
+        }
+        if (allowed && Array.isArray(next.lines)) {
+          for (const line of next.lines) {
+            if (!line || typeof line !== 'object') {
+              allowed = false
+              break
+            }
+            const item = line as Record<string, unknown>
+            const priceId = item.ownerCatalogPriceId ?? item.materialPriceId
+            if (typeof priceId === 'string') {
+              const retained =
+                Array.isArray(previous?.lines) &&
+                previous.lines.some((old) => {
+                  if (!old || typeof old !== 'object') return false
+                  const priorLine = old as Record<string, unknown>
+                  return (
+                    typeof item.id === 'string' &&
+                    priorLine.id === item.id &&
+                    (priorLine.ownerCatalogPriceId ??
+                      priorLine.materialPriceId) === priceId
+                  )
+                })
+              const price = await client.query(
+                `SELECT 1 FROM sync_entities price JOIN sync_entities supplier
+                 ON supplier.entity_type = 'supplier' AND supplier.entity_id::text = COALESCE(price.payload_json->>'supplierId', price.payload_json->>'supplier_id') AND (NOT supplier.is_deleted OR $4::boolean)
+                 WHERE price.entity_type = 'material_price' AND price.entity_id::text = $1 AND (NOT price.is_deleted OR $4::boolean)
+                   AND LOWER(COALESCE(supplier.payload_json->>'countryId', supplier.payload_json->>'country_id')) = $2
+                   AND ($3::text IS NULL OR COALESCE(price.payload_json->>'materialId', price.payload_json->>'material_id') = $3)
+                 FOR SHARE OF price, supplier`,
+                [
+                  priceId,
+                  countryId,
+                  typeof item.materialId === 'string' ? item.materialId : null,
+                  retained,
+                ],
+              )
+              if (price.rowCount !== 1) {
+                allowed = false
+                break
+              }
+            }
+          }
+        }
+        if (!allowed) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
+      if (
+        ['rfq', 'order_comment', 'receipt'].includes(input.event.entityType)
+      ) {
+        const existing = await client.query<StoredEntity>(
+          'SELECT version, payload_json FROM sync_entities WHERE entity_type = $1 AND entity_id = $2 FOR UPDATE',
+          [input.event.entityType, input.event.entityId],
+        )
+        const previous = existing.rows[0]?.payload_json
+        const next = input.event.payload
+        const field =
+          input.event.entityType === 'rfq' ? 'sourceOrderId' : 'orderId'
+        const orderId = previous?.[field] ?? next[field]
+        const scope =
+          typeof orderId === 'string'
+            ? await client.query<{ project_id: string; country_id: string }>(
+                `SELECT p.id::text AS project_id, p.country_id::text AS country_id FROM sync_entities o
+           JOIN projects p ON p.id::text = o.payload_json->>'projectId' AND p.is_active AND p.deleted_at IS NULL
+           JOIN user_project_bindings b ON b.project_id = p.id AND b.user_id = $2 AND b.deleted_at IS NULL
+           JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+           JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+           JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+           WHERE o.entity_type = 'purchase_order' AND o.entity_id::text = $1 AND NOT o.is_deleted
+             AND (o.payload_json->>'countryId' IS NULL OR o.payload_json->>'countryId' = p.country_id::text)
+           FOR SHARE OF o, p, b, scope, d, t`,
+                [orderId, input.actorId],
+              )
+            : null
+        const project = scope?.rows[0]
+        let allowed =
+          !!project &&
+          (input.event.operation !== 'upsert' ||
+            (next[field] === orderId && next.projectId === project.project_id))
+        if (allowed && input.event.entityType === 'rfq') {
+          const supplierId = previous?.supplierId ?? next.supplierId
+          const supplier = await client.query(
+            `SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1 AND (NOT is_deleted OR $3::boolean)
+             AND COALESCE(payload_json->>'countryId', payload_json->>'country_id') = $2 FOR SHARE`,
+            [
+              supplierId,
+              project?.country_id,
+              !!previous && previous.supplierId === supplierId,
+            ],
+          )
+          allowed =
+            supplier.rowCount === 1 &&
+            (input.event.operation !== 'upsert' ||
+              next.supplierId === supplierId)
+        }
+        if (!allowed) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
       const prior = await client.query<StoredEvent>(
         `SELECT event_id, result_status, result_error_code, server_version, origin_account_id,
                 origin_installation_id, origin_status
@@ -566,6 +915,55 @@ export class PostgresSyncStore implements SyncStore {
 
       const serverVersion = currentVersion + 1
       const deleted = input.event.operation === 'soft_delete'
+      if (!deleted && input.event.entityType === 'supplier') {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+          `supplier-code:${input.event.payload.businessCode}`,
+        ])
+        const duplicate = await client.query(
+          "SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id <> $1 AND COALESCE(payload_json->>'businessCode',payload_json->>'business_code') = $2 LIMIT 1",
+          [input.event.entityId, input.event.payload.businessCode],
+        )
+        if (duplicate.rowCount) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'SUPPLIER_CODE_CONFLICT',
+          }
+        }
+      }
+      if (
+        !deleted &&
+        ['supplier', 'material_price'].includes(input.event.entityType) &&
+        current &&
+        (input.recoveryReason ||
+          !catalogPayload(
+            input.event.entityType,
+            input.event.entityId,
+            current.payload_json,
+          ))
+      ) {
+        if (!input.recoveryReason) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: currentVersion,
+            errorCode: 'CATALOG_RECOVERY_REQUIRED',
+          }
+        }
+        await quarantineCatalogPayload(
+          client,
+          `entity:${input.event.entityType}:${input.event.entityId}:${currentVersion}`,
+          null,
+          input.event.entityType,
+          input.event.entityId,
+          currentVersion,
+          current.payload_json,
+          input.actorId,
+        )
+      }
       const unitPayload =
         input.event.entityType === 'unit'
           ? canonicalUnitPayload(input.event)
@@ -779,6 +1177,23 @@ export class PostgresSyncStore implements SyncStore {
           }
         }
       }
+      const persistedPayload =
+        deleted &&
+        current &&
+        [
+          'supplier',
+          'material_price',
+          'purchase_order',
+          'rfq',
+          'order_comment',
+          'receipt',
+        ].includes(input.event.entityType)
+          ? current.payload_json
+          : (defaultsPayload ??
+            ratePayload ??
+            taxPayload ??
+            unitPayload ??
+            input.event.payload)
       await client.query('SAVEPOINT category_entity_write')
       try {
         await client.query(
@@ -796,11 +1211,7 @@ export class PostgresSyncStore implements SyncStore {
             input.event.entityId,
             serverVersion,
             deleted,
-            defaultsPayload ??
-              ratePayload ??
-              taxPayload ??
-              unitPayload ??
-              input.event.payload,
+            persistedPayload,
             input.actorId,
           ],
         )
@@ -854,6 +1265,21 @@ export class PostgresSyncStore implements SyncStore {
       await client.query(
         'LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE',
       )
+      if (input.recoveryReason) {
+        await client.query(
+          'UPDATE catalog_sync_quarantine SET resolved_event_id = $3, resolved_at = NOW() WHERE entity_type = $1 AND entity_id = $2 AND resolved_at IS NULL',
+          [input.event.entityType, input.event.entityId, input.event.eventId],
+        )
+        await client.query(
+          "INSERT INTO audit_entries(id,actor_id,entity_type,entity_id,action,reason) VALUES(gen_random_uuid(),$1,$2,$3,'catalog_history_recovered',$4)",
+          [
+            input.actorId,
+            input.event.entityType,
+            input.event.entityId,
+            input.recoveryReason,
+          ],
+        )
+      }
       await client.query(
         `INSERT INTO server_change_log
            (entity_type, entity_id, operation, version, payload_json, actor_id)
@@ -863,11 +1289,7 @@ export class PostgresSyncStore implements SyncStore {
           input.event.entityId,
           input.event.operation,
           serverVersion,
-          defaultsPayload ??
-            ratePayload ??
-            taxPayload ??
-            unitPayload ??
-            input.event.payload,
+          persistedPayload,
           input.actorId,
         ],
       )
@@ -1133,7 +1555,9 @@ export class PostgresSyncStore implements SyncStore {
       prior.rows[0].country_id !== countryId
     ) {
       const used = await client.query(
-        `SELECT 1 FROM sync_entities WHERE entity_type = 'purchase_order'
+        `SELECT 1 FROM user_project_bindings WHERE project_id::text = $1 AND deleted_at IS NULL
+         UNION ALL
+         SELECT 1 FROM sync_entities WHERE entity_type = 'purchase_order'
          AND is_deleted = FALSE AND
            (payload_json->>'projectId' = $1 OR payload_json->>'project_id' = $1) LIMIT 1`,
         [event.entityId],
@@ -1683,99 +2107,187 @@ export class PostgresSyncStore implements SyncStore {
     actor: SyncActor
     cursor: string
     limit: number
-  }): Promise<{ changes: SyncChange[]; nextCursor: string }> {
-    const canReadAll = input.actor.roles.some((role) =>
-      ['super_administrator', 'administrator', 'purchaser', 'viewer'].includes(
-        role,
-      ),
-    )
-    const result = await this.pool.query<{
-      sequence: string
-      entity_type: SyncChange['entityType']
-      entity_id: string
-      operation: SyncChange['operation']
-      version: string
-      payload_json: Record<string, unknown>
-      changed_at: Date
-      repair_request_id: string | null
-      old_business_code: string | null
-      new_business_code: string | null
-      quarantine_status: string | null
-    }>(
-      `SELECT c.sequence, c.entity_type, c.entity_id, c.operation, c.version, c.payload_json, c.changed_at,
+    replayUntil?: string
+    authorizationVersion?: string
+  }) {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ')
+      const scopes = await client.query(
+        `SELECT s.project_id, s.department_id, s.team_id, s.xmin::text AS scope_revision,
+              b.xmin::text AS binding_revision, p.country_id, p.xmin::text AS project_revision,
+              d.xmin::text AS department_revision, t.xmin::text AS team_revision
+       FROM user_project_scope_bindings s
+       JOIN user_project_bindings b ON b.user_id = s.user_id AND b.project_id = s.project_id AND b.deleted_at IS NULL
+       JOIN projects p ON p.id = s.project_id AND p.is_active AND p.deleted_at IS NULL
+       JOIN departments d ON d.id = s.department_id AND d.is_active AND d.deleted_at IS NULL
+       JOIN teams t ON t.id = s.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+       WHERE s.user_id = $1 AND s.deleted_at IS NULL ORDER BY s.project_id, s.department_id, s.team_id`,
+        [input.actor.id],
+      )
+      // Row revisions also detect revoke/regrant between two client refreshes.
+      const watermark = await client.query<{
+        cursor: string
+        recovery_revision: string
+      }>(
+        "SELECT COALESCE(MAX(sequence), 0)::text AS cursor, (SELECT count(*)::text FROM audit_entries WHERE action = 'catalog_history_recovered') AS recovery_revision FROM server_change_log",
+      )
+      // A scoped repair can make a formerly unroutable historical quote visible.
+      const authorizationVersion = createHash('sha256')
+        .update(
+          JSON.stringify({
+            scopes: scopes.rows,
+            recoveryRevision: watermark.rows[0]!.recovery_revision,
+          }),
+        )
+        .digest('hex')
+      const replayUntil = watermark.rows[0]!.cursor
+      if (
+        input.authorizationVersion &&
+        input.authorizationVersion !== authorizationVersion
+      ) {
+        await client.query('COMMIT')
+        return {
+          changes: [],
+          nextCursor: input.cursor,
+          authorizationVersion,
+          replayUntil,
+        }
+      }
+      const result = await client.query<{
+        sequence: string
+        entity_type: SyncChange['entityType']
+        entity_id: string
+        operation: SyncChange['operation']
+        version: string
+        payload_json: Record<string, unknown>
+        changed_at: Date
+        repair_request_id: string | null
+        old_business_code: string | null
+        new_business_code: string | null
+        quarantine_status: string | null
+      }>(
+        `SELECT c.sequence, c.entity_type, c.entity_id, c.operation, c.version, c.payload_json, c.changed_at,
               repair.request_id AS repair_request_id, repair.old_business_code, repair.new_business_code,
               q.status AS quarantine_status
        FROM server_change_log c
        LEFT JOIN category_code_repairs repair ON c.entity_type = 'material_category' AND repair.category_id = c.entity_id AND repair.result_version = c.version
        LEFT JOIN category_code_quarantine q ON c.entity_type = 'material_category' AND q.entity_id = c.entity_id
-       WHERE c.sequence > $1
+       WHERE c.sequence > $1 AND c.sequence <= $5
          AND (
-           $2
-           OR c.entity_type = ANY($3::text[])
+           c.entity_type = ANY($2::text[])
            OR (
              c.entity_type = 'supplier'
              AND EXISTS (
                SELECT 1 FROM user_project_bindings b
                JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
-               WHERE b.user_id = $4 AND b.deleted_at IS NULL
-                 AND p.country_id::text = c.payload_json->>'countryId'
+               JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+               JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+               JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+               JOIN sync_entities supplier ON supplier.entity_type = 'supplier' AND supplier.entity_id = c.entity_id
+               WHERE b.user_id = $3 AND b.deleted_at IS NULL
+                 AND p.country_id::text = LOWER(COALESCE(c.payload_json->>'countryId', c.payload_json->>'country_id'))
+                 AND p.country_id::text = LOWER(COALESCE(supplier.payload_json->>'countryId', supplier.payload_json->>'country_id'))
              )
            )
            OR (
              c.entity_type = 'material_price'
              AND EXISTS (
                SELECT 1 FROM sync_entities supplier
-               JOIN user_project_bindings b ON b.user_id = $4 AND b.deleted_at IS NULL
+               JOIN user_project_bindings b ON b.user_id = $3 AND b.deleted_at IS NULL
                JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+               JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+               JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+               JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
                WHERE supplier.entity_type = 'supplier'
-                 AND supplier.entity_id::text = c.payload_json->>'supplierId'
-                 AND p.country_id::text = supplier.payload_json->>'countryId'
+                 AND supplier.entity_id::text = LOWER(COALESCE(c.payload_json->>'supplierId', c.payload_json->>'supplier_id'))
+                 AND p.country_id::text = LOWER(COALESCE(supplier.payload_json->>'countryId', supplier.payload_json->>'country_id'))
              )
            )
-           OR EXISTS (
+           OR (c.entity_type NOT IN ('supplier', 'material_price') AND EXISTS (
              SELECT 1 FROM user_project_bindings b
-             WHERE b.user_id = $4
+             JOIN projects p ON p.id = b.project_id AND p.is_active AND p.deleted_at IS NULL
+             JOIN user_project_scope_bindings scope ON scope.user_id = b.user_id AND scope.project_id = b.project_id AND scope.deleted_at IS NULL
+             JOIN departments d ON d.id = scope.department_id AND d.is_active AND d.deleted_at IS NULL
+             JOIN teams t ON t.id = scope.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+             WHERE b.user_id = $3
                AND b.deleted_at IS NULL
                AND b.project_id::text = c.payload_json->>'projectId'
-           )
+               AND (c.entity_type <> 'purchase_order' OR c.payload_json->>'countryId' IS NULL OR c.payload_json->>'countryId' = p.country_id::text)
+           ))
          )
        ORDER BY c.sequence
-       LIMIT $5`,
-      [
-        input.cursor,
-        canReadAll,
-        globallyVisibleEntityTypes,
-        input.actor.id,
-        input.limit,
-      ],
-    )
-    const changes = result.rows.map((row) => {
-      const payload = { ...row.payload_json }
-      if (row.entity_type === 'material_category') {
-        delete payload.__categoryRepair
-        delete payload.__categoryQuarantine
-        if (row.repair_request_id)
-          payload.__categoryRepair = {
-            requestId: row.repair_request_id,
-            oldBusinessCode: row.old_business_code,
-            newBusinessCode: row.new_business_code,
+       LIMIT $4`,
+        [
+          input.cursor,
+          globallyVisibleEntityTypes,
+          input.actor.id,
+          input.limit,
+          input.replayUntil ?? replayUntil,
+        ],
+      )
+      const changes: SyncChange[] = []
+      for (const row of result.rows) {
+        let payload = { ...row.payload_json }
+        delete payload.__catalogQuarantine
+        if (
+          row.operation === 'upsert' &&
+          catalogTypes.includes(row.entity_type)
+        ) {
+          const canonical = catalogPayload(
+            row.entity_type,
+            row.entity_id,
+            payload,
+          )
+          if (canonical) payload = canonical
+          else {
+            await quarantineCatalogPayload(
+              client,
+              `change:${row.sequence}`,
+              row.sequence,
+              row.entity_type,
+              row.entity_id,
+              Number(row.version),
+              row.payload_json,
+              input.actor.id,
+            )
+            payload.__catalogQuarantine = 'INVALID_CATALOG_PAYLOAD'
           }
-        if (row.quarantine_status === 'unresolved')
-          payload.__categoryQuarantine = true
+        }
+        if (row.entity_type === 'material_category') {
+          delete payload.__categoryRepair
+          delete payload.__categoryQuarantine
+          if (row.repair_request_id)
+            payload.__categoryRepair = {
+              requestId: row.repair_request_id,
+              oldBusinessCode: row.old_business_code,
+              newBusinessCode: row.new_business_code,
+            }
+          if (row.quarantine_status === 'unresolved')
+            payload.__categoryQuarantine = true
+        }
+        changes.push({
+          cursor: row.sequence,
+          entityType: row.entity_type,
+          entityId: row.entity_id,
+          operation: row.operation,
+          version: Number(row.version),
+          payload,
+          changedAt: row.changed_at.toISOString(),
+        })
       }
+      await client.query('COMMIT')
       return {
-        cursor: row.sequence,
-        entityType: row.entity_type,
-        entityId: row.entity_id,
-        operation: row.operation,
-        version: Number(row.version),
-        payload,
-        changedAt: row.changed_at.toISOString(),
+        changes,
+        nextCursor: changes.at(-1)?.cursor ?? input.cursor,
+        authorizationVersion,
+        replayUntil,
       }
-    })
-    return {
-      changes,
-      nextCursor: changes.at(-1)?.cursor ?? input.cursor,
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
     }
   }
 
@@ -1803,6 +2315,8 @@ export class PostgresSyncStore implements SyncStore {
       `SELECT 1 FROM sync_entities
        WHERE entity_type = 'purchase_order' AND is_deleted = FALSE
          AND (payload_json->>'projectId' = $1 OR payload_json->>'project_id' = $1)
+       UNION ALL
+       SELECT 1 FROM user_project_bindings WHERE project_id::text = $1 AND deleted_at IS NULL
        LIMIT 1`,
       [projectId],
     )
@@ -2054,6 +2568,34 @@ async function hasApprovalProvenance(
   )
 }
 
+async function quarantineCatalogPayload(
+  client: PoolClient,
+  sourceKey: string,
+  sequence: string | null,
+  entityType: string,
+  entityId: string,
+  version: number,
+  payload: Record<string, unknown>,
+  actorId: string,
+): Promise<void> {
+  await client.query(
+    `WITH recorded AS (
+       INSERT INTO catalog_sync_quarantine(source_key,change_sequence,entity_type,entity_id,server_version,original_payload,reason)
+       VALUES($1,$2,$3,$4,$5,$6,'MANUAL_REVIEW_REQUIRED') ON CONFLICT(source_key) DO NOTHING RETURNING entity_id
+     ) INSERT INTO audit_entries(id,actor_id,entity_type,entity_id,action,reason)
+       SELECT gen_random_uuid(),$7,$3,entity_id,'catalog_payload_quarantined',$1 FROM recorded`,
+    [
+      sourceKey,
+      sequence,
+      entityType,
+      entityId,
+      version,
+      JSON.stringify(payload),
+      actorId,
+    ],
+  )
+}
+
 function validRfqTransition(
   previous: Record<string, unknown> | undefined,
   event: SyncEvent,
@@ -2201,6 +2743,37 @@ function canonicalProjectDefaultsPayload(
   return parsed.data
 }
 
+function validCatalogQuoteRow(row: {
+  price_id: string
+  supplier_id: string
+  material_id: string
+  price_payload: Record<string, unknown>
+  supplier_payload: Record<string, unknown>
+  material_payload: Record<string, unknown>
+}): boolean {
+  const price = catalogPayload(
+    'material_price',
+    row.price_id,
+    row.price_payload,
+  )
+  const supplier = catalogPayload(
+    'supplier',
+    row.supplier_id,
+    row.supplier_payload,
+  )
+  const material = catalogPayload(
+    'material',
+    row.material_id,
+    row.material_payload,
+  )
+  return !!(
+    price &&
+    supplier &&
+    material &&
+    (price.countryId == null || price.countryId === supplier.countryId)
+  )
+}
+
 async function ownerQuoteDiscrepancy(
   client: PoolClient,
   payload: Record<string, unknown>,
@@ -2228,16 +2801,16 @@ async function ownerQuoteDiscrepancy(
       return true
     const supplierId = (supplier as Record<string, unknown>).id
     const result = await client.query(
-      `SELECT 1 FROM sync_entities p
-       JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = p.payload_json->>'supplierId' AND NOT s.is_deleted
-       JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = p.payload_json->>'materialId' AND NOT m.is_deleted
+      `SELECT p.entity_id::text AS price_id,p.payload_json AS price_payload,s.entity_id::text AS supplier_id,s.payload_json AS supplier_payload,m.entity_id::text AS material_id,m.payload_json AS material_payload FROM sync_entities p
+       JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = LOWER(COALESCE(p.payload_json->>'supplierId',p.payload_json->>'supplier_id')) AND NOT s.is_deleted
+       JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = LOWER(COALESCE(p.payload_json->>'materialId',p.payload_json->>'material_id')) AND NOT m.is_deleted
        WHERE p.entity_type = 'material_price' AND p.entity_id::text = $1 AND NOT p.is_deleted
-         AND p.payload_json->>'materialId' = $2 AND p.payload_json->>'supplierId' = $3
-         AND p.payload_json->>'currency' = $4 AND p.payload_json->>'unit' = $5 AND p.payload_json->>'unitPriceMinor' = $6
-         AND s.payload_json->>'countryId' = $7 AND s.payload_json->>'isActive' = 'true' AND s.payload_json->>'isBlacklisted' = 'false'
-         AND m.payload_json->>'isActive' = 'true'
+         AND LOWER(COALESCE(p.payload_json->>'materialId',p.payload_json->>'material_id')) = $2 AND LOWER(COALESCE(p.payload_json->>'supplierId',p.payload_json->>'supplier_id')) = $3
+         AND p.payload_json->>'currency' = $4 AND p.payload_json->>'unit' = $5 AND COALESCE(p.payload_json->>'unitPriceMinor',p.payload_json->>'unit_price_minor') = $6
+         AND LOWER(COALESCE(s.payload_json->>'countryId',s.payload_json->>'country_id')) = $7 AND COALESCE(s.payload_json->>'isActive',s.payload_json->>'is_active') = 'true' AND COALESCE(s.payload_json->>'isBlacklisted',s.payload_json->>'is_blacklisted') = 'false'
+         AND COALESCE(m.payload_json->>'isActive',m.payload_json->>'is_active') = 'true'
          AND p.entity_id::text = (SELECT c.entity_id::text FROM server_change_log c WHERE c.entity_type = 'material_price'
-           AND c.payload_json->>'materialId' = $2 AND c.payload_json->>'supplierId' = $3 AND c.payload_json->>'currency' = $4
+           AND LOWER(COALESCE(c.payload_json->>'materialId',c.payload_json->>'material_id')) = $2 AND LOWER(COALESCE(c.payload_json->>'supplierId',c.payload_json->>'supplier_id')) = $3 AND c.payload_json->>'currency' = $4
            ORDER BY c.sequence DESC LIMIT 1)`,
       [
         item.ownerCatalogPriceId,
@@ -2249,7 +2822,8 @@ async function ownerQuoteDiscrepancy(
         payload.countryId,
       ],
     )
-    if (result.rowCount !== 1) return true
+    if (result.rowCount !== 1 || !validCatalogQuoteRow(result.rows[0]))
+      return true
   }
   return false
 }
@@ -2385,27 +2959,35 @@ async function validCatalogQuotes(
     if (scope.rowCount !== 1) return false
     if (line.priceSource === 'manual') {
       const allowedSupplier = await client.query(
-        `SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1 AND NOT is_deleted
-         AND payload_json->>'countryId' = $2 AND payload_json->>'isActive' = 'true' AND payload_json->>'isBlacklisted' = 'false'`,
+        `SELECT payload_json FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1 AND NOT is_deleted
+         AND LOWER(COALESCE(payload_json->>'countryId',payload_json->>'country_id')) = $2 AND COALESCE(payload_json->>'isActive',payload_json->>'is_active') = 'true' AND COALESCE(payload_json->>'isBlacklisted',payload_json->>'is_blacklisted') = 'false'`,
         [supplierId, event.payload.countryId],
       )
-      if (allowedSupplier.rowCount !== 1) return false
+      if (
+        allowedSupplier.rowCount !== 1 ||
+        !catalogPayload(
+          'supplier',
+          supplierId,
+          allowedSupplier.rows[0]!.payload_json,
+        )
+      )
+        return false
       continue
     }
     const result = await client.query(
-      `SELECT 1 FROM sync_entities p
-      JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = p.payload_json->>'supplierId' AND NOT s.is_deleted
-      JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = p.payload_json->>'materialId' AND NOT m.is_deleted
+      `SELECT p.entity_id::text AS price_id,p.payload_json AS price_payload,s.entity_id::text AS supplier_id,s.payload_json AS supplier_payload,m.entity_id::text AS material_id,m.payload_json AS material_payload FROM sync_entities p
+      JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = LOWER(COALESCE(p.payload_json->>'supplierId',p.payload_json->>'supplier_id')) AND NOT s.is_deleted
+      JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = LOWER(COALESCE(p.payload_json->>'materialId',p.payload_json->>'material_id')) AND NOT m.is_deleted
       WHERE p.entity_type = 'material_price' AND p.entity_id::text = $1 AND NOT p.is_deleted
-        AND p.payload_json->>'materialId' = $2 AND p.payload_json->>'supplierId' = $3
+        AND LOWER(COALESCE(p.payload_json->>'materialId',p.payload_json->>'material_id')) = $2 AND LOWER(COALESCE(p.payload_json->>'supplierId',p.payload_json->>'supplier_id')) = $3
         AND p.payload_json->>'currency' = $4 AND p.payload_json->>'unit' = $5
-        AND p.payload_json->>'unitPriceMinor' = $6 AND s.payload_json->>'countryId' = $7
-        AND s.payload_json->>'isActive' = 'true'
-        AND s.payload_json->>'isBlacklisted' = 'false'
-        AND m.payload_json->>'isActive' = 'true'
+        AND COALESCE(p.payload_json->>'unitPriceMinor',p.payload_json->>'unit_price_minor') = $6 AND LOWER(COALESCE(s.payload_json->>'countryId',s.payload_json->>'country_id')) = $7
+        AND COALESCE(s.payload_json->>'isActive',s.payload_json->>'is_active') = 'true'
+        AND COALESCE(s.payload_json->>'isBlacklisted',s.payload_json->>'is_blacklisted') = 'false'
+        AND COALESCE(m.payload_json->>'isActive',m.payload_json->>'is_active') = 'true'
         AND p.entity_id::text = (SELECT c.entity_id::text FROM server_change_log c
-          WHERE c.entity_type = 'material_price' AND c.payload_json->>'materialId' = $2
-            AND c.payload_json->>'supplierId' = $3 AND c.payload_json->>'currency' = $4
+          WHERE c.entity_type = 'material_price' AND LOWER(COALESCE(c.payload_json->>'materialId',c.payload_json->>'material_id')) = $2
+            AND LOWER(COALESCE(c.payload_json->>'supplierId',c.payload_json->>'supplier_id')) = $3 AND c.payload_json->>'currency' = $4
           ORDER BY c.sequence DESC LIMIT 1)`,
       [
         line.catalogPriceId,
@@ -2417,7 +2999,8 @@ async function validCatalogQuotes(
         event.payload.countryId,
       ],
     )
-    if (result.rowCount !== 1) return false
+    if (result.rowCount !== 1 || !validCatalogQuoteRow(result.rows[0]))
+      return false
   }
   return true
 }

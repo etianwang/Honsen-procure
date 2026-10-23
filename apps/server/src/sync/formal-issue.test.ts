@@ -46,6 +46,34 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
 
   it('keeps legacy unissued order tombstones compatible', async () => {
     const store = new PostgresSyncStore(pool!)
+    const countryId = randomUUID(),
+      projectId = randomUUID(),
+      departmentId = randomUUID(),
+      teamId = randomUUID()
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'fixture', 'UTC')",
+      [countryId, `FORMAL-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'fixture', 'site', 'department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `FORMAL-${projectId}`],
+    )
+    await pool!.query(
+      "INSERT INTO departments (id, business_code, name) VALUES ($1, $2, 'fixture')",
+      [departmentId, `FORMAL-${departmentId}`],
+    )
+    await pool!.query(
+      "INSERT INTO teams (id, department_id, business_code, name) VALUES ($1, $2, $3, 'fixture')",
+      [teamId, departmentId, `FORMAL-${teamId}`],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [actorId, projectId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+      [actorId, projectId, departmentId, teamId],
+    )
     expect(
       await store.pushEvent({
         event: {
@@ -54,7 +82,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
           entityId: randomUUID(),
           operation: 'soft_delete',
           baseVersion: 0,
-          payload: { projectId: randomUUID() },
+          payload: { projectId },
         },
         installationId: randomUUID(),
         actorId,
@@ -77,6 +105,26 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
        VALUES ($1, $2, $3, 'fixture project', 'fixture site', 'fixture department', 'XOF', 'zh_fr')`,
       [projectId, countryId, projectCode],
     )
+    const departmentId = randomUUID(),
+      teamId = randomUUID()
+    await pool!.query(
+      "INSERT INTO departments (id, business_code, name) VALUES ($1, $2, 'fixture')",
+      [departmentId, `FORMAL-${departmentId}`],
+    )
+    await pool!.query(
+      "INSERT INTO teams (id, department_id, business_code, name) VALUES ($1, $2, $3, 'fixture')",
+      [teamId, departmentId, `FORMAL-${teamId}`],
+    )
+    for (const userId of [actorId, applicantId]) {
+      await pool!.query(
+        'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+        [userId, projectId],
+      )
+      await pool!.query(
+        'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+        [userId, projectId, departmentId, teamId],
+      )
+    }
     const installationId = randomUUID()
     const formalDocumentNo = `${countryCode}-${projectCode}-20261015-OPA-${shortCode(installationId)}-1`
     const line = {
@@ -304,6 +352,16 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
        VALUES ($1, $2, $3, 'fixture project', 'fixture site', 'fixture department', 'XOF', 'zh_fr')`,
       [secondProjectId, countryId, secondProjectCode],
     )
+    for (const userId of [actorId, applicantId]) {
+      await pool!.query(
+        'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+        [userId, secondProjectId],
+      )
+      await pool!.query(
+        'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+        [userId, secondProjectId, departmentId, teamId],
+      )
+    }
     const reusedSequenceId = randomUUID()
     await seedApproved(reusedSequenceId, {
       ...snapshot,
@@ -337,10 +395,6 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       ).rowCount,
     ).toBe(0)
 
-    await pool!.query(
-      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
-      [actorId, projectId],
-    )
     const pulled = await store.pullChanges({
       actor: { id: actorId, roles: ['engineer'], installationId: randomUUID() },
       cursor,

@@ -16,6 +16,7 @@ import {
 import type { Role } from '@honsen/shared'
 import { z } from 'zod'
 import type { SyncActor, SyncStore } from './types.js'
+import { catalogPayload } from './catalog-payload.js'
 
 const procurementRoles: Role[] = ['purchaser', 'administrator']
 const masterDataRoles: Role[] = [
@@ -93,6 +94,27 @@ export class SyncService {
     const results: SyncEventResult[] = []
     const blockedQuotes = new Set<string>()
     for (const event of request.events) {
+      if (
+        event.operation === 'upsert' &&
+        (event.entityType === 'supplier' ||
+          event.entityType === 'material_price')
+      ) {
+        const payload = catalogPayload(
+          event.entityType,
+          event.entityId,
+          event.payload,
+        )
+        if (!payload) {
+          results.push({
+            eventId: event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'INVALID_CATALOG_PAYLOAD',
+          })
+          continue
+        }
+        event.payload = payload
+      }
       const key = `${event.entityType}:${event.entityId}`
       if (blockedQuotes.has(key)) {
         results.push({
@@ -131,7 +153,54 @@ export class SyncService {
       actor,
       cursor: query.cursor ?? '0',
       limit: query.limit,
+      replayUntil: query.replayUntil,
+      authorizationVersion: query.authorizationVersion,
     })
+  }
+
+  async repairCatalog(
+    actor: SyncActor,
+    input: unknown,
+  ): Promise<SyncEventResult> {
+    if (!actor.roles.includes('administrator'))
+      throw new CategoryRepairError('FORBIDDEN')
+    const request = z
+      .strictObject({
+        requestId: uuidSchema,
+        entityType: z.enum(['supplier', 'material_price']),
+        entityId: uuidSchema,
+        expectedVersion: z.number().int().positive(),
+        payload: z.record(z.string(), z.unknown()),
+        reason: z.string().trim().min(1).max(1000),
+      })
+      .parse(input)
+    const payload = catalogPayload(
+      request.entityType,
+      request.entityId,
+      request.payload,
+    )
+    if (!payload)
+      return {
+        eventId: request.requestId,
+        status: 'validation_error',
+        serverVersion: null,
+        errorCode: 'INVALID_CATALOG_PAYLOAD',
+      }
+    return normalizeResult(
+      await this.store.pushEvent({
+        actorId: actor.id,
+        installationId: actor.installationId,
+        recoveryReason: request.reason,
+        event: {
+          eventId: request.requestId,
+          entityType: request.entityType,
+          entityId: request.entityId,
+          operation: 'upsert',
+          baseVersion: request.expectedVersion,
+          payload,
+        },
+      }),
+    )
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {

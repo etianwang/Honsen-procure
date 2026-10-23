@@ -32,6 +32,7 @@ import { canEditMaterials, type UserRole } from '../lib/permissions'
 
 type MaterialsPageProps = {
   role: UserRole
+  countryId?: string
   projectId?: string
   api?: CatalogApi
 }
@@ -74,6 +75,7 @@ type PriceFormValues = {
 
 export function MaterialsPage({
   role,
+  countryId,
   projectId,
   api = tauriCatalogApi,
 }: MaterialsPageProps) {
@@ -264,8 +266,14 @@ export function MaterialsPage({
 
   async function saveSupplier(values: SupplierFormValues) {
     const existing = supplierEditor === 'new' ? undefined : supplierEditor
+    const supplierCountryId = existing?.countryId ?? countryId
+    if (!supplierCountryId) {
+      setError('请选择有效的授权范围后再新增供应商')
+      return
+    }
     const supplier: Supplier = {
       id: existing?.id ?? crypto.randomUUID(),
+      countryId: supplierCountryId,
       businessCode: values.businessCode.trim(),
       name: values.name.trim(),
       contactName: optionalText(values.contactName),

@@ -1,4 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import {
+  materialFixture,
+  supplierFixture,
+  priceFixture,
+} from './catalog-fixtures.js'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
@@ -332,6 +337,37 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       () => randomUUID(),
     )
     const deviceId = randomUUID()
+    const countryId = randomUUID()
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'fixture', 'UTC')",
+      [countryId, `RFQ-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'fixture', 'site', 'department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `RFQ-${projectId}`],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [actorId, projectId],
+    )
+    const departmentId = randomUUID(),
+      teamId = randomUUID()
+    await pool!.query(
+      "INSERT INTO departments (id, business_code, name) VALUES ($1, $2, 'fixture')",
+      [departmentId, `RFQ-${departmentId}`],
+    )
+    await pool!.query(
+      "INSERT INTO teams (id, department_id, business_code, name) VALUES ($1, $2, $3, 'fixture')",
+      [teamId, departmentId, `RFQ-${teamId}`],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+      [actorId, projectId, departmentId, teamId],
+    )
+    await pool!.query(
+      "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('supplier', $1, 1, $2, $3)",
+      [supplierId, { id: supplierId, countryId }, actorId],
+    )
     const order = await store.pushEvent({
       event: {
         eventId: randomUUID(),
@@ -508,6 +544,33 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     const [orderId, rfqId, projectId, otherProjectId, supplierId, itemId] =
       Array.from({ length: 6 }, () => randomUUID())
     const deviceId = randomUUID()
+    const countryId = randomUUID(),
+      departmentId = randomUUID(),
+      teamId = randomUUID()
+    await pool!.query(
+      "INSERT INTO countries (id, business_code, name, time_zone) VALUES ($1, $2, 'fixture', 'UTC')",
+      [countryId, `RFQ-${countryId}`],
+    )
+    await pool!.query(
+      "INSERT INTO projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair) VALUES ($1, $2, $3, 'fixture', 'site', 'department', 'XOF', 'zh_fr')",
+      [projectId, countryId, `RFQ-${projectId}`],
+    )
+    await pool!.query(
+      "INSERT INTO departments (id, business_code, name) VALUES ($1, $2, 'fixture')",
+      [departmentId, `RFQ-${departmentId}`],
+    )
+    await pool!.query(
+      "INSERT INTO teams (id, department_id, business_code, name) VALUES ($1, $2, $3, 'fixture')",
+      [teamId, departmentId, `RFQ-${teamId}`],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [actorId, projectId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+      [actorId, projectId, departmentId, teamId],
+    )
     expect(
       (
         await store.pushEvent({
@@ -4114,18 +4177,46 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
       [actorId, projectA],
     )
+    await pool!.query(
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [actorId, projectB],
+    )
+    const departmentId = randomUUID(),
+      teamId = randomUUID()
+    await pool!.query(
+      "INSERT INTO departments (id, business_code, name) VALUES ($1, $2, 'fixture')",
+      [departmentId, `D-${departmentId}`],
+    )
+    await pool!.query(
+      "INSERT INTO teams (id, department_id, business_code, name) VALUES ($1, $2, $3, 'fixture')",
+      [teamId, departmentId, `T-${teamId}`],
+    )
+    for (const projectId of [projectA, projectB])
+      await pool!.query(
+        'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+        [actorId, projectId, departmentId, teamId],
+      )
+    const materialId = randomUUID()
+    await pool!.query(
+      "INSERT INTO sync_entities (entity_type, entity_id, version, payload_json, updated_by) VALUES ('material', $1, 1, $2, $3)",
+      [materialId, materialFixture(materialId), actorId],
+    )
     for (const [entityType, entityId, payload] of [
-      ['supplier', supplierA, { countryId: countryA, name: 'A' }],
-      ['supplier', supplierB, { countryId: countryB, name: 'B' }],
       [
-        'material_price',
-        priceA,
-        { supplierId: supplierA, unitPriceMinor: '1' },
+        'supplier',
+        supplierA,
+        { ...supplierFixture(supplierA, countryA), name: 'A' },
       ],
+      [
+        'supplier',
+        supplierB,
+        { ...supplierFixture(supplierB, countryB), name: 'B' },
+      ],
+      ['material_price', priceA, priceFixture(priceA, materialId, supplierA)],
       [
         'material_price',
         priceB,
-        { supplierId: supplierB, unitPriceMinor: '2' },
+        { ...priceFixture(priceB, materialId, supplierB), unitPriceMinor: '2' },
       ],
     ] as const) {
       const result = await store.pushEvent({
@@ -4142,6 +4233,10 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       })
       expect(result.status).toBe('accepted')
     }
+    await pool!.query(
+      'UPDATE user_project_bindings SET deleted_at = NOW() WHERE user_id = $1 AND project_id = $2',
+      [actorId, projectB],
+    )
     const engineer = {
       id: actorId,
       roles: ['engineer' as const],
@@ -4167,12 +4262,309 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     })
     expect(purchaser.changes.map((change) => change.entityId)).toEqual([
       supplierA,
-      supplierB,
       priceA,
-      priceB,
     ])
+    const forged = await new SyncService(store).push(
+      { id: actorId, roles: ['purchaser'], installationId: randomUUID() },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            eventId: randomUUID(),
+            entityType: 'supplier',
+            entityId: supplierB,
+            operation: 'upsert',
+            baseVersion: 1,
+            payload: {
+              ...supplierFixture(supplierB, countryA),
+              name: 'forged',
+            },
+          },
+        ],
+      },
+    )
+    expect(forged.results[0]?.status).toBe('validation_error')
+    expect(
+      (await store.getEntityPayload('supplier', supplierB))?.countryId,
+    ).toBe(countryB)
+    const ownEdit = await store.pushEvent({
+      actorId,
+      installationId: randomUUID(),
+      event: {
+        eventId: randomUUID(),
+        entityType: 'supplier',
+        entityId: supplierA,
+        operation: 'upsert',
+        baseVersion: 1,
+        payload: { ...supplierFixture(supplierA, countryA), name: 'updated A' },
+      },
+    })
+    expect(ownEdit.status).toBe('accepted')
+    expect(
+      await store.getEntityPayload('material_price', priceA),
+    ).toMatchObject({ supplierId: supplierA, materialId, unitPriceMinor: '1' })
+    const countryChange = await store.pushEvent({
+      actorId,
+      installationId: randomUUID(),
+      event: {
+        eventId: randomUUID(),
+        entityType: 'supplier',
+        entityId: supplierA,
+        operation: 'upsert',
+        baseVersion: 2,
+        payload: { ...supplierFixture(supplierA, countryB), name: 'invalid' },
+      },
+    })
+    expect(countryChange.status).toBe('validation_error')
+    expect(await store.getEntityPayload('supplier', supplierA)).toMatchObject({
+      countryId: countryA,
+      name: 'updated A',
+    })
+    const invalidQuote = await store.pushEvent({
+      actorId,
+      installationId: randomUUID(),
+      event: {
+        eventId: randomUUID(),
+        entityType: 'material_price',
+        entityId: randomUUID(),
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: { supplierId: supplierB, materialId, unitPriceMinor: '3' },
+      },
+    })
+    expect(invalidQuote.status).toBe('validation_error')
+    const missingMaterial = await store.pushEvent({
+      actorId,
+      installationId: randomUUID(),
+      event: {
+        eventId: randomUUID(),
+        entityType: 'material_price',
+        entityId: randomUUID(),
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          supplierId: supplierA,
+          materialId: randomUUID(),
+          unitPriceMinor: '3',
+        },
+      },
+    })
+    expect(missingMaterial.status).toBe('validation_error')
+    const forgedOrder = await new SyncService(store).push(
+      { id: actorId, roles: ['purchaser'], installationId: randomUUID() },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            eventId: randomUUID(),
+            entityType: 'purchase_order',
+            entityId: randomUUID(),
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: {
+              projectId: projectB,
+              countryId: countryB,
+              applicantId: actorId,
+              workflowStatus: 'draft',
+            },
+          },
+        ],
+      },
+    )
+    expect(forgedOrder.results[0]?.status).toBe('validation_error')
+    const forgedProject = await new SyncService(store).push(
+      { id: actorId, roles: ['purchaser'], installationId: randomUUID() },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            eventId: randomUUID(),
+            entityType: 'project',
+            entityId: projectA,
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: {
+              business_code: `SYNC-P-${projectA}`,
+              name: 'fixture project',
+              country_id: countryB,
+              site: 'fixture site',
+              department_name: 'fixture department',
+              default_currency: 'XOF',
+              default_language_pair: 'zh_fr',
+              is_active: true,
+              version: 1,
+            },
+          },
+        ],
+      },
+    )
+    expect(forgedProject.results[0]?.status).toBe('validation_error')
+    expect(
+      (
+        await pool!.query(
+          'SELECT country_id::text FROM projects WHERE id = $1',
+          [projectA],
+        )
+      ).rows[0]?.country_id,
+    ).toBe(countryA)
     await pool!.query(
-      'UPDATE user_project_bindings SET deleted_at = NOW() WHERE user_id = $1 AND project_id = $2',
+      'INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2)',
+      [otherActorId, projectB],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id) VALUES ($1, $2, $3, $4)',
+      [otherActorId, projectB, departmentId, teamId],
+    )
+    const orderB = randomUUID(),
+      orderA = randomUUID()
+    const lineA = randomUUID()
+    const createOrder = (
+      id: string,
+      accountId: string,
+      projectId: string,
+      countryId: string,
+      lines: unknown[] = [],
+    ) =>
+      store.pushEvent({
+        actorId: accountId,
+        installationId: randomUUID(),
+        event: {
+          eventId: randomUUID(),
+          entityType: 'purchase_order',
+          entityId: id,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            projectId,
+            countryId,
+            applicantId: accountId,
+            workflowStatus: 'draft',
+            lines,
+          },
+        },
+      })
+    expect(
+      (await createOrder(orderB, otherActorId, projectB, countryB)).status,
+    ).toBe('accepted')
+    expect(
+      (
+        await createOrder(orderA, actorId, projectA, countryA, [
+          { materialId, ownerCatalogPriceId: priceB },
+        ])
+      ).status,
+    ).toBe('validation_error')
+    expect(
+      (
+        await createOrder(orderA, actorId, projectA, countryA, [
+          { id: lineA, materialId, ownerCatalogPriceId: priceA },
+        ])
+      ).status,
+    ).toBe('accepted')
+    const stolenOrder = await store.pushEvent({
+      actorId,
+      installationId: randomUUID(),
+      event: {
+        eventId: randomUUID(),
+        entityType: 'purchase_order',
+        entityId: orderB,
+        operation: 'upsert',
+        baseVersion: 1,
+        payload: {
+          projectId: projectA,
+          countryId: countryA,
+          applicantId: otherActorId,
+          workflowStatus: 'draft',
+        },
+      },
+    })
+    expect(stolenOrder.status).toBe('validation_error')
+    expect(
+      await store.getEntityPayload('purchase_order', orderB),
+    ).toMatchObject({ projectId: projectB, countryId: countryB })
+    const invalidRfq = await store.pushEvent({
+      actorId,
+      installationId: randomUUID(),
+      event: {
+        eventId: randomUUID(),
+        entityType: 'rfq',
+        entityId: randomUUID(),
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          sourceOrderId: orderA,
+          projectId: projectA,
+          supplierId: supplierB,
+        },
+      },
+    })
+    expect(invalidRfq.status).toBe('validation_error')
+    const afterFiltered = await store.pullChanges({
+      actor: {
+        id: actorId,
+        roles: ['purchaser'],
+        installationId: randomUUID(),
+      },
+      cursor: purchaser.nextCursor,
+      limit: 20,
+    })
+    expect(afterFiltered.changes.map((change) => change.entityId)).toEqual([
+      supplierA,
+      orderA,
+    ])
+    expect(BigInt(afterFiltered.nextCursor)).toBeGreaterThan(
+      BigInt(purchaser.nextCursor),
+    )
+    expect(
+      (
+        await store.pushEvent({
+          actorId,
+          installationId: randomUUID(),
+          event: {
+            eventId: randomUUID(),
+            entityType: 'material_price',
+            entityId: priceA,
+            operation: 'soft_delete',
+            baseVersion: 1,
+            payload: {},
+          },
+        })
+      ).status,
+    ).toBe('accepted')
+    expect(
+      (
+        await store.pushEvent({
+          actorId,
+          installationId: randomUUID(),
+          event: {
+            eventId: randomUUID(),
+            entityType: 'purchase_order',
+            entityId: orderA,
+            operation: 'upsert',
+            baseVersion: 1,
+            payload: {
+              projectId: projectA,
+              countryId: countryA,
+              applicantId: actorId,
+              workflowStatus: 'draft',
+              lines: [{ id: lineA, materialId, ownerCatalogPriceId: priceA }],
+            },
+          },
+        })
+      ).status,
+    ).toBe('accepted')
+    const tombstonePull = await store.pullChanges({
+      actor: engineer,
+      cursor: afterFiltered.nextCursor,
+      limit: 20,
+    })
+    expect(
+      tombstonePull.changes.find((change) => change.entityId === priceA),
+    ).toMatchObject({
+      operation: 'soft_delete',
+      payload: { supplierId: supplierA, materialId },
+    })
+    await pool!.query(
+      'UPDATE user_project_scope_bindings SET deleted_at = NOW() WHERE user_id = $1 AND project_id = $2',
       [actorId, projectA],
     )
     const revoked = await store.pullChanges({

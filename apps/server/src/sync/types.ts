@@ -1,9 +1,9 @@
 import type {
   Role,
-  SyncChange,
   SyncEvent,
   SyncEventResult,
   CategoryRepairRequest,
+  SyncPullResponse,
 } from '@honsen/shared'
 
 export type SyncActor = {
@@ -29,12 +29,15 @@ export type SyncStore = {
     event: SyncEvent
     installationId: string
     actorId: string
+    recoveryReason?: string
   }): Promise<SyncEventResult>
   pullChanges(input: {
     actor: SyncActor
     cursor: string
     limit: number
-  }): Promise<{ changes: SyncChange[]; nextCursor: string }>
+    replayUntil?: string
+    authorizationVersion?: string
+  }): Promise<SyncPullResponse>
   hasActiveProjectBinding(
     accountId: string,
     projectId: string,

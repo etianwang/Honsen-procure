@@ -78,6 +78,84 @@ function purchaseOrderEvent(applicantId = engineer.id) {
 }
 
 describe('SyncService', () => {
+  it('rejects malformed supplier and quote events before storing them', async () => {
+    const store = new FixtureStore()
+    const actor = { ...engineer, roles: ['purchaser' as const] }
+    const results = await new SyncService(store).push(actor, {
+      deviceId: actor.installationId,
+      events: [
+        {
+          eventId: randomUUID(),
+          entityType: 'supplier',
+          entityId: randomUUID(),
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: { countryId: randomUUID() },
+        },
+        {
+          eventId: randomUUID(),
+          entityType: 'material_price',
+          entityId: randomUUID(),
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: { materialId: randomUUID(), supplierId: randomUUID() },
+        },
+      ],
+    })
+    expect(results.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+    ])
+    expect(store.pushed).toBe(0)
+  })
+  it('rejects a forged payload identity while retaining tombstone support', async () => {
+    const store = new FixtureStore()
+    const actor = { ...engineer, roles: ['purchaser' as const] }
+    const results = await new SyncService(store).push(actor, {
+      deviceId: actor.installationId,
+      events: [
+        {
+          eventId: randomUUID(),
+          entityType: 'supplier',
+          entityId: randomUUID(),
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            id: randomUUID(),
+            countryId: randomUUID(),
+            businessCode: 'TEST',
+            name: 'Fixture',
+            contactName: null,
+            address: null,
+            city: null,
+            country: null,
+            phone: null,
+            whatsapp: null,
+            email: null,
+            paymentTerms: null,
+            deliveryLeadTime: null,
+            isPreferred: false,
+            isBlacklisted: false,
+            isActive: true,
+            version: 1,
+          },
+        },
+        {
+          eventId: randomUUID(),
+          entityType: 'supplier',
+          entityId: randomUUID(),
+          operation: 'soft_delete',
+          baseVersion: 1,
+          payload: {},
+        },
+      ],
+    })
+    expect(results.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+    ])
+    expect(store.pushed).toBe(1)
+  })
   it('does not process later order events after a quote rejection in the same batch', async () => {
     class RejectedQuoteStore extends FixtureStore {
       override async pushEvent(
