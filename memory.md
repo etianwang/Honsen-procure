@@ -1,6 +1,12 @@
 # Honsen采购管理系统（HONSEN Procure）— Development Memory
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
+
+## PR #17 historical reference contract repair — builder handoff (2026-10-23)
+
+- Continue `codex/pr17-sync-p1-repair` from production `8c7ba265bf963fd47e9e3a77876b2f022830fde9`, repairing the actual independent P1 in `4d486cdf840961c7480a1c603d7dee104fc0af22`. Exact checkpoint/remote/CI are delivered with the containing commit. [Scope, tests and original failure](docs/reviews/PR17-REFERENCE-CONTRACT-REPAIR.md). Current production change is confined to strict reference decoding at the trusted Pull projector; no migration, dependency, renderer or authorization contract changes.
+- Original independent fixture reproduced `InvalidInput` before the fix. Four new default Rust tests now pass; the fixture is not ignored. Fresh isolated PostgreSQL 16.15 authenticated tests publish both country/project naming forms and old payload versions, prove B's cursor past A history, bounded grant/regrant replay, a late quote and C isolation; the resulting real pages pass file SQLite restart, repeat replay/incremental continuation, complete Outbox/draft/frozen snapshot/audit retention and FK checks. Existing directly affected Rust filters pass 7/7. Rust bins check/Clippy and server lint/typecheck pass; existing warnings remain. Final format checks, PR-branch integration and exact-SHA CI are verified before delivery.
+- **BLOCKER for independent closure:** original QA must recheck this historical-reference defect and directly affected paths at the final production SHA; no overall QA PASS, Draft removal or merge is claimed. **BLOCKER for V1 production release:** real Windows EXE online re-login after revocation remains NOT PASSED. **DEFERRED:** full T04/T10, Windows A/B, Linux deployment and original parent/milestone acceptance. **WARNING:** synthetic retained-order fixtures prove byte retention, not native issue/print acceptance; user-session WSL startup warning did not prevent actual tests. Task E: TEMP/cache/target and disposable Compose DB are used; remove only task-owned test resources after testing. No main/other worktree changes, force push, PR #17/#13 merge or production deployment.
 
 ## T04 FIX2-B + FIX2-C builder handoff (2026-10-21)
 

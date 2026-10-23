@@ -1,0 +1,45 @@
+# PR #17 historical reference contract repair — builder evidence
+
+Scope: repair the P1 independently reproduced at production `8c7ba265bf963fd47e9e3a77876b2f022830fde9`, with independent failure evidence [4d486cdf](https://github.com/etianwang/Honsen-procure/blob/4d486cdf840961c7480a1c603d7dee104fc0af22/docs/reviews/PR17-P1-INDEPENDENT-RECHECK.md). This document records implementation/testing only; independent acceptance remains required. The containing production commit, remote equality and exact-SHA CI result are delivered after commit.
+
+## Production change
+
+`parse_remote_reference` is used only by the trusted Pull projection path for country, project, site, department, team and unit. It accepts already-supported camelCase and desktop snake_case fields, rejects conflicting aliases, validates payload ID/kind against the envelope, and derives the version from the positive trusted envelope version. Duplicate UUID aliases with equivalent casing are the same identity; distinct UUIDs reject. Missing kind is routing metadata derived from the envelope; missing business facts are never supplied.
+
+The normalized record still passes the existing business-code, field, foreign-key and immutable-code validation/projection. No renderer input contract, authorization check, catalog validator, replay state, cursor mechanism, Outbox, audit or order snapshot mutation was added or loosened. PostgreSQL remains responsible for live scope filtering on every Pull/replay page. No migration or dependency change is needed.
+
+The original fixture first failed on the unmodified production parser: `InvalidInput`, missing `business_code`, replay cursor zero after two attempts. After the production change the same committed historical responses project successfully. The regression now continues through the full replay, file restart, repeated metadata, retained incremental cursor, repeated incremental Pull, late quote projection and historical bad-record recovery.
+
+## Automated regression coverage
+
+- `apps/desktop/src-tauri/src/reference_sync_tests.rs`: four default Rust tests. The real-history test defaults to `tests/sync/fixtures/pr17-authorized-history.json`, adopted byte-for-byte from the independent evidence (SHA-256 `BFE68BF6FD203F8FD3A19E0474F01D87E635E491AC9723CAFB5713A4126CB4F0`). It is not ignored. `PR17_QA_TRANSCRIPT` can instead point to fresh PostgreSQL responses.
+- The same test preserves nonempty pending Outbox, a synthetic legacy draft, frozen header/line price snapshots and audit rows by comparing all stored columns before/after catch-up. The fixture seeds existing history; it does not claim native formal-issue acceptance. It checks SQLite FK integrity and the actual late supplier/quote identity, active state and integer price.
+- Unit/transaction cases exercise both formats for all six entity types, equal duplicate aliases, conflicting aliases, forged identity/kind, zero/negative envelope version, ignored untrusted payload version, rollback/cursor retention and a missing country FK without fabricating that country.
+- `apps/server/src/sync/pr17-reference-contract.integration.test.ts`: the adopted authenticated QA driver now also publishes real camelCase/snake_case country and project events, including omitted/stale payload versions, and a third unauthorized country's supplier/quote. The normal `npm run test` executes its three scenarios whenever `TEST_DATABASE_URL` exists; a bounded 505-event fixture crosses the desktop's 500-row page boundary. Test-owned log/entity rows are cleaned afterward so the fixture cannot change unrelated suites' first-page expectations.
+- Server cases prove the B cursor has passed hidden A quote history; A grant/revoke/regrant changes trusted metadata; history is bounded; a quote created during replay arrives through the retained incremental cursor; C remains filtered; malformed catalog Push, legacy deletes and restricted-role historical recovery remain functional.
+
+## Builder verification
+
+Environment: Node 24.18.0, unchanged committed lockfile; normal WSL2 user `honsen-dev`, Docker/Compose/buildx; disposable PostgreSQL 16.15 on loopback port 54329; actual SQLite; E: worktree, TEMP/npm cache/Cargo target and evidence. A WSL user-session startup warning did not prevent the healthy disposable DB or test execution.
+
+| Check                                                            | Result                                                                                                                                                                                    |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Original independent PostgreSQL-response fixture before fix      | FAIL, as expected; persisted replay remained at zero.                                                                                                                                     |
+| Four new Rust regressions, original committed fixture            | 4/4 PASS.                                                                                                                                                                                 |
+| Fresh authenticated PostgreSQL contract driver                   | 3/3 PASS; camel/snake country/project, grant/regrant, 500-row replay, C isolation and restricted-role recovery.                                                                           |
+| Four new Rust regressions consuming that fresh PostgreSQL output | 4/4 PASS; full file restart/replay → incremental continuation, retained data and FK integrity.                                                                                            |
+| Existing directly affected Rust tests                            | 7/7 PASS: reference master projection, authorization refresh, replay migration/durability (2), missing supplier/quote replay, catalog historical recovery and catalog replay idempotence. |
+| Rust bins check and project Clippy                               | Exit 0. Existing library/bin/test warnings remain; no warning suppression or unrelated cleanup.                                                                                           |
+| Server test source lint / strict typecheck                       | PASS.                                                                                                                                                                                     |
+| Formatting / diff checks                                         | Checked before checkpoint.                                                                                                                                                                |
+| Final production GitHub quality                                  | Must be SUCCESS at the final PR HEAD; report exact run/SHA with delivery.                                                                                                                 |
+
+The fresh test command is `npm run test --workspace @honsen/server -- src/sync/pr17-reference-contract.integration.test.ts` with the ignored test-only database URL and an E: `PR17_QA_TRANSCRIPT` path. Consume that output with `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib reference_sync_ -- --nocapture`. Without the override, the Rust command automatically checks the original independent fixture. Existing directly affected Rust tests were run by individual filters rather than repeating the full Rust/native matrix.
+
+Final local run: PostgreSQL driver 3/3 in 20.97s, fresh-response Rust regressions 4/4 in 13.41s. Fresh JSON SHA-256 is `36CDB380508E262058197244143146E20730A87B95A4A29A99A42B5D250278E2`; raw response/logs remain in the task's E: runtime. Actual database version was queried as `16.15`; after the fixture finalizer its material's change-log count was zero. Focused read-only builder review found no remaining P0/P1 in this production diff; it did not claim independent acceptance.
+
+## Remaining gates
+
+Builder readiness does not close the independent finding. After the final production SHA passes CI, the original independent QA should recheck only the failed historical-reference contract and directly affected projection/replay paths. PR #17 remains Draft; there is no merge or deployment authorization.
+
+Real Windows EXE online re-login after revocation remains **NOT PASSED / mandatory V1 production-release security hold** under the coordinator's existing gate adjustment. Overall V1 security QA is not passed. Full T04/T10, Windows A/B and Linux deployment acceptance were not repeated; the unchanged CI workflow still runs its required existing checks. Toolbox preflight was repeated in the required upstream order; existing installer/Runner/manifest/registry/release-evidence gaps remain outside this repair, with identities/contracts untouched.

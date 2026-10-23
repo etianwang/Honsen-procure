@@ -8704,6 +8704,59 @@ fn replay_quarantined_category_dependents(
     Ok(())
 }
 
+fn parse_remote_reference(
+    change: &SyncPullChangeInput,
+) -> Result<ReferenceMasterDataInput, AuthError> {
+    let mut payload = change
+        .payload
+        .as_object()
+        .cloned()
+        .ok_or(AuthError::InvalidInput)?;
+    if change.version < 1
+        || payload
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok())
+            != Some(change.entity_id)
+        || payload
+            .get("kind")
+            .is_some_and(|kind| kind.as_str() != Some(change.entity_type.as_str()))
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    for (camel, snake) in [
+        ("businessCode", "business_code"),
+        ("timeZone", "time_zone"),
+        ("isActive", "is_active"),
+        ("countryId", "country_id"),
+        ("departmentName", "department_name"),
+        ("defaultCurrency", "default_currency"),
+        ("defaultLanguagePair", "default_language_pair"),
+        ("projectId", "project_id"),
+        ("departmentId", "department_id"),
+    ] {
+        if let Some(value) = payload.remove(camel) {
+            if let Some(previous) = payload.get(snake) {
+                let same_id = snake.ends_with("_id")
+                    && previous
+                        .as_str()
+                        .and_then(|id| Uuid::parse_str(id).ok())
+                        .is_some_and(|id| {
+                            value.as_str().and_then(|value| Uuid::parse_str(value).ok()) == Some(id)
+                        });
+                if previous != &value && !same_id {
+                    return Err(AuthError::InvalidInput);
+                }
+            }
+            payload.insert(snake.into(), value);
+        }
+    }
+    // Routing and version come from the trusted envelope, not legacy payload metadata.
+    payload.insert("kind".into(), serde_json::json!(change.entity_type));
+    payload.insert("version".into(), serde_json::json!(change.version));
+    serde_json::from_value(serde_json::Value::Object(payload)).map_err(|_| AuthError::InvalidInput)
+}
+
 fn project_remote_master_data_change(
     transaction: &Transaction<'_>,
     change: &SyncPullChangeInput,
@@ -8762,8 +8815,7 @@ fn project_remote_master_data_change(
     }
     match change.entity_type.as_str() {
         "country" | "project" | "site" | "department" | "team" | "unit" => {
-            let record: ReferenceMasterDataInput = serde_json::from_value(change.payload.clone())
-                .map_err(|_| AuthError::InvalidInput)?;
+            let record = parse_remote_reference(change)?;
             project_remote_reference_master_data(transaction, &record, change)?;
         }
         "material_category" => {
@@ -19746,4 +19798,6 @@ mod tests {
             vec![retryable]
         );
     }
+
+    include!("reference_sync_tests.rs");
 }
