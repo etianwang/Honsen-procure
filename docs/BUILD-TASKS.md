@@ -139,7 +139,7 @@ All child items inherit the original parent scope, dependencies and global gate.
 
 ### T09 — original dependencies: T06, T08
 
-- [ ] T09-A — IN PROGRESS: accept two or more partial batches, cumulative per-line quantity/unit/date/receiver and required over-receipt reasons through trusted commands and production DOM flow. Also accept Honsen-self-purchase append-only multiple payment records with independent voucher warning; owner-self-purchase must reject payment creation.
+- [ ] T09-A — IN PROGRESS: accept two or more partial batches, cumulative per-line quantity/unit/date/receiver and required over-receipt reasons through trusted commands and production DOM flow. The 2026-10-23 receipt-visibility slice now returns exact SQLite-derived ordered/received/remaining quantities to the normal execution page and proves the partial state in its production-route Playwright flow; no migration or sync-contract change. Also accept Honsen-self-purchase append-only multiple payment records with independent voucher warning; owner-self-purchase must reject payment creation.
 - [ ] T09-B — IN PROGRESS: accept completed-with-conditions reason, permanent closed-order immutability and prohibition of deletion/edit by every role.
 - [ ] T09-C — BLOCKED: demonstrate receipt photo/file ingestion, maximum ten photos, compression and archival with T11. T11 currently depends on T09; a dependency-boundary plan must be approved rather than silently treating metadata links as full archival acceptance.
 - [ ] T09-D — NOT STARTED: retain original receipt DOM proof, integration/retention/failure checks and affected-package gates after outstanding items pass.

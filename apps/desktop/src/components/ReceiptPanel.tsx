@@ -7,6 +7,8 @@ type ReceiptLine = {
   materialName: string
   unit: string
   orderedQuantity: string
+  receivedQuantity: string
+  remainingQuantity: string
 }
 
 type ReceiptPanelProps = {
@@ -100,7 +102,9 @@ export function ReceiptPanel({
       <div className="requisition-lines" aria-label="收货明细">
         {lines.map((line) => (
           <label className="requisition-line" key={line.id}>
-            {line.materialName} · 订购 {line.orderedQuantity} {line.unit}
+            {line.materialName} · 订购 {line.orderedQuantity} {line.unit} ·
+            累计实收 {line.receivedQuantity} {line.unit} · 待收{' '}
+            {line.remainingQuantity} {line.unit}
             <Input
               aria-label={`${line.materialName} 实收数量`}
               inputMode="decimal"

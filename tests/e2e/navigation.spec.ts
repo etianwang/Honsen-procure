@@ -1211,6 +1211,18 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
                             quantity: '2',
                             unit: '袋',
                             currency: 'XOF',
+                            receivedQuantity:
+                              receiptCount === 0
+                                ? '0'
+                                : receiptCount === 1
+                                  ? '1'
+                                  : '2',
+                            remainingQuantity:
+                              receiptCount === 0
+                                ? '2'
+                                : receiptCount === 1
+                                  ? '1'
+                                  : '0',
                           },
                         ],
                       },
@@ -1250,6 +1262,7 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   await page.getByLabel('market cement 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('收货中')
+  await expect(page.getByText('累计实收 1 袋 · 待收 1 袋')).toBeVisible()
   await page.getByLabel('market cement 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
   await expect(page.getByText('没有可执行的已确认采购申请')).toBeVisible()

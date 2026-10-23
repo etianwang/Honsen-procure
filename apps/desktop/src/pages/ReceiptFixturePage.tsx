@@ -30,6 +30,8 @@ export function ReceiptFixturePage() {
             materialName: 'fixture pipe',
             unit: '根',
             orderedQuantity: '2.5',
+            receivedQuantity: '0',
+            remainingQuantity: '2.5',
           },
         ]}
       />

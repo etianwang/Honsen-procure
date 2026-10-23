@@ -2,6 +2,8 @@ export type ProcurementExecutionLine = {
   id: string
   materialName: string
   quantity: string
+  receivedQuantity: string
+  remainingQuantity: string
   unit: string
   currency: 'XOF' | 'CNY' | 'USD' | 'EUR'
 }

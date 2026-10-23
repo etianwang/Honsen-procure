@@ -141,6 +141,8 @@ export function ProcurementExecutionPage({
                 materialName: line.materialName,
                 unit: line.unit,
                 orderedQuantity: line.quantity,
+                receivedQuantity: line.receivedQuantity,
+                remainingQuantity: line.remainingQuantity,
               }))}
             />
           ) : null}
@@ -168,6 +170,8 @@ export function ProcurementExecutionPage({
                     materialName: line.materialName,
                     unit: line.unit,
                     orderedQuantity: line.quantity,
+                    receivedQuantity: line.receivedQuantity,
+                    remainingQuantity: line.remainingQuantity,
                   }))}
                 />
               </section>

@@ -343,6 +343,8 @@ pub struct ProcurementExecutionLineView {
     pub id: Uuid,
     pub material_name: String,
     pub quantity: String,
+    pub received_quantity: String,
+    pub remaining_quantity: String,
     pub unit: String,
     pub currency: String,
 }
@@ -2286,11 +2288,21 @@ impl LocalAuthService {
                 .map_err(|_| AuthError::Database)?
                 .map(|row| {
                     let (id, snapshot, quantity, unit, currency) = row.map_err(|_| AuthError::Database)?;
+                    let received_quantity = connection
+                        .prepare("SELECT ri.quantity_decimal FROM local_receipt_items ri JOIN local_receipts r ON r.id = ri.receipt_id WHERE ri.order_item_id = ?1")
+                        .map_err(|_| AuthError::Database)?
+                        .query_map([&id], |row| row.get::<_, String>(0))
+                        .map_err(|_| AuthError::Database)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|_| AuthError::Database)?
+                        .into_iter()
+                        .try_fold(0i128, |sum, value| parse_quantity_hundredths(&value)?.checked_add(sum).ok_or(AuthError::InvalidInput))?;
+                    let ordered_quantity = parse_quantity_hundredths(&quantity)?;
                     let material_name = serde_json::from_str::<serde_json::Value>(&snapshot)
                         .ok()
                         .and_then(|value| value.get("nameZh").and_then(|name| name.as_str()).map(ToOwned::to_owned))
                         .ok_or(AuthError::Database)?;
-                    Ok(ProcurementExecutionLineView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, material_name, quantity, unit, currency })
+                    Ok(ProcurementExecutionLineView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, material_name, quantity, received_quantity: format_quantity_hundredths(received_quantity), remaining_quantity: format_quantity_hundredths(ordered_quantity.saturating_sub(received_quantity)), unit, currency })
                 })
                 .collect::<Result<Vec<_>, _>>()
         };
@@ -7003,6 +7015,18 @@ fn parse_quantity_hundredths(value: &str) -> Result<i128, AuthError> {
     Ok(hundredths)
 }
 
+fn format_quantity_hundredths(value: i128) -> String {
+    let whole = value / 100;
+    let fraction = value % 100;
+    if fraction == 0 {
+        whole.to_string()
+    } else if fraction % 10 == 0 {
+        format!("{whole}.{}", fraction / 10)
+    } else {
+        format!("{whole}.{fraction:02}")
+    }
+}
+
 fn validate_adjustment(adjustment: &AdjustmentInput) -> Result<(), AuthError> {
     match adjustment {
         AdjustmentInput::FixedMinor { minor } => {
@@ -10074,6 +10098,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(second_receipt.workflow_status, "completed");
+        let execution_orders = service.list_confirmed_procurement_orders(now).unwrap();
+        let execution_line = &execution_orders[0].children[0].lines[0];
+        assert_eq!(execution_line.received_quantity, "2.5");
+        assert_eq!(execution_line.remaining_quantity, "0");
         assert_eq!(
             service.close_supplier_order_with_conditions(
                 children[0].child_order_id,
