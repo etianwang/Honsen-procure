@@ -793,6 +793,7 @@ Build shared contracts and exact money/quantity helpers only:
 
 - Candidate `f805c9ed3c88f6af16238e999539fd591f7d93b4`, QA branch `codex/qa-pr18-quote-pagination`; result QA_FAIL. Real EXE reproduced P1 stale Honsen quote saved and submitted after deactivation. Full evidence and commands: `docs/qa/pr18-quote/CONTINUATION.md`. No code/schema or production data changes. The task-only `.qa-pr18/` remains untracked, including synthetic SQLite and build data; checkpoint is this entry's commit.
 - BLOCKER: fix and independently recheck stale quote validation. DEFERRED: PR #17 country fix integration and independent recheck before release; full T04/T10/Linux out of scope. WARNING: native formal snapshot used a pre-approved SQLite fixture; no approval UI proof. Fresh isolated profile seed failed twice with secure storage error; reused this task's working profile.
+
 ## PR #18 stale quote repair attempt — 2026-10-23
 
 - Branch `codex/catalog-quote-pagination`, checkpoint `f805c9ed3c88f6af16238e999539fd591f7d93b4`. Dirty files: `apps/desktop/src-tauri/src/lib.rs` contains only a deliberately failing regression; `memory.md` contains this handoff. No production repair, schema migration, or sync protocol change has been completed. No production database or independent QA worktree was modified.
