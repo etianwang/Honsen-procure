@@ -79,6 +79,7 @@ export function calculateOwnerLinePrice(input: OwnerLinePricing) {
 export const requisitionLineSchema = z.object({
   id: uuidSchema,
   materialId: uuidSchema.nullable(),
+  catalogPriceId: uuidSchema.nullable().optional(),
   materialSnapshot: z.object({
     nameZh: z.string().trim().min(1).max(255),
     nameFr: z.string().trim().min(1).max(255).nullable(),

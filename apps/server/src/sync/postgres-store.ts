@@ -230,6 +230,9 @@ export class PostgresSyncStore implements SyncStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      if (['material', 'material_price', 'supplier', 'purchase_order'].includes(input.event.entityType)) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('catalog-quote-write', 0))")
+      }
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         input.event.eventId,
       ])
@@ -442,6 +445,10 @@ export class PostgresSyncStore implements SyncStore {
         }
       }
       if (input.event.entityType === 'purchase_order') {
+        if (!(await validCatalogQuotes(client, input.event, input.actorId, current?.payload_json))) {
+          await client.query('ROLLBACK')
+          return { eventId: input.event.eventId, status: 'validation_error', serverVersion: null, errorCode: 'QUOTE_UNAVAILABLE' }
+        }
         if (!(await validParentWithExistingRfqs(client, input.event))) {
           await client.query('ROLLBACK')
           return {
@@ -2162,4 +2169,54 @@ function canonicalProjectDefaultsPayload(
   })
   if (!parsed.success || parsed.data.projectId !== event.entityId) return null
   return parsed.data
+}
+
+// The shared advisory lock serializes quote/supplier writes with this verification.
+async function validCatalogQuotes(client: PoolClient, event: SyncEvent, actorId: string, previous?: Record<string, unknown>): Promise<boolean> {
+  if (event.operation !== 'upsert' || event.payload.formallyIssuedAt != null || event.payload.procurementMode === 'owner_self_purchase') return true
+  const lines = event.payload.lines
+  if (!Array.isArray(lines)) return true
+  const currentLines = Array.isArray(previous?.lines) ? previous.lines : []
+  for (const value of lines) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const line = value as Record<string, unknown>
+    const old = currentLines.find((item: unknown) => item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).id === line.id) as Record<string, unknown> | undefined
+    if (event.payload.workflowStatus === 'pending_confirmation' && old?.catalogPriceId && line.catalogPriceId !== old.catalogPriceId) return false
+    if (line.catalogPriceId == null) {
+      if (line.materialId != null && line.supplierSnapshotJson != null) {
+        if (!old || old.catalogPriceId != null || old.materialId !== line.materialId || old.supplierSnapshotJson !== line.supplierSnapshotJson || old.currency !== line.currency || old.unit !== line.unit || old.unitPriceMinor !== line.unitPriceMinor) return false
+      }
+      continue
+    }
+    if (typeof line.catalogPriceId !== 'string' || typeof line.materialId !== 'string' || typeof line.supplierSnapshotJson !== 'string') return false
+    let supplier: unknown
+    try { supplier = JSON.parse(line.supplierSnapshotJson) } catch { return false }
+    if (!supplier || typeof supplier !== 'object' || Array.isArray(supplier)) return false
+    const supplierId = (supplier as Record<string, unknown>).id
+    if (typeof supplierId !== 'string' || typeof event.payload.countryId !== 'string') return false
+    const scope = await client.query(`SELECT 1 FROM projects p
+      JOIN user_project_bindings b ON b.project_id = p.id AND b.user_id::text = $1 AND b.deleted_at IS NULL
+      JOIN user_project_scope_bindings a ON a.project_id = p.id AND a.user_id = b.user_id AND a.deleted_at IS NULL
+        AND a.department_id::text = $3 AND a.team_id::text = $4
+      WHERE p.id::text = $2 AND p.country_id::text = $5 AND p.is_active AND p.deleted_at IS NULL
+      FOR SHARE OF p, b, a`, [actorId, event.payload.projectId, event.payload.departmentId, event.payload.teamId, event.payload.countryId])
+    if (scope.rowCount !== 1) return false
+    const result = await client.query(`SELECT 1 FROM sync_entities p
+      JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = p.payload_json->>'supplierId' AND NOT s.is_deleted
+      JOIN sync_entities m ON m.entity_type = 'material' AND m.entity_id::text = p.payload_json->>'materialId' AND NOT m.is_deleted
+      WHERE p.entity_type = 'material_price' AND p.entity_id::text = $1 AND NOT p.is_deleted
+        AND p.payload_json->>'materialId' = $2 AND p.payload_json->>'supplierId' = $3
+        AND p.payload_json->>'currency' = $4 AND p.payload_json->>'unit' = $5
+        AND p.payload_json->>'unitPriceMinor' = $6 AND s.payload_json->>'countryId' = $7
+        AND COALESCE((s.payload_json->>'isActive')::boolean, false)
+        AND NOT COALESCE((s.payload_json->>'isBlacklisted')::boolean, false)
+        AND COALESCE((m.payload_json->>'isActive')::boolean, false)
+        AND p.entity_id::text = (SELECT c.entity_id::text FROM server_change_log c
+          WHERE c.entity_type = 'material_price' AND c.payload_json->>'materialId' = $2
+            AND c.payload_json->>'supplierId' = $3 AND c.payload_json->>'currency' = $4
+          ORDER BY c.sequence DESC LIMIT 1)`,
+      [line.catalogPriceId, line.materialId, supplierId, line.currency, line.unit, line.unitPriceMinor, event.payload.countryId])
+    if (result.rowCount !== 1) return false
+  }
+  return true
 }
