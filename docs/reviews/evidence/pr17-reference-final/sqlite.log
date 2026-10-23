@@ -13,4 +13,3 @@ test tests::reference_sync_invalid_contract_rolls_back_page_and_keeps_real_refer
 test tests::reference_sync_postgres_history_replays_after_restart ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out; finished in 14.62s
-

@@ -12,4 +12,3 @@ attempt=1, result=Ok(()), incremental=504, replay=Some(("8e782e451de765bca930369
 test tests::pr17_independent_postgres_transcript_survives_sqlite_restart_and_repair ... ok
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 102 filtered out; finished in 11.28s
-
