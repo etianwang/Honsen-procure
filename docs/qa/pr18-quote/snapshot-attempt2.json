@@ -1,0 +1,10 @@
+{
+  "sha": "f805c9ed3c88f6af16238e999539fd591f7d93b4",
+  "orderId": "b8940b11-96ab-4035-a4ac-06c7d84e544f",
+  "checks": [],
+  "errors": ["Error: pricing failed"],
+  "pricing": {
+    "ok": false,
+    "error": "invalid args `input` for command `save_owner_purchase_pricing`: missing field `material_price_id`"
+  }
+}

@@ -788,3 +788,8 @@ Build shared contracts and exact money/quantity helpers only:
 
 - Candidate `f805c9ed3c88f6af16238e999539fd591f7d93b4`; branch `codex/qa-pr18-quote-pagination`. QA_FAIL: pre-existing server country isolation blocker and incomplete native acceptance. See `docs/qa/pr18-quote/REPORT.md` for scoped evidence, commands and skipped acceptance items. No application or migration changes. Test-only `.qa-pr18/` remains untracked with disposable SQLite, build, cache and profile; do not remove other sessions' files. Checkpoint is this entry's commit.
 - BLOCKER: server foreign-country Pull/forged Push repair and independent recheck; remaining real EXE cases including formal snapshot and dynamic quote changes. DEFERRED: full T04/T10 and deployment. WARNING: one low npm advisory; no production data used.
+
+## PR #18 QA continuation — 2026-10-23
+
+- Candidate `f805c9ed3c88f6af16238e999539fd591f7d93b4`, QA branch `codex/qa-pr18-quote-pagination`; result QA_FAIL. Real EXE reproduced P1 stale Honsen quote saved and submitted after deactivation. Full evidence and commands: `docs/qa/pr18-quote/CONTINUATION.md`. No code/schema or production data changes. The task-only `.qa-pr18/` remains untracked, including synthetic SQLite and build data; checkpoint is this entry's commit.
+- BLOCKER: fix and independently recheck stale quote validation. DEFERRED: PR #17 country fix integration and independent recheck before release; full T04/T10/Linux out of scope. WARNING: native formal snapshot used a pre-approved SQLite fixture; no approval UI proof. Fresh isolated profile seed failed twice with secure storage error; reused this task's working profile.
