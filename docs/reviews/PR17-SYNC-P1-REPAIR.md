@@ -47,6 +47,8 @@ Earlier failed/interrupted evidence remains historical: the old Rust run was int
 
 The extra strict `cargo clippy --lib --bins -- -D warnings` diagnostic fails on nine pre-existing library style warnings; `git blame` attributes all nine sites to pre-repair commits. The prescribed project Clippy command exits zero with those warnings and existing test/bin warnings. Existing React effect/Vite chunk/linker warnings remain. No suppression or unrelated cleanup was introduced.
 
+The first integrated candidate `8c84c273f951282020b7fbf06aa18e1c8e9494cf` passed CI format/lint/typecheck/PostgreSQL tests/build, then failed the migration grant gate because migration 010 lacked an explicit API grant entry. The follow-up registers only SELECT/INSERT/UPDATE on `catalog_sync_quarantine`; DELETE and schema creation remain denied. The existing restricted-role deployment-grant regression now exercises these exact privileges and passes against disposable PostgreSQL 16. No live deployment or broad Linux QA was performed. Final CI must pass on the follow-up production SHA, not the failed candidate.
+
 ## Acceptance and release holds
 
 - Independent QA must recheck P1-01/P1-02 and their directly affected Push/Pull/recovery paths on the final production SHA. Builder review found no remaining P0/P1 in this bounded change; this is not independent acceptance.

@@ -43,5 +43,12 @@
       "name": "category_code_repairs",
       "privileges": ["SELECT", "INSERT"]
     }
+  ],
+  "010_catalog_sync_quarantine.sql": [
+    {
+      "kind": "table",
+      "name": "catalog_sync_quarantine",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    }
   ]
 }

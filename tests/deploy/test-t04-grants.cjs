@@ -201,6 +201,21 @@ async function main() {
     }
     await db.query('SELECT * FROM category_code_quarantine')
     await db.query('SELECT * FROM category_code_repairs')
+    await db.query(
+      "INSERT INTO catalog_sync_quarantine(source_key,entity_type,entity_id,server_version,original_payload,reason) VALUES ('grant-test','supplier',$1,1,'{}','MANUAL_REVIEW_REQUIRED')",
+      [randomUUID()],
+    )
+    await db.query('SELECT * FROM catalog_sync_quarantine')
+    await db.query(
+      "UPDATE catalog_sync_quarantine SET resolved_at=NOW() WHERE source_key='grant-test'",
+    )
+    await assert.rejects(
+      db.query(
+        "DELETE FROM catalog_sync_quarantine WHERE source_key='grant-test'",
+      ),
+      (e) => e.code === '42501',
+      'API must retain original catalog quarantine evidence',
+    )
     await assert.rejects(
       db.query('CREATE TABLE public.forbidden(id int)'),
       (e) => e.code === '42501',
