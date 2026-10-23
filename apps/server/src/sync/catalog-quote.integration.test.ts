@@ -152,6 +152,99 @@ describe.skipIf(!pool)('catalog quote push', () => {
   afterAll(async () => {
     await pool!.end()
   })
+  it('bounds authorization replay and rechecks grants on every page', async () => {
+    const reader = randomUUID()
+    await pool!.query(
+      "INSERT INTO users(id,business_code,username,password_hash,ui_locale) VALUES ($1,$1::uuid::text,$1::uuid::text,'fixture','zh-CN')",
+      [reader],
+    )
+    const sync = new SyncService(store!)
+    const identity = {
+      id: reader,
+      roles: ['engineer'] as const,
+      installationId: randomUUID(),
+    }
+    const before = await sync.pull(identity, { cursor: '0', limit: 500 })
+    expect(before.changes.some((change) => change.entityId === supplier)).toBe(
+      false,
+    )
+    expect(before.authorizationVersion).toMatch(/^[a-f0-9]{64}$/)
+    await pool!.query(
+      'INSERT INTO user_project_bindings(user_id,project_id) VALUES ($1,$2)',
+      [reader, project],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings(user_id,project_id,department_id,team_id) VALUES ($1,$2,$3,$4)',
+      [reader, project, department, team],
+    )
+    const expanded = await sync.pull(identity, {
+      cursor: before.nextCursor,
+      limit: 500,
+    })
+    expect(expanded.authorizationVersion).not.toBe(before.authorizationVersion)
+    const replayUntil = expanded.replayUntil
+    const latePrice = randomUUID()
+    const lateMaterial = randomUUID()
+    expect(
+      (
+        await push('material', lateMaterial, {
+          id: lateMaterial,
+          isActive: true,
+        })
+      ).status,
+    ).toBe('accepted')
+    expect(
+      (
+        await push('material_price', latePrice, {
+          ...quote,
+          id: latePrice,
+          materialId: lateMaterial,
+        })
+      ).status,
+    ).toBe('accepted')
+    const history = await sync.pull(identity, {
+      cursor: '0',
+      limit: 500,
+      replayUntil,
+      authorizationVersion: expanded.authorizationVersion,
+    })
+    expect(history.changes.some((change) => change.entityId === supplier)).toBe(
+      true,
+    )
+    expect(history.changes.some((change) => change.entityId === price)).toBe(
+      true,
+    )
+    expect(
+      history.changes.some((change) => change.entityId === latePrice),
+    ).toBe(false)
+    const incremental = await sync.pull(identity, {
+      cursor: expanded.nextCursor,
+      limit: 500,
+    })
+    expect(
+      incremental.changes.some((change) => change.entityId === latePrice),
+    ).toBe(true)
+    await pool!.query(
+      'UPDATE user_project_scope_bindings SET deleted_at = NOW(), updated_at = NOW() WHERE user_id = $1',
+      [reader],
+    )
+    const revoked = await sync.pull(identity, {
+      cursor: '0',
+      limit: 500,
+      replayUntil,
+      authorizationVersion: expanded.authorizationVersion,
+    })
+    expect(revoked.changes).toEqual([])
+    expect(revoked.authorizationVersion).not.toBe(expanded.authorizationVersion)
+    await pool!.query(
+      'UPDATE user_project_scope_bindings SET deleted_at = NULL, updated_at = NOW() WHERE user_id = $1',
+      [reader],
+    )
+    const restored = await sync.pull(identity, { cursor: '0', limit: 500 })
+    expect(restored.authorizationVersion).not.toBe(
+      expanded.authorizationVersion,
+    )
+  })
   it('rejects incomplete and forged catalog payloads without logging changes', async () => {
     const supplierId = randomUUID()
     const priceId = randomUUID()

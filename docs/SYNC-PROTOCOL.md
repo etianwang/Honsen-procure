@@ -40,6 +40,14 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 - Tombstones are applied as soft deletion. Keep them long enough for the longest supported offline window.
 - On restart after an interrupted pull, retry the same cursor. The apply operation must be idempotent.
 
+### Authorization history replay
+
+Pull also returns `authorizationVersion` (a server SHA-256 fingerprint of current live project/country/department/team bindings and their PostgreSQL row revisions) and `replayUntil` (the committed change-log high-water mark). A revoke/regrant changes the fingerprint even if the client never observed the revoked state. Each page uses one repeatable-read database snapshot for both authorization and changes.
+
+The desktop persists an account-owned replay task in `local_sync_authorization_replay` when this fingerprint changes, including on upgrade from a client without a recorded fingerprint. It conservatively replays all currently authorized history with a separate cursor and fixed upper bound. This also covers newly granted projects and their countries; it never resets the incremental cursor. Replay requests carry `authorizationVersion` and `replayUntil`; every page reapplies current authorization. A changed fingerprint returns no historical records and starts a new bounded task. Replaying a revoked scope cannot restore access.
+
+Page projection and the task cursor/completion flag commit in one SQLite transaction. Restart resumes the committed task. A repeated fingerprint cannot extend its upper bound or rewind progress. Supplier/material dependency quarantine is replayed after each page; older versions cannot replace a newer projection. Pending Outbox and order snapshots remain protected by the existing conflict rules. After the bounded replay completes, ordinary Pull resumes from its original incremental cursor, including events committed during replay. Empty pages retain their cursor and complete the bounded task.
+
 ## WebSocket change hints
 
 WebSocket is a latency optimization, not a data synchronization channel. After the server transaction commits an accepted Push, it notifies authenticated online devices with the minimal `dataset-changed` hint. The recipient then performs the normal authenticated cursor Pull.

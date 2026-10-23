@@ -6,6 +6,7 @@ import {
 } from '@honsen/shared'
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
 import { isDeepStrictEqual } from 'node:util'
+import { createHash } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import { formalShortCode, parseFormalIssue } from './formal-issue.js'
 import type { SyncActor, SyncStore } from './types.js'
@@ -1937,27 +1938,64 @@ export class PostgresSyncStore implements SyncStore {
     actor: SyncActor
     cursor: string
     limit: number
-  }): Promise<{ changes: SyncChange[]; nextCursor: string }> {
-    const result = await this.pool.query<{
-      sequence: string
-      entity_type: SyncChange['entityType']
-      entity_id: string
-      operation: SyncChange['operation']
-      version: string
-      payload_json: Record<string, unknown>
-      changed_at: Date
-      repair_request_id: string | null
-      old_business_code: string | null
-      new_business_code: string | null
-      quarantine_status: string | null
-    }>(
-      `SELECT c.sequence, c.entity_type, c.entity_id, c.operation, c.version, c.payload_json, c.changed_at,
+    replayUntil?: string
+    authorizationVersion?: string
+  }) {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ')
+      const scopes = await client.query(
+        `SELECT s.project_id, s.department_id, s.team_id, s.xmin::text AS scope_revision,
+              b.xmin::text AS binding_revision, p.country_id, p.xmin::text AS project_revision,
+              d.xmin::text AS department_revision, t.xmin::text AS team_revision
+       FROM user_project_scope_bindings s
+       JOIN user_project_bindings b ON b.user_id = s.user_id AND b.project_id = s.project_id AND b.deleted_at IS NULL
+       JOIN projects p ON p.id = s.project_id AND p.is_active AND p.deleted_at IS NULL
+       JOIN departments d ON d.id = s.department_id AND d.is_active AND d.deleted_at IS NULL
+       JOIN teams t ON t.id = s.team_id AND t.department_id = d.id AND t.is_active AND t.deleted_at IS NULL
+       WHERE s.user_id = $1 AND s.deleted_at IS NULL ORDER BY s.project_id, s.department_id, s.team_id`,
+        [input.actor.id],
+      )
+      // Row revisions also detect revoke/regrant between two client refreshes.
+      const authorizationVersion = createHash('sha256')
+        .update(JSON.stringify(scopes.rows))
+        .digest('hex')
+      const watermark = await client.query<{ cursor: string }>(
+        'SELECT COALESCE(MAX(sequence), 0)::text AS cursor FROM server_change_log',
+      )
+      const replayUntil = watermark.rows[0]!.cursor
+      if (
+        input.authorizationVersion &&
+        input.authorizationVersion !== authorizationVersion
+      ) {
+        await client.query('COMMIT')
+        return {
+          changes: [],
+          nextCursor: input.cursor,
+          authorizationVersion,
+          replayUntil,
+        }
+      }
+      const result = await client.query<{
+        sequence: string
+        entity_type: SyncChange['entityType']
+        entity_id: string
+        operation: SyncChange['operation']
+        version: string
+        payload_json: Record<string, unknown>
+        changed_at: Date
+        repair_request_id: string | null
+        old_business_code: string | null
+        new_business_code: string | null
+        quarantine_status: string | null
+      }>(
+        `SELECT c.sequence, c.entity_type, c.entity_id, c.operation, c.version, c.payload_json, c.changed_at,
               repair.request_id AS repair_request_id, repair.old_business_code, repair.new_business_code,
               q.status AS quarantine_status
        FROM server_change_log c
        LEFT JOIN category_code_repairs repair ON c.entity_type = 'material_category' AND repair.category_id = c.entity_id AND repair.result_version = c.version
        LEFT JOIN category_code_quarantine q ON c.entity_type = 'material_category' AND q.entity_id = c.entity_id
-       WHERE c.sequence > $1
+       WHERE c.sequence > $1 AND c.sequence <= $5
          AND (
            c.entity_type = ANY($2::text[])
            OR (
@@ -2002,35 +2040,50 @@ export class PostgresSyncStore implements SyncStore {
          )
        ORDER BY c.sequence
        LIMIT $4`,
-      [input.cursor, globallyVisibleEntityTypes, input.actor.id, input.limit],
-    )
-    const changes = result.rows.map((row) => {
-      const payload = { ...row.payload_json }
-      if (row.entity_type === 'material_category') {
-        delete payload.__categoryRepair
-        delete payload.__categoryQuarantine
-        if (row.repair_request_id)
-          payload.__categoryRepair = {
-            requestId: row.repair_request_id,
-            oldBusinessCode: row.old_business_code,
-            newBusinessCode: row.new_business_code,
-          }
-        if (row.quarantine_status === 'unresolved')
-          payload.__categoryQuarantine = true
-      }
+        [
+          input.cursor,
+          globallyVisibleEntityTypes,
+          input.actor.id,
+          input.limit,
+          input.replayUntil ?? replayUntil,
+        ],
+      )
+      const changes = result.rows.map((row) => {
+        const payload = { ...row.payload_json }
+        if (row.entity_type === 'material_category') {
+          delete payload.__categoryRepair
+          delete payload.__categoryQuarantine
+          if (row.repair_request_id)
+            payload.__categoryRepair = {
+              requestId: row.repair_request_id,
+              oldBusinessCode: row.old_business_code,
+              newBusinessCode: row.new_business_code,
+            }
+          if (row.quarantine_status === 'unresolved')
+            payload.__categoryQuarantine = true
+        }
+        return {
+          cursor: row.sequence,
+          entityType: row.entity_type,
+          entityId: row.entity_id,
+          operation: row.operation,
+          version: Number(row.version),
+          payload,
+          changedAt: row.changed_at.toISOString(),
+        }
+      })
+      await client.query('COMMIT')
       return {
-        cursor: row.sequence,
-        entityType: row.entity_type,
-        entityId: row.entity_id,
-        operation: row.operation,
-        version: Number(row.version),
-        payload,
-        changedAt: row.changed_at.toISOString(),
+        changes,
+        nextCursor: changes.at(-1)?.cursor ?? input.cursor,
+        authorizationVersion,
+        replayUntil,
       }
-    })
-    return {
-      changes,
-      nextCursor: changes.at(-1)?.cursor ?? input.cursor,
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
     }
   }
 

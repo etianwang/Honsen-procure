@@ -151,6 +151,8 @@ export class SyncService {
       actor,
       cursor: query.cursor ?? '0',
       limit: query.limit,
+      replayUntil: query.replayUntil,
+      authorizationVersion: query.authorizationVersion,
     })
   }
 

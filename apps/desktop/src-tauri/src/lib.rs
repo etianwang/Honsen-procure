@@ -722,6 +722,15 @@ pub struct SyncPullPageInput {
     pub next_cursor: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncPullEnvelope {
+    #[serde(flatten)]
+    page: SyncPullPageInput,
+    authorization_version: String,
+    replay_until: String,
+}
+
 #[derive(Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct RemotePurchaseOrderPayload {
@@ -5767,6 +5776,17 @@ impl LocalAuthService {
         account_id: Uuid,
         session: Option<OnlineSession>,
     ) -> Result<(), AuthError> {
+        self.apply_sync_pull_page_with_replay(page, now, account_id, session, None)
+    }
+
+    fn apply_sync_pull_page_with_replay(
+        &self,
+        page: SyncPullPageInput,
+        now: SystemTime,
+        account_id: Uuid,
+        session: Option<OnlineSession>,
+        replay: Option<&str>,
+    ) -> Result<(), AuthError> {
         if page.changes.len() > 500 || !valid_sync_cursor(&page.next_cursor) {
             return Err(AuthError::InvalidInput);
         }
@@ -5793,14 +5813,32 @@ impl LocalAuthService {
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         require_transaction_account(&transaction, account_id)?;
         let account_id_text = account_id.to_string();
-        let account_cursor: String = transaction.query_row(
-            "SELECT COALESCE((SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1), '0')",
-            [&account_id_text], |row| row.get(0),
-        ).map_err(|_| AuthError::Database)?;
+        let account_cursor: String = if let Some(version) = replay {
+            let (cursor, until): (String, String) = transaction.query_row(
+                "SELECT replay_cursor, replay_until FROM local_sync_authorization_replay WHERE account_id = ?1 AND authorization_version = ?2 AND completed = 0",
+                params![account_id_text, version], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::InvalidInput)?;
+            if parse_sync_cursor(&page.next_cursor)? > parse_sync_cursor(&until)? {
+                return Err(AuthError::InvalidInput);
+            }
+            cursor
+        } else {
+            transaction.query_row(
+                "SELECT COALESCE((SELECT last_pull_cursor FROM local_sync_account_pull_state WHERE account_id = ?1), '0')",
+                [&account_id_text], |row| row.get(0),
+            ).map_err(|_| AuthError::Database)?
+        };
         if parse_sync_cursor(&page.next_cursor)? < parse_sync_cursor(&account_cursor)? {
             return Err(AuthError::InvalidInput);
         }
         for change in &page.changes {
+            let newer: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_sync_remote_entities WHERE entity_type = ?1 AND entity_id = ?2 AND server_version > ?3) OR EXISTS(SELECT 1 FROM local_sync_entity_versions WHERE entity_type = ?1 AND entity_id = ?2 AND server_version > ?3)",
+                params![change.entity_type, change.entity_id.to_string(), change.version], |row| row.get(0),
+            ).map_err(|_| AuthError::Database)?;
+            if newer {
+                continue;
+            }
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String, Option<String>)> = transaction.query_row(
@@ -5864,10 +5902,17 @@ impl LocalAuthService {
                 )
                 .map_err(|_| AuthError::Database)?;
         }
-        transaction.execute(
+        if let Some(version) = replay {
+            transaction.execute(
+                "UPDATE local_sync_authorization_replay SET replay_cursor = ?3, completed = ?4 WHERE account_id = ?1 AND authorization_version = ?2",
+                params![account_id_text, version, page.next_cursor, (page.changes.len() < SYNC_PULL_PAGE_LIMIT) as i64],
+            ).map_err(|_| AuthError::Database)?;
+        } else {
+            transaction.execute(
             "INSERT INTO local_sync_account_pull_state (account_id, last_pull_cursor, last_success_at) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET last_pull_cursor = excluded.last_pull_cursor, last_success_at = excluded.last_success_at",
             params![account_id_text, page.next_cursor, unix_seconds(now)],
         ).map_err(|_| AuthError::Database)?;
+        }
         transaction.commit().map_err(|_| AuthError::Database)
     }
 
@@ -6371,25 +6416,74 @@ impl LocalAuthService {
         })
     }
 
+    fn observe_sync_authorization(
+        &self,
+        account_id: Uuid,
+        version: &str,
+        until: &str,
+        session: Option<OnlineSession>,
+    ) -> Result<bool, AuthError> {
+        if version.len() != 64
+            || !version.bytes().all(|value| value.is_ascii_hexdigit())
+            || !valid_sync_cursor(until)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        if let Some(session) = session {
+            Self::require_request_session(&connection, session)?;
+        }
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        require_transaction_account(&transaction, account_id)?;
+        let changed = transaction.execute(
+            "INSERT INTO local_sync_authorization_replay (account_id, authorization_version, replay_until) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET authorization_version = excluded.authorization_version, replay_cursor = '0', replay_until = excluded.replay_until, completed = 0 WHERE authorization_version <> excluded.authorization_version",
+            params![account_id.to_string(), version, until],
+        ).map_err(|_| AuthError::Database)? > 0;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(changed)
+    }
+
+    fn pending_sync_replay(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Option<(String, String, String)>, AuthError> {
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        connection.query_row(
+            "SELECT authorization_version, replay_cursor, replay_until FROM local_sync_authorization_replay WHERE account_id = ?1 AND completed = 0",
+            [account_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional().map_err(|_| AuthError::Database)
+    }
+
     pub async fn pull_sync_https(&self, now: SystemTime) -> Result<SyncPullView, AuthError> {
         let request = self.sync_request(now)?;
         let account_id = request.session.account_id;
         self.refresh_authorization_for_session(&request, now)
             .await?;
-        let mut cursor = self.pull_cursor_for_account(account_id)?;
         self.ensure_active_sync_account(account_id)?;
         let endpoint = sync_pull_endpoint()?;
         let client = self.https_client()?;
         let mut applied_count = 0;
         loop {
+            let replay = self.pending_sync_replay(account_id)?;
+            let cursor = match &replay {
+                Some((_, cursor, _)) => cursor.clone(),
+                None => self.pull_cursor_for_account(account_id)?,
+            };
             Self::require_request_session(
                 &*self.connection.lock().map_err(|_| AuthError::Database)?,
                 request.session,
             )?;
+            let mut query = vec![("cursor", cursor.as_str()), ("limit", "500")];
+            if let Some((version, _, until)) = &replay {
+                query.extend([
+                    ("authorizationVersion", version.as_str()),
+                    ("replayUntil", until.as_str()),
+                ]);
+            }
             let response = client
                 .get(endpoint.clone())
                 .bearer_auth(&request.token)
-                .query(&[("cursor", cursor.as_str()), ("limit", "500")])
+                .query(&query)
                 .send()
                 .await
                 .map_err(|_| AuthError::SyncTransport)?;
@@ -6399,22 +6493,37 @@ impl LocalAuthService {
             if !response.status().is_success() {
                 return Err(AuthError::SyncTransport);
             }
-            let page = response
-                .json::<SyncPullPageInput>()
+            let envelope = response
+                .json::<SyncPullEnvelope>()
                 .await
                 .map_err(|_| AuthError::SyncTransport)?;
+            if self.observe_sync_authorization(
+                account_id,
+                &envelope.authorization_version,
+                &envelope.replay_until,
+                Some(request.session),
+            )? {
+                self.refresh_authorization_for_session(&request, now)
+                    .await?;
+                continue;
+            }
+            let page = envelope.page;
             let has_more = pull_page_has_more(&cursor, &page)?;
-            let next_cursor = page.next_cursor.clone();
             applied_count += page.changes.len();
-            self.apply_sync_pull_page_for_account(page, now, account_id, Some(request.session))?;
-            cursor = next_cursor;
-            if !has_more {
+            self.apply_sync_pull_page_with_replay(
+                page,
+                now,
+                account_id,
+                Some(request.session),
+                replay.as_ref().map(|(version, _, _)| version.as_str()),
+            )?;
+            if !has_more && replay.is_none() {
                 break;
             }
         }
         Ok(SyncPullView {
             applied_count,
-            next_cursor: cursor,
+            next_cursor: self.pull_cursor_for_account(account_id)?,
         })
     }
 
@@ -7707,6 +7816,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0053_requisition_catalog_quote",
             include_str!("../migrations/0053_requisition_catalog_quote.sql"),
+        ),
+        (
+            "0054_authorization_replay",
+            include_str!("../migrations/0054_authorization_replay.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -12789,6 +12902,193 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         let count: i64 = connection.query_row("SELECT count(*) FROM local_schema_migrations WHERE version = '0049_material_category_audit_compat'", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn authorization_replay_survives_restart_and_preserves_incremental_state() {
+        let path = std::env::temp_dir().join(format!("scope-replay-{}.sqlite", Uuid::new_v4()));
+        let now = SystemTime::now();
+        let account = account();
+        let version = "a".repeat(64);
+        let open = || {
+            let service = LocalAuthService::open(
+                Connection::open(&path).unwrap(),
+                Box::new(MemoryCredentialVault::new()),
+                path.with_extension("media"),
+                None,
+            )
+            .unwrap();
+            service
+                .cache_verified_account(account.clone(), "correct-password", now)
+                .unwrap();
+            let captcha = service.issue_captcha(now).unwrap();
+            service
+                .offline_login(
+                    &account.username,
+                    "correct-password",
+                    captcha.id,
+                    answer(&captcha.question),
+                    now,
+                )
+                .unwrap();
+            service
+        };
+        let material_id = Uuid::new_v4();
+        let supplier_id = Uuid::new_v4();
+        let price_id = Uuid::new_v4();
+        let material = serde_json::json!({"id":material_id,"nameZh":"Material","aliases":[],"model":"M","specification":"S","unit":"pcs","isActive":true,"version":1});
+        let supplier = serde_json::json!({"id":supplier_id,"businessCode":"REPLAY-SUP","name":"Supplier","isPreferred":false,"isBlacklisted":false,"isActive":true,"version":1});
+        let price = serde_json::json!({"id":price_id,"materialId":material_id,"supplierId":supplier_id,"currency":"USD","unitPriceMinor":"123","unit":"pcs","effectiveAt":"2026-01-01","version":1});
+        let change = |cursor: u64, entity_type: &str, entity_id, payload| SyncPullChangeInput {
+            cursor: cursor.to_string(),
+            entity_type: entity_type.into(),
+            entity_id,
+            operation: "upsert".into(),
+            version: 1,
+            payload,
+            changed_at: "2026-10-23T00:00:00Z".into(),
+        };
+        {
+            let service = open();
+            service
+                .apply_sync_pull_page(
+                    SyncPullPageInput {
+                        changes: vec![change(
+                            1000,
+                            "fixture",
+                            Uuid::new_v4(),
+                            serde_json::json!({}),
+                        )],
+                        next_cursor: "1000".into(),
+                    },
+                    now,
+                )
+                .unwrap();
+            let connection = service.connection.lock().unwrap();
+            connection.execute("INSERT INTO local_sync_outbox(event_id,entity_type,entity_id,operation,base_version,payload_json,created_at,owner_account_id) VALUES (?1,'fixture',?2,'upsert',0,'{}',1,?3)",params![Uuid::new_v4().to_string(),Uuid::new_v4().to_string(),account.id.to_string()]).unwrap();
+            drop(connection);
+            assert!(
+                service
+                    .observe_sync_authorization(account.id, &version, "1000", None)
+                    .unwrap()
+            );
+            let mut changes = vec![
+                change(1, "material", material_id, material),
+                change(2, "material_price", price_id, price.clone()),
+            ];
+            changes
+                .extend((3..=500).map(|cursor| {
+                    change(cursor, "fixture", Uuid::new_v4(), serde_json::json!({}))
+                }));
+            service
+                .apply_sync_pull_page_with_replay(
+                    SyncPullPageInput {
+                        changes,
+                        next_cursor: "500".into(),
+                    },
+                    now,
+                    account.id,
+                    None,
+                    Some(&version),
+                )
+                .unwrap();
+            assert_eq!(service.pull_cursor_for_account(account.id).unwrap(), "1000");
+            assert_eq!(
+                service.pending_sync_replay(account.id).unwrap().unwrap().1,
+                "500"
+            );
+        }
+        let service = open();
+        assert!(
+            !service
+                .observe_sync_authorization(account.id, &version, "2000", None)
+                .unwrap()
+        );
+        assert_eq!(
+            service.pending_sync_replay(account.id).unwrap(),
+            Some((version.clone(), "500".into(), "1000".into()))
+        );
+        service
+            .apply_sync_pull_page_with_replay(
+                SyncPullPageInput {
+                    changes: vec![change(501, "supplier", supplier_id, supplier)],
+                    next_cursor: "501".into(),
+                },
+                now,
+                account.id,
+                None,
+                Some(&version),
+            )
+            .unwrap();
+        assert!(service.pending_sync_replay(account.id).unwrap().is_none());
+        assert_eq!(service.pull_cursor_for_account(account.id).unwrap(), "1000");
+        let mut updated = change(1001, "material_price", price_id, price.clone());
+        updated.version = 2;
+        updated.payload["unitPriceMinor"] = serde_json::json!("456");
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![updated],
+                    next_cursor: "1001".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let restored = "b".repeat(64);
+        assert!(
+            service
+                .observe_sync_authorization(account.id, &restored, "1001", None)
+                .unwrap()
+        );
+        service
+            .apply_sync_pull_page_with_replay(
+                SyncPullPageInput {
+                    changes: vec![change(2, "material_price", price_id, price)],
+                    next_cursor: "2".into(),
+                },
+                now,
+                account.id,
+                None,
+                Some(&restored),
+            )
+            .unwrap();
+        let connection = service.connection.lock().unwrap();
+        let saved: i64 = connection
+            .query_row(
+                "SELECT unit_price_minor FROM local_material_prices WHERE id = ?1",
+                [price_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved, 456);
+        let pending: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM local_sync_outbox WHERE acknowledged_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 1);
+        let faults: i64 = connection
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(faults, 0);
+    }
+
+    #[test]
+    fn authorization_replay_state_migration_preserves_incremental_cursor() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let connection = service.connection.lock().unwrap();
+        let count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM local_sync_authorization_replay",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 0);
     }
 
