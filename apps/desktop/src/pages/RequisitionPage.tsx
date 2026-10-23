@@ -80,6 +80,7 @@ function newLine(currency: EditorLine['currency']): EditorLine {
       specification: '',
     },
     supplierId: null,
+    priceSource: 'manual',
     supplierSnapshot: null,
     currency,
     quantity: '1',
@@ -130,6 +131,8 @@ function materialLine(
       ? { id: quote.supplierId, name: quote.supplierName }
       : null,
     supplierId: quote?.supplierId ?? null,
+    catalogPriceId: quote?.priceId ?? null,
+    priceSource: quote ? 'catalog' : 'manual',
     unit: material.unit,
     unitPriceMinor: quote?.unitPriceMinor ?? '0',
     currency: quote?.currency ?? line.currency,
@@ -543,9 +546,11 @@ export function RequisitionPage({
         await api.setProcurementMode(orderId, mode)
       }
       setMessage('草稿已自动保存到本机')
-    } catch {
+    } catch (error) {
       setMessage(
-        '基础草稿已保存，但可信定价未完成。请修正报价后再次保存；当前不能提交。',
+        isQuoteUnavailable(error)
+          ? '所选报价已失效或不可用，请重新选择；原草稿已保留。'
+          : '保存失败，请检查订单内容；原草稿已保留。',
       )
     }
   }
@@ -564,8 +569,12 @@ export function RequisitionPage({
       await api.submitRequisitionDraft(draft.id)
       setStatus('pending')
       setMessage('采购申请已提交，状态：待确认')
-    } catch {
-      setMessage('提交失败，请检查订单内容。')
+    } catch (error) {
+      setMessage(
+        isQuoteUnavailable(error)
+          ? '所选报价已失效或不可用，请重新选择；原草稿已保留。'
+          : '提交失败，请检查订单内容。',
+      )
     }
   }
 
@@ -703,7 +712,14 @@ export function RequisitionPage({
                     options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
                       value,
                     }))}
-                    onChange={(currency) => updateLine(index, { currency })}
+                    onChange={(currency) =>
+                      updateLine(index, {
+                        currency,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
+                    }
                   />
                 </label>
                 {mode === 'owner_self_purchase' ? (
@@ -732,19 +748,13 @@ export function RequisitionPage({
                 ) : null}
                 {mode === 'honsen_self_purchase' && line.materialId ? (
                   <label>
-                    选择供应商报价
+                    选择供应商报价（当前来源：
+                    {line.priceSource === 'catalog' ? '目录报价' : '手工价格'}）
                     <Select
                       aria-label="选择供应商报价"
                       virtual={false}
                       disabled={status === 'pending'}
-                      value={
-                        (quotePages[line.materialId]?.prices ?? []).find(
-                          (price) =>
-                            price.supplierId === line.supplierId &&
-                            price.currency === line.currency &&
-                            price.unitPriceMinor === line.unitPriceMinor,
-                        )?.priceId
-                      }
+                      value={line.catalogPriceId ?? undefined}
                       placeholder="选择供应商报价"
                       options={(
                         quotePages[line.materialId]?.prices ??
@@ -762,6 +772,8 @@ export function RequisitionPage({
                         if (price)
                           updateLine(index, {
                             supplierId: price.supplierId,
+                            catalogPriceId: price.priceId,
+                            priceSource: 'catalog',
                             supplierSnapshot: {
                               id: price.supplierId,
                               name: price.supplierName,
@@ -806,7 +818,12 @@ export function RequisitionPage({
                     disabled={status === 'pending'}
                     value={line.unit}
                     onChange={(event) =>
-                      updateLine(index, { unit: event.target.value })
+                      updateLine(index, {
+                        unit: event.target.value,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
                     }
                   />
                 </label>
@@ -818,7 +835,12 @@ export function RequisitionPage({
                     value={line.unitPriceMinor}
                     inputMode="numeric"
                     onChange={(event) =>
-                      updateLine(index, { unitPriceMinor: event.target.value })
+                      updateLine(index, {
+                        unitPriceMinor: event.target.value,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
                     }
                   />
                 </label>
@@ -944,5 +966,14 @@ export function RequisitionPage({
         canApprove={canApprove}
       />
     </>
+  )
+}
+
+function isQuoteUnavailable(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'quote_unavailable'
   )
 }
