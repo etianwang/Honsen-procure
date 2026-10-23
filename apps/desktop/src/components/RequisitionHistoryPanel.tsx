@@ -13,7 +13,10 @@ import { OrderWorkflowPanel } from './OrderWorkflowPanel'
 type Props = {
   api: Pick<
     RequisitionApi,
-    'listRequisitionHistory' | 'getRequisitionDetail' | 'withdrawRequisition'
+    | 'listRequisitionHistory'
+    | 'getRequisitionDetail'
+    | 'withdrawRequisition'
+    | 'issueOwnerFormalOrder'
   >
   refreshKey: string
   projectId: string
@@ -45,6 +48,7 @@ export function RequisitionHistoryPanel({
   const [detailError, setDetailError] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [withdrawError, setWithdrawError] = useState(false)
+  const [issueError, setIssueError] = useState(false)
   const detailRequest = useRef(0)
 
   useEffect(() => {
@@ -106,6 +110,17 @@ export function RequisitionHistoryPanel({
       setRetry((value) => value + 1)
     } catch {
       setWithdrawError(true)
+    }
+  }
+
+  async function issueOwnerOrder(orderId: string) {
+    setIssueError(false)
+    try {
+      await api.issueOwnerFormalOrder(orderId)
+      await openDetail(orderId)
+      setRetry((value) => value + 1)
+    } catch {
+      setIssueError(true)
     }
   }
 
@@ -212,6 +227,12 @@ export function RequisitionHistoryPanel({
       {withdrawError ? (
         <Alert type="error" title="撤回失败：当前状态或授权不允许撤回。" />
       ) : null}
+      {issueError ? (
+        <Alert
+          type="error"
+          title="正式下达失败：请检查审批状态、授权和冻结报价。"
+        />
+      ) : null}
       {detailLoading ? <p role="status">正在读取详情…</p> : null}
       {detail ? (
         <section aria-label="请购详情">
@@ -220,6 +241,14 @@ export function RequisitionHistoryPanel({
           detail.applicantId === applicantId ? (
             <Button onClick={() => void withdrawHistoricalOrder(detail.id)}>
               撤回历史申请
+            </Button>
+          ) : null}
+          {canApprove &&
+          detail.procurementMode === 'owner_self_purchase' &&
+          (detail.workflowStatus === 'confirmed' ||
+            detail.workflowStatus === 'approved') ? (
+            <Button onClick={() => void issueOwnerOrder(detail.id)}>
+              正式下达业主申请
             </Button>
           ) : null}
           {detail.projectId === projectId &&
@@ -233,6 +262,9 @@ export function RequisitionHistoryPanel({
             {detail.projectName} · {detail.site} · {detail.workflowStatus} ·{' '}
             {detail.procurementMode ?? '历史模式未记录'}
           </p>
+          {detail.formalDocumentNo ? (
+            <p>正式编号：{detail.formalDocumentNo}</p>
+          ) : null}
           <p>
             申请日期：{detail.orderDate} · 交货地址：{detail.deliveryAddress}
           </p>

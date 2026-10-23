@@ -1,7 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { loginRequestSchema, type LoginResponse } from '@honsen/shared'
 import { CaptchaStore } from './captcha.js'
-import type { AuthStore, LoginAccount, PasswordVerifier } from './types.js'
+import type {
+  AuthStore,
+  AuthenticatedAccount,
+  PasswordVerifier,
+} from './types.js'
 
 const sessionLifetimeMilliseconds = 8 * 60 * 60 * 1000
 
@@ -74,7 +78,7 @@ export class AuthService {
   async authenticate(
     accessToken: string,
     now = new Date(),
-  ): Promise<LoginAccount> {
+  ): Promise<AuthenticatedAccount> {
     const account = await this.store.findActiveSession(
       hashToken(accessToken),
       now,

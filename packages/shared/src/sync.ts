@@ -1,5 +1,15 @@
 import { z } from 'zod'
 import { uuidSchema } from './contracts.js'
+import { materialCategorySchema } from './master-data.js'
+
+export const categoryRepairRequestSchema = z.strictObject({
+  requestId: uuidSchema,
+  categoryId: uuidSchema,
+  expectedVersion: z.number().int().min(1),
+  newBusinessCode: materialCategorySchema.shape.businessCode,
+  reason: z.string().trim().min(1).max(1000),
+})
+export type CategoryRepairRequest = z.infer<typeof categoryRepairRequestSchema>
 
 export const syncEntityTypeSchema = z.enum([
   'country',
@@ -42,6 +52,9 @@ export const syncEventResultSchema = z.object({
   eventId: uuidSchema,
   status: z.enum(['accepted', 'conflict', 'validation_error']),
   serverVersion: z.number().int().min(0).nullable(),
+  errorCode: z.string().min(1).max(80).optional(),
+  serverPayload: z.record(z.string(), z.unknown()).optional(),
+  serverOperation: syncOperationSchema.optional(),
 })
 
 export const syncPushResponseSchema = z.object({
@@ -51,6 +64,14 @@ export const syncPushResponseSchema = z.object({
 export const syncPullQuerySchema = z.object({
   cursor: z.string().regex(/^\d+$/).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
+  replayUntil: z
+    .string()
+    .regex(/^\d{1,19}$/)
+    .optional(),
+  authorizationVersion: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 })
 
 export const syncChangeSchema = z.object({
@@ -66,6 +87,11 @@ export const syncChangeSchema = z.object({
 export const syncPullResponseSchema = z.object({
   changes: z.array(syncChangeSchema),
   nextCursor: z.string().regex(/^\d+$/),
+  authorizationVersion: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  replayUntil: z.string().regex(/^\d+$/).optional(),
 })
 
 export type SyncEvent = z.infer<typeof syncEventSchema>

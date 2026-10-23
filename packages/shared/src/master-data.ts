@@ -17,7 +17,7 @@ export const projectDefaultsSchema = z.object({
   projectId: uuidSchema,
   departmentTitle: z.string().trim().min(1).max(255),
   companyAddress: z.string().trim().min(1).max(1000),
-  companyContact: z.string().trim().min(1).max(255),
+  companyContact: z.string().trim().max(255).nullable(),
   defaultCurrency: currencySchema,
   defaultLanguagePair: documentLanguagePairSchema,
   defaultTaxTemplateId: uuidSchema.nullable(),
@@ -53,6 +53,17 @@ const activeReferenceSchema = z.object({
   businessCode: businessCodeSchema,
   name: z.string().trim().min(1).max(255),
   isActive: z.boolean(),
+})
+
+export const materialCategorySchema = activeReferenceSchema.extend({
+  // Unlike other master data, category codes are immutable and compared
+  // byte-for-byte by the desktop database; do not normalize whitespace.
+  businessCode: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/),
+  version: z.number().int().min(1),
 })
 
 export const referenceMasterDataSchema = z.discriminatedUnion('kind', [
