@@ -440,6 +440,12 @@ fn g2_pull_production_issue_outbox_reaches_second_file_without_changing_issuer_n
         .unwrap();
     {
         let c = producer.connection.lock().unwrap();
+        c.execute(
+            "UPDATE local_suppliers SET is_active = 1 WHERE id = ?1",
+            [id(7).to_string()],
+        )
+        .unwrap();
+        c.execute("UPDATE local_material_prices SET is_active = 1, deleted_at = NULL, unit_price_minor = 1234 WHERE id = ?1", [id(8).to_string()]).unwrap();
         c.execute("INSERT INTO local_authorization_snapshots (account_id,project_id,department_id,team_id,verified_at,expires_at) VALUES (?1,?2,?3,?4,?5,?6)", params![id(1).to_string(),id(3).to_string(),id(4).to_string(),id(5).to_string(),unix_seconds(now),unix_seconds(now+AUTHORIZATION_CACHE_WINDOW)]).unwrap();
         c.execute("INSERT INTO local_exchange_rates (id,from_currency,to_currency,rate_decimal,effective_at,source,version) VALUES (?1,'CNY','XOF','76.5','2026-10-19','public_daily',1)", [id(30).to_string()]).unwrap();
     }
