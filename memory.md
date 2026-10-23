@@ -816,3 +816,8 @@ Build shared contracts and exact money/quantity helpers only:
 
 - BLOCKER: CHANGES_REQUIRED on production SHA `0f9895ae4df12abdccda57246c13eccebb66e000`; owner issue checks `catalog` while stored source is `catalog_price`, so locally stale catalog quotes can be formally issued. See `docs/qa/pr18-final-review.md` for exact scope, repair and acceptance. No code or migrations changed.
 - DEFERRED: PR #17 country-isolation integration and independent security recheck; three-way integration has conflicts. WARNING: no full Windows A/B, T04, T10, Linux deployment or live desktop-to-server sync rerun. Independent targeted QA PASS and CI evidence are scoped as documented in the review. Check `git log -1` and `git status --short` for this evidence checkpoint and dirty state.
+
+## PR #18 incremental final recheck — 2026-10-23
+
+- APPROVED for candidate `c00129745572ab8e80d8ef42aca1cba79aefc37e`; the earlier owner quote predicate P1 is fixed and independently rechecked. Exact scope, CI, QA and integration evidence: `docs/qa/pr18-final-recheck-c001297.md`. No application code, schema or migration changes in this review branch. Inspect Git HEAD/status for the evidence checkpoint.
+- BLOCKER for overall release: PR #17 country isolation and its independent security acceptance remain open; merging the two branches also requires conflict resolution and a combined scope check. DEFERRED: complete multi-account approval UI and numbered SPO formal-issue acceptance. WARNING: QA checked Outbox counts, not byte-for-byte content; full Windows A/B, T04, T10 and Linux deployment were not rerun for this review. No production data or deployments were touched.
