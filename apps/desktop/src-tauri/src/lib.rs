@@ -17880,6 +17880,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migrated_item_currency, "CNY");
+        let preserved: (Option<String>, Option<String>, i64) = connection.query_row(
+            "SELECT catalog_price_id, price_source, unit_price_minor FROM local_purchase_order_items WHERE order_id = ?1",
+            [&order_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(preserved, (None, None, 100));
         let workflow_column_exists: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('local_purchase_orders') WHERE name = 'workflow_status'",
@@ -18478,7 +18483,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 material_id: Some(material),
                 catalog_price_id: None,
-                price_source: None,
+                price_source: Some("manual".into()),
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "forged".into(),
                     name_fr: None,

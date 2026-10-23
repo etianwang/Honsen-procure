@@ -236,7 +236,9 @@ export class PostgresSyncStore implements SyncStore {
         )
       ) {
         await client.query(
-          "SELECT pg_advisory_xact_lock(hashtextextended('catalog-quote-write', 0))",
+          input.event.entityType === 'purchase_order'
+            ? "SELECT pg_advisory_xact_lock(hashtextextended('catalog-quote-write', 0))"
+            : "SELECT pg_advisory_xact_lock_shared(hashtextextended('catalog-quote-write', 0))",
         )
       }
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
@@ -455,7 +457,6 @@ export class PostgresSyncStore implements SyncStore {
           !(await validCatalogQuotes(
             client,
             input.event,
-            input.actorId,
             current?.payload_json,
           ))
         ) {
@@ -2193,10 +2194,22 @@ function canonicalProjectDefaultsPayload(
 async function validCatalogQuotes(
   client: PoolClient,
   event: SyncEvent,
-  actorId: string,
   previous?: Record<string, unknown>,
 ): Promise<boolean> {
   if (event.operation !== 'upsert' || event.payload.formallyIssuedAt != null)
+    return true
+  if (
+    previous &&
+    [
+      'approved',
+      'confirmed',
+      'executing',
+      'receiving',
+      'completed',
+      'completed_with_conditions',
+    ].includes(String(previous.workflowStatus)) &&
+    isDeepStrictEqual(previous.lines, event.payload.lines)
+  )
     return true
   const currentLines = Array.isArray(previous?.lines) ? previous.lines : []
   const previousCatalog = currentLines.some(
@@ -2207,7 +2220,17 @@ async function validCatalogQuotes(
       (line as Record<string, unknown>).catalogPriceId != null,
   )
   if (event.payload.procurementMode === 'owner_self_purchase')
-    return !previousCatalog
+    return (
+      !previousCatalog &&
+      (!Array.isArray(event.payload.lines) ||
+        event.payload.lines.every(
+          (line: unknown) =>
+            !line ||
+            typeof line !== 'object' ||
+            Array.isArray(line) ||
+            (line as Record<string, unknown>).catalogPriceId == null,
+        ))
+    )
   const lines = event.payload.lines
   if (!Array.isArray(lines))
     return (
@@ -2284,7 +2307,7 @@ async function validCatalogQuotes(
       WHERE p.id::text = $2 AND p.country_id::text = $5 AND p.is_active AND p.deleted_at IS NULL
       FOR SHARE OF p, b, a`,
       [
-        actorId,
+        event.payload.applicantId,
         event.payload.projectId,
         event.payload.departmentId,
         event.payload.teamId,

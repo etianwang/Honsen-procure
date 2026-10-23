@@ -21,6 +21,7 @@ const [
   order,
   line,
 ] = Array.from({ length: 11 }, () => randomUUID())
+const buyer = randomUUID()
 const store = pool ? new PostgresSyncStore(pool) : null
 const quote = {
   id: price,
@@ -60,9 +61,10 @@ const push = (
   entityId: string,
   payload: Record<string, unknown>,
   baseVersion = 0,
+  actorId = actor,
 ) =>
   store!.pushEvent({
-    actorId: actor,
+    actorId,
     installationId: installation,
     event: {
       eventId: randomUUID(),
@@ -80,6 +82,10 @@ describe.skipIf(!pool)('catalog quote push', () => {
     await pool!.query(
       `INSERT INTO users(id,business_code,username,password_hash,ui_locale) VALUES ($1,$2,$2,'fixture','zh-CN')`,
       [actor, actor],
+    )
+    await pool!.query(
+      `INSERT INTO users(id,business_code,username,password_hash,ui_locale) VALUES ($1,$2,$2,'fixture','zh-CN')`,
+      [buyer, buyer],
     )
     await pool!.query(
       `INSERT INTO countries(id,business_code,name,time_zone) VALUES ($1,$1::uuid::text,'test','UTC')`,
@@ -131,14 +137,50 @@ describe.skipIf(!pool)('catalog quote push', () => {
       [order],
     )
     expect(saved.rows[0].payload_json.lines[0].catalogPriceId).toBe(price)
+    expect(
+      (
+        await push(
+          'purchase_order',
+          order,
+          { ...data, workflowStatus: 'pending_confirmation' },
+          1,
+        )
+      ).status,
+    ).toBe('accepted')
+    expect(
+      (
+        await push(
+          'purchase_order',
+          order,
+          { ...data, workflowStatus: 'confirmed' },
+          2,
+          buyer,
+        )
+      ).status,
+    ).toBe('accepted')
+    const staleOrder = randomUUID()
+    expect((await push('purchase_order', staleOrder, data)).status).toBe(
+      'accepted',
+    )
     const replacement = randomUUID()
     expect(
       (await push('material_price', replacement, { ...quote, id: replacement }))
         .status,
     ).toBe('accepted')
+    expect(
+      (
+        await push(
+          'purchase_order',
+          order,
+          { ...data, workflowStatus: 'executing' },
+          3,
+          buyer,
+        )
+      ).status,
+    ).toBe('accepted')
     const result = await push(
       'purchase_order',
-      order,
+      staleOrder,
       { ...data, workflowStatus: 'pending_confirmation' },
       1,
     )
@@ -150,7 +192,7 @@ describe.skipIf(!pool)('catalog quote push', () => {
       (
         await pool!.query(
           `SELECT payload_json->>'workflowStatus' AS status FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1`,
-          [order],
+          [staleOrder],
         )
       ).rows[0].status,
     ).toBe('draft')
@@ -161,6 +203,15 @@ describe.skipIf(!pool)('catalog quote push', () => {
       (await push('material_price', latest, { ...quote, id: latest })).status,
     ).toBe('accepted')
     const lineData = { ...data.lines[0], catalogPriceId: latest }
+    expect(
+      (
+        await push('purchase_order', randomUUID(), {
+          ...data,
+          procurementMode: 'owner_self_purchase',
+          lines: [lineData],
+        })
+      ).errorCode,
+    ).toBe('QUOTE_UNAVAILABLE')
     const next = { ...data, lines: [lineData] }
     expect(
       (
