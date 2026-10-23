@@ -1,0 +1,28 @@
+{
+  "candidate": "20da0985fdb18b1e4a6571c54de8a0a4af40282c",
+  "checks": [
+    "real EXE UI offline re-login with already refreshed revoked scope hides cached supplier; Rust IPC hides supplier and quote",
+    "real EXE Rust IPC enforces controlled valid versus expired offline authorization snapshots",
+    "another authorized account accesses retained same-profile supplier and quote"
+  ],
+  "fixture": "previous task-owned receiver profile; SQLite authorization timestamps modified only for controlled boundary tests",
+  "errors": [],
+  "afterRevoke": {
+    "supplier": false,
+    "quote": false
+  },
+  "validSnapshot": {
+    "supplier": true,
+    "quote": true
+  },
+  "expiredSnapshot": {
+    "supplier": false,
+    "quote": false
+  },
+  "otherAuthorized": {
+    "supplier": true,
+    "quote": true
+  },
+  "result": "INCOMPLETE",
+  "failure": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- 'offline_window_expired'\n\n    at file:///E:/Project/honsen-pr17-supplier-qa/tests/native/pr17-revocation-offline.mjs:51:10"
+}

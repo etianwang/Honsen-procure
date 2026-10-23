@@ -1,0 +1,8 @@
+{
+  "candidate": "20da0985fdb18b1e4a6571c54de8a0a4af40282c",
+  "checks": [],
+  "fixture": "previous task-owned receiver profile; SQLite authorization timestamps modified only for controlled boundary tests",
+  "errors": [],
+  "result": "INCOMPLETE",
+  "failure": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: '材料库', exact: true })\nExpected: visible\nTimeout: 30000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" getByRole('button', { name: '材料库', exact: true }) with timeout 30000ms\n  - waiting for getByRole('button', { name: '材料库', exact: true })\n\n    at captureRawStack (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright-core\\lib\\coreBundle.js:9282:17)\n    at callMatcherAsStep (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright\\lib\\matchers\\expect.js:13316:57)\n    at Object.toBeVisible (E:\\Project\\honsen-pr17-supplier-qa\\node_modules\\playwright\\lib\\matchers\\expect.js:13308:23)\n    at E:\\Project\\honsen-pr17-supplier-qa\\tests\\native\\pr17-revocation-offline.mjs:35:66"
+}

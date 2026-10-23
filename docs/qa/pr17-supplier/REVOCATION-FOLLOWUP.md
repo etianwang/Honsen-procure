@@ -1,0 +1,24 @@
+# PR 17 revocation boundary follow-up
+
+Candidate `20da0985fdb18b1e4a6571c54de8a0a4af40282c`; previous QA checkpoint `5e6ac3c26cd509b55517befd6359d2f11155d1be`. Result: **BLOCKED_ENV**. An online re-login after revocation has not been verified, so no unconditional security sign-off is claimed.
+
+## Windows credential diagnosis
+
+The actual Windows API `CredWriteW` was called directly with a unique synthetic generic credential, independently of Honsen, and failed with raw Win32 code 8 (insufficient memory resources). `CredEnumerateW` succeeded and counted 762 credentials; no names or values were collected, and no preexisting credential was changed. The same raw code was returned earlier by old and new Honsen vault probes. The current user profile was loaded, VaultSvc, KeyIso and SamSs were running, and at inspection approximately 13 GiB physical memory and 8 GiB virtual memory remained available, with approximately 8 GiB free on C:. These observations locate the failure at the OS credential write boundary but do not establish which resource or quota is exhausted. `round2-wincred.json` and `tests/native/pr17-wincred-probe.py` retain the reproducible result. The user token's Administrators group is deny-only; a separate Windows account was not created, and existing accounts were not modified or impersonated.
+
+## Actual desktop and production Rust IPC
+
+Using the previously authenticated task-owned receiver profile, the Windows EXE built from the candidate (SHA-256 `71e6b12eed24d9e7711142dbd73bc43bce7a6644158b5332cc1669d36695b5bb`), WebView2, the real OS credential vault for offline credential **read**, SQLite and real Tauri commands:
+
+- After the previous real server-side revocation and authorization refresh, the user signed in through the real offline login UI. The supplier was absent in the materials UI; Rust `list_suppliers` and `search_catalog` both omitted the cached supplier and quote.
+- A controlled SQLite authorization snapshot set valid for 60 seconds allowed the supplier and quote to appear; setting its expiry before the current time hid both through the same IPC commands. These timestamp changes are synthetic fixtures, not server refresh or proof of online re-login.
+- After changing to a different previously verified and still-authorized account in the same EXE/profile, both the supplier and quote were visible. Both SQLite rows remained present. A controlled 25-hour-old account verification time caused real Rust IPC `offline_login` to return `offline_window_expired`.
+- Details and assertions are in `round2-authorization-result.json` and `tests/native/pr17-revocation-offline.mjs`. The test resets the synthetic accounts' cached verification times and manipulates only this task-owned SQLite. This does not prove that a fresh account, online login, or network refresh works in the current Windows credential environment.
+
+The first two UI attempts did not reach the tested boundary: the harness used a forward slash in the profile path and thereby selected a different path-derived credential namespace. `round2-ui-attempt.json` and `round2-login-diagnostic.json` preserve those failures; correcting the path with Node's Windows `join` yielded the successful real EXE test above. A further assertion initially failed because the test driver failed to serialize a rejected IPC error; `round2-partial.json` preserves that attempt. The final driver correctly captures the error inside the renderer.
+
+## Rust core tests and limits
+
+Three focused candidate Rust tests passed: file-backed SQLite supplier/quote country filtering and expiry; 24-hour offline login and idle expiry; and validated authorization snapshot replacement. They use the real Rust core with controlled test time and a test credential vault; they are not separate real UI or real HTTPS tests. See `round2-rust-tests.log`. The previous task's actual HTTPS/PostgreSQL evidence remains scoped to its recorded checks; its first successful raw JSON was overwritten as documented in `RECHECK-20da.md`.
+
+**BLOCKER:** an actual online login after revocation, and confirmation that the UI waits for the fresh authorization snapshot in that path, still require a working credential-write environment. The cause of Windows error 8 has not been proven beyond the OS API boundary; it is not evidence by itself of a production defect. No new P0/P1 defect was confirmed in the completed checks, but that unverified online boundary leaves a possible unauthorized-access risk. Conditional code review may proceed on the disclosed evidence, but final security acceptance and merge must wait for an independent online re-login recheck on a clean Windows user or environment. PR remained Draft and all three `quality` checks were successful at SHA inspection. No full T04, T10, deployment, production DB, or unrelated workflows were tested.

@@ -1,0 +1,38 @@
+warning: linker stdout: 正在创建库 E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.34s
+     Running unittests src\lib.rs (E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 1 test
+test tests::supplier_country_isolation_uses_file_sqlite_for_catalog_and_requisition ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 15.18s
+
+warning: linker stdout: 正在创建库 E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src\lib.rs (E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 1 test
+test tests::offline_window_and_idle_sessions_expire ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 0.75s
+
+warning: linker stdout: 正在创建库 E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running unittests src\lib.rs (E:\Project\honsen-pr17-recheck-cache\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 1 test
+test tests::cloud_authorization_refresh_replaces_only_validated_account_scopes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 91 filtered out; finished in 0.66s
