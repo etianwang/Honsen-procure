@@ -1,0 +1,12 @@
+
+> @honsen/server@0.0.0-development test
+> vitest run src/sync/postgres-store.test.ts
+
+
+ RUN  v5.0.3 E:/Project/honsen-pr17-recheck-target/apps/server
+
+
+ Test Files  1 passed (1)
+      Tests  42 passed (42)
+   Start at  00:05:55
+   Duration  930ms (tests 71%, transform 16%, import 13%)
