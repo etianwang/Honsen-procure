@@ -2319,6 +2319,8 @@ test('catalog details and Honsen draft can reach later quote pages', async ({
     ),
   ).resolves.toMatchObject({
     supplierId: 's-25',
+    catalogPriceId: 'p-25',
+    priceSource: 'catalog',
     quantity: '3',
     unitPriceMinor: '1025',
     currency: 'XOF',

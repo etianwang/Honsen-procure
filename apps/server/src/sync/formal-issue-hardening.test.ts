@@ -277,6 +277,68 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
     ).toBe('accepted')
   })
 
+  it('preserves an issued offline snapshot and audits a revoked catalog quote', async () => {
+    const f = fixture(111)
+    const line = {
+      ...f.approved.lines[0],
+      ownerQuoteSource: 'catalog_price',
+      ownerCatalogPriceId: randomUUID(),
+      ownerManualReferenceReason: null,
+      materialId: randomUUID(),
+      supplierSnapshotJson: JSON.stringify({
+        id: randomUUID(),
+        name: 'fixture',
+      }),
+      unit: 'pcs',
+    }
+    const pending = { ...f.pending, lines: [line] }
+    const approved = { ...f.approved, lines: [line] }
+    const issued = {
+      ...f.issued,
+      lines: [line],
+      formalSnapshotJson: JSON.stringify(approved),
+    }
+    expect(
+      (
+        await store.pushEvent({
+          event: f.event(pending, 0),
+          installationId,
+          actorId: engineerId,
+        })
+      ).status,
+    ).toBe('accepted')
+    expect(
+      (
+        await store.pushEvent({
+          event: f.event(approved, 1),
+          installationId,
+          actorId,
+        })
+      ).status,
+    ).toBe('accepted')
+    expect(
+      (
+        await store.pushEvent({
+          event: f.event(issued, 2),
+          installationId,
+          actorId,
+        })
+      ).status,
+    ).toBe('accepted')
+    const result = await pool!.query(
+      `SELECT payload_json FROM sync_entities WHERE entity_type = 'purchase_order' AND entity_id = $1`,
+      [f.orderId],
+    )
+    expect(result.rows[0].payload_json.lines[0].ownerFinalUnitPriceMinor).toBe(
+      '120',
+    )
+    const audit = await pool!.query(
+      `SELECT 1 FROM audit_entries WHERE entity_type = 'purchase_order' AND entity_id = $1 AND action = 'issued_quote_verification_discrepancy'`,
+      [f.orderId],
+    )
+    expect(audit.rowCount).toBe(1)
+  })
+
   it('never revives a soft-deleted approved order by formal issue Push', async () => {
     const f = fixture(108)
     const push = (
