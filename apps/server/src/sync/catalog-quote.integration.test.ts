@@ -53,6 +53,8 @@ const data = {
       currency: 'CNY',
       unit: 'pcs',
       unitPriceMinor: '1234',
+      quantity: '3',
+      lineTotalMinor: '3702',
     },
   ],
 }
@@ -147,7 +149,15 @@ describe.skipIf(!pool)('catalog quote push', () => {
         change.entityType === 'purchase_order' && change.entityId === order,
     )
     expect(pulledOrder?.payload.lines).toMatchObject([
-      { catalogPriceId: price, priceSource: 'catalog' },
+      {
+        catalogPriceId: price,
+        priceSource: 'catalog',
+        currency: 'CNY',
+        unitPriceMinor: '1234',
+        quantity: '3',
+        lineTotalMinor: '3702',
+        supplierSnapshotJson: JSON.stringify({ id: supplier, name: 'fixture' }),
+      },
     ])
     expect(
       (
@@ -301,5 +311,27 @@ describe.skipIf(!pool)('catalog quote push', () => {
     } finally {
       client.release()
     }
+  })
+  it('rejects a quote when the project authorization has been revoked', async () => {
+    await pool!.query(
+      "UPDATE sync_entities SET payload_json = jsonb_set(payload_json, '{isBlacklisted}', 'false') WHERE entity_type = 'supplier' AND entity_id = $1",
+      [supplier],
+    )
+    const latest = randomUUID()
+    expect(
+      (await push('material_price', latest, { ...quote, id: latest })).status,
+    ).toBe('accepted')
+    await pool!.query(
+      'UPDATE user_project_bindings SET deleted_at = now() WHERE user_id = $1 AND project_id = $2',
+      [actor, project],
+    )
+    const result = await push('purchase_order', randomUUID(), {
+      ...data,
+      lines: [{ ...data.lines[0], catalogPriceId: latest }],
+    })
+    expect(result).toMatchObject({
+      status: 'validation_error',
+      errorCode: 'QUOTE_UNAVAILABLE',
+    })
   })
 })
