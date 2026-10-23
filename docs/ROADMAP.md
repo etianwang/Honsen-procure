@@ -210,3 +210,7 @@ G1 (2026-10-19) stays OPEN. Independent QA `b0a6069` verified the bounded Push/P
 The following instruction applied to the original foundation stage only; it does not override the current approved v1.0 scope or Delivery-First path.
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
+
+## Catalog quote pagination checkpoint — 2026-10-22
+
+T05/T06/T08 have a bounded quote-list correctness repair under independent review. The four-price overview is retained while material details and purchase selection can page through authorized current prices. Local SQLite and mocked browser coverage are development evidence only; independent QA, native acceptance and final-SHA CI remain open. Milestone and task acceptance gates are unchanged; see `docs/BUILD-TASKS.md` and `memory.md`.

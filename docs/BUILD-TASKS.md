@@ -317,3 +317,7 @@ This is a sequencing plan only; it does not change any task or milestone status.
 FIX2 and the bounded T10-A/G2 slice are independently CLOSED and now share the local integration baseline above; do not repeat their development or full native matrices. Recommended next development is existing **T10-B/D / G3 structured errors and permanent-failure handling**, after user confirmation. Obtain T04 deployment authority and the T09-C/T11 boundary decision separately; they do not block every safe implementation. Original final acceptance dependencies remain unchanged. This integration starts no next task.
 
 The original initial recommendation was to start T00 to establish repository shape, CI gates and an automated DOM harness without production behavior or packaging identity. That foundation is now accepted; it is not the current next task.
+
+## T05/T06/T08 quote pagination checkpoint — 2026-10-22
+
+The four-quote material search result remains an overview. A separate bounded, country-authorized active-quote query now serves material detail and purchase selection; historic inactive prices remain history and blacklisted suppliers are not selectable. File-backed SQLite tests cover pagination and country scope, and mocked-IPC browser tests cover selection beyond four; formal snapshot behavior uses the existing regression. Independent QA, native end-to-end evidence and final-SHA CI remain open. This partial defect repair does not close T05, T06, T08, T10 or any original acceptance gate. See `memory.md` for the handoff and skipped PostgreSQL evidence.

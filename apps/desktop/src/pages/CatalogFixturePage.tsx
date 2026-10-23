@@ -2,6 +2,9 @@ import type { CatalogApi } from '../lib/catalog-api'
 import { MaterialsPage } from './MaterialsPage'
 
 const fixtureCatalogApi: CatalogApi = {
+  async listCatalogPrices() {
+    return []
+  },
   async searchCatalog(query) {
     const materials = [
       {
@@ -73,5 +76,11 @@ const fixtureCatalogApi: CatalogApi = {
 }
 
 export function CatalogFixturePage() {
-  return <MaterialsPage role="engineer" api={fixtureCatalogApi} />
+  return (
+    <MaterialsPage
+      role="engineer"
+      projectId="00000000-0000-4000-8000-000000000102"
+      api={fixtureCatalogApi}
+    />
+  )
 }

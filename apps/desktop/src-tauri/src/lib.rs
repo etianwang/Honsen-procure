@@ -301,6 +301,8 @@ pub enum AdjustmentInput {
 pub struct RequisitionLineInput {
     pub id: Uuid,
     pub material_id: Option<Uuid>,
+    pub catalog_price_id: Option<Uuid>,
+    pub price_source: Option<String>,
     pub material_snapshot: MaterialSnapshotInput,
     pub supplier_id: Option<Uuid>,
     pub currency: String,
@@ -669,6 +671,7 @@ pub struct SyncStatusView {
     pub pending_count: i64,
     pub conflict_count: i64,
     pub quarantined_count: i64,
+    pub quote_rejected_count: i64,
     pub last_success_at: Option<i64>,
 }
 
@@ -771,6 +774,8 @@ struct RemotePurchaseOrderPayload {
 struct RemotePurchaseOrderLine {
     id: Uuid,
     material_id: Option<Uuid>,
+    catalog_price_id: Option<Uuid>,
+    price_source: Option<String>,
     material_snapshot_json: String,
     supplier_snapshot_json: Option<String>,
     currency: String,
@@ -1043,6 +1048,10 @@ pub struct CatalogPriceView {
     pub unit_price_minor: String,
     pub unit: String,
     pub effective_at: String,
+    pub is_blacklisted: bool,
+    pub payment_terms: Option<String>,
+    pub delivery_lead_time: Option<String>,
+    pub source_note: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1179,6 +1188,8 @@ pub enum AuthError {
     PasswordHashing,
     #[error("secure credential storage error")]
     SecureStorage,
+    #[error("selected quote is no longer available; choose another quote")]
+    QuoteUnavailable,
     #[error("invalid input")]
     InvalidInput,
     #[error("business code cannot change")]
@@ -1613,7 +1624,7 @@ impl LocalAuthService {
             .lock()
             .map_err(|_| AuthError::Database)?
             .query_row(
-                "SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL",
+                "SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL)",
                 [account_id.to_string()],
                 |row| row.get(0),
             )
@@ -3498,6 +3509,10 @@ impl LocalAuthService {
         {
             return Err(AuthError::Forbidden);
         }
+        let invalid_catalog_quote: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_material_prices p ON p.id = i.owner_catalog_price_id LEFT JOIN local_suppliers s ON s.id = p.supplier_id WHERE i.order_id = ?1 AND i.owner_quote_source = 'catalog_price' AND (p.id IS NULL OR p.material_id IS NOT i.material_id OR p.is_active != 1 OR p.deleted_at IS NOT NULL OR p.unit_price_minor IS NOT i.owner_source_unit_price_minor OR p.currency IS NOT i.currency OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if invalid_catalog_quote {
+            return Err(AuthError::QuoteUnavailable);
+        }
         let valid_line_count: i64 = transaction.query_row(
             "SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1 AND owner_quote_source IS NOT NULL AND owner_source_unit_price_minor IS NOT NULL AND owner_locked_exchange_rate_decimal IS NOT NULL AND owner_converted_reference_unit_minor IS NOT NULL AND owner_markup_json IS NOT NULL AND owner_final_unit_price_minor IS NOT NULL AND ((currency = ?2 AND owner_locked_exchange_rate_decimal = '1') OR (currency <> ?2 AND EXISTS (SELECT 1 FROM local_exchange_rates r WHERE r.from_currency = local_purchase_order_items.currency AND r.to_currency = ?2 AND r.rate_decimal = local_purchase_order_items.owner_locked_exchange_rate_decimal AND r.effective_at <= ?3 AND r.deleted_at IS NULL)))",
             params![order_id.to_string(), primary_currency, order_date],
@@ -3979,6 +3994,8 @@ impl LocalAuthService {
                     .map(Uuid::parse_str)
                     .transpose()
                     .map_err(|_| AuthError::Database)?,
+                catalog_price_id: None,
+                price_source: None,
                 material_snapshot: serde_json::from_str(&snapshot_json)
                     .map_err(|_| AuthError::Database)?,
                 supplier_id: None,
@@ -4785,6 +4802,18 @@ impl LocalAuthService {
                 params![draft.id.to_string(), draft.display_no, draft.country_id.to_string(), draft.project_id.to_string(), draft.site, draft.department_id.to_string(), draft.team_id.to_string(), draft.applicant_id.to_string(), draft.currency, draft.primary_currency, draft.language_pair, workflow_status, draft.urgency, draft.urgency_reason, draft.order_date, draft.delivery_address, draft.expected_delivery_date, draft.notes, calculated.subtotal, calculated.line_discount, calculated.order_discount, calculated.freight, draft.tax_rate_basis_points, calculated.tax, calculated.total, version, unix_seconds(now)],
             )
             .map_err(|_| AuthError::Database)?;
+        for line in &calculated.lines {
+            if line.input.material_id.is_some()
+                && line.input.supplier_id.is_some()
+                && line.input.catalog_price_id.is_none()
+                && line.input.price_source.as_deref() != Some("manual")
+            {
+                let historical: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items WHERE id = ?1 AND order_id = ?2 AND catalog_price_id IS NULL AND material_id = ?3 AND json_extract(supplier_snapshot_json, '$.id') = ?4 AND currency = ?5 AND unit = ?6 AND unit_price_minor = ?7)", params![line.input.id.to_string(), draft.id.to_string(), line.input.material_id.map(|id| id.to_string()), line.input.supplier_id.map(|id| id.to_string()), line.input.currency, line.input.unit, line.unit_price_minor], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+                if !historical {
+                    return Err(AuthError::QuoteUnavailable);
+                }
+            }
+        }
         transaction
             .execute(
                 "DELETE FROM local_purchase_order_items WHERE order_id = ?1",
@@ -4792,6 +4821,14 @@ impl LocalAuthService {
             )
             .map_err(|_| AuthError::Database)?;
         for line in &calculated.lines {
+            match (
+                line.input.price_source.as_deref(),
+                line.input.catalog_price_id,
+            ) {
+                (Some("catalog"), Some(_)) | (Some("manual"), None) | (None, None) => {}
+                _ => return Err(AuthError::QuoteUnavailable),
+            }
+            validate_catalog_quote(&transaction, draft.country_id, &line.input)?;
             let material_snapshot = material_snapshot(&transaction, &line.input)?;
             let supplier_snapshot = supplier_snapshot(&transaction, draft.country_id, &line.input)?;
             transaction
@@ -4799,6 +4836,16 @@ impl LocalAuthService {
                     "INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
                     params![line.input.id.to_string(), draft.id.to_string(), line.input.material_id.map(|value| value.to_string()), material_snapshot, supplier_snapshot, line.input.currency, line.input.quantity, line.input.unit, line.unit_price_minor, serde_json::to_string(&line.input.line_discount).map_err(|_| AuthError::InvalidInput)?, serde_json::to_string(&line.input.line_freight).map_err(|_| AuthError::InvalidInput)?, line.input.freight_included as i64, line.total, line.input.sort_order, unix_seconds(now)],
+                )
+                .map_err(|_| AuthError::Database)?;
+            transaction
+                .execute(
+                    "UPDATE local_purchase_order_items SET catalog_price_id = ?2, price_source = ?3 WHERE id = ?1",
+                    params![
+                        line.input.id.to_string(),
+                        line.input.catalog_price_id.map(|id| id.to_string()),
+                        line.input.price_source
+                    ],
                 )
                 .map_err(|_| AuthError::Database)?;
         }
@@ -4846,6 +4893,7 @@ impl LocalAuthService {
         {
             return Err(AuthError::Forbidden);
         }
+        validate_saved_catalog_quotes(&transaction, order_id)?;
         transaction
             .execute(
                 "UPDATE local_purchase_orders SET workflow_status = 'pending_confirmation', version = version + 1, updated_at = ?2 WHERE id = ?1",
@@ -5315,6 +5363,10 @@ impl LocalAuthService {
                                 unit_price_minor: minor.to_string(),
                                 unit,
                                 effective_at,
+                                is_blacklisted: false,
+                                payment_terms: None,
+                                delivery_lead_time: None,
+                                source_note: None,
                             })
                         })
                         .collect::<Result<Vec<_>, AuthError>>()?;
@@ -5335,6 +5387,68 @@ impl LocalAuthService {
                 },
             )
             .collect()
+    }
+
+    pub fn list_catalog_prices(
+        &self,
+        material_id: Uuid,
+        project_id: Option<Uuid>,
+        after: Option<Uuid>,
+        include_blacklisted: bool,
+        now: SystemTime,
+    ) -> Result<Vec<CatalogPriceView>, AuthError> {
+        self.require_catalog_read(now)?;
+        if project_id.is_none() {
+            return Err(AuthError::InvalidInput);
+        }
+        let account_id = self.active_session_user_id()?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut statement = connection.prepare(
+            "SELECT p.id, s.id, s.name, s.is_preferred, p.currency, p.unit_price_minor, p.unit, p.effective_at, s.is_blacklisted, s.payment_terms, s.delivery_lead_time, p.source_note
+             FROM local_material_prices p JOIN local_suppliers s ON s.id = p.supplier_id
+             JOIN local_materials m ON m.id = p.material_id
+             WHERE p.material_id = ?1 AND m.is_active = 1 AND m.deleted_at IS NULL AND p.is_active = 1 AND p.deleted_at IS NULL
+               AND s.country_id IS NOT NULL AND s.is_active = 1 AND (?6 OR s.is_blacklisted = 0) AND s.deleted_at IS NULL
+               AND (?2 IS NULL OR s.country_id = (SELECT country_id FROM local_projects WHERE id = ?2 AND is_active = 1 AND deleted_at IS NULL))
+               AND EXISTS (SELECT 1 FROM local_authorization_snapshots a JOIN local_projects ap ON ap.id = a.project_id AND ap.is_active = 1 AND ap.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?3 AND a.expires_at >= ?4 AND ap.country_id = s.country_id AND (?2 IS NULL OR a.project_id = ?2))
+             AND (?5 IS NULL OR p.id > ?5)
+             ORDER BY p.id LIMIT 25"
+        ).map_err(|_| AuthError::Database)?;
+        let results = statement
+            .query_map(
+                params![
+                    material_id.to_string(),
+                    project_id.map(|id| id.to_string()),
+                    account_id.to_string(),
+                    unix_seconds(now),
+                    after.map(|id| id.to_string()),
+                    include_blacklisted
+                ],
+                |row| {
+                    let price_id: String = row.get(0)?;
+                    let supplier_id: String = row.get(1)?;
+                    Ok(CatalogPriceView {
+                        price_id: Uuid::parse_str(&price_id)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        supplier_id: Uuid::parse_str(&supplier_id)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        supplier_name: row.get(2)?,
+                        is_preferred_supplier: row.get::<_, i64>(3)? != 0,
+                        currency: row.get(4)?,
+                        unit_price_minor: row.get::<_, i64>(5)?.to_string(),
+                        unit: row.get(6)?,
+                        effective_at: row.get(7)?,
+                        is_blacklisted: row.get::<_, i64>(8)? != 0,
+                        payment_terms: row.get(9)?,
+                        delivery_lead_time: row.get(10)?,
+                        source_note: row.get(11)?,
+                    })
+                },
+            )
+            .map_err(|_| AuthError::Database)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Database);
+        results
     }
 
     pub fn list_suppliers(&self, now: SystemTime) -> Result<Vec<SupplierView>, AuthError> {
@@ -5427,7 +5541,7 @@ impl LocalAuthService {
         }
         let actor = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        let mut query = connection.prepare("SELECT o.event_id, o.entity_id, c.business_code, c.name FROM local_sync_outbox o JOIN local_material_categories c ON c.id = o.entity_id WHERE o.owner_account_id = ?1 AND o.entity_type = 'material_category' AND o.last_error = 'CATEGORY_CODE_CONFLICT' AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY o.created_at, o.rowid").map_err(|_| AuthError::Database)?;
+        let mut query = connection.prepare("SELECT o.event_id, o.entity_id, c.business_code, c.name FROM local_sync_outbox o JOIN local_material_categories c ON c.id = o.entity_id WHERE o.owner_account_id = ?1 AND o.entity_type = 'material_category' AND o.last_error = 'CATEGORY_CODE_CONFLICT' AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND o.rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY o.created_at, o.rowid").map_err(|_| AuthError::Database)?;
         query
             .query_map([actor.to_string()], |row| {
                 Ok(LocalCategoryConflictView {
@@ -5511,13 +5625,14 @@ impl LocalAuthService {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
             .query_row(
-                "SELECT (SELECT COUNT(*) FROM local_sync_outbox o WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1)",
+                "SELECT (SELECT COUNT(*) FROM local_sync_outbox o WHERE owner_account_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL) AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)), (SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE o.owner_account_id = ?1 AND c.resolved_at IS NULL), (SELECT COUNT(*) FROM local_sync_outbox o WHERE o.owner_account_id IS NULL AND ((o.acknowledged_at IS NULL AND o.superseded_at IS NULL) OR EXISTS (SELECT 1 FROM local_sync_conflicts c WHERE c.event_id = o.event_id AND c.resolved_at IS NULL))), (SELECT last_success_at FROM local_sync_account_pull_state WHERE account_id = ?1), (SELECT COUNT(*) FROM local_sync_outbox WHERE owner_account_id = ?1 AND rejected_at IS NOT NULL AND quote_recovery_event_id IS NULL AND last_error = 'QUOTE_UNAVAILABLE')",
                 [account_id.to_string()],
                 |row| Ok(SyncStatusView {
                     pending_count: row.get(0)?,
                     conflict_count: row.get(1)?,
                     quarantined_count: row.get(2)?,
                     last_success_at: row.get(3)?,
+                    quote_rejected_count: row.get(4)?,
                 }),
             )
             .map_err(|_| AuthError::Database)
@@ -5535,7 +5650,7 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         connection
-            .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = blocked.event_id)) ORDER BY o.created_at, o.rowid LIMIT ?2")
+            .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND o.rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = blocked.event_id)) ORDER BY o.created_at, o.rowid LIMIT ?2")
             .map_err(|_| AuthError::Database)?
             .query_map(params![account_id.to_string(), limit as i64], |row| Ok(SyncOutboxEventView {
                 event_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
@@ -5571,10 +5686,21 @@ impl LocalAuthService {
         require_transaction_account(&transaction, account_id)?;
         for acknowledgement in acknowledgements {
             let entity: Option<(String, String)> = transaction.query_row(
-                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND owner_account_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL",
+                "SELECT entity_type, entity_id FROM local_sync_outbox WHERE event_id = ?1 AND owner_account_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL AND rejected_at IS NULL",
                 params![acknowledgement.event_id.to_string(), account_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional().map_err(|_| AuthError::Database)?;
             if let Some((entity_type, entity_id)) = entity {
+                if entity_type == "purchase_order"
+                    && acknowledgement.status == "validation_error"
+                    && acknowledgement.error_code.as_deref() == Some("QUOTE_UNAVAILABLE")
+                {
+                    transaction.execute("UPDATE local_sync_outbox SET last_error = 'QUOTE_UNAVAILABLE', rejected_at = ?2 WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                    transaction.execute("UPDATE local_sync_outbox SET base_version = base_version - 1 WHERE owner_account_id = ?1 AND entity_type = ?2 AND entity_id = ?3 AND acknowledged_at IS NULL AND superseded_at IS NULL AND rejected_at IS NULL AND rowid > (SELECT rowid FROM local_sync_outbox WHERE event_id = ?4)", params![account_id.to_string(), entity_type, entity_id, acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                    continue;
+                }
+                if acknowledgement.error_code.as_deref() == Some("QUOTE_PREDECESSOR_REJECTED") {
+                    continue;
+                }
                 if entity_type == "material_category"
                     && acknowledgement.error_code.as_deref() == Some("CATEGORY_CODE_CONFLICT")
                     && matches!(
@@ -5588,6 +5714,9 @@ impl LocalAuthService {
                 match acknowledgement.status.as_str() {
                     "accepted" if acknowledgement.server_version.unwrap_or(-1) >= 1 => {
                         transaction.execute("UPDATE local_sync_outbox SET acknowledged_at = ?2, last_error = NULL WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
+                        if entity_type == "purchase_order" {
+                            transaction.execute("UPDATE local_sync_outbox SET quote_recovery_event_id = ?1 WHERE owner_account_id = ?2 AND entity_type = 'purchase_order' AND entity_id = ?3 AND rejected_at IS NOT NULL AND quote_recovery_event_id IS NULL AND rowid < (SELECT rowid FROM local_sync_outbox WHERE event_id = ?1) AND EXISTS (SELECT 1 FROM local_sync_outbox recovered WHERE recovered.event_id = ?1 AND json_extract(recovered.payload_json, '$.workflowStatus') = 'pending_confirmation')", params![acknowledgement.event_id.to_string(), account_id.to_string(), entity_id]).map_err(|_| AuthError::Database)?;
+                        }
                         transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES (?1, ?2, ?3) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![entity_type, entity_id, acknowledgement.server_version]).map_err(|_| AuthError::Database)?;
                     }
                     "validation_error" => {
@@ -5675,7 +5804,7 @@ impl LocalAuthService {
             let remote_payload =
                 serde_json::to_string(&change.payload).map_err(|_| AuthError::Database)?;
             let pending: Option<(String, i64, String, Option<String>)> = transaction.query_row(
-                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
+                "SELECT event_id, base_version, payload_json, owner_account_id FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL) AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) ORDER BY CASE WHEN owner_account_id IS NULL OR owner_account_id <> ?3 THEN 0 ELSE 1 END, created_at, rowid LIMIT 1",
                 params![change.entity_type, change.entity_id.to_string(), account_id_text],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).optional().map_err(|_| AuthError::Database)?;
@@ -6748,6 +6877,7 @@ pub mod commands {
                 AuthError::Forbidden => "forbidden",
                 AuthError::Database => "local_storage_error",
                 AuthError::InvalidInput => "invalid_input",
+                AuthError::QuoteUnavailable => "quote_unavailable",
                 AuthError::ImmutableBusinessCode => "immutable_business_code",
                 AuthError::PasswordHashing | AuthError::SecureStorage => "credential_storage_error",
                 AuthError::SyncTransport => "sync_transport_error",
@@ -7292,6 +7422,24 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn list_catalog_prices(
+        auth: State<'_, LocalAuthService>,
+        material_id: Uuid,
+        project_id: Option<Uuid>,
+        after: Option<Uuid>,
+        include_blacklisted: bool,
+    ) -> Result<Vec<super::CatalogPriceView>, CommandError> {
+        auth.list_catalog_prices(
+            material_id,
+            project_id,
+            after,
+            include_blacklisted,
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn list_suppliers(
         auth: State<'_, LocalAuthService>,
     ) -> Result<Vec<super::SupplierView>, CommandError> {
@@ -7555,6 +7703,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0052_remote_category_repair_intents",
             include_str!("../migrations/0052_remote_category_repair_intents.sql"),
+        ),
+        (
+            "0053_requisition_catalog_quote",
+            include_str!("../migrations/0053_requisition_catalog_quote.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -8473,7 +8625,7 @@ fn project_remote_purchase_order_change(
     }
     // Old staged rows are replayed on every page too, including pages for other entities.
     let pending: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL)",
+        "SELECT EXISTS(SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL))",
         [change.entity_id.to_string()], |row| row.get(0),
     ).map_err(|_| AuthError::Database)?;
     if pending {
@@ -8574,7 +8726,7 @@ fn project_remote_purchase_order_change(
         if let Some(order) = &order {
             if order.procurement_mode.as_deref() == Some("owner_self_purchase") {
                 transaction.execute(
-                    "UPDATE local_purchase_orders SET procurement_mode = 'owner_self_purchase', version = ?2, updated_at = ?3 WHERE id = ?1 AND version < ?2 AND procurement_mode IS NULL AND parent_order_id IS NULL AND workflow_status IN ('confirmed', 'approved') AND country_id = ?4 AND project_id = ?5 AND NOT EXISTS (SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL) AND NOT EXISTS (SELECT 1 FROM local_rfqs WHERE source_order_id = ?1) AND NOT EXISTS (SELECT 1 FROM local_purchase_orders child WHERE child.parent_order_id = ?1 AND child.deleted_at IS NULL)",
+                    "UPDATE local_purchase_orders SET procurement_mode = 'owner_self_purchase', version = ?2, updated_at = ?3 WHERE id = ?1 AND version < ?2 AND procurement_mode IS NULL AND parent_order_id IS NULL AND workflow_status IN ('confirmed', 'approved') AND country_id = ?4 AND project_id = ?5 AND NOT EXISTS (SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL)) AND NOT EXISTS (SELECT 1 FROM local_rfqs WHERE source_order_id = ?1) AND NOT EXISTS (SELECT 1 FROM local_purchase_orders child WHERE child.parent_order_id = ?1 AND child.deleted_at IS NULL)",
                     params![change.entity_id.to_string(), change.version, unix_seconds(now), order.country_id.to_string(), order.project_id.to_string()],
                 ).map_err(|_| AuthError::Database)?;
             }
@@ -8646,6 +8798,16 @@ fn project_remote_purchase_order_change(
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                  ON CONFLICT(id) DO UPDATE SET material_id = excluded.material_id, material_snapshot_json = excluded.material_snapshot_json, supplier_snapshot_json = excluded.supplier_snapshot_json, currency = excluded.currency, quantity_decimal = excluded.quantity_decimal, unit = excluded.unit, unit_price_minor = excluded.unit_price_minor, line_discount_json = excluded.line_discount_json, line_freight_json = excluded.line_freight_json, freight_included = excluded.freight_included, line_total_minor = excluded.line_total_minor, sort_order = excluded.sort_order, updated_at = excluded.updated_at",
                 params![line.id.to_string(), change.entity_id.to_string(), line.material_id.map(|value| value.to_string()), line.material_snapshot_json, line.supplier_snapshot_json, line.currency, line.quantity, line.unit, remote_minor(&line.unit_price_minor)?, line.line_discount_json, line.line_freight_json, line.freight_included as i64, remote_minor(&line.line_total_minor)?, line.sort_order, line.created_at, line.updated_at],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "UPDATE local_purchase_order_items SET catalog_price_id = ?2, price_source = ?3 WHERE id = ?1",
+                params![
+                    line.id.to_string(),
+                    line.catalog_price_id.map(|id| id.to_string()),
+                    line.price_source
+                ],
             )
             .map_err(|_| AuthError::Database)?;
         transaction.execute(
@@ -8974,11 +9136,11 @@ fn remote_order_references_exist(
             return Ok(false);
         }
     }
-    for price in order
-        .lines
-        .iter()
-        .filter_map(|line| line.owner_catalog_price_id)
-    {
+    for price in order.lines.iter().flat_map(|line| {
+        [line.owner_catalog_price_id, line.catalog_price_id]
+            .into_iter()
+            .flatten()
+    }) {
         let exists: bool = transaction
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM local_material_prices WHERE id = ?1)",
@@ -9632,7 +9794,7 @@ fn insert_local_sync_outbox(
         .unwrap_or(0);
     let pending_count: i64 = transaction
         .query_row(
-            "SELECT COUNT(*) FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)",
+            "SELECT COUNT(*) FROM local_sync_outbox o WHERE entity_type = ?1 AND entity_id = ?2 AND owner_account_id = (SELECT user_id FROM local_session) AND acknowledged_at IS NULL AND superseded_at IS NULL AND rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id)",
             params![entity_type, entity_id.to_string()],
             |row| row.get(0),
         )
@@ -9711,9 +9873,9 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
         )
         .map_err(|_| AuthError::Database)?;
     let lines = transaction
-        .prepare("SELECT id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at, owner_quote_source, owner_catalog_price_id, owner_manual_reference_reason, owner_manual_reference_actor_id, owner_manual_reference_at, owner_source_unit_price_minor, owner_locked_exchange_rate_decimal, owner_converted_reference_unit_minor, owner_markup_json, owner_final_unit_price_minor FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id")
+        .prepare("SELECT id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at, owner_quote_source, owner_catalog_price_id, owner_manual_reference_reason, owner_manual_reference_actor_id, owner_manual_reference_at, owner_source_unit_price_minor, owner_locked_exchange_rate_decimal, owner_converted_reference_unit_minor, owner_markup_json, owner_final_unit_price_minor, catalog_price_id, price_source FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id")
         .map_err(|_| AuthError::Database)?
-        .query_map([order_id.to_string()], |row| Ok(serde_json::json!({
+        .query_map([order_id.to_string()], |row| { let mut line = serde_json::json!({
             "id": row.get::<_, String>(0)?,
             "materialId": row.get::<_, Option<String>>(1)?,
             "materialSnapshotJson": row.get::<_, String>(2)?,
@@ -9739,7 +9901,9 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
             "ownerConvertedReferenceUnitMinor": row.get::<_, Option<i64>>(22)?.map(|value| value.to_string()),
             "ownerMarkupJson": row.get::<_, Option<String>>(23)?,
             "ownerFinalUnitPriceMinor": row.get::<_, Option<i64>>(24)?.map(|value| value.to_string()),
-        })))
+            "catalogPriceId": row.get::<_, Option<String>>(25)?,
+            "priceSource": row.get::<_, Option<String>>(26)?,
+        }); if line["catalogPriceId"].is_null() { line.as_object_mut().unwrap().remove("catalogPriceId"); } if line["priceSource"].is_null() { line.as_object_mut().unwrap().remove("priceSource"); } Ok(line) })
         .map_err(|_| AuthError::Database)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| AuthError::Database)?;
@@ -9973,6 +10137,37 @@ fn material_snapshot(
             .map_err(|_| AuthError::Database)
     } else {
         serde_json::to_string(&line.material_snapshot).map_err(|_| AuthError::Database)
+    }
+}
+
+fn validate_catalog_quote(
+    transaction: &Transaction<'_>,
+    country_id: Uuid,
+    line: &RequisitionLineInput,
+) -> Result<(), AuthError> {
+    let Some(price_id) = line.catalog_price_id else {
+        return Ok(());
+    };
+    let valid: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM local_material_prices p JOIN local_suppliers s ON s.id = p.supplier_id JOIN local_materials m ON m.id = p.material_id WHERE p.id = ?1 AND p.material_id = ?2 AND p.supplier_id = ?3 AND p.currency = ?4 AND p.unit = ?5 AND p.unit_price_minor = ?6 AND p.is_active = 1 AND p.deleted_at IS NULL AND s.country_id = ?7 AND s.is_active = 1 AND s.is_blacklisted = 0 AND s.deleted_at IS NULL AND m.is_active = 1 AND m.deleted_at IS NULL)",
+        params![price_id.to_string(), line.material_id.map(|id| id.to_string()), line.supplier_id.map(|id| id.to_string()), line.currency, line.unit, line.unit_price_minor.parse::<i64>().map_err(|_| AuthError::InvalidInput)?, country_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+    if valid {
+        Ok(())
+    } else {
+        Err(AuthError::QuoteUnavailable)
+    }
+}
+
+fn validate_saved_catalog_quotes(
+    transaction: &Transaction<'_>,
+    order_id: Uuid,
+) -> Result<(), AuthError> {
+    let invalid: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_material_prices p ON p.id = i.catalog_price_id LEFT JOIN local_suppliers s ON s.id = p.supplier_id LEFT JOIN local_materials m ON m.id = p.material_id WHERE i.order_id = ?1 AND i.catalog_price_id IS NOT NULL AND (p.id IS NULL OR p.material_id IS NOT i.material_id OR p.supplier_id IS NOT json_extract(i.supplier_snapshot_json, '$.id') OR p.currency IS NOT i.currency OR p.unit IS NOT i.unit OR p.unit_price_minor IS NOT i.unit_price_minor OR p.is_active != 1 OR p.deleted_at IS NOT NULL OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL OR m.is_active != 1 OR m.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+    let invalid_supplier: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_suppliers s ON s.id = json_extract(i.supplier_snapshot_json, '$.id') WHERE i.order_id = ?1 AND i.price_source = 'manual' AND i.supplier_snapshot_json IS NOT NULL AND (s.id IS NULL OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+    if invalid || invalid_supplier {
+        Err(AuthError::QuoteUnavailable)
+    } else {
+        Ok(())
     }
 }
 
@@ -14231,6 +14426,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(legacy_mode, None);
+        connection.execute("UPDATE local_purchase_orders SET workflow_status = 'draft', applicant_id = ?2 WHERE id = ?1", params![order_id.to_string(), Uuid::new_v4().to_string()]).unwrap();
         drop(connection);
         let result = service
             .save_owner_purchase_pricing(
@@ -14262,6 +14458,8 @@ mod tests {
             .unwrap();
         assert_eq!(result[0].final_unit_price_minor, "1038");
         assert_eq!(result[1].final_unit_price_minor, "105");
+        service.submit_requisition_draft(order_id, now).unwrap();
+        service.confirm_requisition(order_id, now).unwrap();
         let connection = service.connection.lock().unwrap();
         let stored: (String, Option<String>, Option<String>, Option<String>, i64) = connection.query_row("SELECT o.procurement_mode, i.owner_quote_source, i.owner_manual_reference_reason, i.owner_manual_reference_actor_id, i.owner_final_unit_price_minor FROM local_purchase_orders o JOIN local_purchase_order_items i ON i.order_id = o.id WHERE i.id = ?1", [manual_item_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))).unwrap();
         assert_eq!(stored.0, "owner_self_purchase");
@@ -14342,6 +14540,80 @@ mod tests {
             ),
             Err(AuthError::InvalidInput)
         );
+        let before_issue = {
+            let connection = service.connection.lock().unwrap();
+            let transaction = connection.unchecked_transaction().unwrap();
+            let snapshot = order_sync_payload(&transaction, order_id).unwrap();
+            let sequence: i64 = transaction
+                .query_row(
+                    "SELECT next_formal_sequence FROM local_sync_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let outbox: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1",
+                    [order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            (snapshot, sequence, outbox)
+        };
+        for (sql, restore) in [
+            (
+                "UPDATE local_material_prices SET is_active = 0 WHERE id = ?1",
+                "UPDATE local_material_prices SET is_active = 1 WHERE id = ?1",
+            ),
+            (
+                "UPDATE local_suppliers SET is_blacklisted = 1 WHERE id = ?1",
+                "UPDATE local_suppliers SET is_blacklisted = 0 WHERE id = ?1",
+            ),
+        ] {
+            let target = if sql.contains("local_material_prices") {
+                price_id
+            } else {
+                supplier_id
+            };
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .execute(sql, [target.to_string()])
+                .unwrap();
+            assert_eq!(
+                service.issue_owner_formal_order(order_id, now),
+                Err(AuthError::QuoteUnavailable)
+            );
+            let connection = service.connection.lock().unwrap();
+            let transaction = connection.unchecked_transaction().unwrap();
+            assert_eq!(
+                order_sync_payload(&transaction, order_id).unwrap(),
+                before_issue.0
+            );
+            assert_eq!(
+                transaction
+                    .query_row(
+                        "SELECT next_formal_sequence FROM local_sync_state WHERE singleton = 1",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                before_issue.1
+            );
+            assert_eq!(
+                transaction
+                    .query_row(
+                        "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1",
+                        [order_id.to_string()],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                before_issue.2
+            );
+            transaction.execute(restore, [target.to_string()]).unwrap();
+            transaction.commit().unwrap();
+        }
         let issued = service.issue_owner_formal_order(order_id, now).unwrap();
         assert_eq!(issued.document_type, "OPA");
         assert!(issued.formal_document_no.contains("-OPA-"));
@@ -14472,6 +14744,8 @@ mod tests {
                     lines: vec![RequisitionLineInput {
                         id: draft_item_id,
                         material_id: Some(material_id),
+                        catalog_price_id: None,
+                        price_source: None,
                         material_snapshot: MaterialSnapshotInput {
                             name_zh: "owner material".into(),
                             name_fr: None,
@@ -14672,6 +14946,8 @@ mod tests {
                     lines: vec![RequisitionLineInput {
                         id: draft_item_id,
                         material_id: Some(material_id),
+                        catalog_price_id: None,
+                        price_source: None,
                         material_snapshot: MaterialSnapshotInput {
                             name_zh: "owner material".into(),
                             name_fr: None,
@@ -15867,6 +16143,175 @@ mod tests {
     }
 
     #[test]
+    fn stale_selected_catalog_quote_cannot_be_submitted() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        service
+            .bootstrap_test_profile("test-engineer-a", "test-engineer-b", "test-purchaser", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "purchaser",
+                "test-purchaser",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let id = |s: &str| Uuid::parse_str(s).unwrap();
+        let draft = RequisitionDraftInput {
+            id: Uuid::new_v4(),
+            display_no: "TEST-STALE".into(),
+            country_id: id("10000000-0000-4000-8000-000000000001"),
+            project_id: id("10000000-0000-4000-8000-000000000002"),
+            site: "Test site".into(),
+            department_id: id("10000000-0000-4000-8000-000000000003"),
+            team_id: id("10000000-0000-4000-8000-000000000004"),
+            applicant_id: id("10000000-0000-4000-8000-000000000013"),
+            currency: "CNY".into(),
+            primary_currency: "CNY".into(),
+            language_pair: "zh_fr".into(),
+            urgency: "normal".into(),
+            urgency_reason: None,
+            order_date: "2026-10-12".into(),
+            delivery_address: "Test site".into(),
+            expected_delivery_date: None,
+            notes: None,
+            order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+            order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+            tax_rate_basis_points: 0,
+            lines: vec![RequisitionLineInput {
+                id: Uuid::new_v4(),
+                material_id: Some(id("10000000-0000-4000-8000-000000000005")),
+                catalog_price_id: Some(id("10000000-0000-4000-8000-000000000007")),
+                price_source: Some("catalog".into()),
+                material_snapshot: MaterialSnapshotInput {
+                    name_zh: "synthetic".into(),
+                    name_fr: None,
+                    model: "test".into(),
+                    specification: "test".into(),
+                },
+                supplier_id: Some(id("10000000-0000-4000-8000-000000000006")),
+                currency: "CNY".into(),
+                quantity: "1".into(),
+                unit: "米".into(),
+                unit_price_minor: "1234".into(),
+                line_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
+                line_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
+                freight_included: false,
+                sort_order: 0,
+            }],
+        };
+        let mut forged = draft.clone();
+        forged.lines[0].catalog_price_id = None;
+        assert_eq!(
+            service.save_requisition_draft(forged, now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        let mut wrong_currency = draft.clone();
+        wrong_currency.lines[0].currency = "USD".into();
+        assert_eq!(
+            service.save_requisition_draft(wrong_currency, now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        service.save_requisition_draft(draft.clone(), now).unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 1 WHERE id = ?1",
+                ["10000000-0000-4000-8000-000000000006"],
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_requisition_draft(draft.clone(), now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        let foreign_country = Uuid::new_v4();
+        service.connection.lock().unwrap().execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, 'QA-FOREIGN', 'foreign', 'UTC', 1, 1)", [foreign_country.to_string()]).unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 0, country_id = ?2 WHERE id = ?1",
+                params![
+                    "10000000-0000-4000-8000-000000000006",
+                    foreign_country.to_string()
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_requisition_draft(draft.clone(), now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET country_id = ?2 WHERE id = ?1",
+                params![
+                    "10000000-0000-4000-8000-000000000006",
+                    draft.country_id.to_string()
+                ],
+            )
+            .unwrap();
+        service
+            .set_procurement_mode(draft.id, "honsen_self_purchase".into(), now)
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_material_prices SET is_active = 0 WHERE id = ?1",
+                ["10000000-0000-4000-8000-000000000007"],
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_requisition_draft(draft.clone(), now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        assert_eq!(
+            service.submit_requisition_draft(draft.id, now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        let mut manual = draft.clone();
+        manual.id = Uuid::new_v4();
+        manual.lines[0].id = Uuid::new_v4();
+        manual.lines[0].catalog_price_id = None;
+        manual.lines[0].price_source = Some("manual".into());
+        manual.lines[0].unit_price_minor = "999".into();
+        service.save_requisition_draft(manual.clone(), now).unwrap();
+        service
+            .set_procurement_mode(manual.id, "honsen_self_purchase".into(), now)
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 1 WHERE id = ?1",
+                ["10000000-0000-4000-8000-000000000006"],
+            )
+            .unwrap();
+        assert_eq!(
+            service.submit_requisition_draft(manual.id, now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        let connection = service.connection.lock().unwrap();
+        let (status, stored_price): (String, Option<String>) = connection.query_row("SELECT o.workflow_status, i.catalog_price_id FROM local_purchase_orders o JOIN local_purchase_order_items i ON i.order_id = o.id WHERE o.id = ?1", [draft.id.to_string()], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(status, "draft");
+        assert_eq!(
+            stored_price.as_deref(),
+            Some("10000000-0000-4000-8000-000000000007")
+        );
+    }
+
+    #[test]
     fn catalog_writes_are_role_protected_and_price_changes_keep_history() {
         let service = LocalAuthService::open_in_memory().unwrap();
         let now = SystemTime::now();
@@ -16122,6 +16567,8 @@ mod tests {
             lines: vec![RequisitionLineInput {
                 id: Uuid::new_v4(),
                 material_id: Some(material.id),
+                catalog_price_id: None,
+                price_source: Some("manual".into()),
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "forged".into(),
                     name_fr: None,
@@ -17537,6 +17984,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migrated_item_currency, "CNY");
+        let preserved: (Option<String>, Option<String>, i64) = connection.query_row(
+            "SELECT catalog_price_id, price_source, unit_price_minor FROM local_purchase_order_items WHERE order_id = ?1",
+            [&order_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(preserved, (None, None, 100));
         let workflow_column_exists: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('local_purchase_orders') WHERE name = 'workflow_status'",
@@ -17965,6 +18417,136 @@ mod tests {
             .unwrap();
         assert_eq!(ci_catalog[0].prices.len(), 1);
         assert_eq!(ci_catalog[0].prices[0].supplier_id, ci_supplier);
+        for i in 0..30 {
+            let supplier = Uuid::new_v4();
+            let price = Uuid::new_v4();
+            let connection = service.connection.lock().unwrap();
+            connection.execute("INSERT INTO local_suppliers (id, business_code, name, country_id, is_active, is_blacklisted, version) VALUES (?1, ?2, 'same name', ?3, 1, 0, 1)", params![supplier.to_string(), format!("PAGED-{i}"), ci.to_string()]).unwrap();
+            connection.execute("INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'XOF', 100, 'bag', '2026-10-12', 1, 1)", params![price.to_string(), material.to_string(), supplier.to_string()]).unwrap();
+        }
+        let historical_id = Uuid::new_v4();
+        service.connection.lock().unwrap().execute("INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'XOF', 1, 'bag', '2025-01-01', 0, 1)", params![historical_id.to_string(), material.to_string(), ci_supplier.to_string()]).unwrap();
+        let usd_price = Uuid::new_v4();
+        service.connection.lock().unwrap().execute("INSERT INTO local_material_prices (id, material_id, supplier_id, currency, unit_price_minor, unit, effective_at, is_active, version) VALUES (?1, ?2, ?3, 'USD', 200, 'bag', '2026-10-12', 1, 1)", params![usd_price.to_string(), material.to_string(), ci_supplier.to_string()]).unwrap();
+        let first = service
+            .list_catalog_prices(material, Some(ci_project), None, false, now)
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_material_prices SET is_active = 0 WHERE id = ?1",
+                [first[0].price_id.to_string()],
+            )
+            .unwrap();
+        let second = service
+            .list_catalog_prices(
+                material,
+                Some(ci_project),
+                Some(first.last().unwrap().price_id),
+                false,
+                now,
+            )
+            .unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_material_prices SET is_active = 1 WHERE id = ?1",
+                [first[0].price_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(first.len(), 25);
+        assert_eq!(second.len(), 7);
+        assert_eq!(
+            first
+                .iter()
+                .chain(&second)
+                .map(|p| p.price_id)
+                .collect::<HashSet<_>>()
+                .len(),
+            32
+        );
+        assert!(
+            first
+                .iter()
+                .chain(&second)
+                .all(|p| p.price_id != historical_id)
+        );
+        assert!(
+            first
+                .iter()
+                .chain(&second)
+                .any(|p| p.price_id == usd_price && p.currency == "USD")
+        );
+        assert!(
+            service
+                .list_catalog_prices(material, Some(cm_project), None, false, now)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            service.list_catalog_prices(material, None, None, false, now),
+            Err(AuthError::InvalidInput)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 1 WHERE id = ?1",
+                [ci_supplier.to_string()],
+            )
+            .unwrap();
+        let selectable = service
+            .list_catalog_prices(material, Some(ci_project), None, false, now)
+            .unwrap();
+        let detail = service
+            .list_catalog_prices(material, Some(ci_project), None, true, now)
+            .unwrap();
+        let detail_next = service
+            .list_catalog_prices(
+                material,
+                Some(ci_project),
+                detail.last().map(|p| p.price_id),
+                true,
+                now,
+            )
+            .unwrap();
+        assert!(selectable.iter().all(|p| !p.is_blacklisted));
+        assert!(
+            detail
+                .iter()
+                .chain(&detail_next)
+                .any(|p| p.supplier_id == ci_supplier && p.is_blacklisted)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 0 WHERE id = ?1",
+                [ci_supplier.to_string()],
+            )
+            .unwrap();
+        {
+            let connection = service.connection.lock().unwrap();
+            connection
+                .execute(
+                    "DELETE FROM local_material_prices WHERE id = ?1",
+                    [usd_price.to_string()],
+                )
+                .unwrap();
+            connection.execute("DELETE FROM local_material_prices WHERE supplier_id IN (SELECT id FROM local_suppliers WHERE business_code LIKE 'PAGED-%')", []).unwrap();
+            connection
+                .execute(
+                    "DELETE FROM local_suppliers WHERE business_code LIKE 'PAGED-%'",
+                    [],
+                )
+                .unwrap();
+        }
         assert_eq!(
             service.search_catalog("global", None, now).unwrap()[0]
                 .prices
@@ -18004,6 +18586,8 @@ mod tests {
             lines: vec![RequisitionLineInput {
                 id: Uuid::new_v4(),
                 material_id: Some(material),
+                catalog_price_id: None,
+                price_source: Some("manual".into()),
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "forged".into(),
                     name_fr: None,
@@ -18064,6 +18648,12 @@ mod tests {
             params![unix_seconds(now) - 2, unix_seconds(now) - 1, engineer.id.to_string(), cm_project.to_string()],
         ).unwrap();
         assert!(service.list_suppliers(now).unwrap().is_empty());
+        assert!(
+            service
+                .list_catalog_prices(material, Some(cm_project), None, false, now)
+                .unwrap()
+                .is_empty()
+        );
         let expired_catalog = service.search_catalog("global", None, now).unwrap();
         assert_eq!(expired_catalog.len(), 1);
         assert!(expired_catalog[0].prices.is_empty());
@@ -18174,6 +18764,84 @@ mod tests {
             ),
             Err(AuthError::Forbidden)
         );
+    }
+
+    #[test]
+    fn rejected_quote_event_retains_evidence_and_rebases_later_order_events() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let user = account();
+        service
+            .cache_verified_account(user.clone(), "correct-password", now)
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                &user.username,
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let order = Uuid::new_v4();
+        {
+            let mut connection = service.connection.lock().unwrap();
+            let tx = connection.transaction().unwrap();
+            insert_local_sync_outbox(&tx, "purchase_order", order, "{}", now).unwrap();
+            insert_local_sync_outbox(
+                &tx,
+                "purchase_order",
+                order,
+                r#"{"workflowStatus":"pending_confirmation"}"#,
+                now,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        };
+        let events = service.pending_sync_events(100, now).unwrap();
+        let rejected = events[0].event_id;
+        let ack = SyncAcknowledgementInput {
+            event_id: rejected,
+            status: "validation_error".into(),
+            server_version: None,
+            error_code: Some("QUOTE_UNAVAILABLE".into()),
+            server_payload: None,
+            server_operation: None,
+        };
+        service
+            .apply_sync_acknowledgements(vec![ack.clone()], now)
+            .unwrap();
+        service.apply_sync_acknowledgements(vec![ack], now).unwrap();
+        let pending = service.pending_sync_events(100, now).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event_id, events[1].event_id);
+        assert_eq!(pending[0].base_version, 0);
+        let connection = service.connection.lock().unwrap();
+        let row: (Option<i64>, Option<i64>, Option<i64>, String) = connection.query_row("SELECT acknowledged_at, superseded_at, rejected_at, last_error FROM local_sync_outbox WHERE event_id = ?1", [rejected.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap();
+        assert!(row.0.is_none() && row.1.is_none() && row.2.is_some());
+        assert_eq!(row.3, "QUOTE_UNAVAILABLE");
+        drop(connection);
+        assert_eq!(service.sync_status(now).unwrap().quote_rejected_count, 1);
+        service
+            .apply_sync_acknowledgements(
+                vec![SyncAcknowledgementInput {
+                    event_id: events[1].event_id,
+                    status: "accepted".into(),
+                    server_version: Some(1),
+                    error_code: None,
+                    server_payload: None,
+                    server_operation: None,
+                }],
+                now,
+            )
+            .unwrap();
+        let status = service.sync_status(now).unwrap();
+        assert_eq!(status.quote_rejected_count, 0);
+        assert_eq!(status.pending_count, 0);
+        let connection = service.connection.lock().unwrap();
+        let recovered: String = connection.query_row("SELECT quote_recovery_event_id FROM local_sync_outbox WHERE event_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL", [rejected.to_string()], |row| row.get(0)).unwrap();
+        assert_eq!(recovered, events[1].event_id.to_string());
     }
 
     #[test]
