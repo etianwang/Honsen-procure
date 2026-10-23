@@ -2,6 +2,8 @@ import {
   exchangeRateSchema,
   categoryRepairRequestSchema,
   materialCategorySchema,
+  supplierSchema,
+  materialPriceSchema,
   projectDefaultsSchema,
   referenceMasterDataSchema,
   uuidSchema,
@@ -93,6 +95,24 @@ export class SyncService {
     const results: SyncEventResult[] = []
     const blockedQuotes = new Set<string>()
     for (const event of request.events) {
+      if (
+        event.operation === 'upsert' &&
+        (event.entityType === 'supplier' ||
+          event.entityType === 'material_price')
+      ) {
+        const schema =
+          event.entityType === 'supplier' ? supplierSchema : materialPriceSchema
+        const parsed = schema.safeParse(event.payload)
+        if (!parsed.success || parsed.data.id !== event.entityId) {
+          results.push({
+            eventId: event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'INVALID_CATALOG_PAYLOAD',
+          })
+          continue
+        }
+      }
       const key = `${event.entityType}:${event.entityId}`
       if (blockedQuotes.has(key)) {
         results.push({
