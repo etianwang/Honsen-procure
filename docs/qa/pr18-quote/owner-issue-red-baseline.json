@@ -1,0 +1,50 @@
+{
+  "sha": "0f9895ae4df12abdccda57246c13eccebb66e000",
+  "errors": ["Error: inactive was not rejected with quote_unavailable"],
+  "baseline": {
+    "order": {
+      "workflow_status": "confirmed",
+      "formal_document_no": null,
+      "total_minor": 1003,
+      "formal_snapshot_json": null
+    },
+    "line": {
+      "owner_quote_source": "catalog_price",
+      "owner_catalog_price_id": "40000000-0000-4000-8000-000000000003",
+      "owner_source_unit_price_minor": 1003,
+      "owner_final_unit_price_minor": 1003,
+      "line_total_minor": 1003
+    },
+    "sequence": {
+      "next_formal_sequence": 4
+    },
+    "outbox": {
+      "count": 1
+    }
+  },
+  "inactive_attempt": {
+    "ok": true,
+    "value": {
+      "documentType": "OPA",
+      "formalDocumentNo": "TEST-CI-TEST-OPA-20261012-OPA-N5SESAYX-4",
+      "formalInstallationId": "42e1f537-1c69-49ee-94b1-07a972ecabdd",
+      "formalSequence": 4
+    }
+  },
+  "inactive_after": {
+    "line": {
+      "owner_quote_source": "catalog_price",
+      "owner_catalog_price_id": "40000000-0000-4000-8000-000000000003",
+      "owner_source_unit_price_minor": 1003,
+      "owner_final_unit_price_minor": 1003,
+      "line_total_minor": 1003
+    },
+    "sequence": {
+      "next_formal_sequence": 5
+    },
+    "outbox": {
+      "count": 2
+    }
+  },
+  "workflow_status": "formally_issued"
+}

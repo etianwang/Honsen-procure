@@ -1,0 +1,138 @@
+{
+  "sha": "c00129745572ab8e80d8ef42aca1cba79aefc37e",
+  "orderId": "4a453f54-fc5b-478b-a162-e5c10259726d",
+  "checks": [
+    "inactive rejected, order and sequence and outbox unchanged",
+    "blacklisted rejected, order and sequence and outbox unchanged",
+    "real IPC formal issue frozen snapshot and total survive later price change; order pre-approved by SQLite fixture",
+    "manual-only issue succeeds while catalog quote is inactive"
+  ],
+  "errors": [],
+  "pricing": {
+    "ok": true,
+    "value": [
+      {
+        "orderItemId": "57fc9ef5-b319-4304-ae5b-9acb7c77ac46",
+        "convertedReferenceUnitMinor": "1003",
+        "markupMinor": "0",
+        "finalUnitPriceMinor": "1003"
+      }
+    ]
+  },
+  "baseline": {
+    "order": {
+      "workflow_status": "confirmed",
+      "formal_document_no": null,
+      "total_minor": 1003,
+      "formal_snapshot_json": null
+    },
+    "line": {
+      "owner_quote_source": "catalog_price",
+      "owner_catalog_price_id": "40000000-0000-4000-8000-000000000003",
+      "owner_source_unit_price_minor": 1003,
+      "owner_final_unit_price_minor": 1003,
+      "line_total_minor": 1003
+    },
+    "sequence": {
+      "next_formal_sequence": 5
+    },
+    "outbox": {
+      "count": 1
+    }
+  },
+  "inactive": {
+    "attempt": {
+      "ok": false,
+      "error": {
+        "code": "quote_unavailable"
+      }
+    },
+    "after": {
+      "order": {
+        "workflow_status": "confirmed",
+        "formal_document_no": null,
+        "total_minor": 1003,
+        "formal_snapshot_json": null
+      },
+      "line": {
+        "owner_quote_source": "catalog_price",
+        "owner_catalog_price_id": "40000000-0000-4000-8000-000000000003",
+        "owner_source_unit_price_minor": 1003,
+        "owner_final_unit_price_minor": 1003,
+        "line_total_minor": 1003
+      },
+      "sequence": {
+        "next_formal_sequence": 5
+      },
+      "outbox": {
+        "count": 1
+      }
+    }
+  },
+  "blacklisted": {
+    "attempt": {
+      "ok": false,
+      "error": {
+        "code": "quote_unavailable"
+      }
+    },
+    "after": {
+      "order": {
+        "workflow_status": "confirmed",
+        "formal_document_no": null,
+        "total_minor": 1003,
+        "formal_snapshot_json": null
+      },
+      "line": {
+        "owner_quote_source": "catalog_price",
+        "owner_catalog_price_id": "40000000-0000-4000-8000-000000000003",
+        "owner_source_unit_price_minor": 1003,
+        "owner_final_unit_price_minor": 1003,
+        "line_total_minor": 1003
+      },
+      "sequence": {
+        "next_formal_sequence": 5
+      },
+      "outbox": {
+        "count": 1
+      }
+    }
+  },
+  "issue": {
+    "ok": true,
+    "value": {
+      "documentType": "OPA",
+      "formalDocumentNo": "TEST-CI-TEST-OPA-20261012-OPA-N5SESAYX-5",
+      "formalInstallationId": "42e1f537-1c69-49ee-94b1-07a972ecabdd",
+      "formalSequence": 5
+    }
+  },
+  "before": {
+    "formal_snapshot_json": "{\"applicantId\":\"10000000-0000-4000-8000-000000000013\",\"confirmedAt\":null,\"confirmedBy\":null,\"countryId\":\"10000000-0000-4000-8000-000000000001\",\"currency\":\"XOF\",\"deliveryAddress\":\"test\",\"departmentId\":\"10000000-0000-4000-8000-000000000003\",\"displayNo\":\"QA-4a453f54-fc5b-478b-a162-e5c10259726d\",\"documentType\":null,\"expectedDeliveryDate\":null,\"formalDocumentNo\":null,\"formalInstallationId\":null,\"formalSequence\":null,\"formalSnapshotJson\":null,\"formallyIssuedAt\":null,\"freightMinor\":\"0\",\"languagePair\":\"zh_fr\",\"lineDiscountMinor\":\"0\",\"lines\":[{\"createdAt\":0,\"currency\":\"XOF\",\"freightIncluded\":false,\"id\":\"57fc9ef5-b319-4304-ae5b-9acb7c77ac46\",\"lineDiscountJson\":\"{\\\"kind\\\":\\\"fixed_minor\\\",\\\"minor\\\":\\\"0\\\"}\",\"lineFreightJson\":\"{\\\"kind\\\":\\\"fixed_minor\\\",\\\"minor\\\":\\\"0\\\"}\",\"lineTotalMinor\":\"1003\",\"materialId\":\"10000000-0000-4000-8000-000000000005\",\"materialSnapshotJson\":\"{\\\"nameZh\\\":\\\"synthetic\\\"}\",\"ownerCatalogPriceId\":\"40000000-0000-4000-8000-000000000003\",\"ownerConvertedReferenceUnitMinor\":\"1003\",\"ownerFinalUnitPriceMinor\":\"1003\",\"ownerLockedExchangeRateDecimal\":\"1\",\"ownerManualReferenceActorId\":null,\"ownerManualReferenceAt\":null,\"ownerManualReferenceReason\":null,\"ownerMarkupJson\":\"{\\\"kind\\\":\\\"fixed_minor\\\",\\\"minor\\\":\\\"0\\\"}\",\"ownerQuoteSource\":\"catalog_price\",\"ownerSourceUnitPriceMinor\":\"1003\",\"quantity\":\"1\",\"sortOrder\":0,\"supplierSnapshotJson\":\"{\\\"id\\\":\\\"30000000-0000-4000-8000-000000000003\\\",\\\"name\\\":\\\"QA Vendor 3\\\"}\",\"unit\":\"米\",\"unitPriceMinor\":\"1003\",\"updatedAt\":1792753843}],\"lockedExchangeRateDecimal\":null,\"notes\":null,\"orderDate\":\"2026-10-12\",\"orderDiscountMinor\":\"0\",\"parentOrderId\":null,\"primaryCurrency\":\"XOF\",\"procurementMode\":\"owner_self_purchase\",\"projectId\":\"10000000-0000-4000-8000-000000000002\",\"rejectionReason\":null,\"selfApproved\":false,\"site\":\"Test site\",\"status\":\"pending_confirmation\",\"subtotalMinor\":\"1003\",\"supplierId\":null,\"supplierSnapshotJson\":null,\"supplierTermsCompletedAt\":null,\"taxMinor\":\"0\",\"taxRateBasisPoints\":0,\"teamId\":\"10000000-0000-4000-8000-000000000004\",\"totalMinor\":\"1003\",\"urgency\":\"normal\",\"urgencyReason\":null,\"workflowStatus\":\"confirmed\"}",
+    "total_minor": 1003
+  },
+  "after": {
+    "formal_snapshot_json": "{\"applicantId\":\"10000000-0000-4000-8000-000000000013\",\"confirmedAt\":null,\"confirmedBy\":null,\"countryId\":\"10000000-0000-4000-8000-000000000001\",\"currency\":\"XOF\",\"deliveryAddress\":\"test\",\"departmentId\":\"10000000-0000-4000-8000-000000000003\",\"displayNo\":\"QA-4a453f54-fc5b-478b-a162-e5c10259726d\",\"documentType\":null,\"expectedDeliveryDate\":null,\"formalDocumentNo\":null,\"formalInstallationId\":null,\"formalSequence\":null,\"formalSnapshotJson\":null,\"formallyIssuedAt\":null,\"freightMinor\":\"0\",\"languagePair\":\"zh_fr\",\"lineDiscountMinor\":\"0\",\"lines\":[{\"createdAt\":0,\"currency\":\"XOF\",\"freightIncluded\":false,\"id\":\"57fc9ef5-b319-4304-ae5b-9acb7c77ac46\",\"lineDiscountJson\":\"{\\\"kind\\\":\\\"fixed_minor\\\",\\\"minor\\\":\\\"0\\\"}\",\"lineFreightJson\":\"{\\\"kind\\\":\\\"fixed_minor\\\",\\\"minor\\\":\\\"0\\\"}\",\"lineTotalMinor\":\"1003\",\"materialId\":\"10000000-0000-4000-8000-000000000005\",\"materialSnapshotJson\":\"{\\\"nameZh\\\":\\\"synthetic\\\"}\",\"ownerCatalogPriceId\":\"40000000-0000-4000-8000-000000000003\",\"ownerConvertedReferenceUnitMinor\":\"1003\",\"ownerFinalUnitPriceMinor\":\"1003\",\"ownerLockedExchangeRateDecimal\":\"1\",\"ownerManualReferenceActorId\":null,\"ownerManualReferenceAt\":null,\"ownerManualReferenceReason\":null,\"ownerMarkupJson\":\"{\\\"kind\\\":\\\"fixed_minor\\\",\\\"minor\\\":\\\"0\\\"}\",\"ownerQuoteSource\":\"catalog_price\",\"ownerSourceUnitPriceMinor\":\"1003\",\"quantity\":\"1\",\"sortOrder\":0,\"supplierSnapshotJson\":\"{\\\"id\\\":\\\"30000000-0000-4000-8000-000000000003\\\",\\\"name\\\":\\\"QA Vendor 3\\\"}\",\"unit\":\"米\",\"unitPriceMinor\":\"1003\",\"updatedAt\":1792753843}],\"lockedExchangeRateDecimal\":null,\"notes\":null,\"orderDate\":\"2026-10-12\",\"orderDiscountMinor\":\"0\",\"parentOrderId\":null,\"primaryCurrency\":\"XOF\",\"procurementMode\":\"owner_self_purchase\",\"projectId\":\"10000000-0000-4000-8000-000000000002\",\"rejectionReason\":null,\"selfApproved\":false,\"site\":\"Test site\",\"status\":\"pending_confirmation\",\"subtotalMinor\":\"1003\",\"supplierId\":null,\"supplierSnapshotJson\":null,\"supplierTermsCompletedAt\":null,\"taxMinor\":\"0\",\"taxRateBasisPoints\":0,\"teamId\":\"10000000-0000-4000-8000-000000000004\",\"totalMinor\":\"1003\",\"urgency\":\"normal\",\"urgencyReason\":null,\"workflowStatus\":\"confirmed\"}",
+    "total_minor": 1003
+  },
+  "manualPricing": {
+    "ok": true,
+    "value": [
+      {
+        "orderItemId": "b6f8a3b9-1623-45ac-a413-913daae70c5c",
+        "convertedReferenceUnitMinor": "100",
+        "markupMinor": "0",
+        "finalUnitPriceMinor": "100"
+      }
+    ]
+  },
+  "manualIssue": {
+    "ok": true,
+    "value": {
+      "documentType": "OPA",
+      "formalDocumentNo": "TEST-CI-TEST-OPA-20261012-OPA-N5SESAYX-6",
+      "formalInstallationId": "42e1f537-1c69-49ee-94b1-07a972ecabdd",
+      "formalSequence": 6
+    }
+  }
+}
