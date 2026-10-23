@@ -1,0 +1,15 @@
+{
+  "testedSha": "f805c9ed3c88f6af16238e999539fd591f7d93b4",
+  "checks": [
+    "native material detail second page displays QA Vendor 25",
+    "native purchasing selected QA Vendor 25 at 1025 XOF, quantity 3"
+  ],
+  "errors": [],
+  "persisted": {
+    "supplier_snapshot_json": "{\"id\":\"30000000-0000-4000-8000-000000000025\",\"name\":\"QA Vendor 25\"}",
+    "currency": "XOF",
+    "unit_price_minor": 1025,
+    "quantity_decimal": "3",
+    "line_total_minor": 3075
+  }
+}
