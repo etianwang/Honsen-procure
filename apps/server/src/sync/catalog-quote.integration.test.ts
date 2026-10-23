@@ -137,6 +137,18 @@ describe.skipIf(!pool)('catalog quote push', () => {
       [order],
     )
     expect(saved.rows[0].payload_json.lines[0].catalogPriceId).toBe(price)
+    const pulled = await store!.pullChanges({
+      actor: { id: actor, roles: ['engineer'], installationId: installation },
+      cursor: '0',
+      limit: 500,
+    })
+    const pulledOrder = pulled.changes.find(
+      (change) =>
+        change.entityType === 'purchase_order' && change.entityId === order,
+    )
+    expect(pulledOrder?.payload.lines).toMatchObject([
+      { catalogPriceId: price, priceSource: 'catalog' },
+    ])
     expect(
       (
         await push(
