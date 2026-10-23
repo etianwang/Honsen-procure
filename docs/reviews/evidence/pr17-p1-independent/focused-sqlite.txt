@@ -1,0 +1,52 @@
+warning: linker stdout: 正在创建库 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src\lib.rs (E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 2 tests
+test tests::authorization_replay_state_migration_preserves_incremental_cursor ... ok
+test tests::authorization_replay_survives_restart_and_preserves_incremental_state ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 97 filtered out; finished in 11.00s
+
+warning: linker stdout: 正在创建库 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src\lib.rs (E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 1 test
+test tests::price_waits_for_missing_supplier_and_replays ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 98 filtered out; finished in 0.73s
+
+warning: linker stdout: 正在创建库 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running unittests src\lib.rs (E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 1 test
+test tests::malformed_catalog_history_is_retained_and_recovers_without_blocking_pull ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 98 filtered out; finished in 0.74s
+
+warning: linker stdout: 正在创建库 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running unittests src\lib.rs (E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 1 test
+test tests::sync_acknowledgements_quarantine_permanent_failures_without_blocking_later_events ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 98 filtered out; finished in 0.71s

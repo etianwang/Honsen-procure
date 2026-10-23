@@ -1,0 +1,12 @@
+
+> @honsen/server@0.0.0-development test
+> vitest run src/sync/catalog-quote.integration.test.ts src/sync/catalog-payload.test.ts
+
+
+ RUN  v5.0.3 E:/Honsen-PR17-Final-Review/apps/server
+
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Start at  16:34:31
+   Duration  3.86s (tests 92%, import 5%, transform 3%)

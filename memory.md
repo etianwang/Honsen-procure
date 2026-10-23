@@ -1,6 +1,13 @@
 # Honsen采购管理系统（HONSEN Procure）— Development Memory
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-23
+
+## PR #17 independent two-P1 recheck — CHANGES_REQUIRED (2026-10-23)
+
+- Reviewed production `8c7ba265bf963fd47e9e3a77876b2f022830fde9` against unchanged target `ffe42d1c917042f18343c2e068264b2afa2fb106`. Evidence lives in the containing checkpoint on `codex/qa-pr17-p1-final`, in `E:/Honsen-PR17-Final-Review`; exact evidence SHA/remote equality are delivered after commit. [Report, raw synthetic responses and reproduction](docs/reviews/PR17-P1-INDEPENDENT-RECHECK.md). No production branch/main/runtime code was changed; the only lib.rs delta is an include inside cfg(test). No merge or deployment.
+- Independent PostgreSQL 16.15 authenticated-handler scenarios 3/3 and relevant existing server tests 11/11 passed; restricted NOLOGIN role proves scoped administrator recovery, original/audit retention and denied DELETE/CREATE. Actual SQLite focused tests 5/5 passed. The new actual PostgreSQL-response-to-file-SQLite contract test FAILS with `InvalidInput` twice across close/reopen: accepted camelCase country history cannot deserialize into the snake_case reference DTO, which also requires payload version. Incremental cursor stays 1046 and replay cursor stays zero; Outbox remains retained. Production CI is SUCCESS but does not override the independent failure.
+- **BLOCKER for this review:** P1-01 historical catch-up still cannot complete. Normalize accepted historical reference forms at the trusted projection boundary using envelope version and validated identities; rerun the committed failing contract test and direct affected checks. Do not mark both P1 QA PASS, end Draft or enter READY_TO_MERGE. End-to-end draft/formal snapshot/audit retention through the blocked replay was not completed and is NOT PASSED; isolated fixtures are narrower evidence. Preserve recorded fixture startup/cast/permission/timeout failures separately from the confirmed production defect.
+- **BLOCKER for V1 production release:** actual Windows EXE online re-login after revocation remains NOT PASSED under the coordinator's prior gate adjustment. **DEFERRED:** full T04/T10, Windows A/B and Linux deployment QA; all original parent gates remain. **WARNING:** builder/source CI and isolated test passes cannot establish complete client convergence. E:-only task TEMP/npm/Cargo/artifacts were used; disposable Compose resources are removed after testing. Final worktree must be clean after the evidence commit.
 
 ## T04 FIX2-B + FIX2-C builder handoff (2026-10-21)
 

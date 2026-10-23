@@ -4,6 +4,8 @@ The authoritative execution order and mandatory per-task DOM testing gate are in
 
 ## Current delivery path — 2026-10-19
 
+2026-10-23 independent PR #17 P1 recheck: **CHANGES_REQUIRED**. An accepted historical country event blocks the new SQLite authorization replay across restart. [Bounded independent result](reviews/PR17-P1-INDEPENDENT-RECHECK.md); keep Draft and P1-01 open. Windows EXE revoked-account online re-login remains a separate NOT PASSED V1 production-release hold.
+
 2026-10-22: a T05 supplier-country editor repair is under independent recheck; no parent or milestone status changes. See the latest `memory.md` handoff.
 
 2026-10-23: PR #17's two confirmed P1 repairs now have production implementations and PostgreSQL 16/SQLite builder evidence: durable authorization history replay and complete catalog validation with audited historical recovery. See [repair evidence](reviews/PR17-SYNC-P1-REPAIR.md). Independent recheck of these two defects remains required; PR #17 stays Draft. Real Windows EXE online re-login after revocation is still a mandatory V1 production-release security hold, not a passed QA item. All original parent/milestone gates remain open as previously recorded.

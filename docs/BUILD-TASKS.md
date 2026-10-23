@@ -2,6 +2,8 @@
 
 ## Global completion gate
 
+2026-10-23 independent PR #17 P1 recheck: **CHANGES_REQUIRED** at `8c7ba265bf963fd47e9e3a77876b2f022830fde9`. Server-side catalog checks pass, but a legally accepted historical country payload blocks real SQLite authorization replay after restart. [Independent evidence and minimal repair](reviews/PR17-P1-INDEPENDENT-RECHECK.md). P1-01 remains open; do not declare both P1 QA PASS or end Draft. Original parent and production-release gates remain unchanged.
+
 2026-10-23 PR #17 P1-01/P1-02 (B): implemented durable authorized-history replay, complete supplier/quote validation, dependency/collision quarantine and reasoned administrator recovery. [Builder evidence and recovery boundaries](reviews/PR17-SYNC-P1-REPAIR.md) cover PostgreSQL 16 and real SQLite. The two defects require independent targeted recheck before closure; PR #17 remains Draft and no parent/milestone checkbox changes. Windows EXE online re-login after revocation remains a NOT PASSED V1 production-release security gate under the user's approved gate adjustment.
 
 2026-10-22 T05 supplier maintenance defect (B): the supplier editor omitted the required country UUID. The candidate passes the selected authorization-context country for creation and retains the listed supplier's country on edit; Rust still authorizes the country. This is a bounded repair pending independent recheck, not renewed acceptance of T05, T04 or any milestone. See the latest `memory.md` handoff.

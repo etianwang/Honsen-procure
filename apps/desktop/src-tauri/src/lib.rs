@@ -19746,4 +19746,6 @@ mod tests {
             vec![retryable]
         );
     }
+
+    include!("pr17_independent_tests.rs");
 }

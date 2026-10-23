@@ -1,0 +1,12 @@
+
+> @honsen/server@0.0.0-development test
+> vitest run src/sync/pr17-independent.test.ts --testTimeout 120000
+
+
+ RUN  v5.0.3 E:/Honsen-PR17-Final-Review/apps/server
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  16:29:12
+   Duration  62.23s (tests 98%, transform 2%)

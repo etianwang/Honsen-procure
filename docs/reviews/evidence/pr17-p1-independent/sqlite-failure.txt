@@ -1,0 +1,27 @@
+   Compiling honsen-materials-desktop-core v0.0.0-development (E:\Honsen-PR17-Final-Review\apps\desktop\src-tauri)
+warning: linker stdout: 正在创建库 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.lib 和对象 E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `honsen-materials-desktop-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.70s
+     Running unittests src\lib.rs (E:\Honsen-PR17-Independent-P1-runtime\cargo-target\debug\deps\honsen_materials_desktop_core-376eb2a1f88fc8ee.exe)
+
+running 1 test
+attempt=1, result=Err(InvalidInput), incremental=1046, replay=Some(("c26dcc5597478df6f3187c91b8512c672c9757bbba06360a6fa39511fc7b6679", "0", "1056"))
+attempt=2, result=Err(InvalidInput), incremental=1046, replay=Some(("c26dcc5597478df6f3187c91b8512c672c9757bbba06360a6fa39511fc7b6679", "0", "1056"))
+actual first history payload={"businessCode":"04d29f95-27cb-4c25-8fe8-6f554dbfa62f","id":"04d29f95-27cb-4c25-8fe8-6f554dbfa62f","isActive":true,"kind":"country","name":"QA","timeZone":"UTC"}; typed reference parse=Err(Error("missing field `business_code`", line: 0, column: 0))
+
+thread 'tests::pr17_independent_postgres_transcript_survives_sqlite_restart_and_repair' (31840) panicked at src\pr17_independent_tests.rs:110:13:
+accepted authorized historical page cannot project after grant/restart; retry remains blocked
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test tests::pr17_independent_postgres_transcript_survives_sqlite_restart_and_repair ... FAILED
+
+failures:
+
+failures:
+    tests::pr17_independent_postgres_transcript_survives_sqlite_restart_and_repair
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 98 filtered out; finished in 11.37s
+
+error: test failed, to rerun pass `--lib`
