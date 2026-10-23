@@ -2231,25 +2231,35 @@ async function validCatalogQuotes(
       line.catalogPriceId !== old.catalogPriceId
     )
       return false
-    if (line.catalogPriceId == null) {
-      if (line.materialId != null && line.supplierSnapshotJson != null) {
-        if (
-          !old ||
+    if (
+      line.priceSource != null &&
+      line.priceSource !== 'catalog' &&
+      line.priceSource !== 'manual'
+    )
+      return false
+    if ((line.priceSource === 'catalog') !== (line.catalogPriceId != null))
+      return false
+    if (line.catalogPriceId == null && line.priceSource == null) {
+      if (
+        line.materialId != null &&
+        line.supplierSnapshotJson != null &&
+        (!old ||
           old.catalogPriceId != null ||
+          old.priceSource != null ||
           old.materialId !== line.materialId ||
           old.supplierSnapshotJson !== line.supplierSnapshotJson ||
           old.currency !== line.currency ||
           old.unit !== line.unit ||
-          old.unitPriceMinor !== line.unitPriceMinor
-        )
-          return false
-      }
+          old.unitPriceMinor !== line.unitPriceMinor)
+      )
+        return false
       continue
     }
+    if (line.supplierSnapshotJson == null && line.priceSource === 'manual')
+      continue
     if (
-      typeof line.catalogPriceId !== 'string' ||
-      typeof line.materialId !== 'string' ||
-      typeof line.supplierSnapshotJson !== 'string'
+      typeof line.supplierSnapshotJson !== 'string' ||
+      (line.priceSource === 'catalog' && typeof line.materialId !== 'string')
     )
       return false
     let supplier: unknown
@@ -2282,6 +2292,15 @@ async function validCatalogQuotes(
       ],
     )
     if (scope.rowCount !== 1) return false
+    if (line.priceSource === 'manual') {
+      const allowedSupplier = await client.query(
+        `SELECT 1 FROM sync_entities WHERE entity_type = 'supplier' AND entity_id::text = $1 AND NOT is_deleted
+         AND payload_json->>'countryId' = $2 AND payload_json->>'isActive' = 'true' AND payload_json->>'isBlacklisted' = 'false'`,
+        [supplierId, event.payload.countryId],
+      )
+      if (allowedSupplier.rowCount !== 1) return false
+      continue
+    }
     const result = await client.query(
       `SELECT 1 FROM sync_entities p
       JOIN sync_entities s ON s.entity_type = 'supplier' AND s.entity_id::text = p.payload_json->>'supplierId' AND NOT s.is_deleted

@@ -47,6 +47,7 @@ const data = {
       id: line,
       materialId: material,
       catalogPriceId: price,
+      priceSource: 'catalog',
       supplierSnapshotJson: JSON.stringify({ id: supplier, name: 'fixture' }),
       currency: 'CNY',
       unit: 'pcs',
@@ -185,6 +186,33 @@ describe.skipIf(!pool)('catalog quote push', () => {
         })
       ).errorCode,
     ).toBe('QUOTE_UNAVAILABLE')
+    const manual = {
+      ...lineData,
+      catalogPriceId: null,
+      priceSource: 'manual',
+      unitPriceMinor: '999',
+    }
+    expect(
+      (await push('purchase_order', randomUUID(), { ...next, lines: [manual] }))
+        .status,
+    ).toBe('accepted')
+    expect(
+      (
+        await push('purchase_order', randomUUID(), {
+          ...next,
+          lines: [{ ...manual, catalogPriceId: latest }],
+        })
+      ).errorCode,
+    ).toBe('QUOTE_UNAVAILABLE')
+    expect(
+      (
+        await push('purchase_order', randomUUID(), {
+          ...next,
+          countryId: randomUUID(),
+          lines: [manual],
+        })
+      ).errorCode,
+    ).toBe('QUOTE_UNAVAILABLE')
     const client = await pool!.connect()
     try {
       await client.query('BEGIN')
@@ -199,6 +227,14 @@ describe.skipIf(!pool)('catalog quote push', () => {
       await new Promise((resolve) => setTimeout(resolve, 100))
       await client.query('COMMIT')
       expect((await competing).errorCode).toBe('QUOTE_UNAVAILABLE')
+      expect(
+        (
+          await push('purchase_order', randomUUID(), {
+            ...next,
+            lines: [manual],
+          })
+        ).errorCode,
+      ).toBe('QUOTE_UNAVAILABLE')
     } finally {
       client.release()
     }

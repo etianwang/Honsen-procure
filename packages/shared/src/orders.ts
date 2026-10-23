@@ -80,6 +80,7 @@ export const requisitionLineSchema = z.object({
   id: uuidSchema,
   materialId: uuidSchema.nullable(),
   catalogPriceId: uuidSchema.nullable().optional(),
+  priceSource: z.enum(['catalog', 'manual']).nullable().optional(),
   materialSnapshot: z.object({
     nameZh: z.string().trim().min(1).max(255),
     nameFr: z.string().trim().min(1).max(255).nullable(),

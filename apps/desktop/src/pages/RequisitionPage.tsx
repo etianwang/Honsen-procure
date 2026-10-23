@@ -80,6 +80,7 @@ function newLine(currency: EditorLine['currency']): EditorLine {
       specification: '',
     },
     supplierId: null,
+    priceSource: 'manual',
     supplierSnapshot: null,
     currency,
     quantity: '1',
@@ -131,6 +132,7 @@ function materialLine(
       : null,
     supplierId: quote?.supplierId ?? null,
     catalogPriceId: quote?.priceId ?? null,
+    priceSource: quote ? 'catalog' : 'manual',
     unit: material.unit,
     unitPriceMinor: quote?.unitPriceMinor ?? '0',
     currency: quote?.currency ?? line.currency,
@@ -710,7 +712,14 @@ export function RequisitionPage({
                     options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
                       value,
                     }))}
-                    onChange={(currency) => updateLine(index, { currency })}
+                    onChange={(currency) =>
+                      updateLine(index, {
+                        currency,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
+                    }
                   />
                 </label>
                 {mode === 'owner_self_purchase' ? (
@@ -739,7 +748,8 @@ export function RequisitionPage({
                 ) : null}
                 {mode === 'honsen_self_purchase' && line.materialId ? (
                   <label>
-                    选择供应商报价
+                    选择供应商报价（当前来源：
+                    {line.priceSource === 'catalog' ? '目录报价' : '手工价格'}）
                     <Select
                       aria-label="选择供应商报价"
                       virtual={false}
@@ -763,6 +773,7 @@ export function RequisitionPage({
                           updateLine(index, {
                             supplierId: price.supplierId,
                             catalogPriceId: price.priceId,
+                            priceSource: 'catalog',
                             supplierSnapshot: {
                               id: price.supplierId,
                               name: price.supplierName,
@@ -807,7 +818,12 @@ export function RequisitionPage({
                     disabled={status === 'pending'}
                     value={line.unit}
                     onChange={(event) =>
-                      updateLine(index, { unit: event.target.value })
+                      updateLine(index, {
+                        unit: event.target.value,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
                     }
                   />
                 </label>
@@ -819,7 +835,12 @@ export function RequisitionPage({
                     value={line.unitPriceMinor}
                     inputMode="numeric"
                     onChange={(event) =>
-                      updateLine(index, { unitPriceMinor: event.target.value })
+                      updateLine(index, {
+                        unitPriceMinor: event.target.value,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
                     }
                   />
                 </label>

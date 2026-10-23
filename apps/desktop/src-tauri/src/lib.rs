@@ -302,6 +302,7 @@ pub struct RequisitionLineInput {
     pub id: Uuid,
     pub material_id: Option<Uuid>,
     pub catalog_price_id: Option<Uuid>,
+    pub price_source: Option<String>,
     pub material_snapshot: MaterialSnapshotInput,
     pub supplier_id: Option<Uuid>,
     pub currency: String,
@@ -774,6 +775,7 @@ struct RemotePurchaseOrderLine {
     id: Uuid,
     material_id: Option<Uuid>,
     catalog_price_id: Option<Uuid>,
+    price_source: Option<String>,
     material_snapshot_json: String,
     supplier_snapshot_json: Option<String>,
     currency: String,
@@ -3992,6 +3994,7 @@ impl LocalAuthService {
                     .transpose()
                     .map_err(|_| AuthError::Database)?,
                 catalog_price_id: None,
+                price_source: None,
                 material_snapshot: serde_json::from_str(&snapshot_json)
                     .map_err(|_| AuthError::Database)?,
                 supplier_id: None,
@@ -4802,6 +4805,7 @@ impl LocalAuthService {
             if line.input.material_id.is_some()
                 && line.input.supplier_id.is_some()
                 && line.input.catalog_price_id.is_none()
+                && line.input.price_source.as_deref() != Some("manual")
             {
                 let historical: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items WHERE id = ?1 AND order_id = ?2 AND catalog_price_id IS NULL AND material_id = ?3 AND json_extract(supplier_snapshot_json, '$.id') = ?4 AND currency = ?5 AND unit = ?6 AND unit_price_minor = ?7)", params![line.input.id.to_string(), draft.id.to_string(), line.input.material_id.map(|id| id.to_string()), line.input.supplier_id.map(|id| id.to_string()), line.input.currency, line.input.unit, line.unit_price_minor], |row| row.get(0)).map_err(|_| AuthError::Database)?;
                 if !historical {
@@ -4816,6 +4820,13 @@ impl LocalAuthService {
             )
             .map_err(|_| AuthError::Database)?;
         for line in &calculated.lines {
+            match (
+                line.input.price_source.as_deref(),
+                line.input.catalog_price_id,
+            ) {
+                (Some("catalog"), Some(_)) | (Some("manual"), None) | (None, None) => {}
+                _ => return Err(AuthError::QuoteUnavailable),
+            }
             validate_catalog_quote(&transaction, draft.country_id, &line.input)?;
             let material_snapshot = material_snapshot(&transaction, &line.input)?;
             let supplier_snapshot = supplier_snapshot(&transaction, draft.country_id, &line.input)?;
@@ -4828,10 +4839,11 @@ impl LocalAuthService {
                 .map_err(|_| AuthError::Database)?;
             transaction
                 .execute(
-                    "UPDATE local_purchase_order_items SET catalog_price_id = ?2 WHERE id = ?1",
+                    "UPDATE local_purchase_order_items SET catalog_price_id = ?2, price_source = ?3 WHERE id = ?1",
                     params![
                         line.input.id.to_string(),
-                        line.input.catalog_price_id.map(|id| id.to_string())
+                        line.input.catalog_price_id.map(|id| id.to_string()),
+                        line.input.price_source
                     ],
                 )
                 .map_err(|_| AuthError::Database)?;
@@ -8786,10 +8798,11 @@ fn project_remote_purchase_order_change(
             .map_err(|_| AuthError::Database)?;
         transaction
             .execute(
-                "UPDATE local_purchase_order_items SET catalog_price_id = ?2 WHERE id = ?1",
+                "UPDATE local_purchase_order_items SET catalog_price_id = ?2, price_source = ?3 WHERE id = ?1",
                 params![
                     line.id.to_string(),
-                    line.catalog_price_id.map(|id| id.to_string())
+                    line.catalog_price_id.map(|id| id.to_string()),
+                    line.price_source
                 ],
             )
             .map_err(|_| AuthError::Database)?;
@@ -9856,7 +9869,7 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
         )
         .map_err(|_| AuthError::Database)?;
     let lines = transaction
-        .prepare("SELECT id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at, owner_quote_source, owner_catalog_price_id, owner_manual_reference_reason, owner_manual_reference_actor_id, owner_manual_reference_at, owner_source_unit_price_minor, owner_locked_exchange_rate_decimal, owner_converted_reference_unit_minor, owner_markup_json, owner_final_unit_price_minor, catalog_price_id FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id")
+        .prepare("SELECT id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at, owner_quote_source, owner_catalog_price_id, owner_manual_reference_reason, owner_manual_reference_actor_id, owner_manual_reference_at, owner_source_unit_price_minor, owner_locked_exchange_rate_decimal, owner_converted_reference_unit_minor, owner_markup_json, owner_final_unit_price_minor, catalog_price_id, price_source FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id")
         .map_err(|_| AuthError::Database)?
         .query_map([order_id.to_string()], |row| { let mut line = serde_json::json!({
             "id": row.get::<_, String>(0)?,
@@ -9885,7 +9898,8 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
             "ownerMarkupJson": row.get::<_, Option<String>>(23)?,
             "ownerFinalUnitPriceMinor": row.get::<_, Option<i64>>(24)?.map(|value| value.to_string()),
             "catalogPriceId": row.get::<_, Option<String>>(25)?,
-        }); if line["catalogPriceId"].is_null() { line.as_object_mut().unwrap().remove("catalogPriceId"); } Ok(line) })
+            "priceSource": row.get::<_, Option<String>>(26)?,
+        }); if line["catalogPriceId"].is_null() { line.as_object_mut().unwrap().remove("catalogPriceId"); } if line["priceSource"].is_null() { line.as_object_mut().unwrap().remove("priceSource"); } Ok(line) })
         .map_err(|_| AuthError::Database)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| AuthError::Database)?;
@@ -10145,7 +10159,8 @@ fn validate_saved_catalog_quotes(
     order_id: Uuid,
 ) -> Result<(), AuthError> {
     let invalid: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_material_prices p ON p.id = i.catalog_price_id LEFT JOIN local_suppliers s ON s.id = p.supplier_id LEFT JOIN local_materials m ON m.id = p.material_id WHERE i.order_id = ?1 AND i.catalog_price_id IS NOT NULL AND (p.id IS NULL OR p.material_id IS NOT i.material_id OR p.supplier_id IS NOT json_extract(i.supplier_snapshot_json, '$.id') OR p.currency IS NOT i.currency OR p.unit IS NOT i.unit OR p.unit_price_minor IS NOT i.unit_price_minor OR p.is_active != 1 OR p.deleted_at IS NOT NULL OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL OR m.is_active != 1 OR m.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
-    if invalid {
+    let invalid_supplier: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_suppliers s ON s.id = json_extract(i.supplier_snapshot_json, '$.id') WHERE i.order_id = ?1 AND i.price_source = 'manual' AND i.supplier_snapshot_json IS NOT NULL AND (s.id IS NULL OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+    if invalid || invalid_supplier {
         Err(AuthError::QuoteUnavailable)
     } else {
         Ok(())
@@ -14649,6 +14664,7 @@ mod tests {
                         id: draft_item_id,
                         material_id: Some(material_id),
                         catalog_price_id: None,
+                        price_source: None,
                         material_snapshot: MaterialSnapshotInput {
                             name_zh: "owner material".into(),
                             name_fr: None,
@@ -14850,6 +14866,7 @@ mod tests {
                         id: draft_item_id,
                         material_id: Some(material_id),
                         catalog_price_id: None,
+                        price_source: None,
                         material_snapshot: MaterialSnapshotInput {
                             name_zh: "owner material".into(),
                             name_fr: None,
@@ -16087,6 +16104,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 material_id: Some(id("10000000-0000-4000-8000-000000000005")),
                 catalog_price_id: Some(id("10000000-0000-4000-8000-000000000007")),
+                price_source: Some("catalog".into()),
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "synthetic".into(),
                     name_fr: None,
@@ -16446,6 +16464,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 material_id: Some(material.id),
                 catalog_price_id: None,
+                price_source: Some("manual".into()),
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "forged".into(),
                     name_fr: None,
@@ -18459,6 +18478,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 material_id: Some(material),
                 catalog_price_id: None,
+                price_source: None,
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "forged".into(),
                     name_fr: None,
