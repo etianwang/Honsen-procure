@@ -3508,7 +3508,7 @@ impl LocalAuthService {
         {
             return Err(AuthError::Forbidden);
         }
-        let invalid_catalog_quote: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_material_prices p ON p.id = i.owner_catalog_price_id LEFT JOIN local_suppliers s ON s.id = p.supplier_id WHERE i.order_id = ?1 AND i.owner_quote_source = 'catalog' AND (p.id IS NULL OR p.material_id IS NOT i.material_id OR p.is_active != 1 OR p.deleted_at IS NOT NULL OR p.unit_price_minor IS NOT i.owner_source_unit_price_minor OR p.currency IS NOT i.currency OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        let invalid_catalog_quote: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_material_prices p ON p.id = i.owner_catalog_price_id LEFT JOIN local_suppliers s ON s.id = p.supplier_id WHERE i.order_id = ?1 AND i.owner_quote_source = 'catalog_price' AND (p.id IS NULL OR p.material_id IS NOT i.material_id OR p.is_active != 1 OR p.deleted_at IS NOT NULL OR p.unit_price_minor IS NOT i.owner_source_unit_price_minor OR p.currency IS NOT i.currency OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
         if invalid_catalog_quote {
             return Err(AuthError::QuoteUnavailable);
         }
@@ -14422,6 +14422,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(legacy_mode, None);
+        connection.execute("UPDATE local_purchase_orders SET workflow_status = 'draft', applicant_id = ?2 WHERE id = ?1", params![order_id.to_string(), Uuid::new_v4().to_string()]).unwrap();
         drop(connection);
         let result = service
             .save_owner_purchase_pricing(
@@ -14453,6 +14454,8 @@ mod tests {
             .unwrap();
         assert_eq!(result[0].final_unit_price_minor, "1038");
         assert_eq!(result[1].final_unit_price_minor, "105");
+        service.submit_requisition_draft(order_id, now).unwrap();
+        service.confirm_requisition(order_id, now).unwrap();
         let connection = service.connection.lock().unwrap();
         let stored: (String, Option<String>, Option<String>, Option<String>, i64) = connection.query_row("SELECT o.procurement_mode, i.owner_quote_source, i.owner_manual_reference_reason, i.owner_manual_reference_actor_id, i.owner_final_unit_price_minor FROM local_purchase_orders o JOIN local_purchase_order_items i ON i.order_id = o.id WHERE i.id = ?1", [manual_item_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))).unwrap();
         assert_eq!(stored.0, "owner_self_purchase");
@@ -14533,6 +14536,80 @@ mod tests {
             ),
             Err(AuthError::InvalidInput)
         );
+        let before_issue = {
+            let connection = service.connection.lock().unwrap();
+            let transaction = connection.unchecked_transaction().unwrap();
+            let snapshot = order_sync_payload(&transaction, order_id).unwrap();
+            let sequence: i64 = transaction
+                .query_row(
+                    "SELECT next_formal_sequence FROM local_sync_state WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let outbox: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1",
+                    [order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            (snapshot, sequence, outbox)
+        };
+        for (sql, restore) in [
+            (
+                "UPDATE local_material_prices SET is_active = 0 WHERE id = ?1",
+                "UPDATE local_material_prices SET is_active = 1 WHERE id = ?1",
+            ),
+            (
+                "UPDATE local_suppliers SET is_blacklisted = 1 WHERE id = ?1",
+                "UPDATE local_suppliers SET is_blacklisted = 0 WHERE id = ?1",
+            ),
+        ] {
+            let target = if sql.contains("local_material_prices") {
+                price_id
+            } else {
+                supplier_id
+            };
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .execute(sql, [target.to_string()])
+                .unwrap();
+            assert_eq!(
+                service.issue_owner_formal_order(order_id, now),
+                Err(AuthError::QuoteUnavailable)
+            );
+            let connection = service.connection.lock().unwrap();
+            let transaction = connection.unchecked_transaction().unwrap();
+            assert_eq!(
+                order_sync_payload(&transaction, order_id).unwrap(),
+                before_issue.0
+            );
+            assert_eq!(
+                transaction
+                    .query_row(
+                        "SELECT next_formal_sequence FROM local_sync_state WHERE singleton = 1",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                before_issue.1
+            );
+            assert_eq!(
+                transaction
+                    .query_row(
+                        "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1",
+                        [order_id.to_string()],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                before_issue.2
+            );
+            transaction.execute(restore, [target.to_string()]).unwrap();
+            transaction.commit().unwrap();
+        }
         let issued = service.issue_owner_formal_order(order_id, now).unwrap();
         assert_eq!(issued.document_type, "OPA");
         assert!(issued.formal_document_no.contains("-OPA-"));
