@@ -16118,6 +16118,49 @@ mod tests {
         );
         service.save_requisition_draft(draft.clone(), now).unwrap();
         service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 1 WHERE id = ?1",
+                ["10000000-0000-4000-8000-000000000006"],
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_requisition_draft(draft.clone(), now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        let foreign_country = Uuid::new_v4();
+        service.connection.lock().unwrap().execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, 'QA-FOREIGN', 'foreign', 'UTC', 1, 1)", [foreign_country.to_string()]).unwrap();
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET is_blacklisted = 0, country_id = ?2 WHERE id = ?1",
+                params![
+                    "10000000-0000-4000-8000-000000000006",
+                    foreign_country.to_string()
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            service.save_requisition_draft(draft.clone(), now),
+            Err(AuthError::QuoteUnavailable)
+        );
+        service
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE local_suppliers SET country_id = ?2 WHERE id = ?1",
+                params![
+                    "10000000-0000-4000-8000-000000000006",
+                    draft.country_id.to_string()
+                ],
+            )
+            .unwrap();
+        service
             .set_procurement_mode(draft.id, "honsen_self_purchase".into(), now)
             .unwrap();
         service
