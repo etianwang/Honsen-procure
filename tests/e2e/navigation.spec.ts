@@ -1450,7 +1450,17 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   page.on('console', (message) => {
     if (message.type() === 'error') browserErrors.push(message.text())
   })
+  page.on('pageerror', (error) => browserErrors.push(error.message))
   await page.addInitScript(() => {
+    const payments: {
+      id: string
+      payeeName: string
+      currency: string
+      amountMinor: string
+      paymentDate: string
+      paymentType: string
+      status: string
+    }[] = []
     let status = 'confirmed'
     let receiptCount = 0
     const orderId = '00000000-0000-4000-8000-000000000811'
@@ -1461,10 +1471,14 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
             command: string,
             args?: {
               orderId?: string
-              input?: { orderId: string; amountMinor?: string }
+              input?: { orderId: string } & (typeof payments)[number]
             },
           ) {
-            if (command === 'list_confirmed_procurement_orders')
+            if (command === 'list_confirmed_procurement_orders') {
+              const paid = payments.reduce(
+                (total, payment) => total + BigInt(payment.amountMinor),
+                0n,
+              )
               return Promise.resolve(
                 status === 'completed'
                   ? []
@@ -1476,6 +1490,26 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
                         procurementMode: 'honsen_self_purchase',
                         workflowStatus: status,
                         children: [],
+                        paymentSummary: {
+                          currency: 'XOF',
+                          payableMinor: '2000',
+                          paidMinor: paid.toString(),
+                          remainingMinor: (paid < 2000n
+                            ? 2000n - paid
+                            : 0n
+                          ).toString(),
+                          overpaidMinor: (paid > 2000n
+                            ? paid - 2000n
+                            : 0n
+                          ).toString(),
+                          status:
+                            paid === 0n
+                              ? 'unpaid'
+                              : paid < 2000n
+                                ? 'partial'
+                                : 'paid',
+                          records: [...payments],
+                        },
                         lines: [
                           {
                             id: '00000000-0000-4000-8000-000000000812',
@@ -1500,6 +1534,12 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
                       },
                     ],
               )
+            }
+            if (
+              command === 'list_attachments' ||
+              command === 'list_attachment_targets'
+            )
+              return Promise.resolve([])
             if (command === 'list_suppliers') return Promise.resolve([])
             if (command === 'list_rfqs') return Promise.resolve([])
             if (command === 'start_honsen_market_execution') {
@@ -1524,11 +1564,8 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
               if (args?.input?.orderId !== orderId)
                 return Promise.reject(new Error('wrong order'))
               Object.assign(window, { __paymentAmount: args.input.amountMinor })
-              return Promise.resolve({
-                id: crypto.randomUUID(),
-                orderId,
-                voucherWarning: true,
-              })
+              payments.push({ ...args.input, status: 'recorded' })
+              return Promise.resolve()
             }
             return Promise.reject(new Error(`unexpected command: ${command}`))
           },
@@ -1542,17 +1579,28 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   await expect(page.getByRole('button', { name: '开始市场直采' })).toBeVisible()
   await page.getByRole('button', { name: '开始市场直采' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('采购执行中')
-  await page.getByLabel('付款收款人').fill('fixture cash seller')
-  await page.getByLabel('实际付款金额').fill('1200')
-  await page.getByRole('button', { name: '登记付款' }).click()
   await expect(
-    page.getByText('付款已登记；尚未附凭证，请后续补充。'),
-  ).toBeVisible()
+    page.getByRole('button', { name: '创建询价单', exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: '创建供应商子单', exact: true }),
+  ).toHaveCount(0)
+  await page.getByLabel('收款方', { exact: true }).fill('fixture cash seller')
+  await page
+    .getByLabel('实际付款金额（最小单位）', { exact: true })
+    .fill('1200')
+  await page.getByRole('button', { name: '登记实际付款', exact: true }).click()
+  await expect(page.getByText('实际付款已登记，等待同步确认。')).toBeVisible()
   await expect(
     page.evaluate(
       () => (window as Window & { __paymentAmount?: string }).__paymentAmount,
     ),
   ).resolves.toBe('1200')
+  await expect(page.getByText('缺少付款凭证', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'fixture cash seller' }),
+  ).toContainText('1200 XOF')
+  await expect(page.getByText(/累计实付 1200/)).toBeVisible()
   await page.getByLabel('market cement 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('收货中')
