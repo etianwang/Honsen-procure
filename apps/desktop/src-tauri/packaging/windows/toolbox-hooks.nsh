@@ -35,7 +35,7 @@
   ; Keep an explicit Toolbox /D target unchanged.
   ${GetOptions} $CMDLINE "/D=" $0
   StrCmp $0 "" 0 +2
-    StrCpy $INSTDIR "$PROGRAMFILES\Honsen Program\Honsen Procure"
+    StrCpy $INSTDIR "$PROGRAMFILES64\Honsen Program\Honsen Procure"
 !macroend
 
 !macro HonsenRejectOtherInstall key view
