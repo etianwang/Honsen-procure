@@ -106,6 +106,10 @@ pub enum RunnerError {
     WaitProcess,
     #[error("installer returned {0}")]
     InstallerExit(i32),
+    #[error("the UAC approval was cancelled")]
+    UacCancelled,
+    #[error("the installer did not finish before the update timeout")]
+    InstallerTimeout,
     #[error("another Honsen Procure update is already in progress")]
     UpdateInProgress,
     #[error("installed executable version does not match target version")]
@@ -336,18 +340,9 @@ fn apply_windows(
     wait_for_registered_process(request.wait_pid, &registration.executable_path)?;
     let log_path =
         std::env::temp_dir().join(format!("honsen-procure-{}.log", request.operation_id));
-    let exit = std::process::Command::new(&request.installer)
-        .args([
-            "/VERYSILENT",
-            "/SUPPRESSMSGBOXES",
-            "/NORESTART",
-            "/SP-",
-            &format!("/DIR=\"{}\"", registration.install_location.display()),
-            &format!("/LOG=\"{}\"", log_path.display()),
-        ])
-        .status()?
-        .code()
-        .unwrap_or(-1);
+    let verified_installer = copy_verified_installer(request)?;
+    let exit = run_elevated_installer(&verified_installer, &registration.install_location, &log_path)?;
+    let _ = fs::remove_file(verified_installer);
     if exit != 0 {
         return Err(RunnerError::InstallerExit(exit));
     }
@@ -381,6 +376,74 @@ fn apply_windows(
         std::process::Command::new(&updated.executable_path).spawn()?;
     }
     Ok(result)
+}
+
+#[cfg(windows)]
+fn copy_verified_installer(request: &ApplyRequest) -> Result<PathBuf, RunnerError> {
+    let directory = std::env::temp_dir()
+        .join("Honsen Program")
+        .join("VerifiedInstallers")
+        .join(&request.operation_id);
+    fs::create_dir_all(&directory)?;
+    let copy = directory.join("Honsen-Procure-verified.exe");
+    fs::copy(&request.installer, &copy)?;
+    verify_installer_sha256(&copy, &request.sha256)?;
+    Ok(copy)
+}
+
+#[cfg(windows)]
+fn run_elevated_installer(
+    installer: &Path,
+    install_location: &Path,
+    log_path: &Path,
+) -> Result<i32, RunnerError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, GetLastError, ERROR_CANCELLED, WAIT_OBJECT_0},
+        System::Threading::{GetExitCodeProcess, WaitForSingleObject},
+        UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOCLOSEPROCESS},
+    };
+    let file: Vec<u16> = installer.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let verb: Vec<u16> = "runas\0".encode_utf16().collect();
+    let parameters: Vec<u16> = format!(
+        "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR=\"{}\" /LOG=\"{}\"",
+        install_location.display(),
+        log_path.display()
+    )
+    .encode_utf16()
+    .chain(std::iter::once(0))
+    .collect();
+    unsafe {
+        let mut execute = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_NOCLOSEPROCESS,
+            lpVerb: verb.as_ptr(),
+            lpFile: file.as_ptr(),
+            lpParameters: parameters.as_ptr(),
+            nShow: 1,
+            ..Default::default()
+        };
+        if ShellExecuteExW(&mut execute) == 0 {
+            return if GetLastError() == ERROR_CANCELLED {
+                Err(RunnerError::UacCancelled)
+            } else {
+                Err(RunnerError::Io("could not start elevated installer".into()))
+            };
+        }
+        if execute.hProcess.is_null() || WaitForSingleObject(execute.hProcess, 10 * 60 * 1000) != WAIT_OBJECT_0 {
+            if !execute.hProcess.is_null() {
+                CloseHandle(execute.hProcess);
+            }
+            return Err(RunnerError::InstallerTimeout);
+        }
+        let mut exit = 0;
+        if GetExitCodeProcess(execute.hProcess, &mut exit) == 0 {
+            CloseHandle(execute.hProcess);
+            return Err(RunnerError::Io("could not read elevated installer exit code".into()));
+        }
+        CloseHandle(execute.hProcess);
+        Ok(exit as i32)
+    }
 }
 
 #[cfg(windows)]
