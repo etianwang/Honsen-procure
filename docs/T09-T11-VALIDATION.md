@@ -55,7 +55,7 @@ Do not load deployment PostgreSQL settings from `.env` into tests. Normal CI req
 
 ## Remaining issues
 
-- **BLOCKER for final parent/product acceptance:** independent two-running-Windows-client HTTPS/offline/restart/UI acceptance, original full T09/T10/T11 gates and pre-existing Formal/security holds. Layered real API/COS/PostgreSQL and native SQLite proofs are not a substitute for that final installation-level run.
+- **BLOCKER for final parent/product acceptance:** independent two-running-Windows-client HTTPS/offline/restart/UI acceptance, HEIC photo recompression (not implemented), original full T09/T10/T11 gates and pre-existing Formal/security holds. Layered real API/COS/PostgreSQL and native SQLite proofs are not a substitute for that final installation-level run. The full `READY_FOR_INDEPENDENT_T09_T11_QA` flag is withheld; this Draft permits review of the implemented boundaries without claiming all requested work is complete.
 - **DEFERRED:** dedicated resolution of competing immutable payment corrections remains a T10 conflict-workflow boundary. Until then such conflicts remain visible, preserve both records and prevent a false fully-synced status.
 - **WARNING:** HEIC recompression/inline display depends on an additional decoder/OS capability; original HEIC import/download is retained. JPG/PNG compression is implemented. Existing unrelated product localization/release/printing tasks remain outside this run. No production deployment, merge or Release was authorized or performed.
 
