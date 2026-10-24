@@ -2,7 +2,7 @@
 
 ## Scope and evidence boundary
 
-Continue `codex/procurement-t09a` from `164298a97ca8699fe32bdfcc09704f8353c1d401`, based on unified baseline `d3485144b075dceb8082e493c94791aab699a3af`. Checkpoint `2ec7d53eeb501f167f7964b5239ab5637fe2714e` is pushed and its GitHub `quality` passed. The next checkpoint adds the local file queue, native transfer/view commands, production attachment UI, synchronization scheduling and independent-review repairs described below. No other worktree, release branch or production deployment is involved.
+Continue `codex/procurement-t09a` from `164298a97ca8699fe32bdfcc09704f8353c1d401`, based on unified baseline `d3485144b075dceb8082e493c94791aab699a3af`. Checkpoint `2ec7d53eeb501f167f7964b5239ab5637fe2714e` is pushed and its GitHub `quality` passed. Application checkpoint `f7dfffbdb6cb88014b5bbd63f9e9da36db1d4f96` adds the local queue and review repairs. Its [quality run 40097987673](https://github.com/etianwang/Honsen-procure/actions/runs/40097987673) passed. [Draft PR #19](https://github.com/etianwang/Honsen-procure/pull/19) targets the unified baseline. No other worktree, release branch or production deployment is involved.
 
 These are builder and independent code/regression checks for a **Draft QA candidate**, not final Windows product acceptance. Original T09/T10/T11 and milestone checkboxes remain open. No price snapshot or receipt quantity is changed by a payment, reversal or attachment operation.
 
@@ -58,3 +58,9 @@ Do not load deployment PostgreSQL settings from `.env` into tests. Normal CI req
 - **BLOCKER for final parent/product acceptance:** independent two-running-Windows-client HTTPS/offline/restart/UI acceptance, original full T09/T10/T11 gates and pre-existing Formal/security holds. Layered real API/COS/PostgreSQL and native SQLite proofs are not a substitute for that final installation-level run.
 - **DEFERRED:** dedicated resolution of competing immutable payment corrections remains a T10 conflict-workflow boundary. Until then such conflicts remain visible, preserve both records and prevent a false fully-synced status.
 - **WARNING:** HEIC recompression/inline display depends on an additional decoder/OS capability; original HEIC import/download is retained. JPG/PNG compression is implemented. Existing unrelated product localization/release/printing tasks remain outside this run. No production deployment, merge or Release was authorized or performed.
+
+## Delivery checkpoint
+
+Application code is frozen at `f7dfffbdb6cb88014b5bbd63f9e9da36db1d4f96`; the following handoff commit changes documentation only. The application boundary is unchanged after the final native/workspace/DOM checks. Later edits only format sources, strengthen the live cleanup assertion (retested successfully), and record evidence.
+
+The disposable Compose project `honsen-t09a-20261024` was removed with `down --volumes`; no project container remains and TCP54329 is closed. This task's WSL keepalive was stopped. Test evidence remains under `E:/Honsen-T09A` for recovery.
