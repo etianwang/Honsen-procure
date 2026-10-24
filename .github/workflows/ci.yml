@@ -62,6 +62,21 @@ jobs:
           sudo env HONSEN_DEPLOY_TEST=1 TEST_TMP=/var/lib/honsen-artifact-test bash tests/deploy/test-controller-authorization.sh
           sudo env TMPDIR=/var/lib/honsen-artifact-test bash tests/deploy/test-api-grant-policy.sh
           sudo env HONSEN_DEPLOY_TEST=disposable-ci TEST_NODE_DIR="$(dirname "$(command -v node)")" TEST_PG_PASSWORD="${{ github.run_id }}" TEST_REPO="$GITHUB_WORKSPACE" bash tests/deploy/test-controller-e2e.sh
+      - name: Build traceable Linux candidate
+        run: |
+          sudo install -d -m 755 /var/lib/honsen-rc-build
+          sudo env PATH="$PATH" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" npm_config_cache="$RUNNER_TEMP/honsen-rc-npm" RELEASE_DIR=/var/lib/honsen-rc-build/candidate bash deploy/linux/scripts/build-release.sh
+          sudo chmod 644 /var/lib/honsen-rc-build/candidate.manifest.json
+      - name: Preserve Linux candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-candidate-${{ github.sha }}
+          path: |
+            /var/lib/honsen-rc-build/candidate.tar.gz
+            /var/lib/honsen-rc-build/candidate.tar.gz.sha256
+            /var/lib/honsen-rc-build/candidate.manifest.json
+          if-no-files-found: error
+          retention-days: 7
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
       - if: always()
