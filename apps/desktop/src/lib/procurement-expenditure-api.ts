@@ -1,3 +1,4 @@
+import { procurementMutation } from './procurement-sync'
 export type RecordProcurementExpenditureInput = {
   id: string
   orderId: string
@@ -27,7 +28,12 @@ function invoke<T>(command: string, args: object): Promise<T> {
   return host<T>(command, args)
 }
 export const tauriProcurementExpenditureApi: ProcurementExpenditureApi = {
-  record: (input) => invoke<void>('record_procurement_expenditure', { input }),
+  record: (input) =>
+    invoke<void>('record_procurement_expenditure', { input }).then(
+      procurementMutation,
+    ),
   reverse: (input) =>
-    invoke<void>('reverse_procurement_expenditure', { input }),
+    invoke<void>('reverse_procurement_expenditure', { input }).then(
+      procurementMutation,
+    ),
 }

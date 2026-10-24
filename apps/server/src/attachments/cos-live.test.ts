@@ -88,7 +88,31 @@ describe.skipIf(process.env.HONSEN_COS_LIVE !== '1')(
           JSON.stringify({ key, versionId, ...evidence }),
           { mode: 0o600 },
         )
+        if (owned) expect(evidence.cleanup).toBe(204)
       }
     }, 120000)
+    it('rejects a genuinely expired download URL without creating an object', async () => {
+      const cos = CosStorage.fromEnvironment({
+        ...process.env,
+        COS_SIGNED_URL_TTL_SECONDS: '60',
+      })
+      if (!cos) throw new Error('COS_TEST_CONFIGURATION_MISSING')
+      const access = await cos.download(
+        `honsen-procure-tests/${randomUUID()}/${randomUUID()}.pdf`,
+        null,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 66000))
+      const response = await fetch(access.url, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(20000),
+      })
+      const body = await response.text()
+      expect(response.status).toBe(403)
+      expect(/RequestHasExpired|AccessDenied|Expired/.test(body)).toBe(true)
+      console.info(
+        'COS_EXPIRED_URL_EVIDENCE ' +
+          JSON.stringify({ status: response.status, writes: 0 }),
+      )
+    }, 100000)
   },
 )

@@ -31,6 +31,7 @@ export type ProcurementPaymentSummary = {
     paymentType: string
     status: string
     correctsExpenditureId?: string | null
+    hasVoucher?: boolean
     voucherReference?: string | null
     notes?: string | null
   }[]

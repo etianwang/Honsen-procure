@@ -34,6 +34,7 @@ import { tauriRfqApi } from './lib/rfq-api'
 import { tauriSupplierOrderApi } from './lib/supplier-order-api'
 import { tauriWorkflowApi, type WorkflowApi } from './lib/workflow-api'
 import type { UserRole } from './lib/permissions'
+import { startProcurementSync, syncProcurement } from './lib/procurement-sync'
 import './App.css'
 
 const previewRequisitionContext: RequisitionContext = {
@@ -226,6 +227,9 @@ function App() {
         setAuthorizationContext(null)
         setContextError('当前账户没有有效的离线授权范围，无法新建采购申请。')
       })
+  }, [session])
+  useEffect(() => {
+    if (session) return startProcurementSync(syncProcurement)
   }, [session])
   const selectAuthorizationContext = (value: string) => {
     const [projectId, departmentId, teamId] = value.split(':')

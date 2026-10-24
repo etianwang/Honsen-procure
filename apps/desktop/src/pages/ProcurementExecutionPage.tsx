@@ -1,5 +1,6 @@
 import { Alert, Button, Card, Empty, Space } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
+import { AttachmentPanel } from '../components/AttachmentPanel'
 import { RfqPanel } from '../components/RfqPanel'
 import { SupplierAllocationPanel } from '../components/SupplierAllocationPanel'
 import { SupplierChildTermsPanel } from '../components/SupplierChildTermsPanel'
@@ -50,6 +51,12 @@ export function ProcurementExecutionPage({
         .catch(() => setMessage('无法读取已确认采购申请，请重新登录后重试。')),
     [api],
   )
+
+  useEffect(() => {
+    const update = () => void refresh()
+    window.addEventListener('honsen-procurement-synced', update)
+    return () => window.removeEventListener('honsen-procurement-synced', update)
+  }, [refresh])
 
   useEffect(() => {
     void refresh()
@@ -195,6 +202,10 @@ export function ProcurementExecutionPage({
                     onChanged={refresh}
                   />
                 ) : null}
+                <AttachmentPanel
+                  key={`attachments-${child.id}`}
+                  orderId={child.id}
+                />
               </section>
             ))
           ) : ['confirmed', 'approved'].includes(selected.workflowStatus) ? (
@@ -213,6 +224,10 @@ export function ProcurementExecutionPage({
               />
             </>
           ) : null}
+          <AttachmentPanel
+            key={`attachments-${selected.id}`}
+            orderId={selected.id}
+          />
         </section>
       ) : null}
     </>

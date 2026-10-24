@@ -152,12 +152,22 @@ fn insert_payment(
 }
 
 pub(super) fn project_staged(transaction: &Transaction<'_>) -> Result<(), AuthError> {
-    let rows = transaction.prepare("SELECT entity_id,operation,payload_json FROM local_sync_remote_entities WHERE entity_type='procurement_expenditure' ORDER BY json_extract(payload_json,'$.status'),entity_id").map_err(|_|AuthError::Database)?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)?;
-    for (id, operation, json) in rows {
+    let rows = transaction.prepare("SELECT entity_id,operation,payload_json,server_version FROM local_sync_remote_entities WHERE entity_type='procurement_expenditure' ORDER BY json_extract(payload_json,'$.status'),entity_id").map_err(|_|AuthError::Database)?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?))).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)?;
+    for (id, operation, json, server_version) in rows {
         let payment: PaymentPayload =
             serde_json::from_str(&json).map_err(|_| AuthError::InvalidInput)?;
         if operation != "upsert" || payment.id.to_string() != id {
             return Err(AuthError::InvalidInput);
+        }
+        if let Some(original_id) = payment.corrects_expenditure_id {
+            let losing:Option<(String,String,i64,String)>=transaction.query_row("SELECT e.id,o.event_id,o.base_version,o.payload_json FROM local_procurement_expenditures e JOIN local_sync_outbox o ON o.entity_type='procurement_expenditure' AND o.entity_id=e.id AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL WHERE e.corrects_expenditure_id=?1 AND e.id<>?2 ORDER BY o.created_at,o.event_id LIMIT 1",params![original_id.to_string(),payment.id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_|AuthError::Database)?;
+            if let Some((local_id, event_id, base_version, local_payload)) = losing {
+                let exists:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_sync_conflicts WHERE event_id=?1 AND server_version=?2 AND json_extract(server_payload_json,'$.id')=?3)",params![event_id,server_version,payment.id.to_string()],|r|r.get(0)).map_err(|_|AuthError::Database)?;
+                if !exists {
+                    transaction.execute("INSERT INTO local_sync_conflicts (id,event_id,entity_type,entity_id,base_version,server_version,local_payload_json,server_payload_json,server_operation,created_at) VALUES (?1,?2,'procurement_expenditure',?3,?4,?5,?6,?7,'upsert',?8)",params![Uuid::new_v4().to_string(),event_id,local_id,base_version,server_version,local_payload,json,payment.created_at]).map_err(|_|AuthError::Database)?;
+                }
+                continue;
+            }
         }
         insert_payment(transaction, &payment)?;
     }
@@ -197,6 +207,7 @@ pub(super) fn reverse(
     payment.notes = None;
     let mut connection = service.connection.lock().map_err(|_| AuthError::Database)?;
     let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+    require_order_write_scope(&transaction, payment.order_id, actor, now)?;
     if !insert_payment(&transaction, &payment)? {
         return Err(AuthError::InvalidInput);
     }
@@ -210,6 +221,7 @@ pub(super) fn reverse(
     )?;
     transaction.commit().map_err(|_| AuthError::Database)?;
     Ok(ProcurementExpenditureView {
+        has_voucher: false,
         id: payment.id,
         order_id: payment.order_id,
         payee_name: payment.payee_name,

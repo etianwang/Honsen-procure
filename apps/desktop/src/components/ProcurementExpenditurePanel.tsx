@@ -116,7 +116,9 @@ export function ProcurementExpenditurePanel({
                   {t.reverse}
                 </Button>
               ) : null}
-              {record.status === 'recorded' && !record.voucherReference ? (
+              {record.status === 'recorded' &&
+              !record.voucherReference &&
+              !record.hasVoucher ? (
                 <span>{t.warning}</span>
               ) : null}
             </Space>

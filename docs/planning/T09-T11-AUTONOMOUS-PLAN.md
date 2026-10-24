@@ -17,3 +17,7 @@ Toolbox preflight: read upstream README, Windows standard, update protocol, inte
 Review focus: immutable payment overwrite; concurrent duplicate reversal; wrong child/currency/scope; cursor advancing before durable projection; attachment key substitution/expired authorization/hash mismatch. Fresh tests must exercise these boundaries.
 
 Environment: Node 24.18.0; committed lockfile; task temp/cache/Cargo output in `E:/Honsen-T09A`. Test PostgreSQL must use isolated Compose credentials, never deployment `.env`. Only COS configuration may be read from the user's explicitly authorized `.env`, without logging values.
+
+## Execution result
+
+Payment/reversal and native/COS attachment core code is implemented for Draft QA. Fresh checks and independently rechecked repair evidence are in [T09-T11-VALIDATION.md](../T09-T11-VALIDATION.md). Final Windows installation-level acceptance, original parent gates, HEIC recompression limitation and dedicated immutable correction reconciliation remain explicitly open. No production deployment or release.

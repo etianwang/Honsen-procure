@@ -4,6 +4,7 @@ import { beforeAll, afterAll, describe, it, expect } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
 import { AttachmentService } from './service.js'
 import { CosStorage } from './cos.js'
+import { SyncService } from '../sync/service.js'
 import { PostgresSyncStore } from '../sync/postgres-store.js'
 import { createApp } from '../app.js'
 import { AuthService, hashToken } from '../auth/service.js'
@@ -224,6 +225,140 @@ describe.skipIf(!url)(
           expect(await real.removeOwnedTestObject(key, versionId)).toBe(204)
       }
     }, 120000)
+    it('publishes a payment voucher and receipt photo for a second authorized account', async () => {
+      const store = new PostgresSyncStore(pool),
+        sync = new SyncService(store)
+      const paymentId = randomUUID(),
+        receiptId = randomUUID(),
+        secondActor = { id: randomUUID(), roles: ['purchaser'] as const }
+      await pool.query(
+        `INSERT INTO users (id,business_code,username,password_hash,ui_locale,is_enabled) VALUES ($1::uuid,$1::text,$1::text,'fixture','zh-CN',true)`,
+        [secondActor.id],
+      )
+      await pool.query(
+        `INSERT INTO user_project_bindings (user_id,project_id) VALUES ($1,$2)`,
+        [secondActor.id, projectId],
+      )
+      expect(
+        (
+          await sync.push(actor, {
+            deviceId: randomUUID(),
+            events: [
+              {
+                eventId: randomUUID(),
+                entityId: paymentId,
+                entityType: 'procurement_expenditure',
+                operation: 'upsert',
+                baseVersion: 0,
+                payload: {
+                  id: paymentId,
+                  orderId,
+                  projectId,
+                  countryId,
+                  payeeName: 'Synthetic',
+                  currency: 'XOF',
+                  amountMinor: '100',
+                  paymentDate: '2026-10-24',
+                  paymentType: 'progress',
+                  paymentMethod: 'cash',
+                  paymentHandlerId: actor.id,
+                  createdBy: actor.id,
+                  status: 'recorded',
+                  createdAt: 1792800000,
+                },
+              },
+            ],
+          })
+        ).results[0]?.status,
+      ).toBe('accepted')
+      await store.pushEvent({
+        actorId: actor.id,
+        installationId: randomUUID(),
+        event: {
+          eventId: randomUUID(),
+          entityType: 'receipt',
+          entityId: receiptId,
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            id: receiptId,
+            orderId,
+            projectId,
+            receiverId: actor.id,
+            receivedAt: '2026-10-24',
+          },
+        },
+      })
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jN1sAAAAASUVORK5CYII=',
+        'base64',
+      )
+      const uploaded: string[] = []
+      for (const [ownerType, ownerId, bytes, name, mime] of [
+        [
+          'procurement_expenditure',
+          paymentId,
+          file,
+          'voucher.pdf',
+          'application/pdf',
+        ],
+        ['receipt', receiptId, png, 'receipt.png', 'image/png'],
+      ] as const) {
+        const input = {
+          ...data(),
+          ownerType,
+          ownerId,
+          originalName: name,
+          contentType: mime,
+          byteLength: bytes.length,
+          checksum: createHash('sha256').update(bytes).digest('hex'),
+        }
+        let key: string | undefined,
+          versionId: string | null = null
+        try {
+          const prepared = await service.prepare(actor, input)
+          if (real && prepared.upload) {
+            const response = await fetch(prepared.upload.url, {
+              method: 'PUT',
+              headers: prepared.upload.headers,
+              body: bytes,
+              signal: AbortSignal.timeout(30000),
+            })
+            expect(response.status).toBe(200)
+            key = new URL(prepared.upload.url).pathname.slice(1)
+            versionId = response.headers.get('x-cos-version-id')
+          }
+          const metadata = await service.complete(actor, input.id)
+          versionId = metadata.versionId
+          uploaded.push(input.id)
+          const access = await service.download(secondActor, input.id)
+          expect(access.metadata).toMatchObject({
+            ownerType,
+            ownerId,
+            checksum: input.checksum,
+          })
+          if (real) {
+            const response = await fetch(access.download.url, {
+              signal: AbortSignal.timeout(30000),
+            })
+            expect(response.status).toBe(200)
+            expect(
+              createHash('sha256')
+                .update(Buffer.from(await response.arrayBuffer()))
+                .digest('hex'),
+            ).toBe(input.checksum)
+          }
+        } finally {
+          if (real && key)
+            expect(await real.removeOwnedTestObject(key, versionId)).toBe(204)
+        }
+      }
+      const changes = await sync.pull(secondActor, { cursor: '0', limit: 500 })
+      expect(
+        changes.changes.filter((c) => uploaded.includes(c.entityId)),
+      ).toHaveLength(2)
+    }, 120000)
+
     it('rejects an engineer upload and an unrelated receipt owner', async () => {
       await expect(
         service.prepare({ ...actor, roles: ['engineer'] }, data()),
