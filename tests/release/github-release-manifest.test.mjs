@@ -6,7 +6,12 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-const script = fileURLToPath(new URL('../../scripts/generate-github-release-manifest.mjs', import.meta.url))
+const script = fileURLToPath(
+  new URL(
+    '../../scripts/generate-github-release-manifest.mjs',
+    import.meta.url,
+  ),
+)
 
 test('pins a release installer URL, version, and SHA-256 to the approved GitHub repository', () => {
   const directory = mkdtempSync(join(tmpdir(), 'honsen-release-manifest-'))

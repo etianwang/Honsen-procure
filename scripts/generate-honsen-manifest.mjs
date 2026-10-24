@@ -6,7 +6,9 @@ const version = process.env.HONSEN_RELEASE_VERSION
 const updateManifestUrl = process.env.HONSEN_UPDATE_MANIFEST_URL
 
 if (!outputDirectory || !/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version ?? '')) {
-  throw new Error('HONSEN_RELEASE_VERSION must be a release version (major.minor.patch[.build])')
+  throw new Error(
+    'HONSEN_RELEASE_VERSION must be a release version (major.minor.patch[.build])',
+  )
 }
 
 let updateUrl
@@ -15,7 +17,11 @@ try {
 } catch {
   throw new Error('HONSEN_UPDATE_MANIFEST_URL must be a trusted HTTPS URL')
 }
-if (updateUrl.protocol !== 'https:' || updateUrl.username || updateUrl.password) {
+if (
+  updateUrl.protocol !== 'https:' ||
+  updateUrl.username ||
+  updateUrl.password
+) {
   throw new Error('HONSEN_UPDATE_MANIFEST_URL must be a trusted HTTPS URL')
 }
 

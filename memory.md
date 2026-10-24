@@ -371,3 +371,13 @@ Build shared contracts and exact money/quantity helpers only:
 3. Add unit tests for XOF/CNY/USD/EUR formatting, quantity parsing and half-up rounding.
 4. Add a development-only currency preview used by a Playwright DOM click/select test.
 5. Before marking T01 done, run every quality gate and record exact commands/results in this file.
+
+## Release sprint CI repair — 2026-10-24
+
+- Source: `47177e35dc2d8ddc872fc68288f7ee57f5ce9312`, failed hosted run `40092967936`.
+- Reproduced and formatted exactly the five release JavaScript files named by CI. No application, schema, installer contract, or test assertion changes.
+- Fresh checks: Node 24.18.0 `npm ci --cache E:/Honsen-build-cache/npm`; release Node tests 3/3; repository `npm run format:check`; `git diff --check` passed. Application suites are delegated to unchanged hosted quality gates after the authorized push; formatting alone is not RC acceptance.
+- Original release worktree dirty Linux files remain untouched. Root workspace deletions/untracked evidence remain untouched.
+- BLOCKER: unified RC integration and actual Windows/Toolbox/native cross-client/Linux acceptance remain open. PR #19 `98537d2` is Draft with hosted CI success and native credential-storage environment failure.
+- DEFERRED: production deployment, PR merge and formal Release are not authorized.
+- WARNING: npm ci reported 1 low, 1 moderate and 1 high dependency advisory; no automatic dependency/lockfile rewrite. This checkpoint contains only formatting and this handoff.
