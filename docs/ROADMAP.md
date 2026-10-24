@@ -229,3 +229,7 @@ T11 now has a native managed-file queue, direct COS transfer, verified cached do
 ## Catalog quote pagination checkpoint — 2026-10-22
 
 T05/T06/T08 have a bounded quote-list correctness repair under independent review. The four-price overview is retained while material details and purchase selection can page through authorized current prices. Local SQLite and mocked browser coverage are development evidence only; independent QA, native acceptance and final-SHA CI remain open. Milestone and task acceptance gates are unchanged; see `docs/BUILD-TASKS.md` and `memory.md`.
+
+## T15 RC integration checkpoint — 2026-10-24
+
+Independent branch `codex/v1-release-candidate` integrates unified baseline d348514, payment/COS98537d2 and release-toolbox f9145e1. [Exact source ledger, validation and open gates](planning/V1-RC-INTEGRATION.md). This is a bounded candidate-building slice, not T15/V1 parent acceptance. Original dependency table, task register and all final gates remain unchanged. No production deployment or stable Release is authorized.

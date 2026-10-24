@@ -4,7 +4,7 @@ set -euo pipefail
 [[ ${HONSEN_DEPLOY_TEST:-} == disposable-ci && $(id -u) == 0 ]] || exit 2
 : "${TEST_NODE_DIR:?}" "${TEST_PG_PASSWORD:?}" "${TEST_REPO:?}"
 [[ $(ps -p 1 -o comm=) == systemd ]]
-for item in /var/lib/honsen-controller-test /opt/honsen-procure /etc/honsen-procure /run/honsen-procure /var/lib/honsen-procure /usr/lib/systemd/system/honsen-procure.service; do
+for item in /var/lib/honsen-controller-test /www/Honsen-procure /etc/honsen-procure /run/honsen-procure /var/lib/honsen-procure /usr/lib/systemd/system/honsen-procure.service; do
   [[ ! -e $item && ! -L $item ]] || { echo "test path exists: $item" >&2; exit 1; }
 done
 [[ -c /dev/fuse ]] || { echo 'CI runner has no FUSE device for isolated remote backup' >&2; exit 1; }
@@ -46,7 +46,7 @@ cleanup() {
   [[ $created_restore == 0 ]] || docker rm -f "$restore" >/dev/null 2>&1
   rm -f /usr/lib/systemd/system/honsen-procure.service "$unit"
   systemctl daemon-reload >/dev/null 2>&1
-  rm -rf -- "$root" /opt/honsen-procure /etc/honsen-procure /run/honsen-procure /var/lib/honsen-procure
+  rm -rf -- "$root" /www/Honsen-procure /etc/honsen-procure /run/honsen-procure /var/lib/honsen-procure
   if [[ $created_user == 1 ]]; then
     userdel honsen-procure >/dev/null 2>&1
     groupdel honsen-procure >/dev/null 2>&1
@@ -56,8 +56,8 @@ trap cleanup EXIT
 # GitHub's disposable runner may leave /opt writable to the runner account.
 chown root:root /opt
 chmod go-w /opt
-mkdir -p "$root" /opt/honsen-procure /etc/honsen-procure /run/honsen-procure
-chmod 755 "$root" /opt/honsen-procure /etc/honsen-procure
+mkdir -p "$root" /www/Honsen-procure /etc/honsen-procure /run/honsen-procure
+chmod 755 "$root" /www/Honsen-procure /etc/honsen-procure
 useradd --system --user-group --no-create-home honsen-procure
 created_user=1
 git -c safe.directory="$TEST_REPO" clone --quiet --no-hardlinks "$TEST_REPO" "$root/release"
@@ -200,7 +200,7 @@ run_case() {
   echo "controller scenario: $scenario"
   systemctl stop honsen-procure.service >/dev/null 2>&1 || :
   systemctl unmask --runtime honsen-procure.service >/dev/null 2>&1 || :
-  rm -f /run/honsen-procure/deployment-ready /opt/honsen-procure/current /opt/honsen-procure/.current-next "$root/fail-live" "$root/pause-live" "$root/live-waiting" "$root/live-resume" "$root/pause-confirm" "$root/confirm-waiting" "$root/confirm-resume" "$root/check-release-owner" "$root/pause-release" "$root/release-waiting" "$root/release-resume" "$root/pause-after-release" "$root/release-completed" "$root/release-token" "$root/after-release-resume"
+  rm -f /run/honsen-procure/deployment-ready /www/Honsen-procure/current /www/Honsen-procure/.current-next "$root/fail-live" "$root/pause-live" "$root/live-waiting" "$root/live-resume" "$root/pause-confirm" "$root/confirm-waiting" "$root/confirm-resume" "$root/check-release-owner" "$root/pause-release" "$root/release-waiting" "$root/release-resume" "$root/pause-after-release" "$root/release-completed" "$root/release-token" "$root/after-release-resume"
   rm -rf /var/lib/honsen-procure
   PGDATABASE=honsen_test psql -X -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db" >/dev/null
   export PGDATABASE=$db
@@ -231,7 +231,7 @@ SQL
     psql -X -v ON_ERROR_STOP=1 -c 'REVOKE UPDATE ON server_change_log FROM gate_new' >/dev/null
   fi
   prior=$(psql -X -Atqc "SELECT (SELECT string_agg(name || ':' || checksum, ',' ORDER BY name) FROM schema_migrations) || '|' || (SELECT sum(value)::text FROM gate_sentinel)")
-  ln -s "$root/release" /opt/honsen-procure/current
+  ln -s "$root/release" /www/Honsen-procure/current
   printf 'PATH=%s:/usr/bin:/bin\nPOSTGRES_URL=postgresql://gate_old:isolated-test-only@127.0.0.1:5432/%s\n' "$TEST_NODE_DIR" "$db" > /etc/honsen-procure/server.env
   chmod 600 /etc/honsen-procure/server.env
   : > /run/honsen-procure/deployment-ready

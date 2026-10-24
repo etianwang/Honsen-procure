@@ -1,8 +1,10 @@
+<!-- Current RC evidence below supersedes historical implementation-gap labels. -->
+
 # Honsen Toolbox Integration
 
 ## Status
 
-**Identity approved; Toolbox integration is not implemented.** The product is internally distributed rather than publicly released, but automatic update still uses the fixed Toolbox/Runner contract. This document records the approved identity and the remaining implementation gaps; it does not authorize an installer, Runner, manifest, registry entry, catalog mutation or release.
+**RC integration in progress; installed Toolbox acceptance is not complete.** The product is internally distributed rather than publicly released, but automatic update still uses the fixed Toolbox/Runner contract. This document records the approved identity and the remaining implementation gaps; it does not authorize an installer, Runner, manifest, registry entry, catalog mutation or release.
 
 The authoritative upstream documents were reviewed on 2026-10-09:
 
@@ -75,3 +77,13 @@ When the missing identity is approved, implementation must conform to these rule
 ## Change control
 
 If a future implementation conflicts with this contract, report the exact conflict, its user impact and a repair plan before modifying it. Do not make a local exception or silently change an upstream field, result JSON, Runner argument, registry path or deletion boundary.
+
+## RC integration — 2026-10-24
+
+Source: release-toolbox `f9145e1e4f62958e379f8f81c08971a9383c116b` plus unified payment/API candidate `98537d22b17853752203e11646bd1966ef6d1d03`, on independent `codex/v1-release-candidate`. Identity remains honsen.procure; product directory Honsen Procure; main HonsenProcure.exe; Runner HonsenUpdateRunner.exe; machine HKLM registration and NSIS installer. User explicitly selected NSIS, overriding the historical Inno/MSI-only note for this application.
+
+Actual source now includes NSIS registry hooks, both Runner commands, manifest generators and Windows build script. Historical Missing/Not implemented labels above are retained as historical requirements, not an accurate source inventory. Installed-bundle acceptance remains NOT RUN for this RC; no historical installer can substitute for its business binary.
+
+Preflight read in required order on 2026-10-24. Contract discrepancies are recorded, not silently repaired: build/hook default UpdateManifestUrl points to download/manifest.json instead of the canonical GitHub releases/latest API; launch starts the registered EXE without the required update-choice flow; existing upstream integration-contract prose also records Toolbox launch-argument/apply gaps. URL/Runner contract repair requires the requested user approval and independent tests. No Toolbox catalog mutation or stable Release is authorized.
+
+RC evidence must name exact source commit, installer SHA-256, OS and each actual install/update/uninstall outcome. Windows Credential Manager error8 remains a native login blocker; no credential deletion or protection bypass is allowed. Unchanged synthetic Runner tests do not constitute Toolbox joint E2E.

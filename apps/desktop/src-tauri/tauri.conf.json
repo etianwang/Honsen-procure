@@ -24,5 +24,16 @@
       }
     ]
   },
-  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+  "bundle": {
+    "active": true,
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["SimpChinese", "English"],
+        "installerHooks": "packaging/windows/toolbox-hooks.nsh",
+        "startMenuFolder": "Honsen Program"
+      }
+    }
+  }
 }

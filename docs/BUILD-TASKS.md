@@ -335,3 +335,7 @@ Payment sync/reversal and the attachment service now include local durable impor
 ## T05/T06/T08 quote pagination checkpoint — 2026-10-22
 
 The four-quote material search result remains an overview. A separate bounded, country-authorized active-quote query now serves material detail and purchase selection; historic inactive prices remain history and blacklisted suppliers are not selectable. File-backed SQLite tests cover pagination and country scope, and mocked-IPC browser tests cover selection beyond four; formal snapshot behavior uses the existing regression. Independent QA, native end-to-end evidence and final-SHA CI remain open. This partial defect repair does not close T05, T06, T08, T10 or any original acceptance gate. See `memory.md` for the handoff and skipped PostgreSQL evidence.
+
+## T15 RC integration checkpoint — 2026-10-24
+
+Independent branch `codex/v1-release-candidate` integrates unified baseline d348514, payment/COS98537d2 and release-toolbox f9145e1. [Exact source ledger, validation and open gates](planning/V1-RC-INTEGRATION.md). This is a bounded candidate-building slice, not T15/V1 parent acceptance. Original dependency table, task register and all final gates remain unchanged. No production deployment or stable Release is authorized.

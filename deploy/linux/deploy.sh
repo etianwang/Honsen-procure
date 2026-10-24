@@ -32,7 +32,7 @@ protected_dir() {
     current=${current%/*}; [[ -n $current ]] || current=/
   done
 }
-for dir in /opt/honsen-procure /etc/honsen-procure "$BACKUP_DIR" "$EXTERNAL_BACKUP_DIR" "$AUDIT_DIR"; do
+for dir in /www/Honsen-procure /etc/honsen-procure "$BACKUP_DIR" "$EXTERNAL_BACKUP_DIR" "$AUDIT_DIR"; do
   protected_dir "$dir" || { echo 'deployment or backup directory is not protected' >&2; exit 1; }
 done
 [[ ! -L /run/honsen-procure ]] || { echo 'deployment runtime directory is a symlink' >&2; exit 1; }
@@ -87,7 +87,7 @@ log_event start
 [[ -f "$RELEASE_DIR/apps/server/dist/index.js" && -f "$RELEASE_DIR/node_modules/tsx/dist/cli.mjs" ]] || { echo 'built server or migration runtime missing' >&2; exit 1; }
 bash "$script_dir/verify-systemd.sh" "$RELEASE_DIR/deploy/linux/honsen-procure.service"
 export RELEASE_SHA RELEASE_MANIFEST_SHA256 RELEASE_DIR OLD_ROLE NEW_ROLE
-if bash "$script_dir/verify-completed.sh" /var/lib/honsen-procure/deployment.sha /opt/honsen-procure/current; then
+if bash "$script_dir/verify-completed.sh" /var/lib/honsen-procure/deployment.sha /www/Honsen-procure/current; then
   log_event already_deployed
   bash "$script_dir/deployment-lock.sh" release "$lock_token"
   trap - EXIT
@@ -100,11 +100,11 @@ fi
 db_version=$(psql -X -Atqc 'SHOW server_version_num')
 [[ $db_version =~ ^16[0-9]{4}$ ]] || { echo 'PostgreSQL 16 required' >&2; exit 1; }
 log_event "postgres_version:$db_version"
-if [[ -L /opt/honsen-procure/current ]]; then
-  prior=$(git -C /opt/honsen-procure/current rev-parse HEAD)
+if [[ -L /www/Honsen-procure/current ]]; then
+  prior=$(git -C /www/Honsen-procure/current rev-parse HEAD)
   [[ $prior =~ ^[0-9a-f]{40}$ ]] || exit 1
   log_event "previous_sha:$prior"
-elif [[ -e /opt/honsen-procure/current ]]; then
+elif [[ -e /www/Honsen-procure/current ]]; then
   echo 'current release is not a symlink' >&2; exit 1
 fi
 [[ -d $BACKUP_DIR && -d $EXTERNAL_BACKUP_DIR ]] || exit 1
@@ -148,8 +148,8 @@ phase=activate
 psql -X -v ON_ERROR_STOP=1 -v old_role="$OLD_ROLE" -v new_role="$NEW_ROLE" -f "$script_dir/activate-new-role.sql" >/dev/null
 log_event new_role_activated
 mkdir -p /run/honsen-procure
-ln -sT "$RELEASE_DIR" /opt/honsen-procure/.current-next
-mv -Tf /opt/honsen-procure/.current-next /opt/honsen-procure/current
+ln -sT "$RELEASE_DIR" /www/Honsen-procure/.current-next
+mv -Tf /www/Honsen-procure/.current-next /www/Honsen-procure/current
 : > /run/honsen-procure/deployment-ready
 systemctl unmask --runtime honsen-procure.service
 systemctl start honsen-procure.service

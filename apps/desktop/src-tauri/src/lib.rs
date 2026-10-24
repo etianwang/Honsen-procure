@@ -24,6 +24,7 @@ mod attachments;
 mod expenditures;
 pub use attachments::{AttachmentInput, AttachmentTarget, AttachmentView, ProcurementSyncReport};
 mod seed;
+pub mod update_runner;
 pub use seed::SeedImportReport;
 
 const OFFLINE_LOGIN_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);

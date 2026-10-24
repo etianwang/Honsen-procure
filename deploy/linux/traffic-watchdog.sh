@@ -75,7 +75,7 @@ if [[ ! -e $guard/ready ]]; then
 fi
 for _ in {1..2400}; do
   if [[ -f $guard/commit-request ]]; then
-    if alive && owns_lock && bash "$script_dir/verify-completed.sh" /var/lib/honsen-procure/deployment.sha /opt/honsen-procure/current && alive && owns_lock && event confirmed; then
+    if alive && owns_lock && bash "$script_dir/verify-completed.sh" /var/lib/honsen-procure/deployment.sha /www/Honsen-procure/current && alive && owns_lock && event confirmed; then
       touch "$guard/confirmed"
       exit 0
     fi

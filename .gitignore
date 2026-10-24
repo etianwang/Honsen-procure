@@ -6,3 +6,4 @@ dist/
 target/
 playwright-report/
 test-results/
+apps/desktop/src-tauri/release-assets/
