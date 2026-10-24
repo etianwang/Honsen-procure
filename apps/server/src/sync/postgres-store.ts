@@ -1,4 +1,9 @@
-import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
+import {
+  procurementExpenditureSchema,
+  type SyncChange,
+  type SyncEvent,
+  type SyncEventResult,
+} from '@honsen/shared'
 import type { Pool, PoolClient } from 'pg'
 import type { SyncStore } from './types.js'
 
@@ -63,7 +68,11 @@ export class PostgresSyncStore implements SyncStore {
       )
       const current = entity.rows[0]
       const currentVersion = current ? Number(current.version) : 0
-      if (currentVersion !== input.event.baseVersion) {
+      if (
+        currentVersion !== input.event.baseVersion ||
+        (input.event.entityType === 'procurement_expenditure' &&
+          current !== undefined)
+      ) {
         const result = {
           eventId: input.event.eventId,
           status: 'conflict' as const,
@@ -72,6 +81,127 @@ export class PostgresSyncStore implements SyncStore {
         await this.recordConflict(client, input, current, result)
         await client.query('COMMIT')
         return result
+      }
+
+      if (input.event.entityType === 'procurement_expenditure') {
+        const parsed = procurementExpenditureSchema.safeParse(
+          input.event.payload,
+        )
+        if (
+          !parsed.success ||
+          input.event.operation !== 'upsert' ||
+          parsed.data.id !== input.event.entityId ||
+          parsed.data.createdBy !== input.actorId ||
+          parsed.data.paymentHandlerId !== input.actorId
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+        const p = parsed.data
+        // Serialize payments and reversals for this order, including competing devices.
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+          `payment-order:${p.orderId}`,
+        ])
+        const orderResult = await client.query<{
+          payload_json: Record<string, unknown>
+        }>(
+          `SELECT payload_json FROM sync_entities WHERE entity_type='purchase_order' AND entity_id=$1 AND NOT is_deleted FOR SHARE`,
+          [p.orderId],
+        )
+        const order = orderResult.rows[0]?.payload_json
+        const parentResult =
+          order && typeof order.parentOrderId === 'string'
+            ? await client.query<{ payload_json: Record<string, unknown> }>(
+                `SELECT payload_json FROM sync_entities WHERE entity_type='purchase_order' AND entity_id=$1 AND NOT is_deleted FOR SHARE`,
+                [order.parentOrderId],
+              )
+            : null
+        const parent = parentResult?.rows[0]?.payload_json
+        const scope = await client.query(
+          `SELECT 1 FROM user_project_bindings b JOIN projects p ON p.id=b.project_id JOIN countries c ON c.id=p.country_id WHERE b.user_id=$1 AND b.project_id=$2 AND b.deleted_at IS NULL AND p.is_active AND p.deleted_at IS NULL AND c.is_active AND c.deleted_at IS NULL AND c.id=$3 FOR SHARE OF b,p,c`,
+          [input.actorId, p.projectId, p.countryId],
+        )
+        let valid =
+          scope.rowCount === 1 &&
+          !!order &&
+          order.projectId === p.projectId &&
+          order.countryId === p.countryId &&
+          order.currency === p.currency &&
+          [
+            'approved',
+            'confirmed',
+            'formally_issued',
+            'sent',
+            'executing',
+            'receiving',
+            'completed',
+            'completed_with_conditions',
+          ].includes(String(order.workflowStatus)) &&
+          (!order.parentOrderId ||
+            (!!parent &&
+              parent.projectId === p.projectId &&
+              parent.countryId === p.countryId)) &&
+          (parent ?? order).procurementMode === 'honsen_self_purchase' &&
+          (p.supplierId == null || p.supplierId === order.supplierId)
+        if (p.status === 'reversed') {
+          const original = await client.query<{
+            payload_json: Record<string, unknown>
+          }>(
+            `SELECT payload_json FROM procurement_expenditures WHERE id=$1 AND status='recorded'`,
+            [p.correctsExpenditureId],
+          )
+          const originalPayload = original.rows[0]?.payload_json
+          const duplicate = await client.query(
+            'SELECT 1 FROM procurement_expenditures WHERE corrects_expenditure_id=$1',
+            [p.correctsExpenditureId],
+          )
+          valid =
+            valid &&
+            !!originalPayload &&
+            duplicate.rowCount === 0 &&
+            [
+              'orderId',
+              'projectId',
+              'countryId',
+              'currency',
+              'amountMinor',
+              'payeeName',
+              'paymentDate',
+              'paymentType',
+              'paymentMethod',
+            ].every((key) => originalPayload[key] === input.event.payload[key])
+        }
+        if (!valid) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+        await client.query(
+          `INSERT INTO procurement_expenditures (id,order_id,project_id,country_id,parent_order_id,supplier_id,currency,amount_minor,status,corrects_expenditure_id,correction_reason,created_by,created_at,payload_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [
+            p.id,
+            p.orderId,
+            p.projectId,
+            p.countryId,
+            order?.parentOrderId ?? null,
+            order?.supplierId ?? null,
+            p.currency,
+            p.amountMinor,
+            p.status,
+            p.correctsExpenditureId ?? null,
+            p.correctionReason ?? null,
+            p.createdBy,
+            p.createdAt,
+            input.event.payload,
+          ],
+        )
       }
 
       const serverVersion = currentVersion + 1
@@ -109,6 +239,10 @@ export class PostgresSyncStore implements SyncStore {
           input.event.baseVersion,
           serverVersion,
         ],
+      )
+      // Cursor allocation must follow commit order, otherwise another device can skip a late commit.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext('honsen-change-log'))",
       )
       await client.query(
         `INSERT INTO server_change_log

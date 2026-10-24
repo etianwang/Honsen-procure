@@ -131,7 +131,7 @@ export function ProcurementExecutionPage({
           ) : null}
           {selected.procurementMode === 'honsen_self_purchase' &&
           ['executing', 'receiving'].includes(selected.workflowStatus) ? (
-            <><ReceiptPanel
+            <ReceiptPanel
               key={selected.id}
               api={tauriReceiptApi}
               orderId={selected.id}
@@ -146,7 +146,17 @@ export function ProcurementExecutionPage({
                 receivedQuantity: line.receivedQuantity,
                 remainingQuantity: line.remainingQuantity,
               }))}
-            /><ProcurementExpenditurePanel api={tauriProcurementExpenditureApi} orderId={selected.id} currency={selected.primaryCurrency} summary={selected.paymentSummary} onChanged={refresh} /></>
+            />
+          ) : null}
+          {selected.children.length === 0 && selected.paymentSummary ? (
+            <ProcurementExpenditurePanel
+              key={`payment-${selected.id}`}
+              api={tauriProcurementExpenditureApi}
+              orderId={selected.id}
+              currency={selected.primaryCurrency}
+              summary={selected.paymentSummary}
+              onChanged={refresh}
+            />
           ) : null}
           {selected.children.length ? (
             selected.children.map((child) => (
@@ -176,7 +186,15 @@ export function ProcurementExecutionPage({
                     remainingQuantity: line.remainingQuantity,
                   }))}
                 />
-                <ProcurementExpenditurePanel api={tauriProcurementExpenditureApi} orderId={child.id} currency={child.currency} summary={child.paymentSummary} onChanged={refresh} />
+                {child.paymentSummary ? (
+                  <ProcurementExpenditurePanel
+                    api={tauriProcurementExpenditureApi}
+                    orderId={child.id}
+                    currency={child.currency}
+                    summary={child.paymentSummary}
+                    onChanged={refresh}
+                  />
+                ) : null}
               </section>
             ))
           ) : ['confirmed', 'approved'].includes(selected.workflowStatus) ? (

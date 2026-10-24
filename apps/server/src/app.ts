@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { AuthenticationError, AuthService } from './auth/service.js'
 import { MasterDataError, MasterDataService } from './master-data/service.js'
 import { SyncService } from './sync/service.js'
+import { AttachmentService, attachmentStatus } from './attachments/service.js'
 import {
   AuthorizationError,
   AuthorizationService,
@@ -17,6 +18,7 @@ export function createApp(
   masterData?: MasterDataService,
   sync?: SyncService,
   authorization?: AuthorizationService,
+  attachments?: AttachmentService,
 ) {
   const app = Fastify({ logger: false })
   const sockets = new Set<{
@@ -29,6 +31,42 @@ export function createApp(
   }) {
     const authorization = bearerTokenSchema.parse(request.headers.authorization)
     return auth.authenticate(authorization.slice(7))
+  }
+
+  for (const operation of ['prepare', 'complete', 'download'] as const) {
+    app.route({
+      method: operation === 'download' ? 'GET' : 'POST',
+      url:
+        operation === 'prepare'
+          ? '/api/attachments/prepare'
+          : `/api/attachments/:id/${operation}`,
+      handler: async (request, reply) => {
+        try {
+          if (
+            !bearerTokenSchema.safeParse(request.headers.authorization).success
+          )
+            return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+          const actor = await authenticateRequest(request)
+          if (!attachments)
+            return reply.status(503).send({ code: 'ATTACHMENTS_UNAVAILABLE' })
+          if (operation === 'prepare')
+            return await attachments.prepare(actor, request.body)
+          const { id } = z.object({ id: z.uuid() }).parse(request.params)
+          return operation === 'complete'
+            ? await attachments.complete(actor, id)
+            : await attachments.download(actor, id)
+        } catch (error) {
+          if (error instanceof AuthenticationError)
+            return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+          if (error instanceof z.ZodError)
+            return reply.status(400).send({ code: 'INVALID_REQUEST' })
+          const failure = attachmentStatus(error)
+          if (failure)
+            return reply.status(failure.status).send({ code: failure.code })
+          return reply.status(502).send({ code: 'ATTACHMENT_OPERATION_FAILED' })
+        }
+      },
+    })
   }
 
   app.get('/api/auth/captcha', async () => auth.captchas.issue())

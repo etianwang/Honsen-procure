@@ -1,14 +1,208 @@
-import { Alert, Button, Card, Input, Select } from 'antd'
+import { Alert, Button, Card, Input, Modal, Select, Space } from 'antd'
 import { useState } from 'react'
-import type { ProcurementExpenditureApi } from '../lib/procurement-expenditure-api'
+import type { UiLocale } from '@honsen/shared'
+import type {
+  ProcurementExpenditureApi,
+  RecordProcurementExpenditureInput,
+} from '../lib/procurement-expenditure-api'
+import type { ProcurementPaymentSummary } from '../lib/procurement-execution-api'
+import { paymentMessages } from '../lib/payment-messages'
 
-export function ProcurementExpenditurePanel({ api, orderId, currency, summary, onChanged }: { api: ProcurementExpenditureApi; orderId: string; currency: string; summary: { payableMinor: string; paidMinor: string; remainingMinor: string; overpaidMinor: string; status: string; records: { id: string; payeeName: string; amountMinor: string; paymentDate: string; paymentType: string; status: string }[] }; onChanged?: () => void }) {
+type Props = {
+  api: ProcurementExpenditureApi
+  orderId: string
+  currency: string
+  summary: ProcurementPaymentSummary
+  onChanged?: () => void
+  locale?: UiLocale
+}
+export function ProcurementExpenditurePanel({
+  api,
+  orderId,
+  currency,
+  summary,
+  onChanged,
+  locale = 'zh-CN',
+}: Props) {
+  const t = paymentMessages[locale]
   const [amountMinor, setAmountMinor] = useState('')
   const [payeeName, setPayeeName] = useState('')
-  const [paymentType, setPaymentType] = useState<'advance' | 'progress' | 'final' | 'other'>('progress')
+  const [paymentDate, setPaymentDate] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  )
+  const [paymentType, setPaymentType] =
+    useState<RecordProcurementExpenditureInput['paymentType']>('progress')
+  const [paymentMethod, setPaymentMethod] =
+    useState<RecordProcurementExpenditureInput['paymentMethod']>('other')
   const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [reversalId, setReversalId] = useState<string | null>(null)
+  const [reason, setReason] = useState('')
   async function record() {
-    try { await api.record({ id: crypto.randomUUID(), orderId, payeeName, currency, amountMinor, paymentDate: new Date().toISOString().slice(0, 10), paymentType, paymentMethod: 'other', voucherReference: null, notes: null }); setMessage('实际付款已登记，等待同步确认。'); setAmountMinor(''); onChanged?.() } catch { setMessage('付款登记失败：请填写收款方和正整数金额，并确认订单、币种和授权。') }
+    setBusy(true)
+    try {
+      await api.record({
+        id: crypto.randomUUID(),
+        orderId,
+        payeeName,
+        currency,
+        amountMinor,
+        paymentDate,
+        paymentType,
+        paymentMethod,
+        voucherReference: null,
+        notes: null,
+      })
+      setMessage(t.saved)
+      setAmountMinor('')
+      onChanged?.()
+    } catch {
+      setMessage(t.error)
+    } finally {
+      setBusy(false)
+    }
   }
-  return <Card className="card" title="实际付款"><p className="muted">应付 {summary.payableMinor} · 累计实付 {summary.paidMinor} · 尚未支付 {summary.remainingMinor} {currency} · {summary.status}</p>{summary.overpaidMinor !== '0' ? <Alert type="warning" title={`超额付款 ${summary.overpaidMinor} ${currency}`} /> : null}<ul>{summary.records.map((record) => <li key={record.id}>{record.paymentDate} · {record.paymentType} · {record.payeeName} · {record.status === 'reversed' ? '-' : ''}{record.amountMinor} {currency}</li>)}</ul><p className="muted">仅登记已发生付款；金额单位为 {currency} 的最小单位。未接入附件存储时，请在后续 T11 补充付款凭证。</p><Input aria-label="收款方" value={payeeName} onChange={(event) => setPayeeName(event.target.value)} placeholder="收款供应商/收款方" /><Input aria-label="实际付款金额（最小单位）" value={amountMinor} onChange={(event) => setAmountMinor(event.target.value)} placeholder="实际付款金额（整数最小单位）" inputMode="numeric" /><Select aria-label="付款类型" value={paymentType} onChange={setPaymentType} options={[{ value: 'advance', label: '预付款' }, { value: 'progress', label: '进度款' }, { value: 'final', label: '尾款' }, { value: 'other', label: '其他实际付款' }]} /><Button type="primary" onClick={() => void record()}>登记实际付款</Button>{message ? <Alert showIcon type="info" title={message} /> : null}</Card>
+  async function reverse() {
+    if (!reversalId || !reason.trim()) return
+    setBusy(true)
+    try {
+      await api.reverse({
+        id: crypto.randomUUID(),
+        expenditureId: reversalId,
+        reason,
+      })
+      setReversalId(null)
+      setReason('')
+      setMessage(t.reversed)
+      onChanged?.()
+    } catch {
+      setMessage(t.error)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const corrected = new Set(
+    summary.records.map((r) => r.correctsExpenditureId).filter(Boolean),
+  )
+  return (
+    <Card className="card" title={t.title}>
+      <p aria-live="polite">
+        {t.payable} {summary.payableMinor} · {t.paid} {summary.paidMinor} ·{' '}
+        {t.remaining} {summary.remainingMinor} {currency}
+      </p>
+      {summary.overpaidMinor !== '0' ? (
+        <Alert
+          type="warning"
+          title={`${t.overpaid} ${summary.overpaidMinor} ${currency}`}
+        />
+      ) : null}
+      <ul>
+        {summary.records.map((record) => (
+          <li key={record.id}>
+            <Space wrap>
+              <span>
+                {record.paymentDate} · {record.payeeName} ·{' '}
+                {record.status === 'reversed' ? '-' : ''}
+                {record.amountMinor} {currency}
+              </span>
+              {record.status === 'recorded' && !corrected.has(record.id) ? (
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    setReversalId(record.id)
+                    setReason('')
+                  }}
+                >
+                  {t.reverse}
+                </Button>
+              ) : null}
+              {record.status === 'recorded' && !record.voucherReference ? (
+                <span>{t.warning}</span>
+              ) : null}
+            </Space>
+          </li>
+        ))}
+      </ul>
+      <p className="muted">{t.hint}</p>
+      <Space wrap>
+        <label>
+          {t.payee}
+          <Input
+            aria-label={t.payee}
+            value={payeeName}
+            maxLength={255}
+            onChange={(e) => setPayeeName(e.target.value)}
+          />
+        </label>
+        <label>
+          {t.amount}
+          <Input
+            aria-label={t.amount}
+            value={amountMinor}
+            inputMode="numeric"
+            maxLength={19}
+            onChange={(e) => setAmountMinor(e.target.value)}
+          />
+        </label>
+        <label>
+          {t.date}
+          <Input
+            aria-label={t.date}
+            type="date"
+            value={paymentDate}
+            onChange={(e) => setPaymentDate(e.target.value)}
+          />
+        </label>
+        <Select
+          aria-label={t.type}
+          value={paymentType}
+          onChange={setPaymentType}
+          options={(['advance', 'progress', 'final', 'other'] as const).map(
+            (value) => ({ value, label: t[value] }),
+          )}
+        />
+        <Select
+          aria-label={t.method}
+          value={paymentMethod}
+          onChange={setPaymentMethod}
+          options={(
+            ['cash', 'bank_transfer', 'mobile_payment', 'other'] as const
+          ).map((value) => ({ value, label: t[value] }))}
+        />
+        <Button
+          type="primary"
+          loading={busy}
+          disabled={!/^[1-9]\d*$/.test(amountMinor) || !payeeName.trim()}
+          onClick={() => void record()}
+        >
+          {t.record}
+        </Button>
+      </Space>
+      {message ? (
+        <Alert role="status" showIcon type="info" title={message} />
+      ) : null}
+      <Modal
+        title={t.reverse}
+        open={reversalId !== null}
+        onCancel={() => {
+          if (!busy) setReversalId(null)
+        }}
+        onOk={() => void reverse()}
+        okText={t.confirm}
+        cancelText={t.cancel}
+        confirmLoading={busy}
+        okButtonProps={{ disabled: !reason.trim() }}
+      >
+        <label>
+          {t.reason}
+          <Input.TextArea
+            aria-label={t.reason}
+            value={reason}
+            maxLength={1000}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+      </Modal>
+    </Card>
+  )
 }

@@ -15,7 +15,26 @@ export type ProcurementExecutionChild = {
   lines: ProcurementExecutionLine[]
   paymentSummary: ProcurementPaymentSummary
 }
-export type ProcurementPaymentSummary = { currency: string; payableMinor: string; paidMinor: string; remainingMinor: string; overpaidMinor: string; status: string; records: { id: string; payeeName: string; currency: string; amountMinor: string; paymentDate: string; paymentType: string; status: string }[] }
+export type ProcurementPaymentSummary = {
+  currency: string
+  payableMinor: string
+  paidMinor: string
+  remainingMinor: string
+  overpaidMinor: string
+  status: string
+  records: {
+    id: string
+    payeeName: string
+    currency: string
+    amountMinor: string
+    paymentDate: string
+    paymentType: string
+    status: string
+    correctsExpenditureId?: string | null
+    voucherReference?: string | null
+    notes?: string | null
+  }[]
+}
 
 export type ProcurementExecutionOrder = {
   id: string

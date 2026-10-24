@@ -1,3 +1,5 @@
+import { CosStorage } from './attachments/cos.js'
+import { AttachmentService } from './attachments/service.js'
 import argon2 from 'argon2'
 import { createApp } from './app.js'
 import { AuthService } from './auth/service.js'
@@ -16,6 +18,7 @@ if (!databaseUrl)
 
 const pool = createPostgresPool(databaseUrl)
 await waitForDatabase(pool)
+const cos = CosStorage.fromEnvironment(process.env)
 const app = createApp(
   new AuthService(new PostgresAuthStore(pool), {
     verify: argon2.verify,
@@ -23,6 +26,7 @@ const app = createApp(
   new MasterDataService(new PostgresMasterDataStore(pool)),
   new SyncService(new PostgresSyncStore(pool)),
   new AuthorizationService(new PostgresAuthorizationStore(pool)),
+  cos ? new AttachmentService(pool, cos) : undefined,
 )
 
 app.addHook('onClose', async () => pool.end())

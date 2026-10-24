@@ -1,5 +1,6 @@
 import {
   referenceMasterDataSchema,
+  procurementExpenditureSchema,
   syncPullQuerySchema,
   syncPushRequestSchema,
   type SyncEvent,
@@ -49,19 +50,87 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'attachment') return false
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
     if (event.entityType === 'procurement_expenditure') {
+      const parsed = procurementExpenditureSchema.safeParse(event.payload)
       if (
         event.operation !== 'upsert' ||
+        !parsed.success ||
         !actor.roles.some((role) => procurementRoles.includes(role)) ||
-        !validExpenditure(event.payload, event.entityId, actor.id)
-      ) return false
-      const order = await this.store.getEntityPayload('purchase_order', stringField(event.payload, 'orderId')!)
-      return order !== null &&
-        stringField(order, 'projectId') === stringField(event.payload, 'projectId') &&
-        stringField(order, 'countryId') === stringField(event.payload, 'countryId') &&
-        stringField(order, 'procurementMode') === 'honsen_self_purchase'
+        parsed.data.id !== event.entityId ||
+        parsed.data.createdBy !== actor.id ||
+        parsed.data.paymentHandlerId !== actor.id
+      )
+        return false
+      const payment = parsed.data
+      if (
+        !(await this.store.hasActiveProjectBinding(actor.id, payment.projectId))
+      )
+        return false
+      const order = await this.store.getEntityPayload(
+        'purchase_order',
+        payment.orderId,
+      )
+      if (
+        !order ||
+        order.projectId !== payment.projectId ||
+        order.countryId !== payment.countryId ||
+        order.currency !== payment.currency ||
+        ![
+          'approved',
+          'confirmed',
+          'formally_issued',
+          'sent',
+          'executing',
+          'receiving',
+          'completed',
+          'completed_with_conditions',
+        ].includes(String(order.workflowStatus))
+      )
+        return false
+      const parent =
+        typeof order.parentOrderId === 'string'
+          ? await this.store.getEntityPayload(
+              'purchase_order',
+              order.parentOrderId,
+            )
+          : null
+      if (
+        order.parentOrderId &&
+        (!parent ||
+          parent.projectId !== order.projectId ||
+          parent.countryId !== order.countryId)
+      )
+        return false
+      if ((parent ?? order).procurementMode !== 'honsen_self_purchase')
+        return false
+      if (payment.supplierId != null && payment.supplierId !== order.supplierId)
+        return false
+      if (payment.status === 'reversed') {
+        const original = await this.store.getEntityPayload(
+          'procurement_expenditure',
+          payment.correctsExpenditureId!,
+        )
+        if (
+          !original ||
+          original.status !== 'recorded' ||
+          [
+            'orderId',
+            'projectId',
+            'countryId',
+            'currency',
+            'amountMinor',
+            'payeeName',
+            'paymentDate',
+            'paymentType',
+            'paymentMethod',
+          ].some((key) => original[key] !== event.payload[key])
+        )
+          return false
+      }
+      return true
     }
     if (
       referenceMasterDataTypes.includes(
@@ -147,21 +216,6 @@ export class SyncService {
       !(await this.store.hasProjectBusinessUse(event.entityId))
     )
   }
-}
-
-function validExpenditure(payload: Record<string, unknown>, id: string, actorId: string): boolean {
-  const text = (name: string, max = 1000) => {
-    const value = stringField(payload, name)
-    return value !== null && value.trim().length > 0 && value.length <= max
-  }
-  const amount = stringField(payload, 'amountMinor')
-  return stringField(payload, 'id') === id && text('orderId', 36) && text('projectId', 36) && text('countryId', 36) &&
-    text('payeeName', 255) && ['XOF', 'XAF', 'CNY', 'USD', 'EUR', 'ETB'].includes(stringField(payload, 'currency') ?? '') &&
-    amount !== null && /^[1-9]\d*$/.test(amount) && /^\d{4}-\d{2}-\d{2}$/.test(stringField(payload, 'paymentDate') ?? '') &&
-    ['advance', 'progress', 'final', 'other'].includes(stringField(payload, 'paymentType') ?? '') &&
-    ['cash', 'bank_transfer', 'mobile_payment', 'other'].includes(stringField(payload, 'paymentMethod') ?? '') &&
-    stringField(payload, 'paymentHandlerId') === actorId && stringField(payload, 'createdBy') === actorId &&
-    ['recorded', 'reversed'].includes(stringField(payload, 'status') ?? '')
 }
 
 function referencePayload(

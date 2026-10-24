@@ -112,3 +112,7 @@ Obtain authority for T04 authorized initial-record acceptance, then complete the
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
+
+### 2026-10-24 T09-A / T11 builder progress
+
+T09-A payment/reversal server and SQLite/UI foundations are implemented with focused builder evidence. T11 has entered **IN PROGRESS** for its authorized COS service slice (real PUT/HEAD/GET/hash/auth-negative/cleanup passed). Local attachment queue and cross-device archival verification remain open. T09/T10/T11 and M2/M3/M4 remain unchecked; these results are not independent QA or release acceptance. See BUILD-TASKS and memory for scope and remaining gates.

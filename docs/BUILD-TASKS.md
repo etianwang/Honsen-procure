@@ -183,3 +183,7 @@ This is a sequencing plan only; it does not change any task or milestone status.
 Obtain authority for **T04-A/B/C**, then complete T08/T09 prerequisite acceptance. T10 then verifies server registration, idempotency and formal-document conflicts without rewriting local issued snapshots. T11–T15 remain in their original sequence.
 
 The original initial recommendation was to start T00 to establish repository shape, CI gates and an automated DOM harness without production behavior or packaging identity. That foundation is now accepted; it is not the current next task.
+
+### 2026-10-24 authorized autonomous builder checkpoint
+
+T09-A remains unchecked: payment ledger sync and trusted/UI reversal now have focused PostgreSQL/SQLite/DOM evidence. See memory for exact boundaries. T11 is **IN PROGRESS**, with server-only STS-signed COS prepare/verify/download and real isolated-object proof; local file queue and cross-device receipt/voucher acceptance remain BLOCKER. The user explicitly authorizes sequential T09-A/T11 work and push/CI for this run. Original dependency table and all parent/final gates are unchanged; no independent acceptance is asserted.
