@@ -102,6 +102,10 @@ pub enum RunnerError {
     WaitProcess,
     #[error("installer returned {0}")]
     InstallerExit(i32),
+    #[error("another Honsen Procure update is already in progress")]
+    UpdateInProgress,
+    #[error("installed executable version does not match target version")]
+    FileVersionMismatch,
 }
 impl From<io::Error> for RunnerError {
     fn from(error: io::Error) -> Self {
@@ -228,6 +232,8 @@ pub fn launch(_source: Source) -> Result<(), RunnerError> {
 }
 
 pub fn apply(request: &ApplyRequest) -> Result<OperationResult, RunnerError> {
+    #[cfg(windows)]
+    let _update_lock = acquire_update_lock()?;
     let registration = read_registration()?;
     let manifest = read_manifest(&registration.install_location)?;
     validate_apply_request(request, &registration, &manifest)?;
@@ -348,6 +354,7 @@ fn apply_windows(
     {
         return Err(RunnerError::ManifestMismatch);
     }
+    verify_file_version(&updated.executable_path, &request.expected_version)?;
     let result = OperationResult {
         app_id: APP_ID.into(),
         operation_id: request.operation_id.clone(),
@@ -367,6 +374,87 @@ fn apply_windows(
         std::process::Command::new(&updated.executable_path).spawn()?;
     }
     Ok(result)
+}
+
+#[cfg(windows)]
+struct UpdateLock(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for UpdateLock {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::System::Threading::ReleaseMutex(self.0);
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn acquire_update_lock() -> Result<UpdateLock, RunnerError> {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS},
+        System::Threading::CreateMutexW,
+    };
+    let name: Vec<u16> = "Global\\HonsenUpdate-honsen.procure"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let handle = CreateMutexW(std::ptr::null(), 1, name.as_ptr());
+        if handle.is_null() {
+            return Err(RunnerError::Io("could not create update mutex".into()));
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            CloseHandle(handle);
+            return Err(RunnerError::UpdateInProgress);
+        }
+        Ok(UpdateLock(handle))
+    }
+}
+
+#[cfg(windows)]
+fn verify_file_version(path: &Path, expected: &str) -> Result<(), RunnerError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+    };
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    unsafe {
+        let mut ignored = 0;
+        let size = GetFileVersionInfoSizeW(wide.as_ptr(), &mut ignored);
+        if size == 0 {
+            return Err(RunnerError::FileVersionMismatch);
+        }
+        let mut buffer = vec![0_u8; size as usize];
+        if GetFileVersionInfoW(wide.as_ptr(), 0, size, buffer.as_mut_ptr().cast()) == 0 {
+            return Err(RunnerError::FileVersionMismatch);
+        }
+        let mut fixed: *mut core::ffi::c_void = std::ptr::null_mut();
+        let mut length = 0;
+        if VerQueryValueW(
+            buffer.as_ptr().cast(),
+            [b'\\' as u16, 0].as_ptr(),
+            &mut fixed,
+            &mut length,
+        ) == 0
+            || length < std::mem::size_of::<VS_FIXEDFILEINFO>() as u32
+        {
+            return Err(RunnerError::FileVersionMismatch);
+        }
+        let fixed = &*(fixed as *const VS_FIXEDFILEINFO);
+        let actual = format!(
+            "{}.{}.{}.{}",
+            fixed.dwFileVersionMS >> 16,
+            fixed.dwFileVersionMS & 0xffff,
+            fixed.dwFileVersionLS >> 16,
+            fixed.dwFileVersionLS & 0xffff
+        );
+        if actual == expected || actual.trim_end_matches(".0") == expected {
+            Ok(())
+        } else {
+            Err(RunnerError::FileVersionMismatch)
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -417,13 +505,32 @@ fn wait_for_registered_process(pid: u32, expected_path: &Path) -> Result<(), Run
     Ok(())
 }
 fn utc_timestamp() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days = seconds / 86_400;
+    let seconds_of_day = seconds % 86_400;
+    let (year, month, day) = civil_date(days);
     format!(
-        "{}Z",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        seconds_of_day / 3_600,
+        (seconds_of_day % 3_600) / 60,
+        seconds_of_day % 60
     )
+}
+
+fn civil_date(days_since_epoch: i64) -> (i64, i64, i64) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    (year + i64::from(month <= 2), month, day)
 }
 
 #[cfg(test)]
@@ -532,5 +639,50 @@ mod tests {
         assert_eq!(written["status"], "failed");
         assert_eq!(written["step"], "hash-validation");
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn completion_timestamp_is_rfc3339_utc() {
+        let timestamp = utc_timestamp();
+        assert!(timestamp.ends_with('Z'));
+        assert_eq!(timestamp.len(), 20);
+        assert_eq!(&timestamp[10..11], "T");
+        assert_eq!(&timestamp[13..14], ":");
+        assert_eq!(&timestamp[16..17], ":");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn global_lock_blocks_another_process() {
+        use std::{
+            process::{Command, Stdio},
+            time::Duration,
+        };
+        if std::env::var_os("HONSEN_RUNNER_LOCK_HELPER").is_some() {
+            let _lock = acquire_update_lock().unwrap();
+            std::thread::sleep(Duration::from_secs(2));
+            return;
+        }
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "update_runner::tests::global_lock_blocks_another_process",
+                "--nocapture",
+            ])
+            .env("HONSEN_RUNNER_LOCK_HELPER", "1")
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let held_by_child = (0..100).any(|_| match acquire_update_lock() {
+            Err(RunnerError::UpdateInProgress) => true,
+            Ok(lock) => {
+                drop(lock);
+                std::thread::sleep(Duration::from_millis(20));
+                false
+            }
+            Err(error) => panic!("unexpected mutex error: {error}"),
+        });
+        assert!(held_by_child, "the helper process never acquired the global lock");
+        assert!(child.wait().unwrap().success());
     }
 }
