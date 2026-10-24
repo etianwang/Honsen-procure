@@ -13,7 +13,7 @@
   WriteRegStr HKLM "Software\Honsen Program\Apps\honsen.procure" "Publisher" "Honsen"
 !macroend
 
-!include "release-values.nsh"
+!define HONSEN_UPDATE_MANIFEST_URL "https://github.com/etianwang/Honsen-procure/releases/latest/download/manifest.json"
 
 !macro HonsenRejectOtherInstall key view
   SetRegView ${view}
