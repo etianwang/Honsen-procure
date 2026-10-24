@@ -51,7 +51,7 @@ export class AttachmentService {
       project_id: string
       country_id: string
     }>(
-      `SELECT p.id AS project_id,p.country_id FROM sync_entities o JOIN projects p ON p.id::text=o.payload_json->>'projectId' JOIN countries c ON c.id=p.country_id JOIN user_project_bindings b ON b.project_id=p.id AND b.user_id=$2 AND b.deleted_at IS NULL WHERE o.entity_type='purchase_order' AND o.entity_id=$1 AND NOT o.is_deleted AND p.is_active AND p.deleted_at IS NULL AND c.is_active AND c.deleted_at IS NULL AND c.id::text=o.payload_json->>'countryId' FOR SHARE OF o,p,c,b`,
+      `SELECT p.id AS project_id,p.country_id FROM sync_entities o JOIN projects p ON p.id::text=o.payload_json->>'projectId' JOIN countries c ON c.id=p.country_id JOIN user_project_bindings b ON b.project_id=p.id AND b.user_id=$2 AND b.deleted_at IS NULL JOIN user_project_scope_bindings scope ON scope.user_id=b.user_id AND scope.project_id=b.project_id AND scope.deleted_at IS NULL AND scope.department_id::text=o.payload_json->>'departmentId' AND scope.team_id::text=o.payload_json->>'teamId' JOIN departments d ON d.id=scope.department_id AND d.is_active AND d.deleted_at IS NULL JOIN teams t ON t.id=scope.team_id AND t.department_id=d.id AND t.is_active AND t.deleted_at IS NULL WHERE o.entity_type='purchase_order' AND o.entity_id=$1 AND NOT o.is_deleted AND p.is_active AND p.deleted_at IS NULL AND c.is_active AND c.deleted_at IS NULL AND c.id::text=o.payload_json->>'countryId' FOR SHARE OF o,p,c,b,scope,d,t`,
       [orderId, actor.id],
     )
     const scope = result.rows[0]
@@ -88,6 +88,27 @@ export class AttachmentService {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         `attachment:${data.id}`,
       ])
+      if (data.sourceAttachmentId) {
+        const source = await client.query(
+          `SELECT 1 FROM attachments WHERE id=$1 AND order_id=$2 AND owner_type=$3 AND owner_id=$4 AND project_id=$5 AND country_id=$6 AND status='uploaded' AND content_type IN ('image/heic','image/heif') AND NOT (payload_json ? 'sourceAttachmentId') FOR SHARE`,
+          [
+            data.sourceAttachmentId,
+            data.orderId,
+            data.ownerType,
+            data.ownerId,
+            scope.project_id,
+            scope.country_id,
+          ],
+        )
+        if (!source.rowCount)
+          throw new AttachmentError('ATTACHMENT_SOURCE_NOT_VERIFIED', 409)
+        const derivative = await client.query(
+          `SELECT 1 FROM attachments WHERE payload_json->>'sourceAttachmentId'=$1 AND id<>$2`,
+          [data.sourceAttachmentId, data.id],
+        )
+        if (derivative.rowCount)
+          throw new AttachmentError('ATTACHMENT_DERIVATIVE_EXISTS', 409)
+      }
       if (data.ownerType !== 'purchase_order') {
         const owner = await client.query(
           `SELECT 1 FROM sync_entities WHERE entity_type=$1 AND entity_id=$2 AND NOT is_deleted AND payload_json->>'orderId'=$3`,
@@ -111,7 +132,7 @@ export class AttachmentService {
         }
       } else {
         const usage = await client.query<{ total: string; photos: string }>(
-          `SELECT COALESCE(SUM(a.byte_length),0)::text AS total,COUNT(*) FILTER(WHERE a.owner_type='receipt' AND a.owner_id=$2)::text AS photos FROM attachments a WHERE a.order_id=$1 OR a.order_id IN (SELECT entity_id FROM sync_entities WHERE entity_type='purchase_order' AND payload_json->>'parentOrderId'=$1::text)`,
+          `SELECT COALESCE(SUM(a.byte_length),0)::text AS total,COUNT(*) FILTER(WHERE a.owner_type='receipt' AND a.owner_id=$2 AND NOT (a.payload_json ? 'sourceAttachmentId'))::text AS photos FROM attachments a WHERE a.order_id=$1 OR a.order_id IN (SELECT entity_id FROM sync_entities WHERE entity_type='purchase_order' AND payload_json->>'parentOrderId'=$1::text)`,
           [root, data.ownerId],
         )
         if (
@@ -121,6 +142,7 @@ export class AttachmentService {
           throw new AttachmentError('ORDER_ATTACHMENT_LIMIT')
         if (
           data.ownerType === 'receipt' &&
+          !data.sourceAttachmentId &&
           Number(usage.rows[0]?.photos ?? 0) >= 10
         )
           throw new AttachmentError('RECEIPT_PHOTO_LIMIT')

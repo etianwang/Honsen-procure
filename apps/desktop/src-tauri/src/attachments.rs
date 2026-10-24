@@ -1,5 +1,7 @@
 use super::*;
 use std::io::Write;
+#[path = "heic_limits.rs"]
+mod heic_limits;
 
 const MAX_FILE: usize = 100 * 1024 * 1024;
 
@@ -33,6 +35,8 @@ struct Metadata {
     status: String,
     uploaded_by: Uuid,
     created_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_attachment_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -48,6 +52,7 @@ pub struct AttachmentView {
     pub available_locally: bool,
     pub retry_count: i64,
     pub last_error: Option<String>,
+    pub source_attachment_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -152,8 +157,20 @@ fn attachment_data(
             |r| r.get(0),
         )
         .map_err(|_| AuthError::Database)?;
-    let metadata = serde_json::from_str(canonical.as_deref().unwrap_or(&json))
+    let mut metadata: Metadata = serde_json::from_str(canonical.as_deref().unwrap_or(&json))
         .map_err(|_| AuthError::Database)?;
+    if canonical.is_none() {
+        let source: Option<String> = connection
+            .query_row(
+                "SELECT source_attachment_id FROM local_attachment_transfers WHERE id=?1",
+                [id.to_string()],
+                |r| r.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        metadata.source_attachment_id = source
+            .map(|v| Uuid::parse_str(&v).map_err(|_| AuthError::Database))
+            .transpose()?;
+    }
     let (path, state) = connection
         .query_row(
             "SELECT local_path,upload_state FROM local_order_attachments WHERE id=?1",
@@ -167,7 +184,7 @@ fn attachment_data(
 impl LocalAuthService {
     pub fn import_attachment(
         &self,
-        input: AttachmentInput,
+        mut input: AttachmentInput,
         now: SystemTime,
     ) -> Result<Uuid, AuthError> {
         if !self.require_order_mutation(now)? {
@@ -190,7 +207,29 @@ impl LocalAuthService {
         {
             return Err(AuthError::InvalidInput);
         }
+        let is_heic = matches!(input.content_type.as_str(), "image/heic" | "image/heif");
+        let original = is_heic.then(|| {
+            (
+                Uuid::new_v4(),
+                bytes.clone(),
+                input.original_name.clone(),
+                input.content_type.clone(),
+            )
+        });
         let bytes = compress_image(bytes, &input.content_type)?;
+        if is_heic {
+            input.original_name = format!(
+                "{}.jpg",
+                input
+                    .original_name
+                    .rsplit_once('.')
+                    .map_or("image", |v| v.0)
+            );
+            input.content_type = "image/jpeg".into();
+            if !valid_type(&input.original_name, &input.content_type) {
+                return Err(AuthError::InvalidInput);
+            }
+        }
         let checksum = format!("{:x}", Sha256::digest(&bytes));
         let folder = self.media_directory.join("attachments");
         fs::create_dir_all(&folder).map_err(|_| AuthError::Database)?;
@@ -203,8 +242,9 @@ impl LocalAuthService {
         }
         let (project,country,root):(String,String,String)=tx.query_row("SELECT project_id,country_id,COALESCE(parent_order_id,id) FROM local_purchase_orders WHERE id=?1 AND deleted_at IS NULL",[input.order_id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_|AuthError::Forbidden)?;
         let total:i64=tx.query_row("SELECT COALESCE(SUM(byte_length),0) FROM local_order_attachments WHERE order_id=?1 OR order_id IN (SELECT id FROM local_purchase_orders WHERE parent_order_id=?1)",[root],|r|r.get(0)).map_err(|_|AuthError::Database)?;
-        let photos:i64=tx.query_row("SELECT COUNT(*) FROM local_attachment_transfers WHERE owner_type='receipt' AND owner_id=?1",[input.owner_id.to_string()],|r|r.get(0)).map_err(|_|AuthError::Database)?;
-        if total + bytes.len() as i64 > 200 * 1024 * 1024
+        let photos:i64=tx.query_row("SELECT COUNT(*) FROM local_attachment_transfers WHERE owner_type='receipt' AND owner_id=?1 AND source_attachment_id IS NULL",[input.owner_id.to_string()],|r|r.get(0)).map_err(|_|AuthError::Database)?;
+        if total + bytes.len() as i64 + original.as_ref().map_or(0, |v| v.1.len() as i64)
+            > 200 * 1024 * 1024
             || (input.owner_type == "receipt" && photos >= 10)
         {
             return Err(AuthError::InvalidInput);
@@ -215,12 +255,29 @@ impl LocalAuthService {
             .create_new(true)
             .open(&path)
             .map_err(|_| AuthError::InvalidInput)?;
+        let mut original_path = None;
         let result = (|| {
+            if let Some((id, source, name, mime)) = &original {
+                let source_path = folder.join(id.to_string());
+                let mut source_file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&source_path)
+                    .map_err(|_| AuthError::Database)?;
+                original_path = Some(source_path.clone());
+                source_file
+                    .write_all(source)
+                    .and_then(|_| source_file.sync_all())
+                    .map_err(|_| AuthError::Database)?;
+                let hash = format!("{:x}", Sha256::digest(source));
+                tx.execute("INSERT INTO local_order_attachments (id,order_id,original_name,content_type,byte_length,local_path,upload_state,checksum,created_at) VALUES (?1,?2,?3,?4,?5,?6,'pending_upload',?7,?8)",params![id.to_string(),input.order_id.to_string(),name,mime,source.len() as i64,source_path.to_str().ok_or(AuthError::InvalidInput)?,hash,unix_seconds(now)]).map_err(|_|AuthError::Database)?;
+                tx.execute("INSERT INTO local_attachment_transfers (id,owner_type,owner_id,project_id,country_id,uploaded_by,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![id.to_string(),input.owner_type,input.owner_id.to_string(),project,country,actor.to_string(),unix_seconds(now)]).map_err(|_|AuthError::Database)?;
+            }
             file.write_all(&bytes)
                 .and_then(|_| file.sync_all())
                 .map_err(|_| AuthError::Database)?;
             tx.execute("INSERT INTO local_order_attachments (id,order_id,original_name,content_type,byte_length,local_path,upload_state,checksum,created_at) VALUES (?1,?2,?3,?4,?5,?6,'pending_upload',?7,?8)",params![input.id.to_string(),input.order_id.to_string(),input.original_name,input.content_type,bytes.len() as i64,path.to_str().ok_or(AuthError::InvalidInput)?,checksum,unix_seconds(now)]).map_err(|_|AuthError::Database)?;
-            tx.execute("INSERT INTO local_attachment_transfers (id,owner_type,owner_id,project_id,country_id,uploaded_by,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![input.id.to_string(),input.owner_type,input.owner_id.to_string(),project,country,actor.to_string(),unix_seconds(now)]).map_err(|_|AuthError::Database)?;
+            tx.execute("INSERT INTO local_attachment_transfers (id,owner_type,owner_id,project_id,country_id,uploaded_by,created_at,source_attachment_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",params![input.id.to_string(),input.owner_type,input.owner_id.to_string(),project,country,actor.to_string(),unix_seconds(now),original.as_ref().map(|v| v.0.to_string())]).map_err(|_|AuthError::Database)?;
             if input.owner_type == "receipt" {
                 tx.execute("INSERT INTO local_receipt_attachment_links (receipt_id,attachment_id) VALUES (?1,?2)",params![input.owner_id.to_string(),input.id.to_string()]).map_err(|_|AuthError::Database)?;
             }
@@ -231,7 +288,7 @@ impl LocalAuthService {
                 "attachment_imported",
                 None,
                 None,
-                Some(&input.id.to_string()),
+                Some(&serde_json::json!({"id":input.id,"sourceAttachmentId":original.as_ref().map(|v|v.0),"conversion":if is_heic {"heic-rs/0.1.4 -> jpeg/quality82/max2048"}else{"none"}}).to_string()),
                 now,
             )?;
             tx.commit().map_err(|_| AuthError::Database)
@@ -239,6 +296,9 @@ impl LocalAuthService {
         drop(file);
         if result.is_err() {
             let _ = fs::remove_file(&path);
+            if let Some(source_path) = original_path {
+                let _ = fs::remove_file(source_path);
+            }
         }
         result.map(|_| input.id)
     }
@@ -249,7 +309,7 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<Vec<AttachmentView>, AuthError> {
         let connection = self.historical_order_connection(order_id, now)?;
-        connection.prepare("SELECT a.id,t.owner_type,t.owner_id,a.original_name,a.content_type,a.byte_length,a.upload_state,a.local_path,t.retry_count,t.last_error FROM local_order_attachments a JOIN local_attachment_transfers t ON t.id=a.id WHERE a.order_id=?1 ORDER BY a.created_at,a.id").map_err(|_|AuthError::Database)?.query_map([order_id.to_string()],|r|Ok(AttachmentView{id:Uuid::parse_str(&r.get::<_,String>(0)?).map_err(|_|rusqlite::Error::InvalidQuery)?,owner_type:r.get(1)?,owner_id:Uuid::parse_str(&r.get::<_,String>(2)?).map_err(|_|rusqlite::Error::InvalidQuery)?,original_name:r.get(3)?,content_type:r.get(4)?,byte_length:r.get(5)?,upload_state:r.get(6)?,available_locally:Path::new(&r.get::<_,String>(7)?).is_file(),retry_count:r.get(8)?,last_error:r.get(9)?})).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)
+        connection.prepare("SELECT a.id,t.owner_type,t.owner_id,a.original_name,a.content_type,a.byte_length,a.upload_state,a.local_path,t.retry_count,t.last_error,t.source_attachment_id FROM local_order_attachments a JOIN local_attachment_transfers t ON t.id=a.id WHERE a.order_id=?1 ORDER BY a.created_at,a.id").map_err(|_|AuthError::Database)?.query_map([order_id.to_string()],|r|Ok(AttachmentView{id:Uuid::parse_str(&r.get::<_,String>(0)?).map_err(|_|rusqlite::Error::InvalidQuery)?,owner_type:r.get(1)?,owner_id:Uuid::parse_str(&r.get::<_,String>(2)?).map_err(|_|rusqlite::Error::InvalidQuery)?,original_name:r.get(3)?,content_type:r.get(4)?,byte_length:r.get(5)?,upload_state:r.get(6)?,available_locally:Path::new(&r.get::<_,String>(7)?).is_file(),retry_count:r.get(8)?,last_error:r.get(9)?,source_attachment_id:r.get::<_,Option<String>>(10)?.map(|v|Uuid::parse_str(&v).map_err(|_|rusqlite::Error::InvalidQuery)).transpose()?})).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)
     }
 
     pub fn list_attachment_targets(
@@ -313,6 +373,9 @@ fn validate_metadata(metadata: &Metadata) -> Result<(), AuthError> {
         )
         || (metadata.owner_type == "purchase_order" && metadata.owner_id != metadata.order_id)
         || (metadata.owner_type == "receipt" && !metadata.content_type.starts_with("image/"))
+        || metadata
+            .source_attachment_id
+            .is_some_and(|source| source == metadata.id || metadata.content_type != "image/jpeg")
     {
         return Err(AuthError::InvalidInput);
     }
@@ -324,6 +387,12 @@ fn project_one(tx: &Transaction<'_>, metadata: &Metadata) -> Result<(), AuthErro
     let scope:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_orders WHERE id=?1 AND project_id=?2 AND country_id=?3 AND deleted_at IS NULL)",params![metadata.order_id.to_string(),metadata.project_id.to_string(),metadata.country_id.to_string()],|r|r.get(0)).map_err(|_|AuthError::Database)?;
     if !scope {
         return Ok(());
+    }
+    if let Some(source) = metadata.source_attachment_id {
+        let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM local_attachment_transfers t JOIN local_order_attachments a ON a.id=t.id WHERE t.id=?1 AND a.order_id=?2 AND t.owner_type=?3 AND t.owner_id=?4 AND a.content_type IN ('image/heic','image/heif') AND t.source_attachment_id IS NULL)", params![source.to_string(), metadata.order_id.to_string(),metadata.owner_type,metadata.owner_id.to_string()], |r|r.get(0)).map_err(|_|AuthError::Database)?;
+        if !exists {
+            return Ok(());
+        }
     }
     let prior: Option<String> = tx
         .query_row(
@@ -357,6 +426,7 @@ fn project_one(tx: &Transaction<'_>, metadata: &Metadata) -> Result<(), AuthErro
             || local.content_type != metadata.content_type
             || local.byte_length != metadata.byte_length
             || local.checksum != metadata.checksum
+            || local.source_attachment_id != metadata.source_attachment_id
         {
             return Err(AuthError::InvalidInput);
         }
@@ -368,7 +438,7 @@ fn project_one(tx: &Transaction<'_>, metadata: &Metadata) -> Result<(), AuthErro
         tx.execute("UPDATE local_attachment_transfers SET version_id=?2,verified_payload_json=?3,last_error=NULL WHERE id=?1",params![metadata.id.to_string(),metadata.version_id,payload]).map_err(|_|AuthError::Database)?;
     } else {
         tx.execute("INSERT INTO local_order_attachments (id,order_id,original_name,content_type,byte_length,local_path,upload_state,object_key,checksum,created_at) VALUES (?1,?2,?3,?4,?5,'','uploaded',?6,?7,?8)",params![metadata.id.to_string(),metadata.order_id.to_string(),metadata.original_name,metadata.content_type,metadata.byte_length as i64,metadata.object_key,metadata.checksum,metadata.created_at]).map_err(|_|AuthError::Database)?;
-        tx.execute("INSERT INTO local_attachment_transfers (id,owner_type,owner_id,project_id,country_id,uploaded_by,created_at,version_id,verified_payload_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![metadata.id.to_string(),metadata.owner_type,metadata.owner_id.to_string(),metadata.project_id.to_string(),metadata.country_id.to_string(),metadata.uploaded_by.to_string(),metadata.created_at,metadata.version_id,payload]).map_err(|_|AuthError::Database)?;
+        tx.execute("INSERT INTO local_attachment_transfers (id,owner_type,owner_id,project_id,country_id,uploaded_by,created_at,version_id,verified_payload_json,source_attachment_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![metadata.id.to_string(),metadata.owner_type,metadata.owner_id.to_string(),metadata.project_id.to_string(),metadata.country_id.to_string(),metadata.uploaded_by.to_string(),metadata.created_at,metadata.version_id,payload,metadata.source_attachment_id.map(|v|v.to_string())]).map_err(|_|AuthError::Database)?;
     }
     if metadata.owner_type == "receipt"
         && owner_exists(tx, metadata.order_id, "receipt", metadata.owner_id)?
@@ -379,7 +449,7 @@ fn project_one(tx: &Transaction<'_>, metadata: &Metadata) -> Result<(), AuthErro
 }
 
 pub(super) fn project_staged(tx: &Transaction<'_>) -> Result<(), AuthError> {
-    let rows=tx.prepare("SELECT entity_id,operation,payload_json FROM local_sync_remote_entities WHERE entity_type='attachment'").map_err(|_|AuthError::Database)?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)?;
+    let rows=tx.prepare("SELECT entity_id,operation,payload_json FROM local_sync_remote_entities WHERE entity_type='attachment' ORDER BY (json_extract(payload_json,'$.sourceAttachmentId') IS NOT NULL)").map_err(|_|AuthError::Database)?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)?;
     for (id, op, payload) in rows {
         let metadata: Metadata =
             serde_json::from_str(&payload).map_err(|_| AuthError::InvalidInput)?;
@@ -417,13 +487,15 @@ fn endpoint(operation: &str) -> Result<reqwest::Url, AuthError> {
         .join(&format!("../attachments/{operation}"))
         .map_err(|_| AuthError::SyncTransport)
 }
-fn http_client() -> Result<reqwest::Client, AuthError> {
-    reqwest::Client::builder()
+fn http_client(auth: &LocalAuthService) -> Result<reqwest::Client, AuthError> {
+    let mut builder = reqwest::Client::builder()
         .https_only(true)
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|_| AuthError::SyncTransport)
+        .timeout(Duration::from_secs(120));
+    if let Some(certificate) = &auth.test_tls_root {
+        builder = builder.add_root_certificate(certificate.clone());
+    }
+    builder.build().map_err(|_| AuthError::SyncTransport)
 }
 fn signed_url(
     transfer: &SignedTransfer,
@@ -456,35 +528,69 @@ async fn successful(response: reqwest::Response) -> Result<reqwest::Response, Au
 }
 
 impl LocalAuthService {
-    async fn transfer_attachment(&self, id: Uuid, now: SystemTime) -> Result<(), AuthError> {
+    fn attachment_response(
+        &self,
+        response: reqwest::Response,
+        session: OnlineSession,
+    ) -> Result<reqwest::Response, AuthError> {
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            session,
+        )?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.reject_sync_session(session)?;
+        }
+        if response.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(AuthError::Forbidden);
+        }
+        if !response.status().is_success() {
+            return Err(AuthError::SyncTransport);
+        }
+        self.verify_test_sync_origin(&response)?;
+        Ok(response)
+    }
+
+    async fn transfer_attachment(
+        &self,
+        id: Uuid,
+        now: SystemTime,
+        sync: &SyncRequest,
+    ) -> Result<(), AuthError> {
         let (metadata, path, _) = attachment_data(
             &*self.connection.lock().map_err(|_| AuthError::Database)?,
             id,
         )?;
         self.require_active_scope_for_order(metadata.order_id, now)?;
-        let actor = self.active_session_user_id()?;
-        if actor != metadata.uploaded_by {
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            sync.session,
+        )?;
+        if sync.session.account_id != metadata.uploaded_by {
             return Err(AuthError::Forbidden);
         }
-        let token = self
-            .credential_vault
-            .load_sync_token(actor)?
-            .ok_or(AuthError::NoActiveSession)?;
-        let client = http_client()?;
-        let request = serde_json::json!({"id":id,"orderId":metadata.order_id,"ownerType":metadata.owner_type,"ownerId":metadata.owner_id,"originalName":metadata.original_name,"contentType":metadata.content_type,"byteLength":metadata.byte_length,"checksum":metadata.checksum});
-        let prepared = successful(
-            client
-                .post(endpoint("prepare")?)
-                .bearer_auth(&token)
-                .json(&request)
-                .send()
-                .await
-                .map_err(|_| AuthError::SyncTransport)?,
-        )
-        .await?
-        .json::<Prepared>()
-        .await
-        .map_err(|_| AuthError::SyncTransport)?;
+        let client = http_client(self)?;
+        let mut request = serde_json::json!({"id":id,"orderId":metadata.order_id,"ownerType":metadata.owner_type,"ownerId":metadata.owner_id,"originalName":metadata.original_name,"contentType":metadata.content_type,"byteLength":metadata.byte_length,"checksum":metadata.checksum});
+        if let Some(source_id) = metadata.source_attachment_id {
+            request["sourceAttachmentId"] = serde_json::json!(source_id);
+        }
+        let prepared = self
+            .attachment_response(
+                client
+                    .post(endpoint("prepare")?)
+                    .bearer_auth(&sync.token)
+                    .json(&request)
+                    .send()
+                    .await
+                    .map_err(|_| AuthError::SyncTransport)?,
+                sync.session,
+            )?
+            .json::<Prepared>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            sync.session,
+        )?;
         let verified = if let Some(verified) = prepared.metadata {
             verified
         } else {
@@ -508,25 +614,33 @@ impl LocalAuthService {
                 }
                 request = request.header(key, value);
             }
+            Self::require_request_session(
+                &*self.connection.lock().map_err(|_| AuthError::Database)?,
+                sync.session,
+            )?;
             let response = request
                 .body(bytes)
                 .send()
                 .await
                 .map_err(|_| AuthError::SyncTransport)?;
+            Self::require_request_session(
+                &*self.connection.lock().map_err(|_| AuthError::Database)?,
+                sync.session,
+            )?;
             // A prior PUT may have succeeded before a crash. Finalization independently hashes the object.
             if !response.status().is_success() && response.status() != reqwest::StatusCode::CONFLICT
             {
                 return Err(AuthError::SyncTransport);
             }
-            successful(
+            self.attachment_response(
                 client
                     .post(endpoint(&format!("{id}/complete"))?)
-                    .bearer_auth(&token)
+                    .bearer_auth(&sync.token)
                     .send()
                     .await
                     .map_err(|_| AuthError::SyncTransport)?,
-            )
-            .await?
+                sync.session,
+            )?
             .json::<Metadata>()
             .await
             .map_err(|_| AuthError::SyncTransport)?
@@ -535,6 +649,7 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        Self::require_request_session(&connection, sync.session)?;
         let tx = connection.transaction().map_err(|_| AuthError::Database)?;
         project_one(&tx, &verified)?;
         tx.commit().map_err(|_| AuthError::Database)
@@ -544,17 +659,22 @@ impl LocalAuthService {
         &self,
         now: SystemTime,
     ) -> Result<ProcurementSyncReport, AuthError> {
-        self.require_catalog_read(now)?;
+        let sync = self.sync_request(now)?;
         // Push order/payment/receipt owners first; upload failures never roll back their offline writes.
         self.push_pending_https(now).await?;
-        let ids=self.connection.lock().map_err(|_|AuthError::Database)?.prepare("SELECT t.id FROM local_attachment_transfers t JOIN local_order_attachments a ON a.id=t.id WHERE a.upload_state='pending_upload' AND t.next_attempt_at<=?1 AND t.uploaded_by=?2 ORDER BY t.created_at,t.id LIMIT 10").map_err(|_|AuthError::Database)?.query_map(params![unix_seconds(now),self.active_session_user_id()?.to_string()],|r|r.get::<_,String>(0)).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            sync.session,
+        )?;
+        let ids=self.connection.lock().map_err(|_|AuthError::Database)?.prepare("SELECT t.id FROM local_attachment_transfers t JOIN local_order_attachments a ON a.id=t.id WHERE a.upload_state='pending_upload' AND t.next_attempt_at<=?1 AND t.uploaded_by=?2 ORDER BY (t.source_attachment_id IS NOT NULL),t.created_at,t.id LIMIT 10").map_err(|_|AuthError::Database)?.query_map(params![unix_seconds(now),sync.session.account_id.to_string()],|r|r.get::<_,String>(0)).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)?;
         let mut completed = 0;
         for id in ids {
             let id = Uuid::parse_str(&id).map_err(|_| AuthError::Database)?;
-            match self.transfer_attachment(id, now).await {
+            match self.transfer_attachment(id, now, &sync).await {
                 Ok(()) => completed += 1,
                 Err(error) => {
                     let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+                    Self::require_request_session(&connection, sync.session)?;
                     let attempts: i64 = connection
                         .query_row(
                             "SELECT retry_count FROM local_attachment_transfers WHERE id=?1",
@@ -571,13 +691,18 @@ impl LocalAuthService {
                 }
             }
         }
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            sync.session,
+        )?;
         self.pull_sync_https(now).await?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        let pending:i64=connection.query_row("SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL)+(SELECT COUNT(*) FROM local_order_attachments a JOIN local_attachment_transfers t ON t.id=a.id WHERE a.upload_state='pending_upload')",[],|r|r.get(0)).map_err(|_|AuthError::Database)?;
+        Self::require_request_session(&connection, sync.session)?;
+        let pending:i64=connection.query_row("SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL AND owner_account_id=?1)+(SELECT COUNT(*) FROM local_order_attachments a JOIN local_attachment_transfers t ON t.id=a.id WHERE a.upload_state='pending_upload' AND t.uploaded_by=?1)",[sync.session.account_id.to_string()],|r|r.get(0)).map_err(|_|AuthError::Database)?;
         let conflicts: i64 = connection
             .query_row(
-                "SELECT COUNT(*) FROM local_sync_conflicts WHERE resolved_at IS NULL",
-                [],
+                "SELECT COUNT(*) FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id=c.event_id WHERE c.resolved_at IS NULL AND o.owner_account_id=?1",
+                [sync.session.account_id.to_string()],
                 |r| r.get(0),
             )
             .map_err(|_| AuthError::Database)?;
@@ -598,28 +723,30 @@ impl LocalAuthService {
             &*self.connection.lock().map_err(|_| AuthError::Database)?,
             id,
         )?;
-        drop(self.historical_order_connection(metadata.order_id, now)?);
+        let authorized = self.historical_order_connection(metadata.order_id, now)?;
         if !path.is_empty() && Path::new(&path).is_file() {
             return read_verified(&metadata, Path::new(&path));
         }
-        let actor = self.active_session_user_id()?;
-        let token = self
-            .credential_vault
-            .load_sync_token(actor)?
-            .ok_or(AuthError::NoActiveSession)?;
-        let client = http_client()?;
-        let response = successful(
-            client
-                .get(endpoint(&format!("{id}/download"))?)
-                .bearer_auth(&token)
-                .send()
-                .await
-                .map_err(|_| AuthError::SyncTransport)?,
-        )
-        .await?
-        .json::<Download>()
-        .await
-        .map_err(|_| AuthError::SyncTransport)?;
+        drop(authorized);
+        let sync = self.sync_request(now)?;
+        let client = http_client(self)?;
+        let response = self
+            .attachment_response(
+                client
+                    .get(endpoint(&format!("{id}/download"))?)
+                    .bearer_auth(&sync.token)
+                    .send()
+                    .await
+                    .map_err(|_| AuthError::SyncTransport)?,
+                sync.session,
+            )?
+            .json::<Download>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            sync.session,
+        )?;
         if response.metadata != metadata {
             return Err(AuthError::InvalidInput);
         }
@@ -653,6 +780,10 @@ impl LocalAuthService {
                 }
                 file.write_all(&bytes).map_err(|_| AuthError::Database)?;
             }
+            Self::require_request_session(
+                &*self.connection.lock().map_err(|_| AuthError::Database)?,
+                sync.session,
+            )?;
             file.sync_all().map_err(|_| AuthError::Database)?;
             read_verified(&metadata, &temp)
         }
@@ -660,15 +791,18 @@ impl LocalAuthService {
         drop(file);
         let result = match result {
             Ok(data) => {
+                let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+                if let Err(error) = Self::require_request_session(&connection, sync.session) {
+                    let _ = fs::remove_file(&temp);
+                    return Err(error);
+                }
                 if path.exists() {
                     let _ = fs::remove_file(&temp);
                     read_verified(&metadata, &path)?;
                 } else {
                     fs::rename(&temp, &path).map_err(|_| AuthError::Database)?;
                 }
-                self.connection
-                    .lock()
-                    .map_err(|_| AuthError::Database)?
+                connection
                     .execute(
                         "UPDATE local_order_attachments SET local_path=?2 WHERE id=?1",
                         params![id.to_string(), path.to_str().ok_or(AuthError::Database)?],
@@ -712,6 +846,35 @@ pub struct ProcurementSyncReport {
 
 fn compress_image(bytes: Vec<u8>, mime: &str) -> Result<Vec<u8>, AuthError> {
     use image::ImageDecoder;
+    if matches!(mime, "image/heic" | "image/heif") {
+        heic_limits::check(&bytes, 32 * 1024 * 1024)?;
+        let info = heic_rs::probe(&bytes).map_err(|_| AuthError::InvalidInput)?;
+        if [info.width, info.height, info.coded_width, info.coded_height]
+            .into_iter()
+            .any(|v| v == 0 || v > 8192)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let options = heic_rs::DecodeOptions {
+            max_pixels: Some(32 * 1024 * 1024),
+            strict: true,
+            ..Default::default()
+        };
+        let pixels = heic_rs::decode(&bytes, &options).map_err(|_| AuthError::InvalidInput)?;
+        let decoded = image::RgbImage::from_raw(pixels.width, pixels.height, pixels.data)
+            .ok_or(AuthError::InvalidInput)?;
+        let decoded = image::DynamicImage::ImageRgb8(decoded);
+        let decoded = if decoded.width() > 2048 || decoded.height() > 2048 {
+            decoded.thumbnail(2048, 2048)
+        } else {
+            decoded
+        };
+        let mut output = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, 82)
+            .encode_image(&decoded)
+            .map_err(|_| AuthError::InvalidInput)?;
+        return Ok(output);
+    }
     let format = match mime {
         "image/jpeg" => image::ImageFormat::Jpeg,
         "image/png" => image::ImageFormat::Png,
@@ -754,6 +917,46 @@ fn compress_image(bytes: Vec<u8>, mime: &str) -> Result<Vec<u8>, AuthError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn heic_decodes_real_pixels_and_rejects_corruption_and_excess_dimensions() {
+        for (fixture, dimensions) in [
+            (
+                include_bytes!("../../../../tests/fixtures/heic/gradient-512.heic").as_slice(),
+                (512, 512),
+            ),
+            (
+                include_bytes!("../../../../tests/fixtures/heic/checker-1024.heic").as_slice(),
+                (1024, 1024),
+            ),
+        ] {
+            let output = compress_image(fixture.to_vec(), "image/heic").unwrap();
+            if dimensions == (512, 512) {
+                assert_eq!(
+                    output,
+                    include_bytes!("../../../../tests/fixtures/heic/gradient-512.jpg")
+                );
+            }
+            assert!(
+                valid_signature(&output, "image/jpeg"),
+                "HEIC must be decoded and encoded as JPEG"
+            );
+            let decoded = image::load_from_memory(&output).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), dimensions);
+            assert!(compress_image(fixture[..32].to_vec(), "image/heic").is_err());
+            let mut oversized = fixture.to_vec();
+            let indices: Vec<_> = oversized
+                .windows(4)
+                .enumerate()
+                .filter_map(|(i, v)| (v == b"ispe").then_some(i))
+                .collect();
+            assert!(!indices.is_empty());
+            for index in indices {
+                oversized[index + 8..index + 12].copy_from_slice(&9000u32.to_be_bytes());
+            }
+            assert!(compress_image(oversized, "image/heic").is_err());
+        }
+        assert!(compress_image(b"not an image".to_vec(), "image/heic").is_err());
+    }
     fn login(service: &LocalAuthService, actor: Uuid, now: SystemTime) {
         service
             .cache_verified_account(
@@ -784,6 +987,58 @@ mod tests {
             )
             .unwrap();
     }
+    #[test]
+    fn attachment_responses_reject_stale_generations_and_invalidate_only_the_captured_session() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        login(&service, a, now);
+        login(&service, b, now);
+        let response = |status| {
+            reqwest::Response::from(
+                tauri::http::Response::builder()
+                    .status(status)
+                    .body(String::new())
+                    .unwrap(),
+            )
+        };
+        service
+            .activate_online_session(a, &"a".repeat(32), now)
+            .unwrap();
+        let old = service.sync_request(now).unwrap().session;
+        assert!(service.attachment_response(response(200), old).is_ok());
+        service
+            .activate_online_session(b, &"b".repeat(32), now)
+            .unwrap();
+        assert!(matches!(
+            service.attachment_response(response(200), old),
+            Err(AuthError::SyncAccountBoundary)
+        ));
+        assert!(matches!(
+            service.attachment_response(response(401), old),
+            Err(AuthError::SyncAccountBoundary)
+        ));
+        assert_eq!(service.require_online_sync_session(now), Ok(b));
+        let prior_generation = service.sync_request(now).unwrap().session;
+        service
+            .activate_online_session(b, &"c".repeat(32), now)
+            .unwrap();
+        assert!(matches!(
+            service.attachment_response(response(200), prior_generation),
+            Err(AuthError::SyncAccountBoundary)
+        ));
+        let current = service.sync_request(now).unwrap().session;
+        assert!(matches!(
+            service.attachment_response(response(401), current),
+            Err(AuthError::NoActiveSession)
+        ));
+        assert_eq!(
+            service.require_online_sync_session(now),
+            Err(AuthError::NoActiveSession)
+        );
+    }
+
     #[test]
     fn file_queue_survives_restart_and_limits_receipt_photos_and_scope() {
         let path =
@@ -900,6 +1155,11 @@ mod tests {
                     payment_method: "cash".into(),
                     voucher_reference: None,
                     notes: None,
+                    receipt_id: None,
+                    counterparty_type: None,
+                    supplier_id: None,
+                    payment_handler_id: None,
+                    voucher_attachment_ids: vec![],
                 },
                 now,
             )
@@ -1027,6 +1287,55 @@ mod tests {
         ));
         login(&service, actor, now);
         assert_eq!(service.list_attachments(order, now).unwrap().len(), 11);
+        let heic_bytes = include_bytes!("../../../../tests/fixtures/heic/gradient-512.heic");
+        let heic_id = Uuid::new_v4();
+        let heic_input = AttachmentInput {
+            id: heic_id,
+            order_id: order,
+            owner_type: "purchase_order".into(),
+            owner_id: order,
+            original_name: "gradient.heic".into(),
+            content_type: "image/heic".into(),
+            data_base64: BASE64.encode(heic_bytes),
+        };
+        service.import_attachment(heic_input.clone(), now).unwrap();
+        let (derivative, derived_path, _) =
+            attachment_data(&*service.connection.lock().unwrap(), heic_id).unwrap();
+        assert_eq!(derivative.content_type, "image/jpeg");
+        assert_eq!(derivative.original_name, "gradient.jpg");
+        let source_id = derivative.source_attachment_id.unwrap();
+        let (source, source_path, _) =
+            attachment_data(&*service.connection.lock().unwrap(), source_id).unwrap();
+        assert_eq!(source.checksum, format!("{:x}", Sha256::digest(heic_bytes)));
+        assert_eq!(fs::read(source_path).unwrap(), heic_bytes);
+        assert!(
+            fs::read(derived_path)
+                .unwrap()
+                .starts_with(&[255, 216, 255])
+        );
+        assert_eq!(service.list_attachments(order, now).unwrap().len(), 13);
+        assert_eq!(
+            service.import_attachment(heic_input.clone(), now),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service.import_attachment(
+                AttachmentInput {
+                    id: Uuid::new_v4(),
+                    data_base64: BASE64.encode(&heic_bytes[..32]),
+                    ..heic_input
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(service.list_attachments(order, now).unwrap().len(), 13);
+        assert_eq!(
+            fs::read_dir(service.media_directory.join("attachments"))
+                .unwrap()
+                .count(),
+            13
+        );
         let connection = service.connection.lock().unwrap();
         connection
             .execute(

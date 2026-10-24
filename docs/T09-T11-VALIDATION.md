@@ -1,5 +1,7 @@
 # T09-A / T11 QA candidate — 2026-10-24
 
+Historical checkpoint below. Current HEIC implementation, baseline merge, migration and Windows status are in [T09-T11-RELEASE-HANDOFF.md](T09-T11-RELEASE-HANDOFF.md). HEIC conversion is implemented; actual two-client Windows payment/COS acceptance is blocked at native credential storage.
+
 ## Scope and evidence boundary
 
 Continue `codex/procurement-t09a` from `164298a97ca8699fe32bdfcc09704f8353c1d401`, based on unified baseline `d3485144b075dceb8082e493c94791aab699a3af`. Checkpoint `2ec7d53eeb501f167f7964b5239ab5637fe2714e` is pushed and its GitHub `quality` passed. Application checkpoint `f7dfffbdb6cb88014b5bbd63f9e9da36db1d4f96` adds the local queue and review repairs. Its [quality run 40097987673](https://github.com/etianwang/Honsen-procure/actions/runs/40097987673) passed. [Draft PR #19](https://github.com/etianwang/Honsen-procure/pull/19) targets the unified baseline. No other worktree, release branch or production deployment is involved.

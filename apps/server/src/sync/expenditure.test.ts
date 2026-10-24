@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { SyncService } from './service.js'
 import type { SyncStore } from './types.js'
 
-const actor = { id: randomUUID(), roles: ['purchaser'] as const }
+const actor = {
+  id: randomUUID(),
+  installationId: randomUUID(),
+  roles: ['purchaser'] as const,
+}
 const orderId = randomUUID()
 const projectId = randomUUID()
 const countryId = randomUUID()
@@ -28,6 +32,8 @@ function fixture() {
   const order = {
     projectId,
     countryId,
+    departmentId: randomUUID(),
+    teamId: randomUUID(),
     currency: 'XOF',
     procurementMode: 'honsen_self_purchase',
     workflowStatus: 'executing',
@@ -40,6 +46,9 @@ function fixture() {
       return { changes: [], nextCursor: '0' }
     },
     async hasActiveProjectBinding() {
+      return true
+    },
+    async isCompatibleProjectTax() {
       return true
     },
     async hasProjectBusinessUse() {
@@ -71,6 +80,39 @@ async function push(service: SyncService, data: Record<string, unknown>) {
 describe('payment sync validation', () => {
   it('accepts an actual payment with exact integer minor units', async () => {
     expect(await push(fixture().service, payload())).toBe('accepted')
+  })
+  it('retains independent actual handler while rejecting a forged record creator', async () => {
+    const actualHandler = randomUUID()
+    expect(
+      await push(fixture().service, {
+        ...payload(),
+        paymentHandlerId: actualHandler,
+      }),
+    ).toBe('accepted')
+    expect(
+      await push(fixture().service, { ...payload(), createdBy: actualHandler }),
+    ).toBe('validation_error')
+  })
+  it('checks the payment order department/team scope and denies revoked bindings', async () => {
+    const { store, order, service } = fixture()
+    let enabled = true
+    store.hasActiveProjectBinding = async (
+      account,
+      project,
+      department,
+      team,
+    ) =>
+      enabled &&
+      account === actor.id &&
+      project === projectId &&
+      department === order.departmentId &&
+      team === order.teamId
+    expect(await push(service, payload())).toBe('accepted')
+    enabled = false
+    expect(await push(service, payload())).toBe('validation_error')
+    enabled = true
+    store.getEntityPayload = async () => ({ ...order, departmentId: null })
+    expect(await push(service, payload())).toBe('validation_error')
   })
   it.each([
     { currency: 'EUR' },

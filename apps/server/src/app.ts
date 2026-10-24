@@ -1,10 +1,11 @@
 import Fastify from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import websocket from '@fastify/websocket'
 import { z } from 'zod'
 import { AuthenticationError, AuthService } from './auth/service.js'
 import { MasterDataError, MasterDataService } from './master-data/service.js'
-import { SyncService } from './sync/service.js'
 import { AttachmentService, attachmentStatus } from './attachments/service.js'
+import { CategoryRepairError, SyncService } from './sync/service.js'
 import {
   AuthorizationError,
   AuthorizationService,
@@ -19,8 +20,8 @@ export function createApp(
   sync?: SyncService,
   authorization?: AuthorizationService,
   attachments?: AttachmentService,
+  app: FastifyInstance = Fastify({ logger: false }),
 ) {
-  const app = Fastify({ logger: false })
   const sockets = new Set<{
     send(data: string): void
     close(code?: number): void
@@ -272,6 +273,74 @@ export function createApp(
   }
 
   if (sync) {
+    app.get('/api/sync/category-quarantine', async (request, reply) => {
+      try {
+        if (typeof request.headers.authorization !== 'string')
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        return await sync.listCategoryQuarantine(
+          await authenticateRequest(request),
+        )
+      } catch (error) {
+        if (error instanceof AuthenticationError)
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        if (error instanceof CategoryRepairError)
+          return reply
+            .status(error.code === 'FORBIDDEN' ? 403 : 503)
+            .send({ code: error.code })
+        if (error instanceof z.ZodError)
+          return reply.status(400).send({ code: 'INVALID_REQUEST' })
+        throw error
+      }
+    })
+    app.post('/api/sync/category-repairs', async (request, reply) => {
+      try {
+        if (typeof request.headers.authorization !== 'string')
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        return await sync.repairCategory(
+          await authenticateRequest(request),
+          request.body,
+        )
+      } catch (error) {
+        if (error instanceof AuthenticationError)
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        if (error instanceof CategoryRepairError)
+          return reply
+            .status(
+              error.code === 'FORBIDDEN'
+                ? 403
+                : error.code === 'CONFLICT'
+                  ? 409
+                  : 503,
+            )
+            .send({ code: error.code })
+        if (error instanceof z.ZodError)
+          return reply.status(400).send({ code: 'INVALID_REQUEST' })
+        throw error
+      }
+    })
+    app.post('/api/sync/catalog-repairs', async (request, reply) => {
+      try {
+        if (typeof request.headers.authorization !== 'string')
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        const response = await sync.repairCatalog(
+          await authenticateRequest(request),
+          request.body,
+        )
+        if (response.status === 'accepted') {
+          const hint = JSON.stringify({ type: 'dataset-changed' })
+          for (const socket of sockets) socket.send(hint)
+        }
+        return response
+      } catch (error) {
+        if (error instanceof AuthenticationError)
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        if (error instanceof CategoryRepairError)
+          return reply.status(403).send({ code: error.code })
+        if (error instanceof z.ZodError)
+          return reply.status(400).send({ code: 'INVALID_REQUEST' })
+        throw error
+      }
+    })
     app.post('/api/sync/push', async (request, reply) => {
       try {
         const account = await authenticateRequest(request)

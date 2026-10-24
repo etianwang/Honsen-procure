@@ -2,6 +2,11 @@ import { procurementMutation } from './procurement-sync'
 export type RecordProcurementExpenditureInput = {
   id: string
   orderId: string
+  receiptId?: string | null
+  counterpartyType?: 'registered_supplier' | 'market_casual'
+  supplierId?: string | null
+  paymentHandlerId?: string
+  voucherAttachmentIds?: string[]
   payeeName: string
   currency: string
   amountMinor: string

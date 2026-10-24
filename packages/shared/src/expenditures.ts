@@ -9,7 +9,23 @@ export const procurementExpenditureSchema = z
     projectId: uuidSchema,
     countryId: uuidSchema,
     supplierId: uuidSchema.nullish(),
-    payeeName: z.string().trim().min(1).max(255),
+    receiptId: uuidSchema.nullish(),
+    counterpartyType: z
+      .enum(['registered_supplier', 'market_casual'])
+      .nullish(),
+    counterpartySnapshot: z
+      .strictObject({
+        type: z.enum(['registered_supplier', 'market_casual']),
+        supplierId: uuidSchema.nullish(),
+        name: z.string().min(1).max(500),
+      })
+      .nullish(),
+    voucherAttachmentIds: z
+      .array(uuidSchema)
+      .max(100)
+      .refine((ids) => new Set(ids).size === ids.length)
+      .optional(),
+    payeeName: z.string().trim().min(1).max(500),
     currency: currencySchema,
     amountMinor: z
       .string()
@@ -29,6 +45,19 @@ export const procurementExpenditureSchema = z
   })
   .strict()
   .superRefine((v, ctx) => {
+    if (
+      (v.counterpartySnapshot &&
+        (v.counterpartySnapshot.type !== v.counterpartyType ||
+          (v.counterpartySnapshot.supplierId ?? null) !==
+            (v.supplierId ?? null))) ||
+      (v.counterpartyType === 'market_casual' && v.supplierId != null) ||
+      (v.counterpartyType === 'registered_supplier' && v.supplierId == null)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Invalid counterparty association.',
+      })
+
     if (
       v.status === 'reversed'
         ? !v.correctsExpenditureId ||

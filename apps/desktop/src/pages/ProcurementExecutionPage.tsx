@@ -139,7 +139,7 @@ export function ProcurementExecutionPage({
           {selected.procurementMode === 'honsen_self_purchase' &&
           ['executing', 'receiving'].includes(selected.workflowStatus) ? (
             <ReceiptPanel
-              key={selected.id}
+              key={`receipt-${selected.id}`}
               api={tauriReceiptApi}
               orderId={selected.id}
               receiverId={receiverId}
@@ -217,17 +217,24 @@ export function ProcurementExecutionPage({
                 suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
                 onCreated={refresh}
               />
-              <RfqPanel
-                api={rfqApi}
-                sourceOrderId={selected.id}
-                suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
-              />
             </>
           ) : null}
           <AttachmentPanel
             key={`attachments-${selected.id}`}
             orderId={selected.id}
           />
+          {selected.procurementMode !== 'owner_self_purchase' ? (
+            <RfqPanel
+              key={selected.id}
+              api={rfqApi}
+              sourceOrderId={selected.id}
+              suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
+              canCreate={
+                selected.children.length === 0 &&
+                ['confirmed', 'approved'].includes(selected.workflowStatus)
+              }
+            />
+          ) : null}
         </section>
       ) : null}
     </>

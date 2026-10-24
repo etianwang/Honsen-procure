@@ -1,0 +1,42 @@
+# PR #19 API and attachment release handoff
+
+Status: implementation checkpoint; **Windows cross-client acceptance is BLOCKED_ENV**. Keep PR #19 Draft. This document supersedes the earlier HEIC limitation and ancestry statements in `T09-T11-VALIDATION.md`. No production migration or deployment was executed.
+
+## Artifact and update order
+
+1. Select the exact tested PR #19 commit; include server compiled output, shared contracts, committed lockfiles and **all** server migration files. Use Node.js 24.18.0 and PostgreSQL 16. Desktop connects only through HTTPS API.
+2. Back up PostgreSQL and retain the prior application artifact. Stop API writes before migration; run the migration command using a direct PostgreSQL connection and a migration owner. The normal API database role must remain restricted to runtime operations; the migration runner uses its existing global advisory lock and per-file transaction/checksum journal.
+3. Preserve baseline migrations, including other files sharing numeric prefixes. New payment/archive migrations are `005_procurement_expenditures.sql`, `006_attachments.sql`, `011_attachment_derivation.sql`, and `012_payment_sync_compatibility.sql`. Journal identity is the complete filename, not just its numeric prefix. Never edit an already applied migration or manufacture its journal entry.
+4. Start the new API with COS configuration, verify health and scoped login/Push/Pull/attachment authorization, then distribute the matching desktop. SQLite migrations run locally through the trusted application; do not run SQLite files against PostgreSQL.
+5. On failure, stop writes and retain data for a forward repair. The append-only payment/archive tables are not a reversible destructive down migration; never roll back by dropping them or replacing a business database.
+
+## SQLite compatibility
+
+Retain the original `0032_procurement_expenditures`, `0033_expenditure_immutability`, and `0034_attachment_transfers` files. The unified baseline also contains RFQ `0032_rfq_display_numbers` and payment `0045_procurement_expenditures`: the installer recognizes only exact checksummed historical schema counterparts and avoids executing a second incompatible CREATE. `0056_expenditure_branch_compat` adds missing columns and immutable guards without rewriting original ledger rows; legacy pending wire payloads are normalized with before/after audit. `0057_attachment_derivation` retains original HEIC/JPEG source links; `0058_payment_sync_metadata` preserves complete payment metadata. Include the whole committed migration set.
+
+The new API must be installed first. Preserve pending outbox events and original account provenance. A legacy server payment is interpreted through its stored order and recorded server provenance; raw historical sync payloads must remain auditable. An old desktop cannot provide the new HEIC conversion, reversal or attachment archive behavior. Do not enable those actions on an older binary or claim backward compatibility from a successful health request alone. Final release qualification remains gated on the targeted compatibility tests and a working Windows credential store.
+
+## COS and Baota configuration
+
+Server-only environment variables: `POSTGRES_URL`, `COS_REGION`, `COS_BUCKET`, `COS_SECRET_ID`, `COS_SECRET_KEY`, and optional `COS_SIGNED_URL_TTL_SECONDS` (60–900 seconds, default 900). Missing all COS variables disables the archive service; partial/invalid configuration must fail validation. Never put long-term COS keys in the Windows package, renderer, signed URL, log or release report.
+
+Use a private Bucket in the configured region, HTTPS COS endpoints, synchronized server clocks and STS reachability (`sts.tencentcloudapi.com`). The signing identity needs federation-token authorization and object-scoped `PutObject`/`HeadObject`/`GetObject` operations for the application attachment namespace. Issued temporary policy is restricted to the exact object and the requested Put/Get action. Native Windows transfer does not require browser CORS. No public-read Bucket, wildcard public policy or lifecycle change is needed. Test cleanup requires DeleteObject only for the explicitly authorized isolated test prefix; application archival never deletes another object. Retain the immutable object key/version and forbid overwriting an upload.
+
+Baota PostgreSQL must actually run version 16 and support UUID, JSONB, advisory locks, PL/pgSQL triggers, expression indexes and `gen_random_uuid()`. Keep PostgreSQL private and proxy Node's loopback listener (`127.0.0.1:3000`) through validated HTTPS. Preserve the release-toolbox owner/permission contract: `www` owns application/uploads/logs; root protects scripts/config/backups and database ownership stays with PostgreSQL. Redact authorization headers and signed URL query strings in Nginx/API logs.
+
+HEIC decoding is pinned `heic-rs 0.1.4`, compiled directly into the native EXE, with no external codec DLL/executable or OS codec download. The release must use the committed Cargo lockfile; include the MIT notice in `tests/fixtures/heic/LICENSE-MIT` with third-party notices. Originals and bounded JPEG derivatives are separately archived, linked and hashed. Both count toward 200 MB/order; one source plus its derivative counts as one of ten receipt photos.
+
+## Fresh real evidence and remaining gate
+
+- Independent review closed the HEVC pre-allocation bypass, payment metadata omission and legacy timestamp/handler compatibility findings. Fresh Rust expenditure4/4, payment3/3 and HEIC3/3 passed; original local timestamps/attribution and raw server history remain intact. Targeted PostgreSQL payment tests include dependency retry, wrong-order voucher rejection, distinct actual handler and legacy upgrade/reversal. Old binary/new API interoperability is not asserted by those data-upgrade tests.
+- Workspace formatting, strict types, lint and production build passed, with existing React effect and bundle-size warnings. Desktop unit13 and affected DOM2 passed. Browser DOM fixtures verify presentation only and are distinct from the blocked native evidence below. Full T04/PR17/Linux manual QA was not rerun; the repository's existing GitHub quality workflow remains unchanged.
+
+- Actual Rust-generated synthetic HEIC/JPEG pair: source 4,378 bytes, SHA-256 `a618edb8cc6f7b53ee61bc44178014bf16c51dfb55a592be35c83611d7a236f8`; JPEG 18,098 bytes, SHA-256 `b871e368eb980720f33b7880ec43740d7568667ff4dd82b34aee3feb7110ee80`. Real COS PUT/GET 200, server HEAD/content verification and downloaded hashes matched; exact created objects cleaned with DELETE 204 each. Server/PG integration evidence, not a substitute for Windows IPC transfer.
+- COS implementation is unchanged from `f7dfffb`; its earlier invalid-signature/expired-URL 403 and cleanup evidence is reused only for that unchanged boundary.
+- Two native Windows EXEs (PIDs 8804/43076), separate SQLite directories and installation UUIDs, completed native local CAPTCHA and trusted HTTPS cloud CAPTCHA/authentication into disposable PostgreSQL. Both `online_login` calls failed with `credential_storage_error`; standalone Windows synthetic credential write also returned insufficient memory resources. No protection bypass, credential deletion or false payment/COS-chain PASS.
+- Exact blocked EXE SHA-256: `c399f1355b64d02e802982fcd28fbcbd2e7dcd6fac5c650756e648cc86d6ac3d`. Evidence was collected from a dirty merge candidate based on `369532c`, not the final commit. Evidence directory: `E:/Honsen-T09A/native-20261024144354/`; actual payment, reversal, offline/restart and cross-client attachment phases remain NOT RUN after the login gate.
+- Reproduction: `tests/native/run-t09-t11-chain.ps1 -ResourceRoot <isolated-task-directory> -CosEnvFile <authorized-COS-env-file> -HeicFixture tests/fixtures/heic/checker-1024.heic`. Run on a Windows environment whose system credential store accepts fresh writes. The test uses separate native EXEs, validated local HTTPS, disposable PostgreSQL and an isolated random COS prefix; normal completion cleans only owned resources.
+
+Release-toolbox has received the preliminary integration handoff. Final SHA, CI and independent-review outcome must accompany the final artifact selection. No `READY_FOR_INDEPENDENT_T09_T11_QA` claim while the real Windows chain remains blocked.
+
+Sanitized committed evidence: [HEIC/COS](reviews/PR19-HEIC-COS-20261024.json), [two native Windows instances and credential blocker](reviews/PR19-NATIVE-BLOCKED-20261024.json).

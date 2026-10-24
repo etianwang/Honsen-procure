@@ -133,4 +133,35 @@ test('production attachment UI imports a voucher offline and retains pending sta
     page.getByRole('link', { name: '下载文件', exact: true }),
   ).toBeVisible()
   expect(errors).toEqual([])
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'synthetic-attachments',
+      JSON.stringify([
+        {
+          id: '00000000-0000-4000-8000-000000000924',
+          ownerType: 'purchase_order',
+          ownerId: '00000000-0000-4000-8000-000000000921',
+          originalName: 'gradient.heic',
+          contentType: 'image/heic',
+          byteLength: 4378,
+          uploadState: 'uploaded',
+          availableLocally: true,
+          retryCount: 0,
+          lastError: null,
+          sourceAttachmentId: null,
+        },
+      ]),
+    )
+  })
+  await open()
+  await expect(page.getByText(/gradient.heic.*HEIC 原件/)).toBeVisible()
+  await page.getByRole('button', { name: '查看或下载', exact: true }).click()
+  await expect(
+    page.getByRole('link', { name: '下载文件', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page
+      .getByRole('dialog')
+      .getByRole('img', { name: 'gradient.heic', exact: true }),
+  ).toHaveCount(0)
 })

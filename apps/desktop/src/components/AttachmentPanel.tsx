@@ -148,6 +148,11 @@ export function AttachmentPanel({
                   {file.originalName} · {t[file.ownerType]} · {file.byteLength}{' '}
                   B · {file.uploadState === 'uploaded' ? t.uploaded : t.pending}{' '}
                   · {file.availableLocally ? t.local : t.remote}
+                  {file.sourceAttachmentId
+                    ? ` · ${t.derived}`
+                    : ['image/heic', 'image/heif'].includes(file.contentType)
+                      ? ` · ${t.original}`
+                      : ''}
                 </span>
                 <Button disabled={busy} onClick={() => void view(file)}>
                   {t.view}
@@ -177,7 +182,7 @@ export function AttachmentPanel({
             <a href={preview.data} download={preview.name}>
               {t.download}
             </a>
-            {preview.type.startsWith('image/') ? (
+            {['image/jpeg', 'image/png'].includes(preview.type) ? (
               <img
                 src={preview.data}
                 alt={preview.name}

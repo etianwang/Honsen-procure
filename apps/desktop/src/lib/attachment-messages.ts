@@ -1,6 +1,8 @@
 export const attachmentMessages = {
   'zh-CN': {
     title: '附件与凭证',
+    original: 'HEIC 原件',
+    derived: 'JPEG 预览（关联 HEIC 原件）',
     target: '附件业务关联',
     file: '导入附件',
     retry: '同步及重试',
@@ -13,7 +15,7 @@ export const attachmentMessages = {
     saved: '附件已保存在本机，等待云端校验。',
     error: '附件操作失败；请检查授权、网络、文件格式与大小后重试。',
     limits:
-      '每文件最多 100 MB，订单合计最多 200 MB，每批收货最多 10 张照片。JPG/PNG 在本机校验并压缩。',
+      '每文件最多 100 MB，订单合计最多 200 MB，每批收货最多 10 张照片。JPG/PNG 在本机校验并压缩；HEIC 保留原件并生成 JPEG 预览。',
     purchase_order: '采购附件',
     receipt: '收货照片',
     procurement_expenditure: '付款凭证',
@@ -26,6 +28,8 @@ export const attachmentMessages = {
   },
   'fr-FR': {
     title: 'Pièces jointes et justificatifs',
+    original: 'Original HEIC',
+    derived: 'Aperçu JPEG (original HEIC associé)',
     target: 'Associer à',
     file: 'Importer un fichier',
     retry: 'Synchroniser et réessayer',
@@ -38,7 +42,7 @@ export const attachmentMessages = {
     saved: 'Fichier conservé localement ; vérification cloud en attente.',
     error: 'Échec : vérifier les droits, le réseau, le format et la taille.',
     limits:
-      '100 Mo par fichier, 200 Mo par commande, 10 photos par réception. JPG/PNG vérifiés et compressés localement.',
+      '100 Mo par fichier, 200 Mo par commande, 10 photos par réception. JPG/PNG vérifiés et compressés localement ; original HEIC conservé avec aperçu JPEG.',
     purchase_order: 'Pièce de commande',
     receipt: 'Photo de réception',
     procurement_expenditure: 'Justificatif de paiement',
@@ -51,6 +55,8 @@ export const attachmentMessages = {
   },
   'en-US': {
     title: 'Attachments and vouchers',
+    original: 'HEIC original',
+    derived: 'JPEG preview (linked HEIC original)',
     target: 'Business record',
     file: 'Import attachment',
     retry: 'Sync and retry',
@@ -63,7 +69,7 @@ export const attachmentMessages = {
     saved: 'File saved locally; awaiting cloud verification.',
     error: 'Failed: check authorization, connectivity, file type and size.',
     limits:
-      '100 MB per file, 200 MB per order, 10 photos per receipt. JPG/PNG are verified and compressed locally.',
+      '100 MB per file, 200 MB per order, 10 photos per receipt. JPG/PNG are verified and compressed locally; HEIC originals are retained with a JPEG preview.',
     purchase_order: 'Order attachment',
     receipt: 'Receipt photo',
     procurement_expenditure: 'Payment voucher',

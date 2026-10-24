@@ -18,6 +18,7 @@ const viewSchema = z.object({
   availableLocally: z.boolean(),
   retryCount: z.number().int(),
   lastError: z.string().nullable(),
+  sourceAttachmentId: z.uuid().nullable().optional(),
 })
 const targetSchema = z.object({
   ownerType,

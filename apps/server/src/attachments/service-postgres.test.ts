@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { Pool } from 'pg'
 import { beforeAll, afterAll, describe, it, expect } from 'vitest'
 import { runMigrations } from '../db/migration-runner.js'
@@ -15,9 +16,15 @@ describe.skipIf(!url)(
   'PostgreSQL attachment authorization and archival',
   () => {
     const pool = new Pool({ connectionString: url })
-    const actor = { id: randomUUID(), roles: ['purchaser'] as const },
+    const actor = {
+        id: randomUUID(),
+        installationId: randomUUID(),
+        roles: ['purchaser'] as const,
+      },
       countryId = randomUUID(),
       projectId = randomUUID(),
+      departmentId = randomUUID(),
+      teamId = randomUUID(),
       orderId = randomUUID()
     const file = Buffer.from(
       '%PDF-1.4\n% Synthetic attachment API integration\n%%EOF\n',
@@ -78,7 +85,19 @@ describe.skipIf(!url)(
         `INSERT INTO user_project_bindings (user_id,project_id) VALUES ($1,$2)`,
         [actor.id, projectId],
       )
-      await new PostgresSyncStore(pool).pushEvent({
+      await pool.query(
+        `INSERT INTO departments(id,business_code,name) VALUES($1::uuid,$1::text,'Synthetic')`,
+        [departmentId],
+      )
+      await pool.query(
+        `INSERT INTO teams(id,department_id,business_code,name) VALUES($1::uuid,$2,$1::text,'Synthetic')`,
+        [teamId, departmentId],
+      )
+      await pool.query(
+        `INSERT INTO user_project_scope_bindings(user_id,project_id,department_id,team_id) VALUES($1,$2,$3,$4)`,
+        [actor.id, projectId, departmentId, teamId],
+      )
+      const seed = await new PostgresSyncStore(pool).pushEvent({
         actorId: actor.id,
         installationId: randomUUID(),
         event: {
@@ -90,12 +109,15 @@ describe.skipIf(!url)(
           payload: {
             countryId,
             projectId,
+            departmentId,
+            teamId,
             currency: 'XOF',
             procurementMode: 'honsen_self_purchase',
             workflowStatus: 'executing',
           },
         },
       })
+      expect(seed, JSON.stringify(seed)).toMatchObject({ status: 'accepted' })
     })
     afterAll(async () => {
       await pool.end()
@@ -117,7 +139,9 @@ describe.skipIf(!url)(
           return account
         },
         async findActiveSession(token) {
-          return token === hashToken('synthetic-test-token') ? account : null
+          return token === hashToken('synthetic-test-token')
+            ? { ...account, installationId: actor.installationId }
+            : null
         },
         async registerFailedLogin() {},
         async registerSuccessfulLogin() {},
@@ -209,7 +233,11 @@ describe.skipIf(!url)(
         ).toBe(true)
         await expect(
           service.download(
-            { id: randomUUID(), roles: ['purchaser'] },
+            {
+              id: randomUUID(),
+              installationId: randomUUID(),
+              roles: ['purchaser'],
+            },
             input.id,
           ),
         ).rejects.toMatchObject({ code: 'FORBIDDEN' })
@@ -230,7 +258,11 @@ describe.skipIf(!url)(
         sync = new SyncService(store)
       const paymentId = randomUUID(),
         receiptId = randomUUID(),
-        secondActor = { id: randomUUID(), roles: ['purchaser'] as const }
+        secondActor = {
+          id: randomUUID(),
+          installationId: randomUUID(),
+          roles: ['purchaser'] as const,
+        }
       await pool.query(
         `INSERT INTO users (id,business_code,username,password_hash,ui_locale,is_enabled) VALUES ($1::uuid,$1::text,$1::text,'fixture','zh-CN',true)`,
         [secondActor.id],
@@ -238,6 +270,10 @@ describe.skipIf(!url)(
       await pool.query(
         `INSERT INTO user_project_bindings (user_id,project_id) VALUES ($1,$2)`,
         [secondActor.id, projectId],
+      )
+      await pool.query(
+        `INSERT INTO user_project_scope_bindings(user_id,project_id,department_id,team_id) VALUES($1,$2,$3,$4)`,
+        [secondActor.id, projectId, departmentId, teamId],
       )
       expect(
         (
@@ -359,6 +395,202 @@ describe.skipIf(!url)(
       ).toHaveLength(2)
     }, 120000)
 
+    it('archives a JPEG derivative only after its immutable same-owner HEIC source', async () => {
+      const archive = new AttachmentService(
+        pool,
+        fake,
+        `honsen-procure-tests/${randomUUID()}/`,
+      )
+      const source = {
+        ...data(),
+        originalName: 'gradient.heic',
+        contentType: 'image/heic',
+      }
+      const derivative = {
+        ...data(),
+        originalName: 'gradient.jpg',
+        contentType: 'image/jpeg',
+        sourceAttachmentId: source.id,
+      }
+      await expect(archive.prepare(actor, derivative)).rejects.toMatchObject({
+        code: 'ATTACHMENT_SOURCE_NOT_VERIFIED',
+      })
+      await archive.prepare(actor, source)
+      await expect(archive.prepare(actor, derivative)).rejects.toMatchObject({
+        code: 'ATTACHMENT_SOURCE_NOT_VERIFIED',
+      })
+      await archive.complete(actor, source.id)
+      await archive.prepare(actor, derivative)
+      expect(await archive.complete(actor, derivative.id)).toMatchObject({
+        sourceAttachmentId: source.id,
+      })
+      await expect(
+        archive.prepare(actor, { ...derivative, id: randomUUID() }),
+      ).rejects.toMatchObject({ code: 'ATTACHMENT_DERIVATIVE_EXISTS' })
+      await expect(
+        archive.prepare(actor, {
+          ...derivative,
+          sourceAttachmentId: randomUUID(),
+          id: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: 'ATTACHMENT_SOURCE_NOT_VERIFIED' })
+    })
+    it('denies attachment access immediately when the department/team scope is revoked', async () => {
+      const archive = new AttachmentService(
+        pool,
+        fake,
+        `honsen-procure-tests/${randomUUID()}/`,
+      )
+      const input = data()
+      await archive.prepare(actor, input)
+      await archive.complete(actor, input.id)
+      try {
+        await pool.query(
+          'UPDATE user_project_scope_bindings SET deleted_at=NOW() WHERE user_id=$1 AND project_id=$2',
+          [actor.id, projectId],
+        )
+        await expect(archive.download(actor, input.id)).rejects.toMatchObject({
+          code: 'FORBIDDEN',
+        })
+        await expect(archive.prepare(actor, data())).rejects.toMatchObject({
+          code: 'FORBIDDEN',
+        })
+      } finally {
+        await pool.query(
+          'UPDATE user_project_scope_bindings SET deleted_at=NULL WHERE user_id=$1 AND project_id=$2',
+          [actor.id, projectId],
+        )
+      }
+    })
+    it('counts ten HEIC originals as ten receipt photos while retaining ten derivatives', async () => {
+      const archive = new AttachmentService(
+        pool,
+        fake,
+        `honsen-procure-tests/${randomUUID()}/`,
+      )
+      const receiptId = randomUUID()
+      const seed = await new PostgresSyncStore(pool).pushEvent({
+        actorId: actor.id,
+        installationId: actor.installationId,
+        event: {
+          eventId: randomUUID(),
+          entityId: receiptId,
+          entityType: 'receipt',
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            id: receiptId,
+            orderId,
+            projectId,
+            receiverId: actor.id,
+            receivedAt: '2026-10-24',
+          },
+        },
+      })
+      expect(seed, JSON.stringify(seed)).toMatchObject({ status: 'accepted' })
+      const input = () => ({
+        ...data(),
+        ownerType: 'receipt',
+        ownerId: receiptId,
+        originalName: 'gradient.heic',
+        contentType: 'image/heic',
+      })
+      for (let i = 0; i < 10; i++) {
+        const source = input()
+        await archive.prepare(actor, source)
+        await archive.complete(actor, source.id)
+        const derived = {
+          ...input(),
+          originalName: 'gradient.jpg',
+          contentType: 'image/jpeg',
+          sourceAttachmentId: source.id,
+        }
+        await archive.prepare(actor, derived)
+      }
+      await expect(archive.prepare(actor, input())).rejects.toMatchObject({
+        code: 'RECEIPT_PHOTO_LIMIT',
+      })
+    })
+    it.skipIf(!real)(
+      'uploads the actual Rust HEIC source/JPEG pair and verifies independent COS reads',
+      async () => {
+        const archived: { key: string; version: string | null }[] = []
+        const sourceId = randomUUID()
+        try {
+          for (const [name, mime, sourceAttachmentId, id] of [
+            ['gradient-512.heic', 'image/heic', undefined, sourceId],
+            ['gradient-512.jpg', 'image/jpeg', sourceId, randomUUID()],
+          ] as const) {
+            const bytes = readFileSync(
+              new URL(
+                `../../../../tests/fixtures/heic/${name}`,
+                import.meta.url,
+              ),
+            )
+            const input = {
+              ...data(),
+              id,
+              originalName: name,
+              contentType: mime,
+              sourceAttachmentId,
+              byteLength: bytes.length,
+              checksum: createHash('sha256').update(bytes).digest('hex'),
+            }
+            const prepared = await service.prepare(actor, input)
+            expect(prepared.upload).toBeDefined()
+            const upload = prepared.upload!
+            const response = await fetch(upload.url, {
+              method: 'PUT',
+              headers: upload.headers,
+              body: bytes,
+              signal: AbortSignal.timeout(30000),
+            })
+            expect(response.status).toBe(200)
+            const owned = {
+              key: new URL(upload.url).pathname.slice(1),
+              version: response.headers.get('x-cos-version-id'),
+            }
+            archived.push(owned)
+            const metadata = await service.complete(actor, id)
+            owned.version = metadata.versionId
+            expect(metadata.sourceAttachmentId).toBe(sourceAttachmentId)
+            const access = await service.download(actor, id)
+            const downloaded = await fetch(access.download.url, {
+              signal: AbortSignal.timeout(30000),
+            })
+            expect(downloaded.status).toBe(200)
+            const body = Buffer.from(await downloaded.arrayBuffer())
+            expect(body.length).toBe(bytes.length)
+            expect(createHash('sha256').update(body).digest('hex')).toBe(
+              input.checksum,
+            )
+            console.info(
+              JSON.stringify({
+                boundary: 'live-cos-heic',
+                type: mime,
+                put: response.status,
+                get: downloaded.status,
+                byteLength: body.length,
+                sha256: input.checksum,
+                hashMatched: true,
+              }),
+            )
+          }
+        } finally {
+          for (const owned of archived) {
+            const status = await real!.removeOwnedTestObject(
+              owned.key,
+              owned.version,
+            )
+            console.info(
+              JSON.stringify({ boundary: 'live-cos-heic-cleanup', status }),
+            )
+            expect(status).toBe(204)
+          }
+        }
+      },
+      120000,
+    )
     it('rejects an engineer upload and an unrelated receipt owner', async () => {
       await expect(
         service.prepare({ ...actor, roles: ['engineer'] }, data()),

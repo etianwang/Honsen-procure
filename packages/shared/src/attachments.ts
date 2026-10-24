@@ -36,6 +36,9 @@ export const attachmentImportSchema = z
     contentType: z.string().min(1).max(128),
     byteLength: z.number().int().min(1).max(104857600),
     checksum: z.string().regex(/^[a-f0-9]{64}$/),
+    sourceAttachmentId: uuidSchema
+      .transform((id) => id.toLowerCase())
+      .optional(),
   })
   .strict()
   .superRefine((v, ctx) => {
@@ -46,7 +49,10 @@ export const attachmentImportSchema = z
     if (
       !types?.includes(v.contentType) ||
       (v.ownerType === 'receipt' && !v.contentType.startsWith('image/')) ||
-      (v.ownerType === 'purchase_order' && v.ownerId !== v.orderId)
+      (v.ownerType === 'purchase_order' && v.ownerId !== v.orderId) ||
+      (v.sourceAttachmentId !== undefined &&
+        (v.sourceAttachmentId === v.id.toLowerCase() ||
+          v.contentType !== 'image/jpeg'))
     )
       ctx.addIssue({
         code: 'custom',
