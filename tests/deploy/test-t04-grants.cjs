@@ -6,6 +6,9 @@ const { tmpdir } = require('node:os')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const assert = require('node:assert/strict')
+const {
+  verifyApiPrivileges,
+} = require('../../deploy/linux/verify-api-privileges.cjs')
 
 async function main() {
   const source = process.env.TEST_DATABASE_URL
@@ -256,6 +259,47 @@ async function main() {
       [order, { projectId: project, countryId: country }, user],
     )
     await db.query(`SET ROLE "${role}"`)
+    const grantPolicy = JSON.parse(
+      readFileSync('deploy/linux/api-grant-policy.json', 'utf8'),
+    )
+    await verifyApiPrivileges(db, grantPolicy)
+    await assert.rejects(
+      verifyApiPrivileges(db, {
+        unreviewed: [{ kind: 'unknown', name: 'attachments', privileges: [] }],
+      }),
+      /Invalid API grant kind/,
+    )
+    await assert.rejects(
+      verifyApiPrivileges(db, {
+        unreviewed: [
+          { kind: 'routine', name: 'unknown', privileges: ['EXECUTE'] },
+        ],
+      }),
+      /Invalid API routine grant/,
+    )
+    await db.query('RESET ROLE')
+    await db.query(
+      `REVOKE EXECUTE ON FUNCTION public.canonical_procurement_payment(jsonb,uuid,timestamptz) FROM "${role}"`,
+    )
+    await db.query(`SET ROLE "${role}"`)
+    await assert.rejects(
+      verifyApiPrivileges(db, grantPolicy),
+      /API database privileges incomplete/,
+    )
+    await db.query('RESET ROLE')
+    await db.query(
+      `GRANT EXECUTE ON FUNCTION public.canonical_procurement_payment(jsonb,uuid,timestamptz) TO "${role}"`,
+    )
+    await db.query(`REVOKE UPDATE(version_id) ON attachments FROM "${role}"`)
+    await db.query(`SET ROLE "${role}"`)
+    await assert.rejects(
+      verifyApiPrivileges(db, grantPolicy),
+      /API database privileges incomplete/,
+    )
+    await db.query('RESET ROLE')
+    await db.query(`GRANT UPDATE(version_id) ON attachments TO "${role}"`)
+    await db.query(`SET ROLE "${role}"`)
+    await verifyApiPrivileges(db, grantPolicy)
     await db.query(
       "INSERT INTO procurement_expenditures(id,order_id,project_id,country_id,currency,amount_minor,status,created_by,created_at,payload_json) VALUES($1,$2,$3,$4,'XOF',1,'recorded',$5,1,'{}')",
       [payment, order, project, country, user],
