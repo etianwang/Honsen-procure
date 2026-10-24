@@ -82,6 +82,10 @@ pub enum RunnerError {
     AppIdMismatch,
     #[error("invalid manifest")]
     ManifestMismatch,
+    #[error("installed manifest does not match the Honsen Procure identity contract")]
+    ManifestContractMismatch,
+    #[error("installed version does not match the release version contract")]
+    VersionContractMismatch,
     #[error("registered target directory does not match")]
     TargetDirectoryMismatch,
     #[error("result path is not unique to this operation")]
@@ -125,13 +129,16 @@ pub fn validate_apply_request(
         || manifest.executable != MAIN_EXECUTABLE
         || manifest.update_runner != RUNNER_EXECUTABLE
         || manifest.publisher != "Honsen"
-        || !is_version(&manifest.version)
-        || !is_version(&registration.version)
-        || !is_version(&request.expected_version)
         || !is_file_name(&manifest.executable)
         || !is_file_name(&manifest.update_runner)
     {
-        return Err(RunnerError::ManifestMismatch);
+        return Err(RunnerError::ManifestContractMismatch);
+    }
+    if !is_version(&manifest.version)
+        || !is_version(&registration.version)
+        || !is_version(&request.expected_version)
+    {
+        return Err(RunnerError::VersionContractMismatch);
     }
     if !same_windows_path(&request.target_dir, &registration.install_location)
         || !is_child_path(
@@ -585,6 +592,16 @@ mod tests {
         assert_eq!(
             validate_apply_request(&request, &registration(), &manifest()),
             Err(RunnerError::TargetDirectoryMismatch)
+        );
+    }
+
+    #[test]
+    fn apply_identifies_a_manifest_identity_mismatch() {
+        let mut manifest = manifest();
+        manifest.update_runner = "OtherRunner.exe".into();
+        assert_eq!(
+            validate_apply_request(&request(), &registration(), &manifest),
+            Err(RunnerError::ManifestContractMismatch)
         );
     }
     #[test]

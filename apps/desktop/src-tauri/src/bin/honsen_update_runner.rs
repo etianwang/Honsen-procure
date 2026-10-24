@@ -174,6 +174,8 @@ fn failure_step(error: &RunnerError) -> &'static str {
         RunnerError::InstallerExit(_) => "installer-exit",
         RunnerError::AppIdMismatch
         | RunnerError::ManifestMismatch
+        | RunnerError::ManifestContractMismatch
+        | RunnerError::VersionContractMismatch
         | RunnerError::TargetDirectoryMismatch
         | RunnerError::RegistrationMissing => "identity-validation",
         _ => "runner",
