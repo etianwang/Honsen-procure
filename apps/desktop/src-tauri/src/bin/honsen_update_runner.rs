@@ -33,10 +33,12 @@ fn run(arguments: Vec<String>) -> Result<(), RunnerError> {
                 return match run_from_temporary_copy(&arguments, &request.operation_id) {
                     Ok(()) => Ok(()),
                     Err(error) => {
-                        write_result_atomically(
-                            &request.result_path,
-                            &failure_result(&request, &error),
-                        )?;
+                        if !has_worker_result(&request) {
+                            write_result_atomically(
+                                &request.result_path,
+                                &failure_result(&request, &error),
+                            )?;
+                        }
                         Err(error)
                     }
                 };
@@ -182,6 +184,21 @@ fn failure_step(error: &RunnerError) -> &'static str {
     }
 }
 
+fn has_worker_result(request: &ApplyRequest) -> bool {
+    let Ok(bytes) = fs::read(&request.result_path) else {
+        return false;
+    };
+    let Ok(result) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    result.get("appId").and_then(serde_json::Value::as_str) == Some(APP_ID)
+        && result
+            .get("operationId")
+            .and_then(serde_json::Value::as_str)
+            == Some(request.operation_id.as_str())
+        && result.get("status").and_then(serde_json::Value::as_str) == Some("failed")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +275,26 @@ mod tests {
         );
         assert_eq!(result.completed_at_utc.len(), 20);
         assert!(result.completed_at_utc.ends_with('Z'));
+    }
+
+    #[test]
+    fn recognizes_only_the_worker_result_for_the_requested_operation() {
+        let directory = std::env::temp_dir().join(format!("honsen-worker-result-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let request = ApplyRequest {
+            source: Source::Toolbox,
+            app_id: APP_ID.into(),
+            wait_pid: 0,
+            installer: PathBuf::from("C:\\setup.exe"),
+            sha256: "a".repeat(64),
+            target_dir: PathBuf::from("C:\\Procure"),
+            expected_version: "1.2.4".into(),
+            restart: false,
+            operation_id: "0f3b2a90-34c4-4d99-bd17-a964da43f6a6".into(),
+            result_path: directory.join("result.json"),
+        };
+        write_result_atomically(&request.result_path, &failure_result(&request, &RunnerError::HashMismatch)).unwrap();
+        assert!(has_worker_result(&request));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
