@@ -4,6 +4,30 @@ const { createHash } = require('node:crypto')
 const path = require('node:path')
 const { Client } = require('pg')
 
+const reviewedRoutines = {
+  preserve_procurement_expenditure: {
+    signature: '()',
+    returns: 'trigger',
+    language: 'plpgsql',
+    privileges: [],
+    hash: '286ef92d7dfb13cb10ae41794b11d937e5a4f47ed9967080b6208c18ce7d0b0f',
+  },
+  preserve_attachment_archive: {
+    signature: '()',
+    returns: 'trigger',
+    language: 'plpgsql',
+    privileges: [],
+    hash: 'ee73f2f6f15718b0088c9471926ec146a1c1685ccde233792d6315ffc13cc74e',
+  },
+  canonical_procurement_payment: {
+    signature: '(pg_catalog.jsonb,pg_catalog.uuid,pg_catalog.timestamptz)',
+    returns: 'jsonb',
+    language: 'sql',
+    privileges: ['EXECUTE'],
+    hash: 'c4da8c1d34676cc6c71d3c82dbd1a8f152dcdcfd5c1e3dfa3627a4d5861aae02',
+  },
+}
+
 async function main() {
   const role = process.env.NEW_ROLE
   if (!/^[a-z_][a-z0-9_]*$/.test(role || ''))
@@ -37,6 +61,21 @@ async function main() {
           : entry.kind === 'sequence'
             ? ['USAGE', 'SELECT']
             : []
+      if (
+        entry.updateColumns !== undefined &&
+        (entry.kind !== 'table' ||
+          entry.name !== 'attachments' ||
+          JSON.stringify(entry.updateColumns) !==
+            JSON.stringify(['status', 'version_id']))
+      )
+        throw new Error('Invalid API column grant')
+      if (
+        entry.kind === 'routine' &&
+        Object.hasOwn(reviewedRoutines, entry.name) &&
+        JSON.stringify(entry.privileges) ===
+          JSON.stringify(reviewedRoutines[entry.name].privileges)
+      )
+        continue
       if (
         entry.kind === 'routine' &&
         entry.name === 'guard_category_business_code' &&
@@ -122,6 +161,55 @@ async function main() {
     )
     if (schema.rows[0].api_create || schema.rows[0].public_create)
       throw new Error('Untrusted CREATE on public schema')
+    for (const [name, spec] of Object.entries(reviewedRoutines)) {
+      const signature = `public.${name}${spec.signature}`
+      const result = await client.query(
+        `SELECT p.prosrc,p.prosecdef,p.prokind,
+        p.oid=$2::regprocedure AS exact_signature,p.prorettype=$3::regtype AS exact_return,
+        l.lanname,pg_get_userbyid(p.proowner) AS owner,current_user AS creator
+        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_language l ON l.oid=p.prolang
+        WHERE n.nspname='public' AND p.proname=$1`,
+        [name, signature, `pg_catalog.${spec.returns}`],
+      )
+      const fn = result.rows[0]
+      if (
+        result.rowCount !== 1 ||
+        fn.prosecdef ||
+        fn.prokind !== 'f' ||
+        !fn.exact_signature ||
+        !fn.exact_return ||
+        fn.lanname !== spec.language ||
+        fn.owner !== fn.creator ||
+        createHash('sha256').update(fn.prosrc).digest('hex') !== spec.hash
+      )
+        throw new Error('Routine is not the reviewed invoker function')
+      await client.query(
+        `ALTER FUNCTION ${signature} SET search_path = pg_catalog, public, pg_temp`,
+      )
+      await client.query(
+        `REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, "${role}"`,
+      )
+      if (spec.privileges.length)
+        await client.query(
+          `GRANT EXECUTE ON FUNCTION ${signature} TO "${role}"`,
+        )
+      if (name !== 'canonical_procurement_payment') {
+        const table =
+          name === 'preserve_procurement_expenditure'
+            ? 'procurement_expenditures'
+            : 'attachments'
+        const trigger =
+          name === 'preserve_procurement_expenditure'
+            ? 'procurement_expenditures_immutable'
+            : 'attachment_archive_immutable'
+        const binding = await client.query(
+          "SELECT count(*)::int AS count FROM pg_trigger WHERE tgrelid=$1::regclass AND tgname=$2 AND tgfoid=$3::regprocedure AND tgenabled='O' AND tgtype=27 AND NOT tgisinternal",
+          [`public.${table}`, trigger, signature],
+        )
+        if (binding.rows[0].count !== 1)
+          throw new Error('Archive immutability trigger is missing or disabled')
+      }
+    }
     const routine =
       await client.query(`SELECT p.prosrc, p.prosecdef, p.prokind, p.pronargs,
       p.prorettype = 'pg_catalog.trigger'::regtype AS returns_trigger,
@@ -175,7 +263,7 @@ async function main() {
           `grant_object=${entry.name} owner=${obj.rows[0].owner} privileges=${entry.privileges.join(',')}`,
         )
         await client.query(
-          `GRANT ${entry.privileges.join(', ')} ON ${entry.kind.toUpperCase()} public."${entry.name}" TO ${quotedRole}`,
+          `GRANT ${entry.privileges.map((privilege) => (privilege === 'UPDATE' && entry.updateColumns ? `UPDATE (${entry.updateColumns.map((column) => `"${column}"`).join(', ')})` : privilege)).join(', ')} ON ${entry.kind.toUpperCase()} public."${entry.name}" TO ${quotedRole}`,
         )
       }
     }
