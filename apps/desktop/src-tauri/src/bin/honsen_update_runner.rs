@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use honsen_materials_desktop_core::update_runner::{
     APP_ID, ApplyRequest, OperationResult, RunnerError, Source, apply, launch,
-    write_result_atomically,
+    utc_timestamp, write_result_atomically,
 };
 
 fn main() -> ExitCode {
@@ -161,7 +161,7 @@ fn failure_result(request: &ApplyRequest, error: &RunnerError) -> OperationResul
         },
         installer_log_path: None,
         message: error.to_string(),
-        completed_at_utc: "0Z".into(),
+        completed_at_utc: utc_timestamp(),
         install_location: None,
         executable_path: None,
     }
@@ -235,5 +235,26 @@ mod tests {
             parse_apply(&arguments.into_iter().map(String::from).collect::<Vec<_>>()),
             Err(RunnerError::ManifestMismatch)
         );
+    }
+
+    #[test]
+    fn failure_result_uses_an_rfc3339_utc_timestamp() {
+        let result = failure_result(
+            &ApplyRequest {
+                source: Source::Toolbox,
+                app_id: APP_ID.into(),
+                wait_pid: 0,
+                installer: PathBuf::from("C:\\setup.exe"),
+                sha256: "a".repeat(64),
+                target_dir: PathBuf::from("C:\\Procure"),
+                expected_version: "1.2.4".into(),
+                restart: false,
+                operation_id: "0f3b2a90-34c4-4d99-bd17-a964da43f6a6".into(),
+                result_path: PathBuf::from("C:\\result.json"),
+            },
+            &RunnerError::HashMismatch,
+        );
+        assert_eq!(result.completed_at_utc.len(), 20);
+        assert!(result.completed_at_utc.ends_with('Z'));
     }
 }

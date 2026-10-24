@@ -504,7 +504,7 @@ fn wait_for_registered_process(pid: u32, expected_path: &Path) -> Result<(), Run
     }
     Ok(())
 }
-fn utc_timestamp() -> String {
+pub fn utc_timestamp() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
