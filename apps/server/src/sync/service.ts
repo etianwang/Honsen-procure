@@ -51,6 +51,18 @@ export class SyncService {
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false
+    if (event.entityType === 'procurement_expenditure') {
+      if (
+        event.operation !== 'upsert' ||
+        !actor.roles.some((role) => procurementRoles.includes(role)) ||
+        !validExpenditure(event.payload, event.entityId, actor.id)
+      ) return false
+      const order = await this.store.getEntityPayload('purchase_order', stringField(event.payload, 'orderId')!)
+      return order !== null &&
+        stringField(order, 'projectId') === stringField(event.payload, 'projectId') &&
+        stringField(order, 'countryId') === stringField(event.payload, 'countryId') &&
+        stringField(order, 'procurementMode') === 'honsen_self_purchase'
+    }
     if (
       referenceMasterDataTypes.includes(
         event.entityType as (typeof referenceMasterDataTypes)[number],
@@ -135,6 +147,21 @@ export class SyncService {
       !(await this.store.hasProjectBusinessUse(event.entityId))
     )
   }
+}
+
+function validExpenditure(payload: Record<string, unknown>, id: string, actorId: string): boolean {
+  const text = (name: string, max = 1000) => {
+    const value = stringField(payload, name)
+    return value !== null && value.trim().length > 0 && value.length <= max
+  }
+  const amount = stringField(payload, 'amountMinor')
+  return stringField(payload, 'id') === id && text('orderId', 36) && text('projectId', 36) && text('countryId', 36) &&
+    text('payeeName', 255) && ['XOF', 'XAF', 'CNY', 'USD', 'EUR', 'ETB'].includes(stringField(payload, 'currency') ?? '') &&
+    amount !== null && /^[1-9]\d*$/.test(amount) && /^\d{4}-\d{2}-\d{2}$/.test(stringField(payload, 'paymentDate') ?? '') &&
+    ['advance', 'progress', 'final', 'other'].includes(stringField(payload, 'paymentType') ?? '') &&
+    ['cash', 'bank_transfer', 'mobile_payment', 'other'].includes(stringField(payload, 'paymentMethod') ?? '') &&
+    stringField(payload, 'paymentHandlerId') === actorId && stringField(payload, 'createdBy') === actorId &&
+    ['recorded', 'reversed'].includes(stringField(payload, 'status') ?? '')
 }
 
 function referencePayload(

@@ -69,6 +69,7 @@ fn main() {
             commands::save_owner_purchase_pricing,
             commands::set_procurement_mode,
             commands::record_receipt,
+            commands::record_procurement_expenditure,
             commands::save_supplier_child_terms,
             commands::send_supplier_order,
             commands::issue_local_captcha,

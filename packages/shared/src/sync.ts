@@ -20,6 +20,7 @@ export const syncEntityTypeSchema = z.enum([
   'receipt',
   'rfq',
   'attachment',
+  'procurement_expenditure',
 ])
 
 export const syncOperationSchema = z.enum(['upsert', 'soft_delete'])

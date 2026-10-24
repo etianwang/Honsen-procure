@@ -13,7 +13,9 @@ export type ProcurementExecutionChild = {
   displayNo: string
   currency: string
   lines: ProcurementExecutionLine[]
+  paymentSummary: ProcurementPaymentSummary
 }
+export type ProcurementPaymentSummary = { currency: string; payableMinor: string; paidMinor: string; remainingMinor: string; overpaidMinor: string; status: string; records: { id: string; payeeName: string; currency: string; amountMinor: string; paymentDate: string; paymentType: string; status: string }[] }
 
 export type ProcurementExecutionOrder = {
   id: string
@@ -23,6 +25,7 @@ export type ProcurementExecutionOrder = {
   workflowStatus: string
   lines: ProcurementExecutionLine[]
   children: ProcurementExecutionChild[]
+  paymentSummary: ProcurementPaymentSummary
 }
 
 export type ProcurementExecutionApi = {

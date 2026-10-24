@@ -356,6 +356,19 @@ pub struct ProcurementExecutionChildView {
     pub display_no: String,
     pub currency: String,
     pub lines: Vec<ProcurementExecutionLineView>,
+    pub payment_summary: ProcurementPaymentSummaryView,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcurementPaymentSummaryView {
+    pub currency: String,
+    pub payable_minor: String,
+    pub paid_minor: String,
+    pub remaining_minor: String,
+    pub overpaid_minor: String,
+    pub status: String,
+    pub records: Vec<ProcurementExpenditureView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -368,6 +381,7 @@ pub struct ProcurementExecutionOrderView {
     pub workflow_status: String,
     pub lines: Vec<ProcurementExecutionLineView>,
     pub children: Vec<ProcurementExecutionChildView>,
+    pub payment_summary: ProcurementPaymentSummaryView,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -557,6 +571,44 @@ pub struct ReceiptView {
     pub order_id: Uuid,
     pub workflow_status: String,
     pub received_item_count: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordProcurementExpenditureInput {
+    pub id: Uuid,
+    pub order_id: Uuid,
+    pub payee_name: String,
+    pub currency: String,
+    pub amount_minor: String,
+    pub payment_date: String,
+    pub payment_type: String,
+    pub payment_method: String,
+    pub voucher_reference: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReverseProcurementExpenditureInput {
+    pub id: Uuid,
+    pub expenditure_id: Uuid,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcurementExpenditureView {
+    pub id: Uuid,
+    pub order_id: Uuid,
+    pub payee_name: String,
+    pub currency: String,
+    pub amount_minor: String,
+    pub payment_date: String,
+    pub payment_type: String,
+    pub status: String,
+    pub voucher_reference: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -2274,9 +2326,9 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let parents = connection
-            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
+            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status, o.total_minor FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
             .map_err(|_| AuthError::Database)?
-            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?)))
+            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?)))
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| AuthError::Database)?;
@@ -2306,20 +2358,57 @@ impl LocalAuthService {
                 })
                 .collect::<Result<Vec<_>, _>>()
         };
+        let payment_summary = |order_id: &str,
+                               currency: &str,
+                               payable: i64|
+         -> Result<ProcurementPaymentSummaryView, AuthError> {
+            let records = connection.prepare("SELECT id, payee_name, currency, amount_minor, payment_date, payment_type, status, voucher_reference, notes FROM local_procurement_expenditures WHERE order_id = ?1 ORDER BY created_at, id").map_err(|_| AuthError::Database)?.query_map([order_id], |row| Ok(ProcurementExpenditureView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, order_id: Uuid::parse_str(order_id).map_err(|_| rusqlite::Error::InvalidQuery)?, payee_name: row.get(1)?, currency: row.get(2)?, amount_minor: row.get::<_, i64>(3)?.to_string(), payment_date: row.get(4)?, payment_type: row.get(5)?, status: row.get(6)?, voucher_reference: row.get(7)?, notes: row.get(8)? })).map_err(|_| AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_| AuthError::Database)?;
+            if records.iter().any(|record| record.currency != currency) {
+                return Err(AuthError::Database);
+            }
+            let paid = records.iter().try_fold(0i128, |sum, record| {
+                let amount = parse_non_negative_minor(&record.amount_minor)?;
+                if record.status == "reversed" {
+                    sum.checked_sub(amount).ok_or(AuthError::InvalidInput)
+                } else {
+                    sum.checked_add(amount).ok_or(AuthError::InvalidInput)
+                }
+            })?;
+            let payable = i128::from(payable);
+            let remaining = (payable - paid).max(0);
+            let overpaid = (paid - payable).max(0);
+            Ok(ProcurementPaymentSummaryView {
+                currency: currency.into(),
+                payable_minor: payable.to_string(),
+                paid_minor: paid.to_string(),
+                remaining_minor: remaining.to_string(),
+                overpaid_minor: overpaid.to_string(),
+                status: if overpaid > 0 {
+                    "overpaid".into()
+                } else if paid == 0 {
+                    "unpaid".into()
+                } else if remaining == 0 {
+                    "paid".into()
+                } else {
+                    "partial".into()
+                },
+                records,
+            })
+        };
         parents
             .into_iter()
-            .map(|(id, display_no, primary_currency, procurement_mode, workflow_status)| {
+            .map(|(id, display_no, primary_currency, procurement_mode, workflow_status, total_minor)| {
                 let children = connection
-                    .prepare("SELECT id, display_no, currency FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
+                    .prepare("SELECT id, display_no, currency, total_minor FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
                     .map_err(|_| AuthError::Database)?
-                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?)))
                     .map_err(|_| AuthError::Database)?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| AuthError::Database)?
                     .into_iter()
-                    .map(|(child_id, child_display_no, currency)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, currency, lines: read_lines(&child_id)? }))
+                    .map(|(child_id, child_display_no, currency, child_total)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, payment_summary: payment_summary(&child_id, &currency, child_total)?, currency, lines: read_lines(&child_id)? }))
                     .collect::<Result<Vec<_>, AuthError>>()?;
-                Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
+                Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, payment_summary: payment_summary(&id, &primary_currency, total_minor)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
             })
             .collect()
     }
@@ -3360,6 +3449,85 @@ impl LocalAuthService {
             order_id: input.order_id,
             workflow_status: workflow_status.into(),
             received_item_count: input.items.len() as i64,
+        })
+    }
+
+    pub fn record_procurement_expenditure(
+        &self,
+        input: RecordProcurementExpenditureInput,
+        now: SystemTime,
+    ) -> Result<ProcurementExpenditureView, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        self.require_active_scope_for_order(input.order_id, now)?;
+        let amount = as_i64(parse_non_negative_minor(&input.amount_minor)?).and_then(|value| {
+            if value > 0 {
+                Ok(value)
+            } else {
+                Err(AuthError::InvalidInput)
+            }
+        })?;
+        if !valid_required_text(&input.payee_name, 255)
+            || !valid_currency(&input.currency)
+            || !valid_iso_date(&input.payment_date)
+            || !matches!(
+                input.payment_type.as_str(),
+                "advance" | "progress" | "final" | "other"
+            )
+            || !matches!(
+                input.payment_method.as_str(),
+                "cash" | "bank_transfer" | "mobile_payment" | "other"
+            )
+            || !valid_optional_text(&input.voucher_reference, 1000)
+            || !valid_optional_text(&input.notes, 4000)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        let (project_id, country_id, supplier_id, order_currency, mode, parent_id): (String, String, Option<String>, String, Option<String>, Option<String>) = transaction.query_row("SELECT project_id, country_id, supplier_id, currency, procurement_mode, parent_order_id FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL", [input.order_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))).map_err(|_| AuthError::Forbidden)?;
+        let parent_mode: Option<String> = parent_id
+            .as_ref()
+            .map(|id| {
+                transaction
+                    .query_row(
+                        "SELECT procurement_mode FROM local_purchase_orders WHERE id = ?1",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| AuthError::Database)
+            })
+            .transpose()?;
+        if mode.as_deref() != Some("honsen_self_purchase")
+            && parent_mode.as_deref() != Some("honsen_self_purchase")
+            || order_currency != input.currency
+        {
+            return Err(AuthError::Forbidden);
+        }
+        let created_at = unix_seconds(now);
+        transaction.execute("INSERT INTO local_procurement_expenditures (id, order_id, project_id, supplier_id, payee_name, currency, amount_minor, payment_date, payment_type, payment_method, payment_handler_id, voucher_reference, notes, status, created_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'recorded', ?11, ?14)", params![input.id.to_string(), input.order_id.to_string(), project_id, supplier_id, input.payee_name, input.currency, amount, input.payment_date, input.payment_type, input.payment_method, actor_id.to_string(), input.voucher_reference, input.notes, created_at]).map_err(|_| AuthError::InvalidInput)?;
+        let payload = serde_json::json!({"id":input.id,"orderId":input.order_id,"projectId":project_id,"countryId":country_id,"payeeName":input.payee_name,"currency":input.currency,"amountMinor":amount.to_string(),"paymentDate":input.payment_date,"paymentType":input.payment_type,"paymentMethod":input.payment_method,"paymentHandlerId":actor_id,"voucherReference":input.voucher_reference,"notes":input.notes,"status":"recorded","createdBy":actor_id,"createdAt":created_at}).to_string();
+        insert_local_sync_outbox(
+            &transaction,
+            "procurement_expenditure",
+            input.id,
+            &payload,
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(ProcurementExpenditureView {
+            id: input.id,
+            order_id: input.order_id,
+            payee_name: input.payee_name,
+            currency: input.currency,
+            amount_minor: amount.to_string(),
+            payment_date: input.payment_date,
+            payment_type: input.payment_type,
+            status: "recorded".into(),
+            voucher_reference: input.voucher_reference,
+            notes: input.notes,
         })
     }
 
@@ -5042,6 +5210,15 @@ pub mod commands {
         input: super::RecordReceiptInput,
     ) -> Result<super::ReceiptView, CommandError> {
         auth.record_receipt(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn record_procurement_expenditure(
+        auth: State<'_, LocalAuthService>,
+        input: super::RecordProcurementExpenditureInput,
+    ) -> Result<super::ProcurementExpenditureView, CommandError> {
+        auth.record_procurement_expenditure(input, SystemTime::now())
             .map_err(Into::into)
     }
 
