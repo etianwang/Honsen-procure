@@ -1,0 +1,22 @@
+[Unit]
+Description=Honsen Procure API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=honsen-procure
+Group=honsen-procure
+WorkingDirectory=/opt/honsen-procure/current/app
+EnvironmentFile=/etc/honsen-procure/server.env
+ExecStart=/opt/honsen-procure/current/app/node_modules/.bin/tsx /opt/honsen-procure/current/app/apps/server/dist/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/honsen-procure
+
+[Install]
+WantedBy=multi-user.target

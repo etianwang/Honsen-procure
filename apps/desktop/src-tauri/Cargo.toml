@@ -11,6 +11,10 @@ name = "HonsenProcure"
 path = "src/main.rs"
 
 [[bin]]
+name = "HonsenUpdateRunner"
+path = "src/bin/honsen_update_runner.rs"
+
+[[bin]]
 name = "honsen-procure-test-profile"
 path = "src/bin/test_profile.rs"
 
@@ -40,6 +44,10 @@ sha2 = "0.10.9"
 tauri = { version = "2.10.2", default-features = false, features = ["wry"] }
 thiserror = "2.0.17"
 uuid = { version = "1.18.1", features = ["serde", "v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+winreg = "0.56.0"
 
 [build-dependencies]
 tauri-build = { version = "2.7.1", features = [] }

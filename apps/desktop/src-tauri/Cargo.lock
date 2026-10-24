@@ -1292,6 +1292,8 @@ dependencies = [
  "tauri-build",
  "thiserror 2.0.21",
  "uuid",
+ "windows-sys 0.61.2",
+ "winreg",
 ]
 
 [[package]]
