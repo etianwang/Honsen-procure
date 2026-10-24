@@ -13,6 +13,19 @@
   WriteRegStr HKLM "Software\Honsen Program\Apps\honsen.procure" "Publisher" "Honsen"
 !macroend
 
+!macro HonsenWriteUninstallRegistry
+  SetRegView 64
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "DisplayName" "Honsen Procure"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "Publisher" "Honsen"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "DisplayIcon" "$INSTDIR\HonsenProcure.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
+  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "NoModify" 1
+  WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "NoRepair" 1
+!macroend
+
 !define HONSEN_UPDATE_MANIFEST_URL "https://github.com/etianwang/Honsen-procure/releases/latest/download/manifest.json"
 
 !macro HonsenRejectOtherInstall key view
@@ -37,6 +50,7 @@
   Delete "$INSTDIR\resources\HonsenUpdateRunner.exe"
   Delete "$INSTDIR\resources\honsen.app.json"
   !insertmacro HonsenWriteRegistry
+  !insertmacro HonsenWriteUninstallRegistry
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -44,6 +58,8 @@
   ReadRegStr $0 HKLM "Software\Honsen Program\Apps\honsen.procure" "AppId"
   StrCmp "$0" "honsen.procure" 0 +2
     DeleteRegKey HKLM "Software\Honsen Program\Apps\honsen.procure"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure"
   SetRegView 32
   DeleteRegKey HKLM "Software\Honsen Program\Apps\honsen.procure"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure"
 !macroend
