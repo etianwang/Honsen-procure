@@ -4,6 +4,8 @@ The authoritative execution order and mandatory per-task DOM testing gate are in
 
 ## Current delivery path — 2026-10-19
 
+2026-10-24: home demo orders/projects and fixed counts are replaced by authorized saved-history reads, parent-order state counts and separate-currency integer totals, with refresh/error recovery. Bounded desktop unit/DOM/build and existing trusted-history tests pass; no parent or milestone closure. HPA/SPO, formal exports, complete localization and retention acceptance remain required.
+
 2026-10-23: PR #17's historical reference contract P1 has a bounded implementation and PostgreSQL→SQLite builder proof. [Evidence](reviews/PR17-REFERENCE-CONTRACT-REPAIR.md); this does not replace the original independent failure verdict until targeted independent recheck passes. Draft and Windows EXE online-relogin production-release hold remain unchanged.
 
 2026-10-22: a T05 supplier-country editor repair is under independent recheck; no parent or milestone status changes. See the latest `memory.md` handoff.

@@ -2,6 +2,8 @@
 
 ## Global completion gate
 
+2026-10-24 business-flow sprint: the normal home route now loads authorized saved requisitions across all pages, shows actual parent-order state counts and independent-currency integer totals, and removes static demo orders/projects. Refresh failure hides old totals and records. Desktop unit14/14, focused workbench DOM1/1, lint/typecheck/build pass; existing Rust draft-conflict/role/history regressions pass. No migration or sync mutation. This is bounded dashboard implementation evidence; HPA/SPO, T12 exports, full T13 localization and complete closure acceptance remain open. See the current `memory.md` handoff.
+
 2026-10-23 PR #17 historical-reference P1 continuation (B): the trusted Pull projector now strictly normalizes accepted camel/snake reference fields and uses envelope version. The independent PostgreSQL→SQLite failure is a default Rust regression; builder evidence covers fresh PostgreSQL country/project events, restart/regrant, isolation and retained data. [Repair evidence](reviews/PR17-REFERENCE-CONTRACT-REPAIR.md). Independent targeted recheck is still required; keep Draft and all original parent/release gates open.
 
 2026-10-23 PR #17 P1-01/P1-02 (B): implemented durable authorized-history replay, complete supplier/quote validation, dependency/collision quarantine and reasoned administrator recovery. [Builder evidence and recovery boundaries](reviews/PR17-SYNC-P1-REPAIR.md) cover PostgreSQL 16 and real SQLite. The two defects require independent targeted recheck before closure; PR #17 remains Draft and no parent/milestone checkbox changes. Windows EXE online re-login after revocation remains a NOT PASSED V1 production-release security gate under the user's approved gate adjustment.

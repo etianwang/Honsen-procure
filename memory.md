@@ -2,6 +2,12 @@
 
 **Last updated:** 2026-10-23
 
+## Business-flow release sprint — real workbench (2026-10-24)
+
+- Branch `codex/v1-business-flow`, based on unified baseline `d3485144b075dceb8082e493c94791aab699a3af`. This checkpoint replaces hardcoded home orders/projects/counts with all pages from the existing authorized SQLite history command; parent-order counts, separate-currency BigInt totals, closed/cancelled exclusion from the queue, refresh and fail-closed display are implemented. No schema, sync, payment or release changes.
+- Fresh checks: desktop unit tests 14/14; lint and strict typecheck PASS; production build PASS (existing chunk warning); targeted workbench Playwright PASS with retained screenshot under `E:/Honsen-BusinessFlow/playwright-results`. Existing Rust conflict denial and draft-resolution tests each PASS1/1; the existing history/authorization/approval regression PASS1/1. The initial workbench test failed because its new loader was absent before implementation. Mock IPC DOM is presentation evidence, not a new native multi-client acceptance.
+- BLOCKER for complete business-flow acceptance: HPA/SPO are absent from local issuer/server formal parser (OPA only); formal PDF/Excel, full three-language catalogs and final closure/retention acceptance remain unfinished. WARNING: workbench amounts are saved application totals excluding cancellations, explicitly not actual expenditure or a monthly accounting metric; paginated history is not an atomic database-wide snapshot. DEFERRED: urgent/date-filter metrics await saved metadata support; full original parent gates stay open. Payment/COS conflicts are owned by PR #19, untouched. No production deployment or merge.
+
 ## PR #17 historical reference contract repair — builder handoff (2026-10-23)
 
 - Continue `codex/pr17-sync-p1-repair` from production `8c7ba265bf963fd47e9e3a77876b2f022830fde9`, repairing the actual independent P1 in `4d486cdf840961c7480a1c603d7dee104fc0af22`. Exact checkpoint/remote/CI are delivered with the containing commit. [Scope, tests and original failure](docs/reviews/PR17-REFERENCE-CONTRACT-REPAIR.md). Current production change is confined to strict reference decoding at the trusted Pull projector; no migration, dependency, renderer or authorization contract changes.
