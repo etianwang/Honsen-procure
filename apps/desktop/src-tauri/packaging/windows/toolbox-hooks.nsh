@@ -28,6 +28,13 @@
 
 !define HONSEN_UPDATE_MANIFEST_URL "https://github.com/etianwang/Honsen-procure/releases/latest/download/manifest.json"
 
+!macro HonsenUseSharedProgramDirectory
+  ; Tauri's per-machine default omits the shared Honsen Program parent.
+  ; Keep an explicit Toolbox /D target unchanged.
+  StrCmp "$INSTDIR" "$PROGRAMFILES\Honsen Procure" 0 +2
+    StrCpy $INSTDIR "$PROGRAMFILES\Honsen Program\Honsen Procure"
+!macroend
+
 !macro HonsenRejectOtherInstall key view
   SetRegView ${view}
   ReadRegStr $0 ${key} "Software\Honsen Program\Apps\honsen.procure" "ExecutablePath"
@@ -38,6 +45,7 @@
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
+  !insertmacro HonsenUseSharedProgramDirectory
   !insertmacro HonsenRejectOtherInstall HKLM 64
   !insertmacro HonsenRejectOtherInstall HKLM 32
   !insertmacro HonsenRejectOtherInstall HKCU 64
