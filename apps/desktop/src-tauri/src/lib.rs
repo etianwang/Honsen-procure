@@ -20,6 +20,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
+mod attachments;
+mod expenditures;
+pub use attachments::{AttachmentInput, AttachmentTarget, AttachmentView, ProcurementSyncReport};
 mod seed;
 pub use seed::SeedImportReport;
 
@@ -377,6 +380,8 @@ pub struct ProcurementExecutionLineView {
     pub id: Uuid,
     pub material_name: String,
     pub quantity: String,
+    pub received_quantity: String,
+    pub remaining_quantity: String,
     pub unit: String,
     pub currency: String,
 }
@@ -388,6 +393,19 @@ pub struct ProcurementExecutionChildView {
     pub display_no: String,
     pub currency: String,
     pub lines: Vec<ProcurementExecutionLineView>,
+    pub payment_summary: ProcurementPaymentSummaryView,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcurementPaymentSummaryView {
+    pub currency: String,
+    pub payable_minor: String,
+    pub paid_minor: String,
+    pub remaining_minor: String,
+    pub overpaid_minor: String,
+    pub status: String,
+    pub records: Vec<ProcurementExpenditureView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -400,6 +418,7 @@ pub struct ProcurementExecutionOrderView {
     pub workflow_status: String,
     pub lines: Vec<ProcurementExecutionLineView>,
     pub children: Vec<ProcurementExecutionChildView>,
+    pub payment_summary: ProcurementPaymentSummaryView,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -608,25 +627,45 @@ pub struct RecordProcurementExpenditureInput {
     pub id: Uuid,
     pub order_id: Uuid,
     pub receipt_id: Option<Uuid>,
-    pub counterparty_type: String,
+    pub counterparty_type: Option<String>,
     pub supplier_id: Option<Uuid>,
+    pub payment_handler_id: Option<Uuid>,
+    #[serde(default)]
+    pub voucher_attachment_ids: Vec<Uuid>,
     pub payee_name: String,
     pub currency: String,
     pub amount_minor: String,
     pub payment_date: String,
+    pub payment_type: String,
     pub payment_method: String,
-    pub payment_handler_id: Uuid,
+    pub voucher_reference: Option<String>,
     pub notes: Option<String>,
-    #[serde(default)]
-    pub voucher_attachment_ids: Vec<Uuid>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReverseProcurementExpenditureInput {
+    pub id: Uuid,
+    pub expenditure_id: Uuid,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcurementExpenditureView {
+    pub voucher_warning: bool,
+    pub has_voucher: bool,
+    pub corrects_expenditure_id: Option<Uuid>,
     pub id: Uuid,
     pub order_id: Uuid,
-    pub voucher_warning: bool,
+    pub payee_name: String,
+    pub currency: String,
+    pub amount_minor: String,
+    pub payment_date: String,
+    pub payment_type: String,
+    pub status: String,
+    pub voucher_reference: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -685,6 +724,16 @@ pub struct SyncConflictView {
     pub local_payload_json: String,
     pub server_payload_json: String,
     pub server_operation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_resolution_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_by: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -1537,6 +1586,9 @@ impl LocalAuthService {
             .pragma_update(None, "foreign_keys", "ON")
             .map_err(|_| AuthError::Database)?;
         migrate(&mut connection)?;
+        connection
+            .execute("DELETE FROM local_session", [])
+            .map_err(|_| AuthError::Database)?;
         Ok(Self {
             connection: Mutex::new(LocalConnection {
                 database: connection,
@@ -3227,9 +3279,9 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let parents = connection
-            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
+            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status, o.total_minor FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving', 'completed', 'completed_with_conditions') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
             .map_err(|_| AuthError::Database)?
-            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?)))
+            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?)))
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| AuthError::Database)?;
@@ -3241,28 +3293,78 @@ impl LocalAuthService {
                 .map_err(|_| AuthError::Database)?
                 .map(|row| {
                     let (id, snapshot, quantity, unit, currency) = row.map_err(|_| AuthError::Database)?;
+                    let received_quantity = connection
+                        .prepare("SELECT ri.quantity_decimal FROM local_receipt_items ri JOIN local_receipts r ON r.id = ri.receipt_id WHERE ri.order_item_id = ?1")
+                        .map_err(|_| AuthError::Database)?
+                        .query_map([&id], |row| row.get::<_, String>(0))
+                        .map_err(|_| AuthError::Database)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|_| AuthError::Database)?
+                        .into_iter()
+                        .try_fold(0i128, |sum, value| parse_quantity_hundredths(&value)?.checked_add(sum).ok_or(AuthError::InvalidInput))?;
+                    let ordered_quantity = parse_quantity_hundredths(&quantity)?;
                     let material_name = serde_json::from_str::<serde_json::Value>(&snapshot)
                         .ok()
                         .and_then(|value| value.get("nameZh").and_then(|name| name.as_str()).map(ToOwned::to_owned))
                         .ok_or(AuthError::Database)?;
-                    Ok(ProcurementExecutionLineView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, material_name, quantity, unit, currency })
+                    Ok(ProcurementExecutionLineView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, material_name, quantity, received_quantity: format_quantity_hundredths(received_quantity), remaining_quantity: format_quantity_hundredths(ordered_quantity.saturating_sub(received_quantity)), unit, currency })
                 })
                 .collect::<Result<Vec<_>, _>>()
         };
+        let payment_summary = |order_id: &str,
+                               currency: &str,
+                               payable: i64|
+         -> Result<ProcurementPaymentSummaryView, AuthError> {
+            let records = expenditures::effective_records(
+                &connection,
+                Uuid::parse_str(order_id).map_err(|_| AuthError::Database)?,
+            )?;
+            if records.iter().any(|record| record.currency != currency) {
+                return Err(AuthError::Database);
+            }
+            let paid = records.iter().try_fold(0i128, |sum, record| {
+                let amount = parse_non_negative_minor(&record.amount_minor)?;
+                if record.status == "reversed" {
+                    sum.checked_sub(amount).ok_or(AuthError::InvalidInput)
+                } else {
+                    sum.checked_add(amount).ok_or(AuthError::InvalidInput)
+                }
+            })?;
+            let payable = i128::from(payable);
+            let remaining = (payable - paid).max(0);
+            let overpaid = (paid - payable).max(0);
+            Ok(ProcurementPaymentSummaryView {
+                currency: currency.into(),
+                payable_minor: payable.to_string(),
+                paid_minor: paid.to_string(),
+                remaining_minor: remaining.to_string(),
+                overpaid_minor: overpaid.to_string(),
+                status: if overpaid > 0 {
+                    "overpaid".into()
+                } else if paid == 0 {
+                    "unpaid".into()
+                } else if remaining == 0 {
+                    "paid".into()
+                } else {
+                    "partial".into()
+                },
+                records,
+            })
+        };
         parents
             .into_iter()
-            .map(|(id, display_no, primary_currency, procurement_mode, workflow_status)| {
+            .map(|(id, display_no, primary_currency, procurement_mode, workflow_status, total_minor)| {
                 let children = connection
-                    .prepare("SELECT id, display_no, currency FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
+                    .prepare("SELECT id, display_no, currency, total_minor FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
                     .map_err(|_| AuthError::Database)?
-                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?)))
                     .map_err(|_| AuthError::Database)?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| AuthError::Database)?
                     .into_iter()
-                    .map(|(child_id, child_display_no, currency)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, currency, lines: read_lines(&child_id)? }))
+                    .map(|(child_id, child_display_no, currency, child_total)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, payment_summary: payment_summary(&child_id, &currency, child_total)?, currency, lines: read_lines(&child_id)? }))
                     .collect::<Result<Vec<_>, AuthError>>()?;
-                Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
+                Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, payment_summary: payment_summary(&id, &primary_currency, total_minor)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
             })
             .collect()
     }
@@ -4512,6 +4614,191 @@ impl LocalAuthService {
         })
     }
 
+    pub fn record_procurement_expenditure(
+        &self,
+        input: RecordProcurementExpenditureInput,
+        now: SystemTime,
+    ) -> Result<ProcurementExpenditureView, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        self.require_active_scope_for_order(input.order_id, now)?;
+        let amount = as_i64(parse_non_negative_minor(&input.amount_minor)?).and_then(|value| {
+            if value > 0 {
+                Ok(value)
+            } else {
+                Err(AuthError::InvalidInput)
+            }
+        })?;
+        if !valid_required_text(&input.payee_name, 255)
+            || !valid_currency(&input.currency)
+            || !valid_iso_date(&input.payment_date)
+            || !matches!(
+                input.payment_type.as_str(),
+                "advance" | "progress" | "final" | "other"
+            )
+            || !matches!(
+                input.payment_method.as_str(),
+                "cash" | "bank_transfer" | "mobile_payment" | "other"
+            )
+            || !valid_optional_text(&input.voucher_reference, 1000)
+            || !valid_optional_text(&input.notes, 4000)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let actor_id = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+        require_order_write_scope(&transaction, input.order_id, actor_id, now)?;
+        let (project_id, _country_id, supplier_id, order_currency, mode, parent_id, workflow): (String, String, Option<String>, String, Option<String>, Option<String>, String) = transaction.query_row("SELECT project_id, country_id, supplier_id, currency, procurement_mode, parent_order_id, workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL", [input.order_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).map_err(|_| AuthError::Forbidden)?;
+        let parent_mode: Option<String> = parent_id
+            .as_ref()
+            .map(|id| {
+                transaction
+                    .query_row(
+                        "SELECT procurement_mode FROM local_purchase_orders WHERE id = ?1",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| AuthError::Database)
+            })
+            .transpose()?;
+        if parent_mode.as_ref().or(mode.as_ref()).map(String::as_str)
+            != Some("honsen_self_purchase")
+            || !matches!(
+                workflow.as_str(),
+                "approved"
+                    | "confirmed"
+                    | "executing"
+                    | "sent"
+                    | "receiving"
+                    | "completed"
+                    | "completed_with_conditions"
+            )
+            || order_currency != input.currency
+        {
+            return Err(AuthError::Forbidden);
+        }
+        if input.supplier_id.is_some_and(|id| {
+            supplier_id
+                .as_ref()
+                .is_some_and(|supplier| supplier != &id.to_string())
+        }) {
+            return Err(AuthError::Forbidden);
+        }
+        if let Some(receipt_id) = input.receipt_id {
+            let matches_order: bool = transaction
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM local_receipts WHERE id = ?1 AND order_id = ?2)",
+                    params![receipt_id.to_string(), input.order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Database)?;
+            if !matches_order {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        let counterparty_type =
+            input
+                .counterparty_type
+                .as_deref()
+                .unwrap_or(if supplier_id.is_some() {
+                    "registered_supplier"
+                } else {
+                    "market_casual"
+                });
+        let supplier_name = match (
+            counterparty_type,
+            input
+                .supplier_id
+                .or(supplier_id.as_ref().and_then(|id| Uuid::parse_str(id).ok())),
+        ) {
+            ("registered_supplier", Some(supplier_id)) => transaction
+                .query_row(
+                    "SELECT name FROM local_suppliers WHERE id = ?1 AND deleted_at IS NULL",
+                    [supplier_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|_| AuthError::Database)?
+                .ok_or(AuthError::InvalidInput)?,
+            ("market_casual", None) => input.payee_name.clone(),
+            _ => return Err(AuthError::InvalidInput),
+        };
+        let mut voucher_ids = HashSet::new();
+        for attachment_id in &input.voucher_attachment_ids {
+            if !voucher_ids.insert(attachment_id) {
+                return Err(AuthError::InvalidInput);
+            }
+            let belongs_to_order: bool = transaction
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM local_order_attachments WHERE id = ?1 AND order_id = ?2 AND deleted_at IS NULL)",
+                    params![attachment_id.to_string(), input.order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Database)?;
+            if !belongs_to_order {
+                return Err(AuthError::InvalidInput);
+            }
+        }
+        let counterparty_snapshot = serde_json::json!({"type":counterparty_type,"supplierId":input.supplier_id.map(|id|id.to_string()).or(supplier_id.clone()),"name":supplier_name}).to_string();
+        let created_at = unix_seconds(now);
+        transaction.execute("INSERT INTO local_procurement_expenditures (id, order_id, project_id, supplier_id, payee_name, currency, amount_minor, payment_date, payment_type, payment_method, payment_handler_id, voucher_reference, notes, status, created_by, created_at, receipt_id, counterparty_type, counterparty_snapshot_json, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'recorded', ?18, ?14, ?15, ?16, ?17, ?14)", params![input.id.to_string(), input.order_id.to_string(), project_id, input.supplier_id.map(|id|id.to_string()).or(supplier_id.clone()), input.payee_name, input.currency, amount, input.payment_date, input.payment_type, input.payment_method, input.payment_handler_id.unwrap_or(actor_id).to_string(), input.voucher_reference, input.notes, created_at, input.receipt_id.map(|id| id.to_string()), counterparty_type, counterparty_snapshot, actor_id.to_string()]).map_err(|_| AuthError::InvalidInput)?;
+        for attachment_id in &input.voucher_attachment_ids {
+            transaction.execute("INSERT INTO local_procurement_expenditure_vouchers(expenditure_id,attachment_id) VALUES (?1,?2)", params![input.id.to_string(),attachment_id.to_string()]).map_err(|_| AuthError::Database)?;
+        }
+        let mut payment =
+            expenditures::read_payment(&transaction, input.id)?.ok_or(AuthError::Database)?;
+        payment.voucher_attachment_ids = Some({
+            let mut ids = input.voucher_attachment_ids.clone();
+            ids.sort();
+            ids
+        });
+        expenditures::persist_payload(&transaction, &payment)?;
+        let payload = serde_json::to_string(&payment).map_err(|_| AuthError::Database)?;
+        insert_local_sync_outbox(
+            &transaction,
+            "procurement_expenditure",
+            input.id,
+            &payload,
+            now,
+        )?;
+        append_order_audit(
+            &transaction,
+            input.order_id,
+            actor_id,
+            "payment_recorded",
+            None,
+            None,
+            Some(&payload),
+            now,
+        )?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        Ok(ProcurementExpenditureView {
+            id: input.id,
+            order_id: input.order_id,
+            payee_name: input.payee_name,
+            currency: input.currency,
+            amount_minor: amount.to_string(),
+            payment_date: input.payment_date,
+            payment_type: input.payment_type,
+            status: "recorded".into(),
+            corrects_expenditure_id: None,
+            has_voucher: !input.voucher_attachment_ids.is_empty(),
+            voucher_warning: input.voucher_attachment_ids.is_empty(),
+            voucher_reference: input.voucher_reference,
+            notes: input.notes,
+        })
+    }
+
+    pub fn reverse_procurement_expenditure(
+        &self,
+        input: ReverseProcurementExpenditureInput,
+        now: SystemTime,
+    ) -> Result<ProcurementExpenditureView, AuthError> {
+        expenditures::reverse(self, input, now)
+    }
+
     pub fn close_supplier_order_with_conditions(
         &self,
         order_id: Uuid,
@@ -4562,147 +4849,6 @@ impl LocalAuthService {
         insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(())
-    }
-
-    pub fn record_procurement_expenditure(
-        &self,
-        input: RecordProcurementExpenditureInput,
-        now: SystemTime,
-    ) -> Result<ProcurementExpenditureView, AuthError> {
-        if !self.require_order_mutation(now)?
-            || !valid_required_text(&input.payee_name, 500)
-            || !valid_currency(&input.currency)
-            || !valid_iso_date(&input.payment_date)
-            || !valid_optional_text(&input.notes, 2_000)
-            || !matches!(
-                input.counterparty_type.as_str(),
-                "registered_supplier" | "market_casual"
-            )
-            || !matches!(
-                input.payment_method.as_str(),
-                "cash" | "bank_transfer" | "mobile_payment" | "other"
-            )
-        {
-            return Err(AuthError::InvalidInput);
-        }
-        let amount_minor = parse_non_negative_minor(&input.amount_minor)?;
-        if amount_minor == 0 {
-            return Err(AuthError::InvalidInput);
-        }
-        self.require_active_scope_for_order(input.order_id, now)?;
-        let actor_id = self.active_session_user_id()?;
-        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
-        let (project_id, workflow_status, mode): (String, String, Option<String>) = transaction
-            .query_row(
-                "SELECT project_id, workflow_status, procurement_mode FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
-                [input.order_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .map_err(|_| AuthError::Database)?;
-        if mode.as_deref() != Some("honsen_self_purchase")
-            || !matches!(workflow_status.as_str(), "executing" | "receiving")
-        {
-            return Err(AuthError::Forbidden);
-        }
-        if let Some(receipt_id) = input.receipt_id {
-            let matches_order: bool = transaction
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM local_receipts WHERE id = ?1 AND order_id = ?2)",
-                    params![receipt_id.to_string(), input.order_id.to_string()],
-                    |row| row.get(0),
-                )
-                .map_err(|_| AuthError::Database)?;
-            if !matches_order {
-                return Err(AuthError::InvalidInput);
-            }
-        }
-        let supplier_name = match (input.counterparty_type.as_str(), input.supplier_id) {
-            ("registered_supplier", Some(supplier_id)) => transaction
-                .query_row(
-                    "SELECT name FROM local_suppliers WHERE id = ?1 AND deleted_at IS NULL",
-                    [supplier_id.to_string()],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(|_| AuthError::Database)?
-                .ok_or(AuthError::InvalidInput)?,
-            ("market_casual", None) => input.payee_name.clone(),
-            _ => return Err(AuthError::InvalidInput),
-        };
-        let mut voucher_ids = HashSet::new();
-        for attachment_id in &input.voucher_attachment_ids {
-            if !voucher_ids.insert(attachment_id) {
-                return Err(AuthError::InvalidInput);
-            }
-            let belongs_to_order: bool = transaction
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM local_order_attachments WHERE id = ?1 AND order_id = ?2 AND deleted_at IS NULL)",
-                    params![attachment_id.to_string(), input.order_id.to_string()],
-                    |row| row.get(0),
-                )
-                .map_err(|_| AuthError::Database)?;
-            if !belongs_to_order {
-                return Err(AuthError::InvalidInput);
-            }
-        }
-        let counterparty_snapshot = serde_json::json!({
-            "type": input.counterparty_type,
-            "supplierId": input.supplier_id,
-            "name": supplier_name,
-        })
-        .to_string();
-        transaction.execute(
-            "INSERT INTO local_procurement_expenditures (id, order_id, project_id, receipt_id, counterparty_type, supplier_id, payee_name, counterparty_snapshot_json, currency, amount_minor, payment_date, payment_method, payment_handler_id, notes, status, corrects_expenditure_id, created_by, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 'recorded', NULL, ?15, ?16, ?16)",
-            params![input.id.to_string(), input.order_id.to_string(), project_id, input.receipt_id.map(|value| value.to_string()), input.counterparty_type, input.supplier_id.map(|value| value.to_string()), input.payee_name, counterparty_snapshot, input.currency, as_i64(amount_minor)?, input.payment_date, input.payment_method, input.payment_handler_id.to_string(), input.notes, actor_id.to_string(), unix_seconds(now)],
-        ).map_err(|_| AuthError::Database)?;
-        for attachment_id in &input.voucher_attachment_ids {
-            transaction.execute(
-                "INSERT INTO local_procurement_expenditure_vouchers (expenditure_id, attachment_id) VALUES (?1, ?2)",
-                params![input.id.to_string(), attachment_id.to_string()],
-            ).map_err(|_| AuthError::Database)?;
-        }
-        append_order_audit(
-            &transaction,
-            input.order_id,
-            actor_id,
-            "procurement_expenditure_recorded",
-            None,
-            None,
-            Some(&serde_json::json!({ "expenditureId": input.id, "amountMinor": input.amount_minor, "currency": input.currency, "voucherWarning": input.voucher_attachment_ids.is_empty() }).to_string()),
-            now,
-        )?;
-        let payload = serde_json::json!({
-            "id": input.id,
-            "orderId": input.order_id,
-            "projectId": project_id,
-            "receiptId": input.receipt_id,
-            "counterpartyType": input.counterparty_type,
-            "supplierId": input.supplier_id,
-            "payeeName": input.payee_name,
-            "counterpartySnapshot": serde_json::from_str::<serde_json::Value>(&counterparty_snapshot).map_err(|_| AuthError::Database)?,
-            "currency": input.currency,
-            "amountMinor": input.amount_minor,
-            "paymentDate": input.payment_date,
-            "paymentMethod": input.payment_method,
-            "paymentHandlerId": input.payment_handler_id,
-            "notes": input.notes,
-            "status": "recorded",
-            "voucherAttachmentIds": input.voucher_attachment_ids,
-        }).to_string();
-        insert_local_sync_outbox(
-            &transaction,
-            "procurement_expenditure",
-            input.id,
-            &payload,
-            now,
-        )?;
-        transaction.commit().map_err(|_| AuthError::Database)?;
-        Ok(ProcurementExpenditureView {
-            id: input.id,
-            order_id: input.order_id,
-            voucher_warning: input.voucher_attachment_ids.is_empty(),
-        })
     }
 
     fn save_requisition(
@@ -5657,7 +5803,10 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         let account_id = self.active_session_user_id()?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let tx = connection.transaction().map_err(|_| AuthError::Database)?;
+        expenditures::recover_rejected_reversals(&tx, account_id, now)?;
+        tx.commit().map_err(|_| AuthError::Database)?;
         connection
             .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND o.rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = blocked.event_id)) ORDER BY o.created_at, o.rowid LIMIT ?2")
             .map_err(|_| AuthError::Database)?
@@ -5705,6 +5854,12 @@ impl LocalAuthService {
                 {
                     transaction.execute("UPDATE local_sync_outbox SET last_error = 'QUOTE_UNAVAILABLE', rejected_at = ?2 WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now)]).map_err(|_| AuthError::Database)?;
                     transaction.execute("UPDATE local_sync_outbox SET base_version = base_version - 1 WHERE owner_account_id = ?1 AND entity_type = ?2 AND entity_id = ?3 AND acknowledged_at IS NULL AND superseded_at IS NULL AND rejected_at IS NULL AND rowid > (SELECT rowid FROM local_sync_outbox WHERE event_id = ?4)", params![account_id.to_string(), entity_type, entity_id, acknowledgement.event_id.to_string()]).map_err(|_| AuthError::Database)?;
+                    continue;
+                }
+                if entity_type == "procurement_expenditure"
+                    && acknowledgement.error_code.as_deref() == Some("PAYMENT_DEPENDENCY_PENDING")
+                {
+                    transaction.execute("UPDATE local_sync_outbox SET retry_count=retry_count+1,last_error='PAYMENT_DEPENDENCY_PENDING' WHERE event_id=?1",[acknowledgement.event_id.to_string()]).map_err(|_|AuthError::Database)?;
                     continue;
                 }
                 if acknowledgement.error_code.as_deref() == Some("QUOTE_PREDECESSOR_REJECTED") {
@@ -5852,7 +6007,9 @@ impl LocalAuthService {
                 params![change.entity_type, change.entity_id.to_string(), account_id_text],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).optional().map_err(|_| AuthError::Database)?;
-            if let Some((event_id, base_version, local_payload, owner)) = pending {
+            if let Some((event_id, base_version, local_payload, owner)) =
+                pending.filter(|_| change.entity_type != "payment_conflict_resolution")
+            {
                 if owner.as_deref() != Some(account_id_text.as_str()) {
                     return Err(AuthError::SyncAccountBoundary);
                 }
@@ -5891,6 +6048,10 @@ impl LocalAuthService {
         project_staged_purchase_orders(&transaction, now)?;
         project_staged_rfqs(&transaction, now)?;
         project_staged_order_comments(&transaction)?;
+        expenditures::project_decisions(&transaction, now)?;
+        expenditures::project_staged(&transaction)?;
+        attachments::project_staged(&transaction)?;
+        expenditures::project_staged(&transaction)?;
         #[cfg(debug_assertions)]
         if std::mem::replace(
             &mut *self
@@ -5930,7 +6091,7 @@ impl LocalAuthService {
         let account_id = Self::require_conflict_resolution(&connection, now)?;
         connection.prepare("SELECT c.id, c.entity_type, c.entity_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE c.resolved_at IS NULL AND o.owner_account_id = ?1 AND o.owner_account_id = (SELECT user_id FROM local_session) ORDER BY c.created_at, c.id")
             .map_err(|_| AuthError::Database)?
-            .query_map([account_id.to_string()], |row| Ok(SyncConflictView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, server_version: row.get(3)?, local_payload_json: row.get(4)?, server_payload_json: row.get(5)?, server_operation: row.get(6)? }))
+            .query_map([account_id.to_string()], |row| Ok(SyncConflictView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, server_version: row.get(3)?, local_payload_json: row.get(4)?, server_payload_json: row.get(5)?, server_operation: row.get(6)?, event_id: None, payment_resolution_state: None, resolved_by: None, resolved_at: None, resolution_reason: None }))
             .map_err(|_| AuthError::Database)?.collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)
     }
 
@@ -6639,20 +6800,9 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<(), AuthError> {
+        let actor = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        let account_id = Self::session_user_id_on_connection(&connection)?;
-        let authorized: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?2 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?3 JOIN local_projects p ON p.id = o.project_id AND p.country_id = o.country_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.id = ?1 AND o.deleted_at IS NULL)",
-                params![order_id.to_string(), account_id.to_string(), unix_seconds(now)],
-                |row| row.get(0),
-            )
-            .map_err(|_| AuthError::Database)?;
-        if authorized {
-            Ok(())
-        } else {
-            Err(AuthError::Forbidden)
-        }
+        require_order_write_scope(&connection, order_id, actor, now)
     }
 
     fn require_active_scope_for_country(
@@ -7138,6 +7288,24 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn list_payment_sync_conflicts(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::SyncConflictView>, CommandError> {
+        auth.list_payment_sync_conflicts(SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn resolve_payment_sync_conflict(
+        auth: State<'_, LocalAuthService>,
+        input: super::expenditures::ResolvePaymentConflictInput,
+    ) -> Result<(), CommandError> {
+        auth.resolve_payment_sync_conflict(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn list_sync_conflicts(
         auth: State<'_, LocalAuthService>,
     ) -> Result<Vec<super::SyncConflictView>, CommandError> {
@@ -7226,6 +7394,57 @@ pub mod commands {
         input: super::RecordReceiptInput,
     ) -> Result<super::ReceiptView, CommandError> {
         auth.record_receipt(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn import_attachment(
+        auth: State<'_, LocalAuthService>,
+        input: super::AttachmentInput,
+    ) -> Result<Uuid, CommandError> {
+        auth.import_attachment(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+    #[tauri::command]
+    pub fn list_attachments(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<Vec<super::AttachmentView>, CommandError> {
+        auth.list_attachments(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+    #[tauri::command]
+    pub fn list_attachment_targets(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<Vec<super::AttachmentTarget>, CommandError> {
+        auth.list_attachment_targets(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+    #[tauri::command]
+    pub async fn sync_attachments(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<super::ProcurementSyncReport, CommandError> {
+        auth.sync_attachments_https(SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+    #[tauri::command]
+    pub async fn read_attachment(
+        auth: State<'_, LocalAuthService>,
+        id: Uuid,
+    ) -> Result<String, CommandError> {
+        auth.read_attachment_https(id, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn reverse_procurement_expenditure(
+        auth: State<'_, LocalAuthService>,
+        input: super::ReverseProcurementExpenditureInput,
+    ) -> Result<super::ProcurementExpenditureView, CommandError> {
+        auth.reverse_procurement_expenditure(input, SystemTime::now())
             .map_err(Into::into)
     }
 
@@ -7633,6 +7852,159 @@ pub mod commands {
     }
 }
 
+fn expenditure_schema_already_installed(
+    connection: &Connection,
+    pending: &str,
+) -> Result<bool, AuthError> {
+    if pending == "0045_procurement_expenditures" {
+        let legacy: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM local_schema_migrations WHERE version='0044_procurement_expenditures')", [], |r|r.get(0)).map_err(|_|AuthError::Database)?;
+        if legacy {
+            return Ok(false);
+        }
+    }
+    let candidates: &[(&str, &str)] = if pending == "0032_procurement_expenditures" {
+        &[
+            (
+                "0045_procurement_expenditures",
+                include_str!("../migrations/0045_procurement_expenditures.sql"),
+            ),
+            (
+                "0044_procurement_expenditures",
+                include_str!("../migrations/0045_procurement_expenditures.sql"),
+            ),
+        ]
+    } else {
+        &[(
+            "0032_procurement_expenditures",
+            include_str!("../migrations/0032_procurement_expenditures.sql"),
+        )]
+    };
+    for (version, sql) in candidates {
+        let recorded: Option<String> = connection
+            .query_row(
+                "SELECT checksum FROM local_schema_migrations WHERE version=?1",
+                [version],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?;
+        if let Some(recorded) = recorded {
+            if recorded != format!("{:x}", Sha256::digest(sql.as_bytes())) {
+                return Err(AuthError::Database);
+            }
+            let exists: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_procurement_expenditures')", [], |r| r.get(0)).map_err(|_| AuthError::Database)?;
+            if exists {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn apply_expenditure_branch_compat(
+    connection: &mut Connection,
+    version: &str,
+    checksum: &str,
+    sql: &str,
+) -> Result<(), AuthError> {
+    let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
+    for (column, statement) in [
+        (
+            "payment_type",
+            "ALTER TABLE local_procurement_expenditures ADD COLUMN payment_type TEXT NOT NULL DEFAULT 'other' CHECK(payment_type IN ('advance','progress','final','other'))",
+        ),
+        (
+            "voucher_reference",
+            "ALTER TABLE local_procurement_expenditures ADD COLUMN voucher_reference TEXT",
+        ),
+        (
+            "correction_reason",
+            "ALTER TABLE local_procurement_expenditures ADD COLUMN correction_reason TEXT",
+        ),
+        (
+            "receipt_id",
+            "ALTER TABLE local_procurement_expenditures ADD COLUMN receipt_id TEXT REFERENCES local_receipts(id)",
+        ),
+        (
+            "counterparty_type",
+            "ALTER TABLE local_procurement_expenditures ADD COLUMN counterparty_type TEXT NOT NULL DEFAULT 'market_casual' CHECK(counterparty_type IN ('registered_supplier','market_casual'))",
+        ),
+        (
+            "counterparty_snapshot_json",
+            "ALTER TABLE local_procurement_expenditures ADD COLUMN counterparty_snapshot_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(counterparty_snapshot_json))",
+        ),
+        (
+            "updated_at",
+            "ALTER TABLE local_procurement_expenditures ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+        ),
+    ] {
+        let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('local_procurement_expenditures') WHERE name=?1)", [column], |r| r.get(0)).map_err(|_| AuthError::Database)?;
+        if !exists {
+            transaction
+                .execute_batch(statement)
+                .map_err(|_| AuthError::Database)?;
+        }
+    }
+    transaction
+        .execute_batch(sql)
+        .map_err(|_| AuthError::Database)?;
+    let pending = transaction.prepare("SELECT event_id,entity_id,payload_json,owner_account_id FROM local_sync_outbox WHERE entity_type='procurement_expenditure' AND acknowledged_at IS NULL AND superseded_at IS NULL AND json_type(payload_json,'$.countryId') IS NULL").map_err(|_|AuthError::Database)?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?))).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)?;
+    for (event_id, entity_id, previous, owner) in pending {
+        let id = Uuid::parse_str(&entity_id).map_err(|_| AuthError::Database)?;
+        let payment = expenditures::read_payment(&transaction, id)?.ok_or(AuthError::Database)?;
+        expenditures::validate(&payment)?;
+        if owner
+            .as_deref()
+            .is_some_and(|owner| owner != payment.created_by.to_string())
+        {
+            return Err(AuthError::Database);
+        }
+        let original: serde_json::Value =
+            serde_json::from_str(&previous).map_err(|_| AuthError::Database)?;
+        let payload = serde_json::to_value(&payment).map_err(|_| AuthError::Database)?;
+        for key in [
+            "id",
+            "orderId",
+            "projectId",
+            "payeeName",
+            "currency",
+            "amountMinor",
+            "paymentDate",
+            "paymentMethod",
+            "paymentHandlerId",
+            "status",
+        ] {
+            if original.get(key) != payload.get(key) {
+                return Err(AuthError::Database);
+            }
+        }
+        let next = payload.to_string();
+        append_order_audit(
+            &transaction,
+            payment.order_id,
+            payment.created_by,
+            "payment_sync_payload_migrated",
+            Some(&event_id),
+            Some(&previous),
+            Some(&next),
+            SystemTime::now(),
+        )?;
+        transaction
+            .execute(
+                "UPDATE local_sync_outbox SET payload_json=?2 WHERE event_id=?1",
+                params![event_id, next],
+            )
+            .map_err(|_| AuthError::Database)?;
+    }
+    transaction
+        .execute(
+            "INSERT INTO local_schema_migrations(version,checksum,applied_at) VALUES (?1,?2,?3)",
+            params![version, checksum, unix_seconds(SystemTime::now())],
+        )
+        .map_err(|_| AuthError::Database)?;
+    transaction.commit().map_err(|_| AuthError::Database)
+}
+
 fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
     connection
         .execute_batch(
@@ -7767,6 +8139,18 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             include_str!("../migrations/0031_procurement_workflow_states.sql"),
         ),
         (
+            "0032_procurement_expenditures",
+            include_str!("../migrations/0032_procurement_expenditures.sql"),
+        ),
+        (
+            "0033_expenditure_immutability",
+            include_str!("../migrations/0033_expenditure_immutability.sql"),
+        ),
+        (
+            "0034_attachment_transfers",
+            include_str!("../migrations/0034_attachment_transfers.sql"),
+        ),
+        (
             "0032_rfq_display_numbers",
             include_str!("../migrations/0032_rfq_display_numbers.sql"),
         ),
@@ -7834,6 +8218,22 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0055_catalog_history_quarantine",
             include_str!("../migrations/0055_catalog_history_quarantine.sql"),
         ),
+        (
+            "0056_expenditure_branch_compat",
+            include_str!("../migrations/0056_expenditure_branch_compat.sql"),
+        ),
+        (
+            "0057_attachment_derivation",
+            include_str!("../migrations/0057_attachment_derivation.sql"),
+        ),
+        (
+            "0058_payment_sync_metadata",
+            include_str!("../migrations/0058_payment_sync_metadata.sql"),
+        ),
+        (
+            "0059_payment_conflict_decisions",
+            include_str!("../migrations/0059_payment_conflict_decisions.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -7848,6 +8248,22 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             Some(value) if value == checksum => continue,
             Some(_) => return Err(AuthError::Database),
             None => {
+                if matches!(
+                    migration.0,
+                    "0032_procurement_expenditures" | "0045_procurement_expenditures"
+                ) && expenditure_schema_already_installed(connection, migration.0)?
+                {
+                    continue;
+                }
+                if migration.0 == "0056_expenditure_branch_compat" {
+                    apply_expenditure_branch_compat(
+                        connection,
+                        migration.0,
+                        &checksum,
+                        migration.1,
+                    )?;
+                    continue;
+                }
                 if migration.0 == "0048_material_category_audit" {
                     // Apply 0049 instead of the faulty, not-yet-applied 0048 without fabricating its checksum record.
                     let sql = include_str!("../migrations/0049_material_category_audit_compat.sql");
@@ -9449,9 +9865,9 @@ fn validate_remote_purchase_order(order: &RemotePurchaseOrderPayload) -> Result<
                 | "rejected"
                 | "confirmed"
                 | "approved"
-                | "formally_issued"
                 | "executing"
                 | "receiving"
+                | "formally_issued"
                 | "sent"
                 | "completed"
                 | "completed_with_conditions"
@@ -10209,6 +10625,20 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
     serde_json::to_string(&serde_json::Value::Object(payload)).map_err(|_| AuthError::Database)
 }
 
+fn require_order_write_scope(
+    connection: &Connection,
+    order_id: Uuid,
+    actor: Uuid,
+    now: SystemTime,
+) -> Result<(), AuthError> {
+    let authorized:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?2 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?3 JOIN local_projects p ON p.id = o.project_id AND p.country_id = o.country_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.id = ?1 AND o.deleted_at IS NULL AND EXISTS(SELECT 1 FROM local_session s JOIN local_accounts u ON u.id=s.user_id WHERE s.user_id=?2 AND u.enabled=1 AND u.requires_password_change=0 AND s.last_active_at>=?4))",params![order_id.to_string(),actor.to_string(),unix_seconds(now),unix_seconds(now)-IDLE_LOCK_WINDOW.as_secs() as i64],|r|r.get(0)).map_err(|_|AuthError::Database)?;
+    if authorized {
+        Ok(())
+    } else {
+        Err(AuthError::Forbidden)
+    }
+}
+
 fn append_order_audit(
     transaction: &Transaction<'_>,
     order_id: Uuid,
@@ -10340,6 +10770,18 @@ fn parse_quantity_hundredths(value: &str) -> Result<i128, AuthError> {
         return Err(AuthError::InvalidInput);
     }
     Ok(hundredths)
+}
+
+fn format_quantity_hundredths(value: i128) -> String {
+    let whole = value / 100;
+    let fraction = value % 100;
+    if fraction == 0 {
+        whole.to_string()
+    } else if fraction % 10 == 0 {
+        format!("{whole}.{}", fraction / 10)
+    } else {
+        format!("{whole}.{fraction:02}")
+    }
 }
 
 fn validate_adjustment(adjustment: &AdjustmentInput) -> Result<(), AuthError> {
@@ -12622,7 +13064,7 @@ mod tests {
         ).unwrap();
     }
 
-    fn grant_new_test_scope(
+    pub(super) fn grant_new_test_scope(
         service: &LocalAuthService,
         account_id: Uuid,
         country_id: Uuid,
@@ -12638,6 +13080,287 @@ mod tests {
         connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES (?1, ?2, ?3, 'fixture team', 1, 1)", params![team_id.to_string(), department_id.to_string(), format!("T-{}", team_id.simple())]).unwrap();
         drop(connection);
         grant_test_scope(service, account_id, project_id, department_id, team_id, now);
+    }
+
+    #[test]
+    fn payment_pull_projects_three_rows_and_preserves_immutable_values() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let actor_id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: actor_id,
+                    username: "payment-test".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "fixture-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "payment-test",
+                "fixture-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let country_id = Uuid::new_v4();
+        grant_new_test_scope(&service, actor_id, country_id, now);
+        let order_id = Uuid::new_v4();
+        let connection = service.connection.lock().unwrap();
+        let (project_id,department_id,team_id):(String,String,String)=connection.query_row("SELECT project_id,department_id,team_id FROM local_authorization_snapshots WHERE account_id=?1",[actor_id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        connection.execute("INSERT INTO local_purchase_orders (id,display_no,country_id,project_id,site,department_id,team_id,applicant_id,currency,primary_currency,language_pair,status,workflow_status,urgency,order_date,delivery_address,subtotal_minor,line_discount_minor,order_discount_minor,freight_minor,tax_rate_basis_points,tax_minor,total_minor,version,created_at,updated_at,procurement_mode) VALUES (?1,'PAYMENT',?2,?3,'fixture',?4,?5,?6,'XOF','XOF','zh_fr','pending_confirmation','executing','normal','2026-10-24','fixture',1000,0,0,0,0,0,1000,1,0,0,'honsen_self_purchase')",params![order_id.to_string(),country_id.to_string(),project_id,department_id,team_id,actor_id.to_string()]).unwrap();
+        drop(connection);
+        let file_id = Uuid::new_v4();
+        let attachment = AttachmentInput {
+            id: file_id,
+            order_id,
+            owner_type: "purchase_order".into(),
+            owner_id: order_id,
+            original_name: "synthetic.pdf".into(),
+            content_type: "application/pdf".into(),
+            data_base64: BASE64.encode(b"%PDF-1.4 synthetic"),
+        };
+        service.import_attachment(attachment.clone(), now).unwrap();
+        assert_eq!(
+            service.list_attachments(order_id, now).unwrap()[0].upload_state,
+            "pending_upload"
+        );
+        assert!(service.import_attachment(attachment.clone(), now).is_err());
+        assert_eq!(
+            service.import_attachment(
+                AttachmentInput {
+                    id: Uuid::new_v4(),
+                    original_name: "../outside.pdf".into(),
+                    ..attachment.clone()
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service.import_attachment(
+                AttachmentInput {
+                    id: Uuid::new_v4(),
+                    data_base64: BASE64.encode(b"MZ executable"),
+                    ..attachment.clone()
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service.import_attachment(
+                AttachmentInput {
+                    id: Uuid::new_v4(),
+                    original_name: "corrupt.jpg".into(),
+                    content_type: "image/jpeg".into(),
+                    data_base64: BASE64.encode([255, 216, 255, 0]),
+                    ..attachment.clone()
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        let ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+        let mut changes:Vec<_>=ids.iter().enumerate().map(|(i,id)|SyncPullChangeInput { cursor:(i+1).to_string(),entity_type:"procurement_expenditure".into(),entity_id:*id,operation:"upsert".into(),version:1,payload:serde_json::json!({"id":id,"orderId":order_id,"projectId":project_id,"countryId":country_id,"payeeName":"Synthetic","currency":"XOF","amountMinor":"100","paymentDate":"2026-10-24","paymentType":"progress","paymentMethod":"cash","paymentHandlerId":actor_id,"status":"recorded","createdBy":actor_id,"createdAt":unix_seconds(now)}),changed_at:"2026-10-24T00:00:00Z".into() }).collect();
+        let receipt_id = Uuid::new_v4();
+        changes[0].payload["receiptId"] = serde_json::json!(receipt_id);
+        changes[0].payload["counterpartyType"] = serde_json::json!("market_casual");
+        changes[0].payload["counterpartySnapshot"] = serde_json::json!({"type":"market_casual","supplierId":null,"name":"Original archived payee"});
+        changes[0].payload["voucherAttachmentIds"] = serde_json::json!([file_id]);
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![changes[0].clone()],
+                    next_cursor: "1".into(),
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM local_procurement_expenditures",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0,
+            "missing receipt retains staged payment"
+        );
+        changes.push(SyncPullChangeInput{cursor:"4".into(),entity_type:"receipt".into(),entity_id:receipt_id,operation:"upsert".into(),version:1,payload:serde_json::json!({"id":receipt_id,"orderId":order_id,"projectId":project_id,"receiverId":actor_id,"receivedAt":"2026-10-24","completed":false}),changed_at:"2026-10-24T00:00:00Z".into()});
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: changes.clone(),
+                    next_cursor: "4".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let count: i64 = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM local_procurement_expenditures",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 3);
+        let roundtrip = expenditures::read_payment(&*service.connection.lock().unwrap(), ids[0])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            roundtrip,
+            serde_json::from_value::<expenditures::PaymentPayload>(changes[0].payload.clone())
+                .unwrap(),
+            "second client keeps receipt/payee/voucher metadata"
+        );
+
+        service
+            .apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: changes.clone(),
+                    next_cursor: "4".into(),
+                },
+                now,
+            )
+            .unwrap();
+        let summary = service.list_confirmed_procurement_orders(now).unwrap();
+        assert_eq!(summary[0].payment_summary.paid_minor, "300");
+        let reversed = service
+            .reverse_procurement_expenditure(
+                ReverseProcurementExpenditureInput {
+                    id: Uuid::new_v4(),
+                    expenditure_id: ids[0],
+                    reason: "Synthetic correction".into(),
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(reversed.status, "reversed");
+        let event = service
+            .pending_sync_events(100, now)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.entity_id == reversed.id)
+            .unwrap();
+        service
+            .apply_sync_acknowledgements(
+                vec![SyncAcknowledgementInput {
+                    event_id: event.event_id,
+                    status: "validation_error".into(),
+                    server_version: None,
+                    error_code: Some("PAYMENT_DEPENDENCY_PENDING".into()),
+                    server_payload: None,
+                    server_operation: None,
+                }],
+                now,
+            )
+            .unwrap();
+        assert!(
+            service
+                .pending_sync_events(100, now)
+                .unwrap()
+                .iter()
+                .any(|pending| pending.event_id == event.event_id),
+            "missing voucher or receipt retains the original pending event for retry"
+        );
+
+        assert_eq!(
+            service.list_confirmed_procurement_orders(now).unwrap()[0]
+                .payment_summary
+                .paid_minor,
+            "200"
+        );
+        assert_eq!(
+            service.reverse_procurement_expenditure(
+                ReverseProcurementExpenditureInput {
+                    id: Uuid::new_v4(),
+                    expenditure_id: ids[0],
+                    reason: "Duplicate".into()
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        let outbox_count:i64=service.connection.lock().unwrap().query_row("SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type='procurement_expenditure'",[],|r|r.get(0)).unwrap();
+        assert_eq!(outbox_count, 1);
+        let audit_count: i64 = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM local_order_audit_entries WHERE action='payment_reversed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(audit_count, 1);
+        let server_reversal_id = Uuid::new_v4();
+        let mut server_reversal = changes[0].clone();
+        server_reversal.cursor = "4".into();
+        server_reversal.entity_id = server_reversal_id;
+        server_reversal.payload["id"] = serde_json::json!(server_reversal_id);
+        server_reversal.payload["status"] = serde_json::json!("reversed");
+        server_reversal.payload["correctsExpenditureId"] = serde_json::json!(ids[0]);
+        server_reversal.payload["correctionReason"] = serde_json::json!("Other device reversal");
+        for _ in 0..2 {
+            service
+                .apply_sync_pull_page(
+                    SyncPullPageInput {
+                        changes: vec![server_reversal.clone()],
+                        next_cursor: "4".into(),
+                    },
+                    now,
+                )
+                .unwrap();
+        }
+        let conflict_count:i64=service.connection.lock().unwrap().query_row("SELECT COUNT(*) FROM local_sync_conflicts WHERE entity_type='procurement_expenditure'",[],|r|r.get(0)).unwrap();
+        assert_eq!(conflict_count, 1);
+        assert_eq!(
+            service.list_confirmed_procurement_orders(now).unwrap()[0]
+                .payment_summary
+                .paid_minor,
+            "200"
+        );
+        let mut tampered = changes[0].clone();
+        tampered.cursor = "4".into();
+        tampered.version = 2;
+        tampered.payload["amountMinor"] = serde_json::json!("999");
+        assert_eq!(
+            service.apply_sync_pull_page(
+                SyncPullPageInput {
+                    changes: vec![tampered],
+                    next_cursor: "4".into()
+                },
+                now
+            ),
+            Err(AuthError::InvalidInput)
+        );
+        let sum: i64 = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT SUM(amount_minor) FROM local_procurement_expenditures",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(sum, 400);
     }
 
     #[test]
@@ -18098,6 +18821,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(second_receipt.workflow_status, "completed");
+        let execution_orders = service.list_confirmed_procurement_orders(now).unwrap();
+        let execution_line = &execution_orders[0].children[0].lines[0];
+        assert_eq!(execution_line.received_quantity, "2.5");
+        assert_eq!(execution_line.remaining_quantity, "0");
         assert_eq!(
             service.close_supplier_order_with_conditions(
                 children[0].child_order_id,
@@ -18477,15 +19204,17 @@ mod tests {
                 RecordProcurementExpenditureInput {
                     id: Uuid::new_v4(),
                     order_id,
+                    payment_type: "other".into(),
+                    voucher_reference: None,
                     receipt_id: None,
-                    counterparty_type: "market_casual".into(),
+                    counterparty_type: Some("market_casual".into()),
                     supplier_id: None,
                     payee_name: "fixture cash seller".into(),
                     currency: "XOF".into(),
                     amount_minor: "1200".into(),
                     payment_date: "2026-10-15".into(),
                     payment_method: "cash".into(),
-                    payment_handler_id: purchaser.id,
+                    payment_handler_id: Some(purchaser.id),
                     notes: None,
                     voucher_attachment_ids: vec![],
                 },
@@ -18498,15 +19227,17 @@ mod tests {
                 RecordProcurementExpenditureInput {
                     id: Uuid::new_v4(),
                     order_id,
+                    payment_type: "other".into(),
+                    voucher_reference: None,
                     receipt_id: None,
-                    counterparty_type: "market_casual".into(),
+                    counterparty_type: Some("market_casual".into()),
                     supplier_id: None,
                     payee_name: "fixture cash seller".into(),
                     currency: "XOF".into(),
                     amount_minor: "800".into(),
                     payment_date: "2026-10-15".into(),
                     payment_method: "mobile_payment".into(),
-                    payment_handler_id: purchaser.id,
+                    payment_handler_id: Some(purchaser.id),
                     notes: Some("balance".into()),
                     voucher_attachment_ids: vec![],
                 },
@@ -18531,15 +19262,17 @@ mod tests {
                 RecordProcurementExpenditureInput {
                     id: Uuid::new_v4(),
                     order_id,
+                    payment_type: "other".into(),
+                    voucher_reference: None,
                     receipt_id: None,
-                    counterparty_type: "market_casual".into(),
+                    counterparty_type: Some("market_casual".into()),
                     supplier_id: None,
                     payee_name: "owner cannot pay".into(),
                     currency: "XOF".into(),
                     amount_minor: "1".into(),
                     payment_date: "2026-10-15".into(),
                     payment_method: "cash".into(),
-                    payment_handler_id: purchaser.id,
+                    payment_handler_id: Some(purchaser.id),
                     notes: None,
                     voucher_attachment_ids: vec![],
                 },
@@ -18550,25 +19283,142 @@ mod tests {
     }
 
     fn seed_expenditure_migration_order(connection: &Connection) {
-        connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES ('mig-country', 'MIG-C', 'migration', 'UTC', 1, 1)", []).unwrap();
-        connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES ('mig-project', 'mig-country', 'MIG-P', 'migration', 'site', 'department', 'XOF', 'zh_fr', 1, 1)", []).unwrap();
-        connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES ('mig-department', 'MIG-D', 'migration', 1, 1)", []).unwrap();
-        connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES ('mig-team', 'mig-department', 'MIG-T', 'migration', 1, 1)", []).unwrap();
-        connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES ('mig-order', 'MIG-ORDER', 'mig-country', 'mig-project', 'site', 'mig-department', 'mig-team', 'mig-user', 'XOF', 'XOF', 'zh_fr', 'draft', 'draft', 'normal', '2026-10-15', 'address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", []).unwrap();
+        connection.execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES ('00000000-0000-4000-8000-000000000001', 'MIG-C', 'migration', 'UTC', 1, 1)", []).unwrap();
+        connection.execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES ('00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000001', 'MIG-P', 'migration', 'site', 'department', 'XOF', 'zh_fr', 1, 1)", []).unwrap();
+        connection.execute("INSERT INTO local_departments (id, business_code, name, is_active, version) VALUES ('00000000-0000-4000-8000-000000000003', 'MIG-D', 'migration', 1, 1)", []).unwrap();
+        connection.execute("INSERT INTO local_teams (id, department_id, business_code, name, is_active, version) VALUES ('00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000003', 'MIG-T', 'migration', 1, 1)", []).unwrap();
+        connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES ('00000000-0000-4000-8000-000000000006', 'MIG-ORDER', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', 'site', '00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000005', 'XOF', 'XOF', 'zh_fr', 'draft', 'draft', 'normal', '2026-10-15', 'address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", []).unwrap();
+    }
+
+    #[test]
+    fn expenditure_branch_compat_preserves_both_historical_schemas_and_reversal_guards() {
+        for (version, sql, insert) in [
+            (
+                "0032_procurement_expenditures",
+                include_str!("../migrations/0032_procurement_expenditures.sql"),
+                "INSERT INTO local_procurement_expenditures(id,order_id,project_id,payee_name,currency,amount_minor,payment_date,payment_type,payment_method,payment_handler_id,status,created_by,created_at) VALUES('00000000-0000-4000-8000-000000000007','00000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000002','preserved','XOF',1200,'2026-10-15','progress','cash','00000000-0000-4000-8000-000000000005','recorded','00000000-0000-4000-8000-000000000005',7)",
+            ),
+            (
+                "0045_procurement_expenditures",
+                include_str!("../migrations/0045_procurement_expenditures.sql"),
+                "INSERT INTO local_procurement_expenditures(id,order_id,project_id,payee_name,currency,amount_minor,payment_date,payment_method,payment_handler_id,status,created_by,created_at,counterparty_type,counterparty_snapshot_json,updated_at) VALUES('00000000-0000-4000-8000-000000000007','00000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000002','preserved','XOF',1200,'2026-10-15','cash','00000000-0000-4000-8000-000000000010','recorded','00000000-0000-4000-8000-000000000005',7,'market_casual','{\"type\":\"market_casual\",\"supplierId\":null,\"name\":\"preserved\"}',7)",
+            ),
+        ] {
+            let mut service = LocalAuthService::open_in_memory().unwrap();
+            let connection = service.connection.get_mut().unwrap();
+            connection.execute_batch("DROP TABLE local_procurement_expenditure_vouchers; DROP TABLE local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version IN ('0032_procurement_expenditures','0033_expenditure_immutability','0045_procurement_expenditures','0056_expenditure_branch_compat');").unwrap();
+            seed_expenditure_migration_order(connection);
+            connection.execute_batch(sql).unwrap();
+            connection.execute_batch(insert).unwrap();
+            if version.starts_with("0045") {
+                for id in [
+                    "00000000-0000-4000-8000-000000000011",
+                    "00000000-0000-4000-8000-000000000012",
+                ] {
+                    connection.execute("INSERT INTO local_order_attachments(id,order_id,original_name,content_type,byte_length,local_path,created_at) VALUES(?1,'00000000-0000-4000-8000-000000000006','fixture.pdf','application/pdf',1,'fixture',7)",[id]).unwrap();
+                    connection.execute("INSERT INTO local_procurement_expenditure_vouchers(expenditure_id,attachment_id) VALUES('00000000-0000-4000-8000-000000000007',?1)",[id]).unwrap();
+                }
+            }
+            let event_id = Uuid::new_v4().to_string();
+            let legacy: String = if version.starts_with("0045") {
+                connection.query_row("SELECT json_object('id',id,'orderId',order_id,'projectId',project_id,'payeeName',payee_name,'currency',currency,'amountMinor',CAST(amount_minor AS TEXT),'paymentDate',payment_date,'paymentMethod',payment_method,'paymentHandlerId',payment_handler_id,'status',status,'receiptId',receipt_id,'supplierId',supplier_id,'notes',notes,'counterpartyType','market_casual','counterpartySnapshot',json(counterparty_snapshot_json),'voucherAttachmentIds',json((SELECT json_group_array(attachment_id) FROM (SELECT attachment_id FROM local_procurement_expenditure_vouchers WHERE expenditure_id=local_procurement_expenditures.id ORDER BY attachment_id DESC)))) FROM local_procurement_expenditures",[],|r|r.get(0)).unwrap()
+            } else {
+                "{}".into()
+            };
+            if version.starts_with("0045") {
+                connection.execute("INSERT INTO local_sync_outbox(event_id,entity_type,entity_id,operation,base_version,payload_json,created_at) VALUES (?1,'procurement_expenditure','00000000-0000-4000-8000-000000000007','upsert',0,?2,7)",params![event_id,legacy]).unwrap();
+            }
+            connection.execute("INSERT INTO local_schema_migrations(version,checksum,applied_at) VALUES(?1,?2,0)",params![version,format!("{:x}",Sha256::digest(sql.as_bytes()))]).unwrap();
+            migrate(connection).unwrap();
+            migrate(connection).unwrap();
+            if version.starts_with("0045") {
+                let migrated: String = connection
+                    .query_row(
+                        "SELECT payload_json FROM local_sync_outbox WHERE event_id=?1",
+                        [&event_id],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                let payment: expenditures::PaymentPayload =
+                    serde_json::from_str(&migrated).unwrap();
+                assert_eq!(payment.amount_minor, "1200");
+                assert_eq!(payment.payment_type, "other");
+                assert_eq!(payment.created_at, 7);
+                let original: String = connection.query_row("SELECT previous_json FROM local_order_audit_entries WHERE action='payment_sync_payload_migrated' AND reason=?1",[&event_id],|r|r.get(0)).unwrap();
+                assert_eq!(original, legacy);
+                assert_ne!(
+                    payment.payment_handler_id, payment.created_by,
+                    "baseline actual handler remains independent of recorder"
+                );
+                connection.execute("UPDATE local_purchase_orders SET procurement_mode='honsen_self_purchase',workflow_status='executing' WHERE id=?1",[payment.order_id.to_string()]).unwrap();
+                // Lost acknowledgement: the old event was retried at t1; server acceptance was t2.
+                connection
+                    .execute(
+                        "UPDATE local_sync_outbox SET acknowledged_at=100 WHERE event_id=?1",
+                        [&event_id],
+                    )
+                    .unwrap();
+                let mut server = payment.clone();
+                server.created_at = 100;
+                server.voucher_attachment_ids.as_mut().unwrap().reverse();
+                connection.execute("INSERT INTO local_sync_remote_entities(entity_type,entity_id,operation,server_version,payload_json,changed_at,source_cursor) VALUES('procurement_expenditure',?1,'upsert',1,?2,'2026-10-24T00:00:00Z','1')",params![server.id.to_string(),serde_json::to_string(&server).unwrap()]).unwrap();
+                let tx = connection.transaction().unwrap();
+                expenditures::project_staged(&tx).unwrap();
+                tx.commit().unwrap();
+                assert_eq!(
+                    expenditures::read_payment(connection, payment.id)
+                        .unwrap()
+                        .unwrap(),
+                    server
+                );
+                assert_eq!(
+                    connection
+                        .query_row(
+                            "SELECT created_at FROM local_procurement_expenditures WHERE id=?1",
+                            [payment.id.to_string()],
+                            |r| r.get::<_, i64>(0)
+                        )
+                        .unwrap(),
+                    7
+                );
+                assert_eq!(connection.query_row("SELECT COUNT(*) FROM local_order_audit_entries WHERE action='legacy_payment_server_provenance_adopted'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+                let tx = connection.transaction().unwrap();
+                expenditures::project_staged(&tx).unwrap();
+                tx.commit().unwrap();
+            }
+            let preserved: (String,i64,String,i64) = connection.query_row("SELECT payee_name,amount_minor,payment_type,created_at FROM local_procurement_expenditures WHERE id='00000000-0000-4000-8000-000000000007'", [], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+            assert_eq!(
+                preserved,
+                (
+                    "preserved".into(),
+                    1200,
+                    if version.starts_with("0032") {
+                        "progress".into()
+                    } else {
+                        "other".into()
+                    },
+                    7
+                )
+            );
+            assert!(connection.execute("UPDATE local_procurement_expenditures SET amount_minor=1 WHERE id='00000000-0000-4000-8000-000000000007'",[]).is_err());
+            assert!(connection.execute("DELETE FROM local_procurement_expenditures WHERE id='00000000-0000-4000-8000-000000000007'",[]).is_err());
+            connection.execute("INSERT INTO local_procurement_expenditures(id,order_id,project_id,payee_name,currency,amount_minor,payment_date,payment_type,payment_method,payment_handler_id,status,corrects_expenditure_id,correction_reason,created_by,created_at,counterparty_type,counterparty_snapshot_json,updated_at) SELECT '00000000-0000-4000-8000-000000000008',order_id,project_id,payee_name,currency,amount_minor,payment_date,payment_type,payment_method,payment_handler_id,'reversed',id,'fixture correction',created_by,8,'market_casual','{}',8 FROM local_procurement_expenditures WHERE id='00000000-0000-4000-8000-000000000007'",[]).unwrap();
+            assert!(connection.execute("INSERT INTO local_procurement_expenditures(id,order_id,project_id,payee_name,currency,amount_minor,payment_date,payment_type,payment_method,payment_handler_id,status,corrects_expenditure_id,correction_reason,created_by,created_at,counterparty_type,counterparty_snapshot_json,updated_at) SELECT 'duplicate-reversal',order_id,project_id,payee_name,currency,amount_minor,payment_date,payment_type,payment_method,payment_handler_id,'reversed',corrects_expenditure_id,correction_reason,created_by,9,'market_casual','{}',9 FROM local_procurement_expenditures WHERE id='00000000-0000-4000-8000-000000000008'",[]).is_err());
+        }
     }
 
     #[test]
     fn expenditure_migration_upgrades_formal_issue_schema_without_rewriting_orders() {
         let mut service = LocalAuthService::open_in_memory().unwrap();
         let connection = service.connection.get_mut().unwrap();
-        connection.execute_batch("DROP TABLE IF EXISTS local_procurement_expenditure_vouchers; DROP TABLE IF EXISTS local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version = '0045_procurement_expenditures';").unwrap();
+        connection.execute_batch("DROP TABLE IF EXISTS local_procurement_expenditure_vouchers; DROP TABLE IF EXISTS local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version IN ('0045_procurement_expenditures','0056_expenditure_branch_compat');").unwrap();
         seed_expenditure_migration_order(connection);
 
         migrate(connection).unwrap();
         migrate(connection).unwrap();
 
         let order: (String, Option<String>) = connection.query_row(
-            "SELECT display_no, formal_document_no FROM local_purchase_orders WHERE id = 'mig-order'",
+            "SELECT display_no, formal_document_no FROM local_purchase_orders WHERE id = '00000000-0000-4000-8000-000000000006'",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).unwrap();
@@ -18591,7 +19441,7 @@ mod tests {
     fn expenditure_migration_promotes_legacy_marker_without_losing_payment() {
         let mut service = LocalAuthService::open_in_memory().unwrap();
         let connection = service.connection.get_mut().unwrap();
-        connection.execute_batch("DROP TABLE IF EXISTS local_procurement_expenditure_vouchers; DROP TABLE IF EXISTS local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version = '0045_procurement_expenditures';").unwrap();
+        connection.execute_batch("DROP TABLE IF EXISTS local_procurement_expenditure_vouchers; DROP TABLE IF EXISTS local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version IN ('0045_procurement_expenditures','0056_expenditure_branch_compat');").unwrap();
         seed_expenditure_migration_order(connection);
         let legacy_sql = include_str!("../migrations/0045_procurement_expenditures.sql");
         connection.execute_batch(legacy_sql).unwrap();
@@ -18601,7 +19451,7 @@ mod tests {
             [&legacy_checksum],
         ).unwrap();
         connection.execute(
-            "INSERT INTO local_procurement_expenditures (id, order_id, project_id, counterparty_type, payee_name, counterparty_snapshot_json, currency, amount_minor, payment_date, payment_method, payment_handler_id, status, created_by, created_at, updated_at) VALUES ('mig-payment', 'mig-order', 'mig-project', 'market_casual', 'cash seller', '{}', 'XOF', 1200, '2026-10-15', 'cash', 'mig-user', 'recorded', 'mig-user', 0, 0)",
+            "INSERT INTO local_procurement_expenditures (id, order_id, project_id, counterparty_type, payee_name, counterparty_snapshot_json, currency, amount_minor, payment_date, payment_method, payment_handler_id, status, created_by, created_at, updated_at) VALUES ('00000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000006', '00000000-0000-4000-8000-000000000002', 'market_casual', 'cash seller', '{}', 'XOF', 1200, '2026-10-15', 'cash', '00000000-0000-4000-8000-000000000005', 'recorded', '00000000-0000-4000-8000-000000000005', 0, 0)",
             [],
         ).unwrap();
 
@@ -18610,7 +19460,7 @@ mod tests {
 
         let amount: i64 = connection
             .query_row(
-                "SELECT amount_minor FROM local_procurement_expenditures WHERE id = 'mig-payment'",
+                "SELECT amount_minor FROM local_procurement_expenditures WHERE id = '00000000-0000-4000-8000-000000000007'",
                 [],
                 |row| row.get(0),
             )
@@ -18628,7 +19478,7 @@ mod tests {
     fn expenditure_migration_rejects_tampered_legacy_checksum_without_rewriting_tables() {
         let mut service = LocalAuthService::open_in_memory().unwrap();
         let connection = service.connection.get_mut().unwrap();
-        connection.execute_batch("DROP TABLE local_procurement_expenditure_vouchers; DROP TABLE local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version = '0045_procurement_expenditures';").unwrap();
+        connection.execute_batch("DROP TABLE local_procurement_expenditure_vouchers; DROP TABLE local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version IN ('0045_procurement_expenditures','0056_expenditure_branch_compat');").unwrap();
         connection
             .execute_batch(include_str!(
                 "../migrations/0045_procurement_expenditures.sql"

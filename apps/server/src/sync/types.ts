@@ -4,6 +4,7 @@ import type {
   SyncEventResult,
   CategoryRepairRequest,
   SyncPullResponse,
+  PaymentConflictView,
 } from '@honsen/shared'
 
 export type SyncActor = {
@@ -13,6 +14,9 @@ export type SyncActor = {
 }
 
 export type SyncStore = {
+  listPaymentConflicts?(
+    actor: SyncActor,
+  ): Promise<{ conflicts: PaymentConflictView[] }>
   listCategoryQuarantine?(): Promise<
     Array<{
       categoryId: string

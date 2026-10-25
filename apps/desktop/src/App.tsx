@@ -43,6 +43,7 @@ import { tauriRfqApi } from './lib/rfq-api'
 import { tauriSupplierOrderApi } from './lib/supplier-order-api'
 import { tauriWorkflowApi, type WorkflowApi } from './lib/workflow-api'
 import type { UserRole } from './lib/permissions'
+import { startProcurementSync, syncProcurement } from './lib/procurement-sync'
 import './App.css'
 
 const previewRequisitionContext: RequisitionContext = {
@@ -298,6 +299,10 @@ function App() {
       active = false
     }
   }, [session, authorizationRefreshReady])
+  useEffect(() => {
+    if (session?.onlineAuthenticated)
+      return startProcurementSync(syncProcurement)
+  }, [session?.user_id, session?.onlineAuthenticated])
   const selectAuthorizationContext = (value: string) => {
     const [projectId, departmentId, teamId] = value.split(':')
     const invoke = (

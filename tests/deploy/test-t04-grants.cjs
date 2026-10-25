@@ -6,6 +6,9 @@ const { tmpdir } = require('node:os')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const assert = require('node:assert/strict')
+const {
+  verifyApiPrivileges,
+} = require('../../deploy/linux/verify-api-privileges.cjs')
 
 async function main() {
   const source = process.env.TEST_DATABASE_URL
@@ -54,7 +57,7 @@ async function main() {
     }
     await db.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
     await db.query(
-      `GRANT SELECT ON user_project_bindings, user_project_scope_bindings, projects, departments, teams TO "${role}"`,
+      `GRANT SELECT ON user_project_bindings, user_project_scope_bindings, projects, countries, departments, teams TO "${role}"`,
     )
     await db.query(
       `GRANT SELECT, INSERT, UPDATE ON sync_entities, sync_events, audit_entries TO "${role}"`,
@@ -104,6 +107,20 @@ async function main() {
     await db.query(
       'ALTER TABLE public.sync_entities ENABLE TRIGGER guard_category_business_code',
     )
+    await db.query(
+      'ALTER TABLE payment_conflict_resolutions DISABLE TRIGGER payment_conflict_resolutions_immutable',
+    )
+    result = run(['deploy/linux/grant-api.cjs'])
+    assert.notEqual(
+      result.status,
+      0,
+      'disabled payment decision guard must be rejected',
+    )
+    await db.query(
+      'ALTER TABLE payment_conflict_resolutions ENABLE TRIGGER payment_conflict_resolutions_immutable',
+    )
+    result = run(['deploy/linux/grant-api.cjs'])
+    assert.equal(result.status, 0, result.stderr)
     const fn = await db.query(
       "SELECT prosecdef, proconfig, pg_get_userbyid(proowner) AS owner, EXISTS (SELECT 1 FROM aclexplode(COALESCE(proacl, acldefault('f', proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE') AS public_execute FROM pg_proc WHERE oid='public.guard_category_business_code()'::regprocedure",
     )
@@ -125,6 +142,77 @@ async function main() {
     assert.deepEqual(fn.rows[0].proconfig, [
       'search_path=pg_catalog, public, pg_temp',
     ])
+    const archiveRoutines = [
+      [
+        'preserve_procurement_expenditure()',
+        'procurement_expenditures',
+        'procurement_expenditures_immutable',
+      ],
+      [
+        'preserve_attachment_archive()',
+        'attachments',
+        'attachment_archive_immutable',
+      ],
+      ['canonical_procurement_payment(jsonb,uuid,timestamptz)', null, null],
+    ]
+    for (const [signature, table, triggerName] of archiveRoutines) {
+      const identity = await db.query(
+        "SELECT prosecdef,proconfig,pg_get_userbyid(proowner) AS owner,pg_get_functiondef(oid) AS definition,EXISTS(SELECT 1 FROM aclexplode(COALESCE(proacl,acldefault('f',proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE') AS public_execute,has_function_privilege($1,oid,'EXECUTE') AS api_execute FROM pg_proc WHERE oid=$2::regprocedure",
+        [role, `public.${signature}`],
+      )
+      assert.equal(identity.rows[0].prosecdef, false)
+      assert.equal(identity.rows[0].owner, fn.rows[0].owner)
+      assert.equal(identity.rows[0].public_execute, false)
+      assert.equal(identity.rows[0].api_execute, table === null)
+      assert.deepEqual(identity.rows[0].proconfig, [
+        'search_path=pg_catalog, public, pg_temp',
+      ])
+      await db.query(`ALTER FUNCTION public.${signature} SECURITY DEFINER`)
+      result = run(['deploy/linux/grant-api.cjs'])
+      assert.notEqual(
+        result.status,
+        0,
+        `${signature} must remain SECURITY INVOKER`,
+      )
+      await db.query(`ALTER FUNCTION public.${signature} SECURITY INVOKER`)
+      if (table) {
+        await db.query(
+          `ALTER TABLE public.${table} DISABLE TRIGGER ${triggerName}`,
+        )
+        result = run(['deploy/linux/grant-api.cjs'])
+        assert.notEqual(
+          result.status,
+          0,
+          `${triggerName} must stay enabled and bound`,
+        )
+        await db.query(
+          `ALTER TABLE public.${table} ENABLE TRIGGER ${triggerName}`,
+        )
+      }
+      const replacement = table
+        ? `CREATE OR REPLACE FUNCTION public.${signature} RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END;$$`
+        : "CREATE OR REPLACE FUNCTION public.canonical_procurement_payment(payload jsonb,actor uuid,recorded_at timestamptz) RETURNS jsonb LANGUAGE SQL STABLE AS $$SELECT '{}'::jsonb$$"
+      await db.query(replacement)
+      result = run(['deploy/linux/grant-api.cjs'])
+      assert.notEqual(
+        result.status,
+        0,
+        `${signature} body must match the reviewed hash`,
+      )
+      await db.query(identity.rows[0].definition)
+    }
+    await db.query(
+      'CREATE FUNCTION public.canonical_procurement_payment() RETURNS integer LANGUAGE sql AS $$SELECT 1$$',
+    )
+    result = run(['deploy/linux/grant-api.cjs'])
+    assert.notEqual(
+      result.status,
+      0,
+      'unreviewed routine overload must fail closed',
+    )
+    await db.query('DROP FUNCTION public.canonical_procurement_payment()')
+    result = run(['deploy/linux/grant-api.cjs'])
+    assert.equal(result.status, 0, result.stderr)
     const user = randomUUID(),
       a = randomUUID(),
       b = randomUUID()
@@ -167,6 +255,190 @@ async function main() {
     )
     assert.equal(result.status, 0, result.stderr)
     process.stdout.write(result.stdout)
+    const country = randomUUID(),
+      project = randomUUID(),
+      order = randomUUID(),
+      payment = randomUUID(),
+      attachment = randomUUID()
+    await db.query(
+      "INSERT INTO countries(id,business_code,name,time_zone) VALUES($1::uuid,$1::text,'Fixture','UTC')",
+      [country],
+    )
+    await db.query(
+      "INSERT INTO projects(id,country_id,business_code,name,site,department_name,default_currency,default_language_pair) VALUES($1::uuid,$2,$1::text,'Fixture','Fixture','Fixture','XOF','zh_fr')",
+      [project, country],
+    )
+    await db.query(
+      "INSERT INTO sync_entities(entity_type,entity_id,version,payload_json,updated_by) VALUES('purchase_order',$1,1,$2,$3)",
+      [order, { projectId: project, countryId: country }, user],
+    )
+    const rejectedPaymentEvent = randomUUID(),
+      resolutionEvent = randomUUID(),
+      paymentConflict = randomUUID(),
+      paymentDecision = randomUUID(),
+      installation = randomUUID()
+    for (const [id, type, entityId, status] of [
+      [rejectedPaymentEvent, 'procurement_expenditure', payment, 'conflict'],
+      [
+        resolutionEvent,
+        'payment_conflict_resolution',
+        paymentDecision,
+        'accepted',
+      ],
+    ]) {
+      await db.query(
+        `INSERT INTO sync_events(event_id,installation_id,actor_id,origin_account_id,origin_installation_id,origin_status,origin_attested_at,entity_type,entity_id,operation,base_version,result_status,server_version) VALUES($1,$2,$3,$3,$2,'attested',NOW(),$4,$5,'upsert',0,$6,1)`,
+        [id, installation, user, type, entityId, status],
+      )
+    }
+    await db.query(
+      `INSERT INTO sync_conflicts(id,event_id,entity_type,entity_id,base_version,server_version,local_payload_json,server_payload_json,origin_account_id,origin_installation_id,origin_status) VALUES($1,$2,'procurement_expenditure',$3,0,1,'{}','{}',$4,$5,'attested')`,
+      [paymentConflict, rejectedPaymentEvent, payment, user, installation],
+    )
+    await db.query(`SET ROLE "${role}"`)
+    const grantPolicy = JSON.parse(
+      readFileSync('deploy/linux/api-grant-policy.json', 'utf8'),
+    )
+    await verifyApiPrivileges(db, grantPolicy)
+    await db.query('SELECT * FROM payment_conflict_resolutions')
+    await db.query(
+      'INSERT INTO payment_conflict_resolutions(id,conflict_id,event_id,rejected_event_id,actor_id,installation_id,reason,payload_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+      [
+        paymentDecision,
+        paymentConflict,
+        resolutionEvent,
+        rejectedPaymentEvent,
+        user,
+        installation,
+        'Retain immutable evidence',
+        { id: paymentDecision },
+      ],
+    )
+    await assert.rejects(
+      db.query("UPDATE payment_conflict_resolutions SET reason='rewrite'"),
+      (e) => e.code === '42501',
+    )
+    await assert.rejects(
+      db.query('DELETE FROM payment_conflict_resolutions'),
+      (e) => e.code === '42501',
+    )
+    await assert.rejects(
+      verifyApiPrivileges(db, {
+        unreviewed: [{ kind: 'unknown', name: 'attachments', privileges: [] }],
+      }),
+      /Invalid API grant kind/,
+    )
+    await assert.rejects(
+      verifyApiPrivileges(db, {
+        unreviewed: [
+          { kind: 'routine', name: 'unknown', privileges: ['EXECUTE'] },
+        ],
+      }),
+      /Invalid API routine grant/,
+    )
+    await db.query('RESET ROLE')
+    await assert.rejects(
+      db.query(
+        "UPDATE payment_conflict_resolutions SET reason='rewrite' WHERE id=$1",
+        [paymentDecision],
+      ),
+      (e) => e.code === 'P0001',
+    )
+    await db.query(
+      `REVOKE EXECUTE ON FUNCTION public.canonical_procurement_payment(jsonb,uuid,timestamptz) FROM "${role}"`,
+    )
+    await db.query(`SET ROLE "${role}"`)
+    await assert.rejects(
+      verifyApiPrivileges(db, grantPolicy),
+      /API database privileges incomplete/,
+    )
+    await db.query('RESET ROLE')
+    await db.query(
+      `GRANT EXECUTE ON FUNCTION public.canonical_procurement_payment(jsonb,uuid,timestamptz) TO "${role}"`,
+    )
+    await db.query(`REVOKE UPDATE(version_id) ON attachments FROM "${role}"`)
+    await db.query(`SET ROLE "${role}"`)
+    await assert.rejects(
+      verifyApiPrivileges(db, grantPolicy),
+      /API database privileges incomplete/,
+    )
+    await db.query('RESET ROLE')
+    await db.query(`GRANT UPDATE(version_id) ON attachments TO "${role}"`)
+    await db.query(`SET ROLE "${role}"`)
+    await verifyApiPrivileges(db, grantPolicy)
+    await db.query(
+      "INSERT INTO procurement_expenditures(id,order_id,project_id,country_id,currency,amount_minor,status,created_by,created_at,payload_json) VALUES($1,$2,$3,$4,'XOF',1,'recorded',$5,1,'{}')",
+      [payment, order, project, country, user],
+    )
+    await db.query('SELECT * FROM procurement_expenditures WHERE id=$1', [
+      payment,
+    ])
+    await assert.rejects(
+      db.query(
+        'UPDATE procurement_expenditures SET amount_minor=2 WHERE id=$1',
+        [payment],
+      ),
+      (e) => e.code === '42501',
+    )
+    await assert.rejects(
+      db.query('DELETE FROM procurement_expenditures WHERE id=$1', [payment]),
+      (e) => e.code === '42501',
+    )
+    await db.query(
+      "INSERT INTO attachments(id,order_id,owner_type,owner_id,project_id,country_id,original_name,content_type,byte_length,checksum,object_key,status,uploaded_by,created_at,payload_json) VALUES($1::uuid,$2,'purchase_order',$2,$3,$4,'fixture.pdf','application/pdf',1,$5,$1::text,'pending_upload',$6,1,'{}')",
+      [attachment, order, project, country, 'a'.repeat(64), user],
+    )
+    await db.query('SELECT * FROM attachments WHERE id=$1 FOR UPDATE', [
+      attachment,
+    ])
+    await db.query(
+      'SELECT order_id,status FROM attachments WHERE id=$1 FOR SHARE',
+      [attachment],
+    )
+    await assert.rejects(
+      db.query(
+        "UPDATE attachments SET original_name='changed.pdf' WHERE id=$1",
+        [attachment],
+      ),
+      (e) => e.code === '42501',
+    )
+    await db.query(
+      "UPDATE attachments SET status='uploaded',version_id='fixture-version' WHERE id=$1",
+      [attachment],
+    )
+    await assert.rejects(
+      db.query("UPDATE attachments SET status='pending_upload' WHERE id=$1", [
+        attachment,
+      ]),
+      (e) => e.code === 'P0001',
+    )
+    await assert.rejects(
+      db.query('DELETE FROM attachments WHERE id=$1', [attachment]),
+      (e) => e.code === '42501',
+    )
+    await db.query(
+      "INSERT INTO attachment_audit(attachment_id,actor_id,action) VALUES($1,$2,'verified')",
+      [attachment, user],
+    )
+    await db.query('SELECT * FROM attachment_audit WHERE attachment_id=$1', [
+      attachment,
+    ])
+    await assert.rejects(
+      db.query('DELETE FROM attachment_audit WHERE attachment_id=$1', [
+        attachment,
+      ]),
+      (e) => e.code === '42501',
+    )
+    assert.equal(
+      (
+        await db.query(
+          'SELECT public.canonical_procurement_payment($1,$2,NOW()) AS payload',
+          [{ orderId: order }, user],
+        )
+      ).rows[0].payload.countryId,
+      country,
+    )
+    await db.query('RESET ROLE')
     const c = randomUUID(),
       d = randomUUID()
     await db.query(`SET ROLE "${role}"`)
@@ -187,6 +459,16 @@ async function main() {
       await shadow.query(`SET ROLE "${role}"`)
       await shadow.query(
         'CREATE TEMP TABLE sync_entities(entity_type text, entity_id uuid, payload_json jsonb)',
+      )
+      assert.equal(
+        (
+          await shadow.query(
+            'SELECT public.canonical_procurement_payment($1,$2,NOW()) AS payload',
+            [{ orderId: order }, user],
+          )
+        ).rows[0].payload.countryId,
+        country,
+        'temporary shadow table must not change canonical payment country',
       )
       await assert.rejects(
         shadow.query(

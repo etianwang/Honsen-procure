@@ -547,6 +547,7 @@ const app = createApp(
   new MasterDataService(new PostgresMasterDataStore(pool)),
   new SyncService(new PostgresSyncStore(pool)),
   new AuthorizationService(new PostgresAuthorizationStore(pool)),
+  undefined,
   nativeApp,
 )
 app.addHook('onClose', async () => pool.end())

@@ -85,6 +85,8 @@ The resolver creates a normal new local mutation/outbox event against the versio
 
 Only an administrator or super administrator may resolve a conflict. For catalog, reference data and immutable comments, **keep local** supersedes the rejected event and creates a new event against the server version; **use server** applies the preserved server operation transactionally. Purchase-order conflicts are never directly overwritten and remain subject to their revision workflow.
 
+Payment reconciliation uses the separate `payment_conflict_resolution` entity, never the mutable resolver. `GET /api/sync/payment-conflicts` returns only attested evidence within the enabled administrator's current authoritative order/project/country/department/team scope, including another creator's conflict. A normal owned Outbox event submits `{id, conflictId, eventId, action: 'use_server', reason}` with base version zero. The server rechecks the live role/scope, rejected event provenance and immutable ledger winner, then atomically appends one unique decision, audit and change-log entry. Duplicate delivery reuses the same result; competing decisions cannot double book. The decision publishes both original payloads and a separately validated canonical payment. SQLite retains original ledger/conflict/Outbox rows, projects the decision once and uses the effective canonical payment for summaries and voucher targets. A queued decision remains pending until the server decision is pulled; changing payment facts still requires the existing reversal/new-payment workflow. Unsupported evidence rolls back the page without advancing its cursor.
+
 ## Retry and observability
 
 - Retry with bounded exponential backoff and jitter; restart/network recovery can trigger an earlier safe retry.

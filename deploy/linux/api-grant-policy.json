@@ -15,7 +15,37 @@
   ],
   "004_authorization_scopes.sql": [],
   "005_nullable_project_default_contact.sql": [],
+  "005_procurement_expenditures.sql": [
+    {
+      "kind": "table",
+      "name": "procurement_expenditures",
+      "privileges": ["SELECT", "INSERT"]
+    },
+    {
+      "kind": "routine",
+      "name": "preserve_procurement_expenditure",
+      "privileges": []
+    }
+  ],
   "005_sync_event_origin.sql": [],
+  "006_attachments.sql": [
+    {
+      "kind": "table",
+      "name": "attachments",
+      "privileges": ["SELECT", "INSERT", "UPDATE"],
+      "updateColumns": ["status", "version_id"]
+    },
+    {
+      "kind": "table",
+      "name": "attachment_audit",
+      "privileges": ["SELECT", "INSERT"]
+    },
+    {
+      "kind": "routine",
+      "name": "preserve_attachment_archive",
+      "privileges": []
+    }
+  ],
   "006_formal_issue_registry.sql": [
     {
       "kind": "table",
@@ -49,6 +79,28 @@
       "kind": "table",
       "name": "catalog_sync_quarantine",
       "privileges": ["SELECT", "INSERT", "UPDATE"]
+    }
+  ],
+  "011_attachment_derivation.sql": [
+    {
+      "kind": "table",
+      "name": "attachments",
+      "privileges": ["SELECT", "INSERT", "UPDATE"],
+      "updateColumns": ["status", "version_id"]
+    }
+  ],
+  "013_payment_conflict_resolutions.sql": [
+    {
+      "kind": "table",
+      "name": "payment_conflict_resolutions",
+      "privileges": ["SELECT", "INSERT"]
+    }
+  ],
+  "012_payment_sync_compatibility.sql": [
+    {
+      "kind": "routine",
+      "name": "canonical_procurement_payment",
+      "privileges": ["EXECUTE"]
     }
   ]
 }

@@ -1,5 +1,6 @@
 import {
   exchangeRateSchema,
+  procurementExpenditureSchema,
   projectDefaultsSchema,
   referenceMasterDataSchema,
   taxTemplateSchema,
@@ -12,6 +13,10 @@ import { formalShortCode, parseFormalIssue } from './formal-issue.js'
 import type { SyncActor, SyncStore } from './types.js'
 import { CategoryRepairError } from './service.js'
 import { catalogPayload, catalogTypes } from './catalog-payload.js'
+import {
+  listPaymentConflicts,
+  pushPaymentResolution,
+} from './payment-conflicts.js'
 
 const globallyVisibleEntityTypes = [
   'country',
@@ -55,6 +60,10 @@ type ProjectDefaultsBusinessRow = {
 
 export class PostgresSyncStore implements SyncStore {
   constructor(private readonly pool: Pool) {}
+
+  async listPaymentConflicts(actor: SyncActor) {
+    return listPaymentConflicts(this.pool, actor)
+  }
 
   async listCategoryQuarantine() {
     const result = await this.pool.query<{
@@ -230,6 +239,8 @@ export class PostgresSyncStore implements SyncStore {
     actorId: string
     recoveryReason?: string
   }): Promise<SyncEventResult> {
+    if (input.event.entityType === 'payment_conflict_resolution')
+      return pushPaymentResolution(this.pool, input)
     if (
       ['supplier', 'material_price'].includes(input.event.entityType) &&
       input.event.payload.id !== undefined &&
@@ -628,9 +639,9 @@ export class PostgresSyncStore implements SyncStore {
              WHERE entity_type = $1 AND entity_id = $2`,
             [input.event.entityType, input.event.entityId],
           )
-          if (conflict.rows[0] && entity.rows[0]) {
+          if (conflict.rows[0]) {
             result.serverPayload = conflict.rows[0].server_payload_json
-            result.serverOperation = entity.rows[0].is_deleted
+            result.serverOperation = entity.rows[0]?.is_deleted
               ? 'soft_delete'
               : 'upsert'
           }
@@ -647,6 +658,46 @@ export class PostgresSyncStore implements SyncStore {
         [input.event.entityType, input.event.entityId],
       )
       const current = entity.rows[0]
+      if (input.event.entityType === 'procurement_expenditure' && current) {
+        // Validate the existing payment's authoritative relation before exposing
+        // its immutable payload in a conflict response.
+        const payment = input.event.payload
+        const scope = await client.query(
+          `SELECT 1 FROM sync_entities o
+           JOIN projects p ON p.id::text=o.payload_json->>'projectId' AND p.is_active AND p.deleted_at IS NULL
+           JOIN countries c ON c.id=p.country_id AND c.is_active AND c.deleted_at IS NULL
+           JOIN user_project_bindings b ON b.project_id=p.id AND b.user_id=$1 AND b.deleted_at IS NULL
+           JOIN user_project_scope_bindings scope ON scope.user_id=b.user_id AND scope.project_id=p.id AND scope.deleted_at IS NULL
+           JOIN departments d ON d.id=scope.department_id AND d.is_active AND d.deleted_at IS NULL
+           JOIN teams t ON t.id=scope.team_id AND t.department_id=d.id AND t.is_active AND t.deleted_at IS NULL
+           WHERE o.entity_type='purchase_order' AND o.entity_id::text=$2 AND NOT o.is_deleted
+             AND p.id::text=$3 AND c.id::text=$4 AND o.payload_json->>'countryId'=c.id::text
+             AND o.payload_json->>'departmentId'=d.id::text AND o.payload_json->>'teamId'=t.id::text
+           FOR SHARE OF o,p,c,b,scope,d,t`,
+          [
+            input.actorId,
+            current.payload_json.orderId,
+            current.payload_json.projectId,
+            payment.countryId,
+          ],
+        )
+        if (
+          scope.rowCount !== 1 ||
+          payment.orderId !== current.payload_json.orderId ||
+          payment.projectId !== current.payload_json.projectId ||
+          payment.createdBy !== input.actorId ||
+          (current.payload_json.countryId !== undefined &&
+            payment.countryId !== current.payload_json.countryId)
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
       const currentVersion = current ? Number(current.version) : 0
       if (input.event.entityType === 'exchange_rate' && currentVersion === 0) {
         const business = await client.query(
@@ -745,7 +796,11 @@ export class PostgresSyncStore implements SyncStore {
           return result
         }
       }
-      if (currentVersion !== input.event.baseVersion) {
+      if (
+        currentVersion !== input.event.baseVersion ||
+        (input.event.entityType === 'procurement_expenditure' &&
+          current !== undefined)
+      ) {
         const result = {
           eventId: input.event.eventId,
           status: 'conflict' as const,
@@ -911,6 +966,212 @@ export class PostgresSyncStore implements SyncStore {
             [input.actorId, input.event.entityId, input.event.eventId],
           )
         }
+      }
+
+      if (input.event.entityType === 'procurement_expenditure') {
+        const parsed = procurementExpenditureSchema.safeParse(
+          input.event.payload,
+        )
+        if (
+          !parsed.success ||
+          input.event.operation !== 'upsert' ||
+          parsed.data.id !== input.event.entityId ||
+          parsed.data.createdBy !== input.actorId
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+        const p = parsed.data
+        // Serialize payments and reversals for this order, including competing devices.
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+          `payment-order:${p.orderId}`,
+        ])
+        const orderResult = await client.query<{
+          payload_json: Record<string, unknown>
+        }>(
+          `SELECT payload_json FROM sync_entities WHERE entity_type='purchase_order' AND entity_id=$1 AND NOT is_deleted FOR SHARE`,
+          [p.orderId],
+        )
+        const order = orderResult.rows[0]?.payload_json
+        const parentResult =
+          order && typeof order.parentOrderId === 'string'
+            ? await client.query<{ payload_json: Record<string, unknown> }>(
+                `SELECT payload_json FROM sync_entities WHERE entity_type='purchase_order' AND entity_id=$1 AND NOT is_deleted FOR SHARE`,
+                [order.parentOrderId],
+              )
+            : null
+        const parent = parentResult?.rows[0]?.payload_json
+        const scope = await client.query(
+          `SELECT 1 FROM user_project_bindings b JOIN projects p ON p.id=b.project_id JOIN countries c ON c.id=p.country_id
+           JOIN user_project_scope_bindings scope ON scope.user_id=b.user_id AND scope.project_id=b.project_id AND scope.deleted_at IS NULL
+           JOIN departments d ON d.id=scope.department_id AND d.is_active AND d.deleted_at IS NULL
+           JOIN teams t ON t.id=scope.team_id AND t.department_id=d.id AND t.is_active AND t.deleted_at IS NULL
+           WHERE b.user_id=$1 AND b.project_id=$2 AND b.deleted_at IS NULL AND p.is_active AND p.deleted_at IS NULL AND c.is_active AND c.deleted_at IS NULL AND c.id=$3 AND d.id::text=$4 AND t.id::text=$5 FOR SHARE OF b,p,c,scope,d,t`,
+          [
+            input.actorId,
+            p.projectId,
+            p.countryId,
+            order?.departmentId ?? null,
+            order?.teamId ?? null,
+          ],
+        )
+        let valid =
+          scope.rowCount === 1 &&
+          !!order &&
+          order.projectId === p.projectId &&
+          order.countryId === p.countryId &&
+          order.currency === p.currency &&
+          [
+            'approved',
+            'confirmed',
+            'formally_issued',
+            'sent',
+            'executing',
+            'receiving',
+            'completed',
+            'completed_with_conditions',
+          ].includes(String(order.workflowStatus)) &&
+          (!order.parentOrderId ||
+            (!!parent &&
+              parent.projectId === p.projectId &&
+              parent.countryId === p.countryId)) &&
+          (parent ?? order).procurementMode === 'honsen_self_purchase' &&
+          (p.supplierId == null ||
+            order.supplierId == null ||
+            p.supplierId === order.supplierId)
+        let dependencyMissing = false
+        if (p.receiptId) {
+          const receipt = await client.query<{
+            payload_json: Record<string, unknown>
+          }>(
+            "SELECT payload_json FROM sync_entities WHERE entity_type='receipt' AND entity_id=$1 AND NOT is_deleted FOR SHARE",
+            [p.receiptId],
+          )
+          const payload = receipt.rows[0]?.payload_json
+          if (!payload) dependencyMissing = true
+          else
+            valid =
+              valid &&
+              payload.orderId === p.orderId &&
+              payload.projectId === p.projectId
+        }
+        if (p.supplierId) {
+          const supplier = await client.query<{
+            payload_json: Record<string, unknown>
+          }>(
+            "SELECT payload_json FROM sync_entities WHERE entity_type='supplier' AND entity_id=$1 AND NOT is_deleted FOR SHARE",
+            [p.supplierId],
+          )
+          const payload = supplier.rows[0]?.payload_json
+          if (!payload) dependencyMissing = true
+          else
+            valid =
+              valid && (payload.countryId ?? payload.country_id) === p.countryId
+        }
+        for (const id of p.voucherAttachmentIds ?? []) {
+          const voucher = await client.query<{
+            order_id: string
+            status: string
+          }>(
+            'SELECT order_id::text,status FROM attachments WHERE id=$1 FOR SHARE',
+            [id],
+          )
+          if (!voucher.rows[0] || voucher.rows[0].status !== 'uploaded')
+            dependencyMissing = true
+          else valid = valid && voucher.rows[0].order_id === p.orderId
+        }
+        if (valid && dependencyMissing) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'PAYMENT_DEPENDENCY_PENDING',
+          }
+        }
+        if (p.status === 'reversed') {
+          const original = await client.query<{
+            payload_json: Record<string, unknown>
+          }>(
+            `SELECT payload_json FROM procurement_expenditures WHERE id=$1 AND status='recorded'`,
+            [p.correctsExpenditureId],
+          )
+          const originalPayload = original.rows[0]?.payload_json
+          const duplicate = await client.query<StoredEntity>(
+            `SELECT e.version,e.payload_json FROM procurement_expenditures p JOIN sync_entities e ON e.entity_type='procurement_expenditure' AND e.entity_id=p.id AND NOT e.is_deleted WHERE p.corrects_expenditure_id=$1`,
+            [p.correctsExpenditureId],
+          )
+          valid =
+            valid &&
+            !!originalPayload &&
+            [
+              'orderId',
+              'projectId',
+              'countryId',
+              'currency',
+              'amountMinor',
+              'payeeName',
+              'paymentDate',
+              'paymentType',
+              'paymentMethod',
+              'receiptId',
+              'counterpartyType',
+              'counterpartySnapshot',
+              'supplierId',
+            ].every((key) =>
+              isDeepStrictEqual(
+                originalPayload[key] ?? null,
+                input.event.payload[key] ?? null,
+              ),
+            )
+          if (valid && duplicate.rows[0]) {
+            const winner = duplicate.rows[0]
+            const result: SyncEventResult = {
+              eventId: input.event.eventId,
+              status: 'conflict',
+              serverVersion: Number(winner.version),
+              errorCode: 'PAYMENT_REVERSAL_CONFLICT',
+            }
+            await this.recordConflict(client, input, winner, result)
+            await client.query(
+              "UPDATE sync_events SET result_error_code='PAYMENT_REVERSAL_CONFLICT' WHERE event_id=$1",
+              [input.event.eventId],
+            )
+            await client.query('COMMIT')
+            return result
+          }
+        }
+        if (!valid) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+          }
+        }
+        await client.query(
+          `INSERT INTO procurement_expenditures (id,order_id,project_id,country_id,parent_order_id,supplier_id,currency,amount_minor,status,corrects_expenditure_id,correction_reason,created_by,created_at,payload_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [
+            p.id,
+            p.orderId,
+            p.projectId,
+            p.countryId,
+            order?.parentOrderId ?? null,
+            order?.supplierId ?? null,
+            p.currency,
+            p.amountMinor,
+            p.status,
+            p.correctsExpenditureId ?? null,
+            p.correctionReason ?? null,
+            p.createdBy,
+            p.createdAt,
+            input.event.payload,
+          ],
+        )
       }
 
       const serverVersion = currentVersion + 1
@@ -2167,7 +2428,7 @@ export class PostgresSyncStore implements SyncStore {
         new_business_code: string | null
         quarantine_status: string | null
       }>(
-        `SELECT c.sequence, c.entity_type, c.entity_id, c.operation, c.version, c.payload_json, c.changed_at,
+        `SELECT c.sequence, c.entity_type, c.entity_id, c.operation, c.version, CASE WHEN c.entity_type='procurement_expenditure' THEN canonical_procurement_payment(c.payload_json,c.actor_id,c.changed_at) ELSE c.payload_json END AS payload_json, c.changed_at,
               repair.request_id AS repair_request_id, repair.old_business_code, repair.new_business_code,
               q.status AS quarantine_status
        FROM server_change_log c
@@ -2213,6 +2474,13 @@ export class PostgresSyncStore implements SyncStore {
              WHERE b.user_id = $3
                AND b.deleted_at IS NULL
                AND b.project_id::text = c.payload_json->>'projectId'
+               AND (c.entity_type <> 'payment_conflict_resolution' OR (
+                 c.payload_json->>'countryId'=p.country_id::text
+                 AND EXISTS (SELECT 1 FROM countries country WHERE country.id=p.country_id AND country.is_active AND country.deleted_at IS NULL)
+                 AND EXISTS (SELECT 1 FROM sync_entities o WHERE o.entity_type='purchase_order' AND o.entity_id::text=c.payload_json->>'orderId' AND NOT o.is_deleted
+                   AND o.payload_json->>'projectId'=p.id::text AND o.payload_json->>'countryId'=p.country_id::text
+                   AND o.payload_json->>'departmentId'=d.id::text AND o.payload_json->>'teamId'=t.id::text)
+               ))
                AND (c.entity_type <> 'purchase_order' OR c.payload_json->>'countryId' IS NULL OR c.payload_json->>'countryId' = p.country_id::text)
            ))
          )
@@ -2351,7 +2619,7 @@ export class PostgresSyncStore implements SyncStore {
     entityId: string,
   ): Promise<Record<string, unknown> | null> {
     const result = await this.pool.query<StoredEntity>(
-      `SELECT version, payload_json FROM sync_entities
+      `SELECT version, CASE WHEN entity_type='procurement_expenditure' THEN canonical_procurement_payment(payload_json,updated_by,updated_at) ELSE payload_json END AS payload_json FROM sync_entities
        WHERE entity_type = $1 AND entity_id = $2 AND is_deleted = FALSE`,
       [entityType, entityId],
     )

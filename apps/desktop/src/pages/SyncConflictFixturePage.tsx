@@ -31,6 +31,8 @@ export function SyncConflictFixturePage() {
     <main className="content">
       <SyncConflictPanel
         api={{
+          listPaymentSyncConflicts: async () => [],
+          resolvePaymentSyncConflict: async () => {},
           listSyncConflicts: async () => [
             {
               id: '00000000-0000-4000-8000-000000000099',

@@ -2,6 +2,12 @@
 
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.
 
+2026-10-25 RC stabilization, Agent A: a reused clean Windows Sandbox passes fresh environment eligibility and the fixed `f4756af` candidate's native vault utility; the host was not probed again. [T14 evidence](reviews/RC-STABILIZATION-WINDOWS-ENV-20261025.md). Actual application login/revocation and dual-client payment/COS remain unexecuted because the existing guest-capable full path lacks authorized COS test configuration and the separate credential-free security path is host-loopback/debug-specific. Environment eligibility does not close any security, Formal, task or milestone gate. C separately owns installation-path findings.
+
+2026-10-25 Agent A: PR #19 immutable-payment conflict reconciliation has builder code and focused PostgreSQL/SQLite/production-route DOM evidence, including canonical voucher-target recovery. [Scope and evidence](planning/PR19-PAYMENT-CONFLICT-CLOSURE.md). Independent recheck, exact-head CI and installed Windows two-client payment/COS acceptance remain open. This round did not rerun native login; the 2026-10-24 credential-storage failure below is historical evidence, not a fresh diagnosis. No parent, security/Formal hold or milestone is closed.
+
+2026-10-24 PR #19: HEIC conversion and real COS source/derivative verification are implemented; unified-baseline conflicts are resolved with additive payment compatibility. Actual two-client Windows payment/COS acceptance remains BLOCKED_ENV (system credential storage). [Handoff](T09-T11-RELEASE-HANDOFF.md). No parent or milestone is closed.
+
 ## Current delivery path — 2026-10-19
 
 2026-10-23: PR #17's historical reference contract P1 has a bounded implementation and PostgreSQL→SQLite builder proof. [Evidence](reviews/PR17-REFERENCE-CONTRACT-REPAIR.md); this does not replace the original independent failure verdict until targeted independent recheck passes. Draft and Windows EXE online-relogin production-release hold remain unchanged.
@@ -50,6 +56,7 @@ The local catalog read path now filters supplier contacts and quotes by live acc
 
 The supplier/material-price Pull repair now withholds cross-country changes from engineers after grant revocation; purchaser all-project visibility remains as specified. Other sync projections/validations keep M3 incomplete.
 
+The Honsen market-direct route now enters executing/receiving without RFQ or supplier child and records parent-level partial/final receipts. The status migration preserves old records. The normal execution UI now reads exact SQLite-derived ordered/received/remaining line quantities after each receipt. Operational actual expenditure and formal HPA/SPO documents remain required, so M2/M3 stay partial.
 The 2026-10-15 T04 local organization editor checkpoint and server organization-sync validation checkpoint passed synthetic Rust/DOM and isolated PostgreSQL tests. They do not establish deployed T04 records, complete cloud business-table projection, native multi-client acceptance or M0/M1/M3 completion.
 
 The follow-on T04 tax/exchange server sync validation checkpoint passed schema/permission failure tests and isolated PostgreSQL idempotency/Pull/conflict tests. Tax/rate maintenance UI, deployed data and native cross-device acceptance remain open; milestone statuses do not change.
@@ -92,7 +99,7 @@ The 2026-10-15 local integration candidate combines RFQ lifecycle/Push/Pull with
 | M3        | [ ] IN PROGRESS | T02, T03, T08, T10, T11, T14                           | T02 account/session PostgreSQL and login/DOM acceptance is complete. Safe entity projection, immutable formally-issued number/quote snapshots, desktop startup/retry/WebSocket/revocation and multi-device offline/reconnect acceptance remain open.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | M4        | [ ] BLOCKED     | T09, T11, T12, T13, T14, T15                           | Approved identity no longer blocks T15, but T14 and all installer/Runner/manifest/registry/release acceptance remain unimplemented; attachment, export, backup/localization/performance, print/accessibility and Windows acceptance have not passed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
-Accepted tasks: **T00, T01, T02, T03, T05, T06, T07**. Partial tasks: **T04, T08, T09, T10**. Not started: **T11–T14**. Blocked: **T15**. Partial tasks remain unchecked even where some historical gates passed.
+Accepted tasks: **T00, T01, T02, T03, T05, T06, T07**. Partial tasks: **T04, T08, T09, T10, T11**. Not started: **T12–T14**. Blocked: **T15**. Partial tasks remain unchecked even where some historical gates passed.
 
 Evidence is committed code and dated records in `memory.md`. On 2026-10-11, the disposable PostgreSQL suites, account-session/provisioning integration tests, workspace gate, Rust tests and 16 Playwright tests passed. T02's accepted changes were subsequently merged through PR #4 (`1e69896`) and PR #5 (`e3f7035`); this does not complete M0/M1/M3 as a whole.
 
@@ -214,6 +221,14 @@ G1 (2026-10-19) stays OPEN. Independent QA `b0a6069` verified the bounded Push/P
 The following instruction applied to the original foundation stage only; it does not override the current approved v1.0 scope or Delivery-First path.
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
+
+### 2026-10-24 T09-A / T11 builder progress
+
+T09-A payment/reversal server and SQLite/UI foundations are implemented with focused builder evidence. T11 has entered **IN PROGRESS** for its authorized COS service slice (real PUT/HEAD/GET/hash/auth-negative/cleanup passed). Local attachment queue and cross-device archival verification remain open. T09/T10/T11 and M2/M3/M4 remain unchecked; these results are not independent QA or release acceptance. See BUILD-TASKS and memory for scope and remaining gates.
+
+### 2026-10-24 native queue and Draft QA candidate evidence
+
+T11 now has a native managed-file queue, direct COS transfer, verified cached download, receipt/payment associations and a production attachment screen. T09-A has synchronized immutable payments and reason-required reversals; actual API/COS/PostgreSQL and two-file SQLite checks passed. Independent review repairs and Rust 21/21 are recorded in [T09-T11-VALIDATION.md](T09-T11-VALIDATION.md). M2/M3/M4 and T09/T10/T11 remain open for final running-Windows-client acceptance and all original gates.
 
 ## Catalog quote pagination checkpoint — 2026-10-22
 

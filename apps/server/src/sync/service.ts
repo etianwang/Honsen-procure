@@ -4,6 +4,8 @@ import {
   materialCategorySchema,
   projectDefaultsSchema,
   referenceMasterDataSchema,
+  procurementExpenditureSchema,
+  paymentConflictResolutionRequestSchema,
   uuidSchema,
   syncPullQuerySchema,
   syncPushRequestSchema,
@@ -64,6 +66,18 @@ const rfqPayloadSchema = z.strictObject({
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
+
+  async listPaymentConflicts(actor: SyncActor) {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    )
+      throw new CategoryRepairError('FORBIDDEN')
+    if (!this.store.listPaymentConflicts)
+      throw new CategoryRepairError('UNAVAILABLE')
+    return this.store.listPaymentConflicts(actor)
+  }
 
   async listCategoryQuarantine(actor: SyncActor) {
     if (
@@ -204,6 +218,109 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'payment_conflict_resolution') {
+      const request = paymentConflictResolutionRequestSchema.safeParse(
+        event.payload,
+      )
+      return (
+        event.operation === 'upsert' &&
+        event.baseVersion === 0 &&
+        request.success &&
+        request.data.id === event.entityId &&
+        actor.roles.some(
+          (role) => role === 'administrator' || role === 'super_administrator',
+        )
+      )
+    }
+    if (event.entityType === 'attachment') return false
+    if (event.entityType === 'order_comment' && event.operation !== 'upsert')
+      return false
+    if (event.entityType === 'procurement_expenditure') {
+      const parsed = procurementExpenditureSchema.safeParse(event.payload)
+      if (
+        event.operation !== 'upsert' ||
+        !parsed.success ||
+        !actor.roles.some((role) => procurementRoles.includes(role)) ||
+        parsed.data.id !== event.entityId ||
+        parsed.data.createdBy !== actor.id
+      )
+        return false
+      const payment = parsed.data
+      const order = await this.store.getEntityPayload(
+        'purchase_order',
+        payment.orderId,
+      )
+      if (
+        !order ||
+        order.projectId !== payment.projectId ||
+        order.countryId !== payment.countryId ||
+        order.currency !== payment.currency ||
+        typeof order.departmentId !== 'string' ||
+        typeof order.teamId !== 'string' ||
+        !(await this.store.hasActiveProjectBinding(
+          actor.id,
+          payment.projectId,
+          order.departmentId,
+          order.teamId,
+        )) ||
+        ![
+          'approved',
+          'confirmed',
+          'formally_issued',
+          'sent',
+          'executing',
+          'receiving',
+          'completed',
+          'completed_with_conditions',
+        ].includes(String(order.workflowStatus))
+      )
+        return false
+      const parent =
+        typeof order.parentOrderId === 'string'
+          ? await this.store.getEntityPayload(
+              'purchase_order',
+              order.parentOrderId,
+            )
+          : null
+      if (
+        order.parentOrderId &&
+        (!parent ||
+          parent.projectId !== order.projectId ||
+          parent.countryId !== order.countryId)
+      )
+        return false
+      if ((parent ?? order).procurementMode !== 'honsen_self_purchase')
+        return false
+      if (
+        payment.supplierId != null &&
+        order.supplierId != null &&
+        payment.supplierId !== order.supplierId
+      )
+        return false
+      if (payment.status === 'reversed') {
+        const original = await this.store.getEntityPayload(
+          'procurement_expenditure',
+          payment.correctsExpenditureId!,
+        )
+        if (
+          !original ||
+          original.status !== 'recorded' ||
+          [
+            'orderId',
+            'projectId',
+            'countryId',
+            'currency',
+            'amountMinor',
+            'payeeName',
+            'paymentDate',
+            'paymentType',
+            'paymentMethod',
+          ].some((key) => original[key] !== event.payload[key])
+        )
+          return false
+      }
+      return true
+    }
     if (event.entityType === 'rfq') {
       if (
         event.operation !== 'upsert' ||
