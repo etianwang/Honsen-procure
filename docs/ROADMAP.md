@@ -1,5 +1,7 @@
 # Roadmap and Development Tasks
 
+2026-10-25 screenshot recovery: 24 unique selected real PNGs now demonstrate the Bethel2 main procurement case in an isolated native Harness using the unchanged RC core/UI. Real actor, amount, receipt, reversal and local-attachment evidence was independently rechecked. Original Windows-EXE vault failure, cloud/Toolbox/print acceptance and newly observed supplementary owner-pricing gaps remain open; this is demonstration evidence only, not milestone or production-security acceptance. See `memory.md` for exact boundaries and retained artifacts.
+
 2026-10-25 demonstration evidence: RC `f4756af` produced one genuine native login screenshot; the Bethel2 business demonstration remains BLOCKED_ENV after fresh credential-vault failure. Header identity/context gaps and missing formal-document entry remain documented, not repaired. Partial artifact location and handoff are in `memory.md`; no milestone or original acceptance gate is closed by this screenshot attempt.
 
 The 2026-10-25 Agent C correction keeps optional COS disabled in the deployment template until configured. Release regressions passed 4/4; independent recheck and original M4/T14/T15 live gates remain open. Pending legacy `www` service/manual changes are excluded; RC protected controller remains authoritative. See `memory.md` for source and preserved dirty paths.

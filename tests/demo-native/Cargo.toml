@@ -1,0 +1,15 @@
+[package]
+name = "honsen-demo-test-harness"
+version = "0.0.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[dependencies]
+honsen-materials-desktop-core = { path = "../../apps/desktop/src-tauri" }
+tauri = { version = "2.10.2", default-features = false, features = ["wry"] }
+serde_json = "1.0.145"
+uuid = { version = "1.18.1", features = ["serde", "v4"] }
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
