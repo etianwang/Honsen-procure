@@ -17,6 +17,7 @@ type Props = {
     | 'getRequisitionDetail'
     | 'withdrawRequisition'
     | 'issueOwnerFormalOrder'
+    | 'issueHonsenFormalOrder'
   >
   refreshKey: string
   projectId: string
@@ -113,10 +114,12 @@ export function RequisitionHistoryPanel({
     }
   }
 
-  async function issueOwnerOrder(orderId: string) {
+  async function issueOrder(orderId: string, mode: string | null) {
     setIssueError(false)
     try {
-      await api.issueOwnerFormalOrder(orderId)
+      if (mode === 'owner_self_purchase')
+        await api.issueOwnerFormalOrder(orderId)
+      else await api.issueHonsenFormalOrder(orderId)
       await openDetail(orderId)
       setRetry((value) => value + 1)
     } catch {
@@ -244,11 +247,16 @@ export function RequisitionHistoryPanel({
             </Button>
           ) : null}
           {canApprove &&
-          detail.procurementMode === 'owner_self_purchase' &&
+          (detail.procurementMode === 'owner_self_purchase' ||
+            detail.procurementMode === 'honsen_self_purchase') &&
           (detail.workflowStatus === 'confirmed' ||
             detail.workflowStatus === 'approved') ? (
-            <Button onClick={() => void issueOwnerOrder(detail.id)}>
-              正式下达业主申请
+            <Button
+              onClick={() => void issueOrder(detail.id, detail.procurementMode)}
+            >
+              {detail.procurementMode === 'owner_self_purchase'
+                ? '正式下达业主申请'
+                : '正式签发 HPA'}
             </Button>
           ) : null}
           {detail.projectId === projectId &&

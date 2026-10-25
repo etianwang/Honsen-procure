@@ -99,6 +99,9 @@ const previewRequisitionApi: RequisitionApi = {
     }
   },
   async submitRequisitionDraft() {},
+  async issueHonsenFormalOrder() {
+    throw new Error('正式签发需要桌面主机')
+  },
   async withdrawRequisition() {},
 }
 
