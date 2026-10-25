@@ -91,7 +91,18 @@ export class SyncService {
   async push(actor: SyncActor, input: unknown): Promise<SyncPushResponse> {
     const request = syncPushRequestSchema.parse(input)
     const results: SyncEventResult[] = []
+    const blockedQuotes = new Set<string>()
     for (const event of request.events) {
+      const key = `${event.entityType}:${event.entityId}`
+      if (blockedQuotes.has(key)) {
+        results.push({
+          eventId: event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+          errorCode: 'QUOTE_PREDECESSOR_REJECTED',
+        })
+        continue
+      }
       if (!(await this.canWrite(actor, event))) {
         results.push({
           eventId: event.eventId,
@@ -101,15 +112,15 @@ export class SyncService {
         })
         continue
       }
-      results.push(
-        normalizeResult(
-          await this.store.pushEvent({
-            event,
-            installationId: actor.installationId,
-            actorId: actor.id,
-          }),
-        ),
+      const result = normalizeResult(
+        await this.store.pushEvent({
+          event,
+          installationId: actor.installationId,
+          actorId: actor.id,
+        }),
       )
+      results.push(result)
+      if (result.errorCode === 'QUOTE_UNAVAILABLE') blockedQuotes.add(key)
     }
     return { results }
   }

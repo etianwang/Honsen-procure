@@ -130,6 +130,7 @@ function materialLine(
       ? { id: quote.supplierId, name: quote.supplierName }
       : null,
     supplierId: quote?.supplierId ?? null,
+    catalogPriceId: quote?.priceId ?? null,
     unit: material.unit,
     unitPriceMinor: quote?.unitPriceMinor ?? '0',
     currency: quote?.currency ?? line.currency,
@@ -543,10 +544,8 @@ export function RequisitionPage({
         await api.setProcurementMode(orderId, mode)
       }
       setMessage('草稿已自动保存到本机')
-    } catch {
-      setMessage(
-        '基础草稿已保存，但可信定价未完成。请修正报价后再次保存；当前不能提交。',
-      )
+    } catch (error) {
+      setMessage(isQuoteUnavailable(error) ? '所选报价已失效或不可用，请重新选择；原草稿已保留。' : '保存失败，请检查订单内容；原草稿已保留。')
     }
   }
 
@@ -564,8 +563,8 @@ export function RequisitionPage({
       await api.submitRequisitionDraft(draft.id)
       setStatus('pending')
       setMessage('采购申请已提交，状态：待确认')
-    } catch {
-      setMessage('提交失败，请检查订单内容。')
+    } catch (error) {
+      setMessage(isQuoteUnavailable(error) ? '所选报价已失效或不可用，请重新选择；原草稿已保留。' : '提交失败，请检查订单内容。')
     }
   }
 
@@ -737,14 +736,7 @@ export function RequisitionPage({
                       aria-label="选择供应商报价"
                       virtual={false}
                       disabled={status === 'pending'}
-                      value={
-                        (quotePages[line.materialId]?.prices ?? []).find(
-                          (price) =>
-                            price.supplierId === line.supplierId &&
-                            price.currency === line.currency &&
-                            price.unitPriceMinor === line.unitPriceMinor,
-                        )?.priceId
-                      }
+                      value={line.catalogPriceId ?? undefined}
                       placeholder="选择供应商报价"
                       options={(
                         quotePages[line.materialId]?.prices ??
@@ -762,6 +754,7 @@ export function RequisitionPage({
                         if (price)
                           updateLine(index, {
                             supplierId: price.supplierId,
+                            catalogPriceId: price.priceId,
                             supplierSnapshot: {
                               id: price.supplierId,
                               name: price.supplierName,
@@ -945,4 +938,8 @@ export function RequisitionPage({
       />
     </>
   )
+}
+
+function isQuoteUnavailable(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'quote_unavailable'
 }
