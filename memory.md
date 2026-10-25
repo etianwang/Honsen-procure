@@ -1,5 +1,7 @@
 # Honsen采购管理系统（HONSEN Procure）— Development Memory
 
+> **简化交接入口：** [交接进度表](docs/交接进度表.md)和[新电脑恢复说明](docs/新电脑恢复说明.md)。GitHub非秘密归档已实际下载校验；文档/源码检查点4be70636998ea85944d67cd111f9fe147c7d33c1，最终分支codex/handover-docs-20261025。用户自行保存敏感密文与独立密钥；新电脑未实测。不要求随身携带证据，不删除原件、不关闭未完成门禁。
+
 > **2026-10-25 HANDOVER_FREEZE** — 本轮为全项目封存迁移，暂停功能/重构/重复QA/正式发布；不改变原任务、依赖、milestone或验收勾选。最新分支、WIP、CI、资产、未备份项和恢复证据见 [交接总览](docs/HANDOVER-2026-10-25.md)。以下历史状态保留，不得据此替代最新SHA。源码封存提交不等于验收；实际交接提交在 codex/handover-docs-20261025 的 git log / GitHub远端核对。原主目录与工作树脏文件保留；没有迁移/同步/生产数据变更。BLOCKER：敏感资料恢复选择与新机实测；DEFERRED：原功能及上线门禁；WARNING：依赖advisory和旧文档矛盾。
 
 **Last updated:** 2026-10-14
