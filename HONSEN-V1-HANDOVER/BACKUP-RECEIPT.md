@@ -1,6 +1,6 @@
 # 备份收据
 
-交接分支codex/handover-20261025；源码13个封存ref，远端SHA已核对，后续B/C另两个ref见协调补充。应用冻结RC f4756afdb01ebac7b17ae9016d9ad56ab450fea5。
+交接分支codex/handover-docs-20261025；源码13个封存ref，远端SHA已核对，后续B/C另两个ref见协调补充。应用冻结RC f4756afdb01ebac7b17ae9016d9ad56ab450fea5。
 
 非秘密大型归档将上传同一仓库专用未发布Draft交接Release，标签handover-2026-10-25-backup。正式Release、main、stable更新入口与生产均不更改。GitHub仓库公开，不能在任何资产中附带真实秘密或恢复密钥。
 

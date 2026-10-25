@@ -1,13 +1,13 @@
 # 新电脑开发环境与恢复
 
-交接日期：2026-10-25。先读 [交接总览](../docs/HANDOVER-2026-10-25.md)。本说明的应用基线是 f4756afdb01ebac7b17ae9016d9ad56ab450fea5，交接文档分支是 codex/handover-20261025；二者不能混为同一应用提交。
+交接日期：2026-10-25。先读 [交接总览](../docs/HANDOVER-2026-10-25.md)。本说明的应用基线是 f4756afdb01ebac7b17ae9016d9ad56ab450fea5，交接文档分支是 codex/handover-docs-20261025；二者不能混为同一应用提交。
 
 ## 先恢复源码
 
 在新电脑自己选择的空目录执行，不能复制旧 worktree 的 .git 指针或假定 E 盘存在：
 
 ```sh
-git clone --branch codex/handover-20261025 https://github.com/etianwang/Honsen-procure.git Honsen-procure
+git clone --branch codex/handover-docs-20261025 https://github.com/etianwang/Honsen-procure.git Honsen-procure
 cd Honsen-procure
 git fetch origin
 git switch --detach f4756afdb01ebac7b17ae9016d9ad56ab450fea5
