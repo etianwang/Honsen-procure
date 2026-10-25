@@ -2,21 +2,21 @@
 Description=Honsen Procure API
 After=network-online.target
 Wants=network-online.target
+ConditionPathExists=/run/honsen-procure/deployment-ready
 
 [Service]
 Type=simple
 User=honsen-procure
 Group=honsen-procure
-WorkingDirectory=/opt/honsen-procure/current/app
+WorkingDirectory=/opt/honsen-procure/current
 EnvironmentFile=/etc/honsen-procure/server.env
-ExecStart=/opt/honsen-procure/current/app/node_modules/.bin/tsx /opt/honsen-procure/current/app/apps/server/dist/index.js
-Restart=on-failure
-RestartSec=5
+ExecStart=/usr/bin/env node --import=tsx /opt/honsen-procure/current/apps/server/dist/index.js
+Restart=no
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/honsen-procure
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

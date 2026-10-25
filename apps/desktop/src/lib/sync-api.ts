@@ -15,6 +15,11 @@ export type SyncApi = {
     resolution: 'keep_local' | 'use_server'
     reason: string
   }): Promise<void>
+  resolvePurchaseOrderConflict(input: {
+    conflictId: string
+    resolution: 'use_server' | 'replace_draft'
+    reason: string
+  }): Promise<void>
 }
 
 function invoke<T>(command: string, args?: object): Promise<T> {
@@ -32,4 +37,6 @@ function invoke<T>(command: string, args?: object): Promise<T> {
 export const tauriSyncApi: SyncApi = {
   listSyncConflicts: () => invoke('list_sync_conflicts'),
   resolveSyncConflict: (input) => invoke('resolve_sync_conflict', { input }),
+  resolvePurchaseOrderConflict: (input) =>
+    invoke('resolve_purchase_order_conflict', { input }),
 }

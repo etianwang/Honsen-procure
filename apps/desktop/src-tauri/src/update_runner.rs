@@ -341,7 +341,11 @@ fn apply_windows(
     let log_path =
         std::env::temp_dir().join(format!("honsen-procure-{}.log", request.operation_id));
     let verified_installer = copy_verified_installer(request)?;
-    let exit = run_elevated_installer(&verified_installer, &registration.install_location, &log_path)?;
+    let exit = run_elevated_installer(
+        &verified_installer,
+        &registration.install_location,
+        &log_path,
+    )?;
     let _ = fs::remove_file(verified_installer);
     if exit != 0 {
         return Err(RunnerError::InstallerExit(exit));
@@ -397,22 +401,23 @@ fn run_elevated_installer(
     install_location: &Path,
     log_path: &Path,
 ) -> Result<i32, RunnerError> {
+    fs::write(log_path, "NSIS update: requesting elevation\n")?;
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, GetLastError, ERROR_CANCELLED, WAIT_OBJECT_0},
+        Foundation::{CloseHandle, ERROR_CANCELLED, GetLastError, WAIT_OBJECT_0},
         System::Threading::{GetExitCodeProcess, WaitForSingleObject},
-        UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOCLOSEPROCESS},
+        UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW},
     };
-    let file: Vec<u16> = installer.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let file: Vec<u16> = installer
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     let verb: Vec<u16> = "runas\0".encode_utf16().collect();
-    let parameters: Vec<u16> = format!(
-        "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR=\"{}\" /LOG=\"{}\"",
-        install_location.display(),
-        log_path.display()
-    )
-    .encode_utf16()
-    .chain(std::iter::once(0))
-    .collect();
+    let parameters: Vec<u16> = format!("/S /D={}", install_location.display())
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     unsafe {
         let mut execute = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -430,7 +435,9 @@ fn run_elevated_installer(
                 Err(RunnerError::Io("could not start elevated installer".into()))
             };
         }
-        if execute.hProcess.is_null() || WaitForSingleObject(execute.hProcess, 10 * 60 * 1000) != WAIT_OBJECT_0 {
+        if execute.hProcess.is_null()
+            || WaitForSingleObject(execute.hProcess, 10 * 60 * 1000) != WAIT_OBJECT_0
+        {
             if !execute.hProcess.is_null() {
                 CloseHandle(execute.hProcess);
             }
@@ -439,9 +446,12 @@ fn run_elevated_installer(
         let mut exit = 0;
         if GetExitCodeProcess(execute.hProcess, &mut exit) == 0 {
             CloseHandle(execute.hProcess);
-            return Err(RunnerError::Io("could not read elevated installer exit code".into()));
+            return Err(RunnerError::Io(
+                "could not read elevated installer exit code".into(),
+            ));
         }
         CloseHandle(execute.hProcess);
+        fs::write(log_path, format!("NSIS installer exit code: {exit}\n"))?;
         Ok(exit as i32)
     }
 }
@@ -462,7 +472,7 @@ impl Drop for UpdateLock {
 #[cfg(windows)]
 fn acquire_update_lock() -> Result<UpdateLock, RunnerError> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS},
+        Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError},
         System::Threading::CreateMutexW,
     };
     let name: Vec<u16> = "Global\\HonsenUpdate-honsen.procure"
@@ -486,9 +496,13 @@ fn acquire_update_lock() -> Result<UpdateLock, RunnerError> {
 fn verify_file_version(path: &Path, expected: &str) -> Result<(), RunnerError> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO, VerQueryValueW,
     };
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     unsafe {
         let mut ignored = 0;
         let size = GetFileVersionInfoSizeW(wide.as_ptr(), &mut ignored);
@@ -594,7 +608,8 @@ fn civil_date(days_since_epoch: i64) -> (i64, i64, i64) {
     let z = days_since_epoch + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let day_of_era = z - era * 146_097;
-    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let year = year_of_era + era * 400;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_prime = (5 * day_of_year + 2) / 153;
@@ -762,7 +777,10 @@ mod tests {
             }
             Err(error) => panic!("unexpected mutex error: {error}"),
         });
-        assert!(held_by_child, "the helper process never acquired the global lock");
+        assert!(
+            held_by_child,
+            "the helper process never acquired the global lock"
+        );
         assert!(child.wait().unwrap().success());
     }
 }

@@ -1,0 +1,32 @@
+{
+  "boundary": "actual Rust fixture conversion plus authorized API/PostgreSQL/real COS archive",
+  "windowsCrossClientAcceptance": "BLOCKED_ENV; this is separate server/object evidence",
+  "test": "apps/server/src/attachments/service-postgres.test.ts: uploads the actual Rust HEIC source/JPEG pair and verifies independent COS reads",
+  "observedAtUtc": "2026-10-24T14:53:23Z",
+  "sourceRevision": "uncommitted PR19 merge candidate based on 369532c4d2fe5e738b9e5cf7d8d6163a40a1faca; exact fixture hashes below",
+  "files": [
+    {
+      "type": "image/heic",
+      "byteLength": 4378,
+      "sha256": "a618edb8cc6f7b53ee61bc44178014bf16c51dfb55a592be35c83611d7a236f8",
+      "put": 200,
+      "get": 200,
+      "serverObjectVerified": true,
+      "downloadHashMatched": true,
+      "cleanupDelete": 204
+    },
+    {
+      "type": "image/jpeg",
+      "byteLength": 18098,
+      "sha256": "b871e368eb980720f33b7880ec43740d7568667ff4dd82b34aee3feb7110ee80",
+      "put": 200,
+      "get": 200,
+      "serverObjectVerified": true,
+      "downloadHashMatched": true,
+      "sourceRelationPreserved": true,
+      "cleanupDelete": 204
+    }
+  ],
+  "credentialOrSignedUrlDataRecorded": false,
+  "existingObjectsOrBucketPoliciesModified": false
+}

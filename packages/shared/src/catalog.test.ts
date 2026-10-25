@@ -44,6 +44,7 @@ describe('catalog contracts', () => {
     expect(() =>
       supplierSchema.parse({
         id,
+        countryId: id,
         businessCode: 'SUP-001',
         name: 'fixture supplier',
         contactName: null,

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import type { SyncEvent, SyncEventResult } from '@honsen/shared'
 import { describe, expect, it } from 'vitest'
 import { SyncService } from './service.js'
 import type { SyncStore } from './types.js'
@@ -5,6 +7,7 @@ import type { SyncStore } from './types.js'
 const engineer = {
   id: '00000000-0000-4000-8000-000000000001',
   roles: ['engineer'] as const,
+  installationId: '00000000-0000-4000-8000-000000000020',
 }
 const projectId = '00000000-0000-4000-8000-000000000002'
 const departmentId = '00000000-0000-4000-8000-000000000011'
@@ -12,16 +15,23 @@ const teamId = '00000000-0000-4000-8000-000000000012'
 
 class FixtureStore implements SyncStore {
   pushed = 0
+  lastPush: Parameters<SyncStore['pushEvent']>[0] | null = null
   bound = true
   projectInUse = false
+  compatibleTax = false
   order: Record<string, unknown> | null = {
     applicantId: engineer.id,
     projectId,
+    workflowStatus: 'approved',
+    procurementMode: 'honsen_self_purchase',
   }
   project: Record<string, unknown> | null = null
 
-  async pushEvent(input: Parameters<SyncStore['pushEvent']>[0]) {
+  async pushEvent(
+    input: Parameters<SyncStore['pushEvent']>[0],
+  ): Promise<SyncEventResult> {
     this.pushed += 1
+    this.lastPush = input
     return {
       eventId: input.event.eventId,
       status: 'accepted' as const,
@@ -47,6 +57,10 @@ class FixtureStore implements SyncStore {
     return this.projectInUse
   }
 
+  async isCompatibleProjectTax() {
+    return this.compatibleTax
+  }
+
   async getEntityPayload(entityType: string) {
     return entityType === 'project' ? this.project : this.order
   }
@@ -64,6 +78,351 @@ function purchaseOrderEvent(applicantId = engineer.id) {
 }
 
 describe('SyncService', () => {
+  it('rejects malformed supplier and quote events before storing them', async () => {
+    const store = new FixtureStore()
+    const actor = { ...engineer, roles: ['purchaser' as const] }
+    const results = await new SyncService(store).push(actor, {
+      deviceId: actor.installationId,
+      events: [
+        {
+          eventId: randomUUID(),
+          entityType: 'supplier',
+          entityId: randomUUID(),
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: { countryId: randomUUID() },
+        },
+        {
+          eventId: randomUUID(),
+          entityType: 'material_price',
+          entityId: randomUUID(),
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: { materialId: randomUUID(), supplierId: randomUUID() },
+        },
+      ],
+    })
+    expect(results.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+    ])
+    expect(store.pushed).toBe(0)
+  })
+  it('rejects a forged payload identity while retaining tombstone support', async () => {
+    const store = new FixtureStore()
+    const actor = { ...engineer, roles: ['purchaser' as const] }
+    const results = await new SyncService(store).push(actor, {
+      deviceId: actor.installationId,
+      events: [
+        {
+          eventId: randomUUID(),
+          entityType: 'supplier',
+          entityId: randomUUID(),
+          operation: 'upsert',
+          baseVersion: 0,
+          payload: {
+            id: randomUUID(),
+            countryId: randomUUID(),
+            businessCode: 'TEST',
+            name: 'Fixture',
+            contactName: null,
+            address: null,
+            city: null,
+            country: null,
+            phone: null,
+            whatsapp: null,
+            email: null,
+            paymentTerms: null,
+            deliveryLeadTime: null,
+            isPreferred: false,
+            isBlacklisted: false,
+            isActive: true,
+            version: 1,
+          },
+        },
+        {
+          eventId: randomUUID(),
+          entityType: 'supplier',
+          entityId: randomUUID(),
+          operation: 'soft_delete',
+          baseVersion: 1,
+          payload: {},
+        },
+      ],
+    })
+    expect(results.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'accepted',
+    ])
+    expect(store.pushed).toBe(1)
+  })
+  it('does not process later order events after a quote rejection in the same batch', async () => {
+    class RejectedQuoteStore extends FixtureStore {
+      override async pushEvent(
+        input: Parameters<SyncStore['pushEvent']>[0],
+      ): Promise<SyncEventResult> {
+        this.pushed += 1
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+          errorCode: 'QUOTE_UNAVAILABLE',
+        }
+      }
+    }
+    const store = new RejectedQuoteStore()
+    const first = purchaseOrderEvent()
+    const second = { ...first, eventId: randomUUID(), baseVersion: 1 }
+    const result = await new SyncService(store).push(engineer, {
+      deviceId: engineer.installationId,
+      events: [first, second],
+    })
+    expect(store.pushed).toBe(1)
+    expect(result.results.map((item) => item.errorCode)).toEqual([
+      'QUOTE_UNAVAILABLE',
+      'QUOTE_PREDECESSOR_REJECTED',
+    ])
+  })
+  it('rejects whitespace in category codes without changing their case', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const id = randomUUID()
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'material_category' as const,
+      entityId: id,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        id,
+        businessCode: ' Cat-1 ',
+        name: 'Fixture',
+        isActive: true,
+        version: 1,
+      },
+    }
+    const actor = { ...engineer, roles: ['administrator'] as const }
+    const rejected = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [event],
+    })
+    expect(rejected.results[0]?.status).toBe('validation_error')
+    expect(store.pushed).toBe(0)
+    const accepted = await service.push(actor, {
+      deviceId: randomUUID(),
+      events: [
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, businessCode: 'Cat-1' },
+        },
+      ],
+    })
+    expect(accepted.results[0]?.status).toBe('accepted')
+    expect(store.lastPush?.event.payload.businessCode).toBe('Cat-1')
+  })
+  it('rejects purchaser category writes and malformed administrator category writes', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const id = randomUUID()
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'material_category' as const,
+      entityId: id,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        id,
+        businessCode: 'CAT-1',
+        name: 'Fixture',
+        isActive: true,
+        version: 1,
+      },
+    }
+    const purchaser = await service.push(
+      { ...engineer, roles: ['purchaser'] },
+      { deviceId: randomUUID(), events: [event] },
+    )
+    expect(purchaser.results[0]?.status).toBe('validation_error')
+    const invalid = await service.push(
+      { ...engineer, roles: ['administrator'] },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            ...event,
+            eventId: randomUUID(),
+            payload: { ...event.payload, name: '' },
+          },
+        ],
+      },
+    )
+    expect(invalid.results[0]?.status).toBe('validation_error')
+    expect(store.pushed).toBe(0)
+    const accepted = await service.push(
+      { ...engineer, roles: ['administrator'] },
+      { deviceId: randomUUID(), events: [{ ...event, eventId: randomUUID() }] },
+    )
+    expect(accepted.results[0]?.status).toBe('accepted')
+    expect(store.pushed).toBe(1)
+  })
+  it('preserves structured conflict details and assigns its stable error code', async () => {
+    const store = new FixtureStore()
+    store.pushEvent = async (input) => ({
+      eventId: input.event.eventId,
+      status: 'conflict',
+      serverVersion: 2,
+      serverPayload: { server: true },
+      serverOperation: 'upsert',
+    })
+
+    const response = await new SyncService(store).push(
+      { ...engineer, roles: ['purchaser'] },
+      { deviceId: randomUUID(), events: [purchaseOrderEvent()] },
+    )
+
+    expect(response.results[0]).toMatchObject({
+      status: 'conflict',
+      errorCode: 'VERSION_CONFLICT',
+      serverPayload: { server: true },
+      serverOperation: 'upsert',
+    })
+  })
+
+  it('rejects an RFQ tombstone or incomplete snapshot before storage', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const event = {
+      ...purchaseOrderEvent(),
+      entityType: 'rfq' as const,
+      payload: { projectId, status: 'sent' },
+    }
+    for (const candidate of [
+      event,
+      { ...event, operation: 'soft_delete' as const },
+    ]) {
+      const response = await service.push(
+        { id: engineer.id, roles: ['purchaser'], installationId: randomUUID() },
+        {
+          deviceId: '00000000-0000-4000-8000-000000000005',
+          events: [candidate],
+        },
+      )
+      expect(response.results[0]).toMatchObject({
+        status: 'validation_error',
+        errorCode: 'FORBIDDEN',
+      })
+    }
+    expect(store.pushed).toBe(0)
+  })
+
+  it('accepts only a complete RFQ linked to a same-project Honsen order', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const rfqId = '00000000-0000-4000-8000-000000000020'
+    const supplierId = '00000000-0000-4000-8000-000000000021'
+    const event = {
+      ...purchaseOrderEvent(),
+      entityType: 'rfq' as const,
+      entityId: rfqId,
+      payload: {
+        id: rfqId,
+        sourceOrderId: '00000000-0000-4000-8000-000000000004',
+        supplierId,
+        supplierSnapshot: { id: supplierId, name: 'fixture supplier' },
+        projectId,
+        displayNo: 'TEST-RFQ',
+        currency: 'XOF',
+        status: 'draft',
+        items: [
+          {
+            sourceItemId: '00000000-0000-4000-8000-000000000022',
+            materialSnapshot: {
+              nameZh: 'fixture',
+              nameFr: null,
+              model: '',
+              specification: '',
+            },
+            quantity: '1.50',
+            unit: 'pcs',
+            sortOrder: 0,
+          },
+        ],
+      },
+    }
+    const push = () =>
+      service.push(
+        { id: engineer.id, roles: ['purchaser'], installationId: randomUUID() },
+        { deviceId: '00000000-0000-4000-8000-000000000005', events: [event] },
+      )
+    expect((await push()).results[0]?.status).toBe('accepted')
+    for (const payload of [
+      { ...event.payload, unitPriceMinor: '100' },
+      {
+        ...event.payload,
+        items: [{ ...event.payload.items[0]!, unitPriceMinor: '100' }],
+      },
+      {
+        ...event.payload,
+        items: [
+          {
+            ...event.payload.items[0]!,
+            materialSnapshot: {
+              nameZh: 'fixture',
+              nameFr: null,
+              model: '',
+              specification: '',
+              unitPriceMinor: '100',
+            },
+          },
+        ],
+      },
+      {
+        ...event.payload,
+        items: [{ ...event.payload.items[0]!, materialSnapshot: {} }],
+      },
+    ]) {
+      const response = await service.push(
+        { id: engineer.id, roles: ['purchaser'], installationId: randomUUID() },
+        {
+          deviceId: '00000000-0000-4000-8000-000000000005',
+          events: [{ ...event, payload }],
+        },
+      )
+      expect(response.results[0]?.status).toBe('validation_error')
+    }
+    expect(
+      (
+        await service.push(engineer, {
+          deviceId: '00000000-0000-4000-8000-000000000005',
+          events: [event],
+        })
+      ).results[0]?.status,
+    ).toBe('validation_error')
+    store.order = {
+      projectId: '00000000-0000-4000-8000-000000000099',
+      workflowStatus: 'approved',
+      procurementMode: 'honsen_self_purchase',
+    }
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    store.order = {
+      projectId,
+      parentOrderId: '00000000-0000-4000-8000-000000000098',
+      workflowStatus: 'approved',
+      procurementMode: 'honsen_self_purchase',
+    }
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    store.order = {
+      projectId,
+      workflowStatus: 'approved',
+      procurementMode: 'owner_self_purchase',
+    }
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    store.order = null
+    expect((await push()).results[0]?.status).toBe('validation_error')
+    expect(store.pushed).toBe(1)
+  })
+
   it('accepts an engineer order only for the engineer and a bound project', async () => {
     const store = new FixtureStore()
     const service = new SyncService(store)
@@ -75,6 +434,26 @@ describe('SyncService', () => {
 
     expect(response.results[0]?.status).toBe('accepted')
     expect(store.pushed).toBe(1)
+  })
+
+  it('binds a pushed event to the authenticated session installation, not the request device', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const trustedInstallationId = '00000000-0000-4000-8000-000000000021'
+
+    await service.push(
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: trustedInstallationId,
+      },
+      {
+        deviceId: '00000000-0000-4000-8000-000000000022',
+        events: [purchaseOrderEvent()],
+      },
+    )
+
+    expect(store.lastPush?.installationId).toBe(trustedInstallationId)
   })
 
   it('rejects an engineer attempt to write another applicant order without mutation', async () => {
@@ -156,7 +535,11 @@ describe('SyncService', () => {
     const store = new FixtureStore()
     const service = new SyncService(store)
     const response = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: engineer.installationId,
+      },
       {
         deviceId: '00000000-0000-4000-8000-000000000005',
         events: [
@@ -179,7 +562,11 @@ describe('SyncService', () => {
     const store = new FixtureStore()
     const service = new SyncService(store)
     const response = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: engineer.installationId,
+      },
       {
         deviceId: '00000000-0000-4000-8000-000000000005',
         events: [
@@ -205,13 +592,337 @@ describe('SyncService', () => {
     expect(store.pushed).toBe(1)
   })
 
+  it('validates organization outbox payloads and permits the master-data roles only', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const departmentId = randomUUID()
+    const events = [
+      {
+        eventId: randomUUID(),
+        entityType: 'department',
+        entityId: departmentId,
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'department',
+          business_code: 'fixture-proc',
+          name: 'Procurement',
+          is_active: true,
+          version: 1,
+        },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'team',
+        entityId: randomUUID(),
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'team',
+          department_id: departmentId,
+          business_code: 'fixture-team',
+          name: 'Field team',
+          is_active: true,
+          version: 1,
+        },
+      },
+      {
+        eventId: randomUUID(),
+        entityType: 'unit',
+        entityId: randomUUID(),
+        operation: 'upsert',
+        baseVersion: 0,
+        payload: {
+          kind: 'unit',
+          business_code: 'fixture-ea',
+          name: 'Each',
+          is_active: true,
+          version: 1,
+        },
+      },
+    ]
+    const request = { deviceId: randomUUID(), events }
+    const denied = await service.push(engineer, request)
+    expect(denied.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+      'validation_error',
+    ])
+    expect(store.pushed).toBe(0)
+    const accepted = await service.push(
+      {
+        id: engineer.id,
+        roles: ['super_administrator'],
+        installationId: randomUUID(),
+      },
+      request,
+    )
+    expect(accepted.results.map((result) => result.status)).toEqual([
+      'accepted',
+      'accepted',
+      'accepted',
+    ])
+    expect(store.pushed).toBe(3)
+    const invalid = await service.push(
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: randomUUID(),
+      },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            ...events[0],
+            eventId: randomUUID(),
+            payload: { ...events[0]!.payload, name: '' },
+          },
+          {
+            ...events[1],
+            eventId: randomUUID(),
+            payload: { ...events[1]!.payload, department_id: 'not-a-uuid' },
+          },
+          {
+            ...events[2],
+            eventId: randomUUID(),
+            payload: { ...events[2]!.payload, business_code: 'bad code' },
+          },
+          { ...events[2], eventId: randomUUID(), operation: 'soft_delete' },
+        ],
+      },
+    )
+    expect(
+      invalid.results.every((result) => result.status === 'validation_error'),
+    ).toBe(true)
+    expect(store.pushed).toBe(3)
+  })
+
+  it('validates tax and exchange-rate outbox records before persistence', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const tax = {
+      eventId: randomUUID(),
+      entityType: 'tax_template',
+      entityId: randomUUID(),
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        business_code: 'FIXTURE-TAX',
+        name: 'Fixture tax',
+        country_id: null,
+        rate_basis_points: 1800,
+        effective_at: '2026-10-15',
+        is_active: true,
+        version: 1,
+      },
+    }
+    const rate = {
+      eventId: randomUUID(),
+      entityType: 'exchange_rate',
+      entityId: randomUUID(),
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        from_currency: 'XOF',
+        to_currency: 'EUR',
+        rate_decimal: '0.00152449',
+        effective_at: '2026-10-15',
+        source: 'manual',
+        reason: 'Fixture rate',
+        version: 1,
+      },
+    }
+    const request = { deviceId: randomUUID(), events: [tax, rate] }
+    const denied = await service.push(engineer, request)
+    expect(denied.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+    ])
+    expect(store.pushed).toBe(0)
+    const accepted = await service.push(
+      {
+        id: engineer.id,
+        roles: ['super_administrator'],
+        installationId: randomUUID(),
+      },
+      request,
+    )
+    expect(accepted.results.map((result) => result.status)).toEqual([
+      'accepted',
+      'accepted',
+    ])
+    const camelCaseNullCountry = await service.push(
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: randomUUID(),
+      },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            ...tax,
+            eventId: randomUUID(),
+            payload: {
+              businessCode: 'FIXTURE-TAX-2',
+              name: 'Fixture tax 2',
+              countryId: null,
+              rateBasisPoints: 0,
+              effectiveAt: '2026-10-15',
+              isActive: true,
+              version: 1,
+            },
+          },
+        ],
+      },
+    )
+    expect(camelCaseNullCountry.results[0]?.status).toBe('accepted')
+    const invalid = await service.push(
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: randomUUID(),
+      },
+      {
+        deviceId: randomUUID(),
+        events: [
+          {
+            ...tax,
+            eventId: randomUUID(),
+            payload: { ...tax.payload, rate_basis_points: -1 },
+          },
+          {
+            ...rate,
+            eventId: randomUUID(),
+            payload: { ...rate.payload, reason: null },
+          },
+          {
+            ...rate,
+            eventId: randomUUID(),
+            payload: { ...rate.payload, rate_decimal: 'NaN' },
+          },
+          { ...tax, eventId: randomUUID(), operation: 'soft_delete' },
+        ],
+      },
+    )
+    expect(
+      invalid.results.every((result) => result.status === 'validation_error'),
+    ).toBe(true)
+    expect(store.pushed).toBe(3)
+  })
+
+  it('requires a valid project-default payload bound to its entity ID', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const event: SyncEvent = {
+      eventId: randomUUID(),
+      entityType: 'project_defaults',
+      entityId: projectId,
+      operation: 'upsert',
+      baseVersion: 0,
+      payload: {
+        project_id: projectId,
+        department_title: 'Procurement',
+        company_address: 'Fixture address',
+        company_contact: 'Fixture contact',
+        default_currency: 'XOF',
+        default_language_pair: 'zh_fr',
+        default_tax_template_id: null,
+      },
+    }
+    const push = (
+      roles: ('engineer' | 'administrator' | 'super_administrator')[],
+      events: (typeof event)[],
+    ) =>
+      service.push(
+        { id: engineer.id, roles, installationId: randomUUID() },
+        { deviceId: randomUUID(), events },
+      )
+    expect((await push(['engineer'], [event])).results[0]?.status).toBe(
+      'validation_error',
+    )
+    expect((await push(['administrator'], [event])).results[0]?.status).toBe(
+      'accepted',
+    )
+    const camel = {
+      ...event,
+      eventId: randomUUID(),
+      payload: {
+        projectId,
+        departmentTitle: 'Procurement',
+        companyAddress: 'Fixture address',
+        companyContact: 'Fixture contact',
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        defaultTaxTemplateId: null,
+      },
+    }
+    expect(
+      (await push(['super_administrator'], [camel])).results[0]?.status,
+    ).toBe('accepted')
+    expect(
+      (
+        await push(
+          ['administrator'],
+          [
+            {
+              ...camel,
+              eventId: randomUUID(),
+              payload: { ...camel.payload, companyContact: null },
+            },
+          ],
+        )
+      ).results[0]?.status,
+    ).toBe('accepted')
+    const bad = await push(
+      ['administrator'],
+      [
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, project_id: randomUUID() },
+        },
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, company_address: '' },
+        },
+        { ...event, eventId: randomUUID(), operation: 'soft_delete' },
+      ],
+    )
+    expect(
+      bad.results.every((result) => result.status === 'validation_error'),
+    ).toBe(true)
+    const withTax = {
+      ...camel,
+      eventId: randomUUID(),
+      payload: {
+        ...camel.payload,
+        defaultTaxTemplateId: randomUUID(),
+      },
+    }
+    expect((await push(['administrator'], [withTax])).results[0]?.status).toBe(
+      'validation_error',
+    )
+    store.compatibleTax = true
+    expect(
+      (await push(['administrator'], [{ ...withTax, eventId: randomUUID() }]))
+        .results[0]?.status,
+    ).toBe('accepted')
+    expect(store.pushed).toBe(4)
+  })
+
   it('rejects changing a used project country without mutation', async () => {
     const store = new FixtureStore()
     store.projectInUse = true
     store.project = { country_id: '00000000-0000-4000-8000-000000000011' }
     const service = new SyncService(store)
     const response = await service.push(
-      { id: engineer.id, roles: ['administrator'] },
+      {
+        id: engineer.id,
+        roles: ['administrator'],
+        installationId: engineer.installationId,
+      },
       {
         deviceId: '00000000-0000-4000-8000-000000000005',
         events: [
@@ -237,5 +948,51 @@ describe('SyncService', () => {
     )
     expect(response.results[0]).toMatchObject({ status: 'validation_error' })
     expect(store.pushed).toBe(0)
+  })
+
+  it('authorizes validated site Push only for a master-data role', async () => {
+    const store = new FixtureStore()
+    const service = new SyncService(store)
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'site' as const,
+      entityId: randomUUID(),
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        business_code: 'SITE-1',
+        project_id: projectId,
+        name: 'Fixture site',
+        is_active: true,
+      },
+    }
+    const push = (roles: ('administrator' | 'engineer')[], events: unknown[]) =>
+      service.push(
+        { id: engineer.id, roles, installationId: randomUUID() },
+        { deviceId: randomUUID(), events },
+      )
+    expect((await push(['engineer'], [event])).results[0]?.status).toBe(
+      'validation_error',
+    )
+    const rejected = await push(
+      ['administrator'],
+      [
+        {
+          ...event,
+          eventId: randomUUID(),
+          payload: { ...event.payload, project_id: '' },
+        },
+        { ...event, eventId: randomUUID(), operation: 'soft_delete' },
+      ],
+    )
+    expect(rejected.results.map((result) => result.status)).toEqual([
+      'validation_error',
+      'validation_error',
+    ])
+    expect(store.pushed).toBe(0)
+    expect((await push(['administrator'], [event])).results[0]?.status).toBe(
+      'accepted',
+    )
+    expect(store.pushed).toBe(1)
   })
 })

@@ -6,12 +6,14 @@ import {
   Settings,
 } from 'lucide-react'
 import type { UserRole } from '../lib/permissions'
+import type { SyncState } from '../lib/sync-lifecycle'
 
 export type AppPage =
   | 'home'
   | 'materials'
   | 'requisition'
   | 'execution'
+  | 'conflicts'
   | 'master-data'
   | 'authorization'
 
@@ -31,6 +33,7 @@ type AppShellProps = PropsWithChildren<{
   role: UserRole
   onNavigate: (page: AppPage) => void
   onLock?: () => void
+  syncState?: SyncState
   authorizationContexts?: AuthorizationContextOption[]
   selectedAuthorizationContext?: string
   onSelectAuthorizationContext?: (value: string) => void
@@ -51,6 +54,7 @@ export function AppShell({
   role,
   onNavigate,
   onLock,
+  syncState,
   authorizationContexts,
   selectedAuthorizationContext,
   onSelectAuthorizationContext,
@@ -106,6 +110,16 @@ export function AppShell({
           </button>
           {(role === 'administrator' || role === 'super_administrator') && (
             <button
+              className={`nav-button ${page === 'conflicts' ? 'active' : ''}`}
+              type="button"
+              onClick={() => onNavigate('conflicts')}
+            >
+              <Settings size={17} aria-hidden="true" />
+              同步冲突
+            </button>
+          )}
+          {(role === 'administrator' || role === 'super_administrator') && (
+            <button
               className={`nav-button ${page === 'authorization' ? 'active' : ''}`}
               type="button"
               onClick={() => onNavigate('authorization')}
@@ -153,7 +167,37 @@ export function AppShell({
                 </select>
               </label>
             )}
-            <span>离线本地数据</span>
+            <span role="status" aria-label="同步状态">
+              {syncState?.kind === 'syncing'
+                ? '同步中'
+                : syncState?.kind === 'synced'
+                  ? '上次同步成功；新操作可能待同步'
+                  : syncState?.kind === 'pending'
+                    ? `待同步 ${syncState.pendingCount ?? '未知'}`
+                    : syncState?.kind === 'retrying'
+                      ? '连接失败，等待重试；本地数据待同步'
+                      : syncState?.kind === 'auth-required'
+                        ? '登录已失效，请重新在线登录'
+                        : syncState?.kind === 'account-boundary'
+                          ? '多账号拉取已暂停，需先完成账号隔离恢复'
+                          : '离线本地数据'}
+              {syncState?.kind !== 'pending' &&
+              syncState?.pendingCount !== undefined
+                ? ` · 待同步 ${syncState.pendingCount}`
+                : ''}
+              {syncState?.conflictCount
+                ? ` · 未解决冲突 ${syncState.conflictCount}`
+                : ''}
+              {syncState?.quoteRejectedCount
+                ? ` · ${syncState.quoteRejectedCount} 项报价失效，请撤回采购单并重新选价`
+                : ''}
+              {syncState?.quarantinedCount
+                ? ` · 待归属旧事件 ${syncState.quarantinedCount}`
+                : ''}
+              {syncState?.lastSuccessAt != null
+                ? ` · 上次拉取成功 ${new Date(syncState.lastSuccessAt * 1000).toLocaleString()}`
+                : ''}
+            </span>
             <span className="avatar">张</span>
             <span>{roleLabel[role]}</span>
             {onLock && (

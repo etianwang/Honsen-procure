@@ -10,7 +10,7 @@ type Session = {
 }
 
 type LoginPageProps = {
-  onLogin: (session: Session) => void
+  onLogin: (session: Session, mode: 'online' | 'offline') => void
   onPreview: () => void
 }
 
@@ -164,10 +164,10 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
                 captchaAnswer: Number(answer),
               },
             })
-              .then(onLogin)
-              .catch(() => {
+              .then((authenticated) => onLogin(authenticated, 'offline'))
+              .catch(async () => {
+                await refreshCaptcha()
                 setMessage('账号、密码或验证码无效。')
-                void refreshCaptcha()
               })
               .finally(() => setSubmitting(false))
           }}
@@ -192,16 +192,10 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
                 cloudCaptchaAnswer: cloudAnswer,
               },
             })
-              .then(async (authenticated) => {
-                await desktopInvoke('refresh_authorization')
-                await desktopInvoke('pull_sync')
-                onLogin(authenticated)
-              })
-              .catch(() => {
-                setMessage(
-                  '在线登录或授权刷新失败，请检查连接并重新获取验证码。',
-                )
-                void refreshCaptcha()
+              .then((authenticated) => onLogin(authenticated, 'online'))
+              .catch(async () => {
+                await refreshCaptcha()
+                setMessage('在线登录失败，请检查连接并重新获取验证码。')
               })
               .finally(() => setSubmitting(false))
           }}

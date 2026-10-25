@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!deploy/linux/.env.production.example
 node_modules/
 dist/
 target/

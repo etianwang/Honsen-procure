@@ -46,6 +46,21 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - name: Verify T04 database deployment grants
+        run: TMPDIR="$RUNNER_TEMP" node tests/deploy/test-t04-grants.cjs
+      - name: Verify Linux nginx and systemd ingress integration
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nginx sshfs openssh-server postgresql-client rsync
+          sudo env HONSEN_DEPLOY_TEST=1 TEST_WORK_DIR="$RUNNER_TEMP" bash tests/deploy/test-real-nginx.sh
+          sudo env HONSEN_DEPLOY_TEST=1 TEST_NODE_DIR="$(dirname "$(command -v node)")" bash tests/deploy/test-real-systemd.sh
+          sudo install -d -m 700 /var/lib/honsen-artifact-test
+          sudo env TMPDIR=/var/lib/honsen-artifact-test "$(command -v node)" tests/deploy/test-artifact.cjs
+          sudo env TMPDIR=/var/lib/honsen-artifact-test "$(command -v node)" tests/deploy/test-writer-inventory.cjs
+          sudo env HONSEN_DEPLOY_TEST=1 TEST_TMP=/var/lib/honsen-artifact-test bash tests/deploy/test-completed.sh
+          sudo env HONSEN_DEPLOY_TEST=1 TEST_TMP=/var/lib/honsen-artifact-test bash tests/deploy/test-controller-authorization.sh
+          sudo env TMPDIR=/var/lib/honsen-artifact-test bash tests/deploy/test-api-grant-policy.sh
+          sudo env HONSEN_DEPLOY_TEST=disposable-ci TEST_NODE_DIR="$(dirname "$(command -v node)")" TEST_PG_PASSWORD="${{ github.run_id }}" TEST_REPO="$GITHUB_WORKSPACE" bash tests/deploy/test-controller-e2e.sh
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
       - if: always()

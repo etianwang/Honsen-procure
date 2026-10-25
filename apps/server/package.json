@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "migrate": "tsx src/db/migrate.ts",
-    "provision:super-admin": "tsx src/scripts/provision-super-admin.ts"
+    "provision:super-admin": "tsx src/scripts/provision-super-admin.ts",
+    "native:test-server": "tsx src/scripts/native-test-server.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

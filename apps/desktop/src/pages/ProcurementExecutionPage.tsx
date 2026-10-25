@@ -1,9 +1,11 @@
 import { Alert, Button, Card, Empty, Space } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
+import { AttachmentPanel } from '../components/AttachmentPanel'
 import { RfqPanel } from '../components/RfqPanel'
 import { SupplierAllocationPanel } from '../components/SupplierAllocationPanel'
 import { SupplierChildTermsPanel } from '../components/SupplierChildTermsPanel'
 import { ReceiptPanel } from '../components/ReceiptPanel'
+import { ProcurementExpenditurePanel } from '../components/ProcurementExpenditurePanel'
 import type { SupplierView } from '../lib/catalog-api'
 import type {
   ProcurementExecutionApi,
@@ -12,6 +14,7 @@ import type {
 import type { RfqApi } from '../lib/rfq-api'
 import type { SupplierOrderApi } from '../lib/supplier-order-api'
 import { tauriReceiptApi } from '../lib/receipt-api'
+import { tauriProcurementExpenditureApi } from '../lib/procurement-expenditure-api'
 
 type Props = {
   api: ProcurementExecutionApi
@@ -48,6 +51,12 @@ export function ProcurementExecutionPage({
         .catch(() => setMessage('无法读取已确认采购申请，请重新登录后重试。')),
     [api],
   )
+
+  useEffect(() => {
+    const update = () => void refresh()
+    window.addEventListener('honsen-procurement-synced', update)
+    return () => window.removeEventListener('honsen-procurement-synced', update)
+  }, [refresh])
 
   useEffect(() => {
     void refresh()
@@ -130,7 +139,7 @@ export function ProcurementExecutionPage({
           {selected.procurementMode === 'honsen_self_purchase' &&
           ['executing', 'receiving'].includes(selected.workflowStatus) ? (
             <ReceiptPanel
-              key={selected.id}
+              key={`receipt-${selected.id}`}
               api={tauriReceiptApi}
               orderId={selected.id}
               receiverId={receiverId}
@@ -141,7 +150,19 @@ export function ProcurementExecutionPage({
                 materialName: line.materialName,
                 unit: line.unit,
                 orderedQuantity: line.quantity,
+                receivedQuantity: line.receivedQuantity,
+                remainingQuantity: line.remainingQuantity,
               }))}
+            />
+          ) : null}
+          {selected.children.length === 0 && selected.paymentSummary ? (
+            <ProcurementExpenditurePanel
+              key={`payment-${selected.id}`}
+              api={tauriProcurementExpenditureApi}
+              orderId={selected.id}
+              currency={selected.primaryCurrency}
+              summary={selected.paymentSummary}
+              onChanged={refresh}
             />
           ) : null}
           {selected.children.length ? (
@@ -168,7 +189,22 @@ export function ProcurementExecutionPage({
                     materialName: line.materialName,
                     unit: line.unit,
                     orderedQuantity: line.quantity,
+                    receivedQuantity: line.receivedQuantity,
+                    remainingQuantity: line.remainingQuantity,
                   }))}
+                />
+                {child.paymentSummary ? (
+                  <ProcurementExpenditurePanel
+                    api={tauriProcurementExpenditureApi}
+                    orderId={child.id}
+                    currency={child.currency}
+                    summary={child.paymentSummary}
+                    onChanged={refresh}
+                  />
+                ) : null}
+                <AttachmentPanel
+                  key={`attachments-${child.id}`}
+                  orderId={child.id}
                 />
               </section>
             ))
@@ -181,12 +217,23 @@ export function ProcurementExecutionPage({
                 suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
                 onCreated={refresh}
               />
-              <RfqPanel
-                api={rfqApi}
-                sourceOrderId={selected.id}
-                suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
-              />
             </>
+          ) : null}
+          <AttachmentPanel
+            key={`attachments-${selected.id}`}
+            orderId={selected.id}
+          />
+          {selected.procurementMode !== 'owner_self_purchase' ? (
+            <RfqPanel
+              key={selected.id}
+              api={rfqApi}
+              sourceOrderId={selected.id}
+              suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
+              canCreate={
+                selected.children.length === 0 &&
+                ['confirmed', 'approved'].includes(selected.workflowStatus)
+              }
+            />
           ) : null}
         </section>
       ) : null}

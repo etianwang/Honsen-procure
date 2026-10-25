@@ -1,8 +1,10 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
 use honsen_materials_desktop_core::update_runner::{
-    APP_ID, ApplyRequest, OperationResult, RunnerError, Source, apply, launch,
-    utc_timestamp, write_result_atomically,
+    APP_ID, ApplyRequest, OperationResult, RunnerError, Source, apply, launch, utc_timestamp,
+    write_result_atomically,
 };
 
 fn main() -> ExitCode {
@@ -279,7 +281,8 @@ mod tests {
 
     #[test]
     fn recognizes_only_the_worker_result_for_the_requested_operation() {
-        let directory = std::env::temp_dir().join(format!("honsen-worker-result-{}", uuid::Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("honsen-worker-result-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let request = ApplyRequest {
             source: Source::Toolbox,
@@ -293,7 +296,11 @@ mod tests {
             operation_id: "0f3b2a90-34c4-4d99-bd17-a964da43f6a6".into(),
             result_path: directory.join("result.json"),
         };
-        write_result_atomically(&request.result_path, &failure_result(&request, &RunnerError::HashMismatch)).unwrap();
+        write_result_atomically(
+            &request.result_path,
+            &failure_result(&request, &RunnerError::HashMismatch),
+        )
+        .unwrap();
         assert!(has_worker_result(&request));
         std::fs::remove_dir_all(directory).unwrap();
     }

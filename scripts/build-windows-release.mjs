@@ -16,7 +16,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const version = process.env.HONSEN_RELEASE_VERSION
 const updateManifestUrl =
   process.env.HONSEN_UPDATE_MANIFEST_URL ??
-  'https://github.com/etianwang/Honsen-procure/releases/latest/download/manifest.json'
+  'https://api.github.com/repos/etianwang/Honsen-procure/releases/latest'
 const targetDirectory = resolve(
   process.env.HONSEN_RELEASE_TARGET_DIR ?? 'E:/Honsen-build-cache/procure',
 )

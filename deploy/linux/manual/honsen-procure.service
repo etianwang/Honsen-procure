@@ -1,0 +1,22 @@
+[Unit]
+Description=Honsen Procure API (manual Baota deployment)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/www/Honsen-procure/app/current
+EnvironmentFile=/etc/honsen-procure/server.env
+ExecStart=/usr/bin/node --import=tsx apps/server/dist/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

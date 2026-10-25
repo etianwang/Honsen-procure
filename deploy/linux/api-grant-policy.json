@@ -1,0 +1,197 @@
+{
+  "001_auth_and_master_data.sql": [
+    {
+      "kind": "table",
+      "name": "users",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "user_roles",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "account_sessions",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "countries",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "projects",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "departments",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "teams",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "user_project_bindings",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "audit_entries",
+      "privileges": ["SELECT", "INSERT"]
+    },
+    {
+      "kind": "table",
+      "name": "schema_migrations",
+      "privileges": ["SELECT"]
+    }
+  ],
+  "002_project_defaults_and_master_data.sql": [
+    {
+      "kind": "table",
+      "name": "sites",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "units",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "tax_templates",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "exchange_rates",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "project_print_defaults",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    }
+  ],
+  "003_sync.sql": [
+    {
+      "kind": "table",
+      "name": "server_change_log",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "sequence",
+      "name": "server_change_log_sequence_seq",
+      "privileges": ["USAGE"]
+    },
+    {
+      "kind": "table",
+      "name": "sync_entities",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "sync_events",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    },
+    {
+      "kind": "table",
+      "name": "sync_conflicts",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    }
+  ],
+  "004_authorization_scopes.sql": [
+    {
+      "kind": "table",
+      "name": "user_project_scope_bindings",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    }
+  ],
+  "005_nullable_project_default_contact.sql": [],
+  "005_procurement_expenditures.sql": [
+    {
+      "kind": "table",
+      "name": "procurement_expenditures",
+      "privileges": ["SELECT", "INSERT"]
+    },
+    {
+      "kind": "routine",
+      "name": "preserve_procurement_expenditure",
+      "privileges": []
+    }
+  ],
+  "005_sync_event_origin.sql": [],
+  "006_attachments.sql": [
+    {
+      "kind": "table",
+      "name": "attachments",
+      "privileges": ["SELECT", "INSERT", "UPDATE"],
+      "updateColumns": ["status", "version_id"]
+    },
+    {
+      "kind": "table",
+      "name": "attachment_audit",
+      "privileges": ["SELECT", "INSERT"]
+    },
+    {
+      "kind": "routine",
+      "name": "preserve_attachment_archive",
+      "privileges": []
+    }
+  ],
+  "006_formal_issue_registry.sql": [
+    {
+      "kind": "table",
+      "name": "formal_issue_registry",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    }
+  ],
+  "007_category_code_conflict.sql": [
+    {
+      "kind": "routine",
+      "name": "guard_category_business_code",
+      "privileges": []
+    }
+  ],
+  "008_category_code_quarantine.sql": [
+    {
+      "kind": "table",
+      "name": "category_code_quarantine",
+      "privileges": ["SELECT", "UPDATE"]
+    }
+  ],
+  "009_category_code_repairs.sql": [
+    {
+      "kind": "table",
+      "name": "category_code_repairs",
+      "privileges": ["SELECT", "INSERT"]
+    }
+  ],
+  "010_catalog_sync_quarantine.sql": [
+    {
+      "kind": "table",
+      "name": "catalog_sync_quarantine",
+      "privileges": ["SELECT", "INSERT", "UPDATE"]
+    }
+  ],
+  "011_attachment_derivation.sql": [
+    {
+      "kind": "table",
+      "name": "attachments",
+      "privileges": ["SELECT", "INSERT", "UPDATE"],
+      "updateColumns": ["status", "version_id"]
+    }
+  ],
+  "012_payment_sync_compatibility.sql": [
+    {
+      "kind": "routine",
+      "name": "canonical_procurement_payment",
+      "privileges": ["EXECUTE"]
+    }
+  ]
+}
