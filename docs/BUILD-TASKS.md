@@ -1,5 +1,9 @@
 # Build Tasks: Zero to Production
 
+## 2026-10-25 Agent C bounded deployment-template correction
+
+T15/T11 deployment template leaves optional COS commented until explicitly configured together. Release regressions passed 4/4 on Node.js 24.18.0; no runtime, migration or UI change. Original checkboxes and dependencies remain unchanged. RC `700387b` supplies the protected service/controller; pending legacy manual/service changes are excluded. See `memory.md` for source and preserved dirty paths. This is builder evidence awaiting main-agent independent recheck, not T15 acceptance.
+
 ## Global completion gate
 
 2026-10-24 PR #19 final continuation (A/B/C): HEIC originals and actual JPEG derivatives, additive payment migration compatibility, preserved payment metadata and minimal unified-baseline conflict resolution have focused builder evidence. Real COS HEIC/JPEG PUT/GET/hash/owned cleanup passed. Two running Windows EXEs reached trusted HTTPS/PostgreSQL authentication but both failed native credential storage; payment/reversal/offline/attachment cross-client phases remain BLOCKED_ENV. See [release handoff](T09-T11-RELEASE-HANDOFF.md). Keep T09/T10/T11 and all original acceptance gates open; no QA-ready flag or production deployment.

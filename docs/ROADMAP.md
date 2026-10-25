@@ -1,5 +1,7 @@
 # Roadmap and Development Tasks
 
+The 2026-10-25 Agent C correction keeps optional COS disabled in the deployment template until configured. Release regressions passed 4/4; independent recheck and original M4/T14/T15 live gates remain open. Pending legacy `www` service/manual changes are excluded; RC protected controller remains authoritative. See `memory.md` for source and preserved dirty paths.
+
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.
 
 2026-10-24 PR #19: HEIC conversion and real COS source/derivative verification are implemented; unified-baseline conflicts are resolved with additive payment compatibility. Actual two-client Windows payment/COS acceptance remains BLOCKED_ENV (system credential storage). [Handoff](T09-T11-RELEASE-HANDOFF.md). No parent or milestone is closed.
