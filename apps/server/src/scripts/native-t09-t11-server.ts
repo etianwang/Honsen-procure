@@ -2,7 +2,10 @@ import { CosError, CosStorage } from '../attachments/cos.js'
 import { AttachmentService } from '../attachments/service.js'
 import argon2 from 'argon2'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
+import { networkInterfaces } from 'node:os'
+import { z } from 'zod'
 import { createApp } from '../app.js'
 import { AuthService } from '../auth/service.js'
 import { AuthorizationService } from '../authorization/service.js'
@@ -21,6 +24,11 @@ const accounts = [
   [
     '10000000-0000-4000-8000-000000000013',
     'purchaser',
+    ['purchaser', 'administrator'],
+  ],
+  [
+    '10000000-0000-4000-8000-000000000014',
+    'purchaser-b',
     ['purchaser', 'administrator'],
   ],
 ] as const
@@ -115,7 +123,15 @@ const nativeApp = Fastify({
   logger: false,
   https: { pfx: readFileSync(pfxPath), passphrase: pfxPassphrase },
 }) as unknown as FastifyInstance
-let reversalFaultUsed = false
+const reversalFaultRoot =
+  process.env.HONSEN_NATIVE_CONTROL_ROOT ??
+  process.env.HONSEN_NATIVE_EVIDENCE_ROOT
+const reversalFaultMarker = reversalFaultRoot
+  ? join(reversalFaultRoot, 'reversal-fault-used.signal')
+  : undefined
+let reversalFaultUsed = Boolean(
+  reversalFaultMarker && existsSync(reversalFaultMarker),
+)
 nativeApp.addHook('onSend', async (request, reply, payload) => {
   const events = (
     request.body as
@@ -140,6 +156,7 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
     !reversalFaultUsed
   ) {
     reversalFaultUsed = true
+    if (reversalFaultMarker) writeFileSync(reversalFaultMarker, '')
     console.log(
       JSON.stringify({
         fault: 'post-commit-reversal-503',
@@ -201,8 +218,99 @@ const app = createApp(
   new AttachmentService(pool, cos, prefix),
   nativeApp,
 )
-app.addHook('onClose', async () => pool.end())
-await app.listen({ host: '127.0.0.1', port })
+const controlRoot = process.env.HONSEN_NATIVE_CONTROL_ROOT
+if (controlRoot && !isAbsolute(controlRoot))
+  throw new Error('INVALID_CONTROL_ROOT')
+let checkingControl = false
+const observer = controlRoot
+  ? setInterval(async () => {
+      if (checkingControl) return
+      checkingControl = true
+      try {
+        for (const operation of ['fixture', 'ledger'] as const) {
+          const request = join(controlRoot, `${operation}-request.test.json`)
+          const response = join(controlRoot, `${operation}-ready.test.json`)
+          if (!existsSync(request) || existsSync(response)) continue
+          try {
+            const data: unknown = JSON.parse(readFileSync(request, 'utf8'))
+            if (operation === 'fixture') {
+              const fixture = z
+                .object({
+                  countryCode: z.string().min(1).max(80),
+                  projectCode: z.string().min(1).max(80),
+                })
+                .strict()
+                .parse(data)
+              await pool.query(
+                'UPDATE countries SET business_code=$2 WHERE id=$1',
+                [nativeScope.countryId, fixture.countryCode],
+              )
+              await pool.query(
+                'UPDATE projects SET business_code=$2 WHERE id=$1',
+                [nativeScope.projectId, fixture.projectCode],
+              )
+              for (const accountId of [
+                accounts[0][0],
+                accounts[2][0],
+                accounts[3][0],
+              ]) {
+                await pool.query(
+                  'INSERT INTO user_project_bindings (user_id,project_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+                  [accountId, nativeScope.projectId],
+                )
+                await pool.query(
+                  'INSERT INTO user_project_scope_bindings (user_id,project_id,department_id,team_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',
+                  [
+                    accountId,
+                    nativeScope.projectId,
+                    nativeScope.departmentId,
+                    nativeScope.teamId,
+                  ],
+                )
+              }
+              writeFileSync(response, JSON.stringify({ ok: true }))
+            } else {
+              const { orderId } = z
+                .object({ orderId: z.uuid() })
+                .strict()
+                .parse(data)
+              const result = await pool.query<{ count: number }>(
+                "SELECT count(*)::int AS count FROM sync_entities WHERE entity_type='procurement_expenditure' AND payload_json->>'orderId'=$1",
+                [orderId],
+              )
+              writeFileSync(
+                response,
+                JSON.stringify({ ok: true, count: result.rows[0]?.count }),
+              )
+            }
+          } catch {
+            writeFileSync(
+              response,
+              JSON.stringify({ ok: false, error: 'HOST_OBSERVER_FAILED' }),
+            )
+          }
+        }
+      } finally {
+        checkingControl = false
+      }
+    }, 100)
+  : undefined
+app.addHook('onClose', async () => {
+  if (observer) clearInterval(observer)
+  await pool.end()
+})
+const host = process.env.HONSEN_PROCURE_TEST_TLS_HOST ?? '127.0.0.1'
+if (
+  host !== '127.0.0.1' &&
+  (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) ||
+    !Object.values(networkInterfaces())
+      .flat()
+      .some(
+        (address) => address?.family === 'IPv4' && address.address === host,
+      ))
+)
+  throw new Error('INVALID_PRIVATE_TEST_HOST')
+await app.listen({ host, port })
 console.log('T09/T11 isolated native HTTPS server listening')
 function required(name: string): string {
   const value = process.env[name]

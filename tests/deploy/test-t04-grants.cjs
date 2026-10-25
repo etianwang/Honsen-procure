@@ -57,7 +57,7 @@ async function main() {
     }
     await db.query('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
     await db.query(
-      `GRANT SELECT ON user_project_bindings, user_project_scope_bindings, projects, departments, teams TO "${role}"`,
+      `GRANT SELECT ON user_project_bindings, user_project_scope_bindings, projects, countries, departments, teams TO "${role}"`,
     )
     await db.query(
       `GRANT SELECT, INSERT, UPDATE ON sync_entities, sync_events, audit_entries TO "${role}"`,
@@ -107,6 +107,20 @@ async function main() {
     await db.query(
       'ALTER TABLE public.sync_entities ENABLE TRIGGER guard_category_business_code',
     )
+    await db.query(
+      'ALTER TABLE payment_conflict_resolutions DISABLE TRIGGER payment_conflict_resolutions_immutable',
+    )
+    result = run(['deploy/linux/grant-api.cjs'])
+    assert.notEqual(
+      result.status,
+      0,
+      'disabled payment decision guard must be rejected',
+    )
+    await db.query(
+      'ALTER TABLE payment_conflict_resolutions ENABLE TRIGGER payment_conflict_resolutions_immutable',
+    )
+    result = run(['deploy/linux/grant-api.cjs'])
+    assert.equal(result.status, 0, result.stderr)
     const fn = await db.query(
       "SELECT prosecdef, proconfig, pg_get_userbyid(proowner) AS owner, EXISTS (SELECT 1 FROM aclexplode(COALESCE(proacl, acldefault('f', proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE') AS public_execute FROM pg_proc WHERE oid='public.guard_category_business_code()'::regprocedure",
     )
@@ -258,11 +272,56 @@ async function main() {
       "INSERT INTO sync_entities(entity_type,entity_id,version,payload_json,updated_by) VALUES('purchase_order',$1,1,$2,$3)",
       [order, { projectId: project, countryId: country }, user],
     )
+    const rejectedPaymentEvent = randomUUID(),
+      resolutionEvent = randomUUID(),
+      paymentConflict = randomUUID(),
+      paymentDecision = randomUUID(),
+      installation = randomUUID()
+    for (const [id, type, entityId, status] of [
+      [rejectedPaymentEvent, 'procurement_expenditure', payment, 'conflict'],
+      [
+        resolutionEvent,
+        'payment_conflict_resolution',
+        paymentDecision,
+        'accepted',
+      ],
+    ]) {
+      await db.query(
+        `INSERT INTO sync_events(event_id,installation_id,actor_id,origin_account_id,origin_installation_id,origin_status,origin_attested_at,entity_type,entity_id,operation,base_version,result_status,server_version) VALUES($1,$2,$3,$3,$2,'attested',NOW(),$4,$5,'upsert',0,$6,1)`,
+        [id, installation, user, type, entityId, status],
+      )
+    }
+    await db.query(
+      `INSERT INTO sync_conflicts(id,event_id,entity_type,entity_id,base_version,server_version,local_payload_json,server_payload_json,origin_account_id,origin_installation_id,origin_status) VALUES($1,$2,'procurement_expenditure',$3,0,1,'{}','{}',$4,$5,'attested')`,
+      [paymentConflict, rejectedPaymentEvent, payment, user, installation],
+    )
     await db.query(`SET ROLE "${role}"`)
     const grantPolicy = JSON.parse(
       readFileSync('deploy/linux/api-grant-policy.json', 'utf8'),
     )
     await verifyApiPrivileges(db, grantPolicy)
+    await db.query('SELECT * FROM payment_conflict_resolutions')
+    await db.query(
+      'INSERT INTO payment_conflict_resolutions(id,conflict_id,event_id,rejected_event_id,actor_id,installation_id,reason,payload_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+      [
+        paymentDecision,
+        paymentConflict,
+        resolutionEvent,
+        rejectedPaymentEvent,
+        user,
+        installation,
+        'Retain immutable evidence',
+        { id: paymentDecision },
+      ],
+    )
+    await assert.rejects(
+      db.query("UPDATE payment_conflict_resolutions SET reason='rewrite'"),
+      (e) => e.code === '42501',
+    )
+    await assert.rejects(
+      db.query('DELETE FROM payment_conflict_resolutions'),
+      (e) => e.code === '42501',
+    )
     await assert.rejects(
       verifyApiPrivileges(db, {
         unreviewed: [{ kind: 'unknown', name: 'attachments', privileges: [] }],
@@ -278,6 +337,13 @@ async function main() {
       /Invalid API routine grant/,
     )
     await db.query('RESET ROLE')
+    await assert.rejects(
+      db.query(
+        "UPDATE payment_conflict_resolutions SET reason='rewrite' WHERE id=$1",
+        [paymentDecision],
+      ),
+      (e) => e.code === 'P0001',
+    )
     await db.query(
       `REVOKE EXECUTE ON FUNCTION public.canonical_procurement_payment(jsonb,uuid,timestamptz) FROM "${role}"`,
     )

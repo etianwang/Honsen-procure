@@ -13,6 +13,10 @@ import { formalShortCode, parseFormalIssue } from './formal-issue.js'
 import type { SyncActor, SyncStore } from './types.js'
 import { CategoryRepairError } from './service.js'
 import { catalogPayload, catalogTypes } from './catalog-payload.js'
+import {
+  listPaymentConflicts,
+  pushPaymentResolution,
+} from './payment-conflicts.js'
 
 const globallyVisibleEntityTypes = [
   'country',
@@ -56,6 +60,10 @@ type ProjectDefaultsBusinessRow = {
 
 export class PostgresSyncStore implements SyncStore {
   constructor(private readonly pool: Pool) {}
+
+  async listPaymentConflicts(actor: SyncActor) {
+    return listPaymentConflicts(this.pool, actor)
+  }
 
   async listCategoryQuarantine() {
     const result = await this.pool.query<{
@@ -231,6 +239,8 @@ export class PostgresSyncStore implements SyncStore {
     actorId: string
     recoveryReason?: string
   }): Promise<SyncEventResult> {
+    if (input.event.entityType === 'payment_conflict_resolution')
+      return pushPaymentResolution(this.pool, input)
     if (
       ['supplier', 'material_price'].includes(input.event.entityType) &&
       input.event.payload.id !== undefined &&
@@ -629,9 +639,9 @@ export class PostgresSyncStore implements SyncStore {
              WHERE entity_type = $1 AND entity_id = $2`,
             [input.event.entityType, input.event.entityId],
           )
-          if (conflict.rows[0] && entity.rows[0]) {
+          if (conflict.rows[0]) {
             result.serverPayload = conflict.rows[0].server_payload_json
-            result.serverOperation = entity.rows[0].is_deleted
+            result.serverOperation = entity.rows[0]?.is_deleted
               ? 'soft_delete'
               : 'upsert'
           }
@@ -648,6 +658,46 @@ export class PostgresSyncStore implements SyncStore {
         [input.event.entityType, input.event.entityId],
       )
       const current = entity.rows[0]
+      if (input.event.entityType === 'procurement_expenditure' && current) {
+        // Validate the existing payment's authoritative relation before exposing
+        // its immutable payload in a conflict response.
+        const payment = input.event.payload
+        const scope = await client.query(
+          `SELECT 1 FROM sync_entities o
+           JOIN projects p ON p.id::text=o.payload_json->>'projectId' AND p.is_active AND p.deleted_at IS NULL
+           JOIN countries c ON c.id=p.country_id AND c.is_active AND c.deleted_at IS NULL
+           JOIN user_project_bindings b ON b.project_id=p.id AND b.user_id=$1 AND b.deleted_at IS NULL
+           JOIN user_project_scope_bindings scope ON scope.user_id=b.user_id AND scope.project_id=p.id AND scope.deleted_at IS NULL
+           JOIN departments d ON d.id=scope.department_id AND d.is_active AND d.deleted_at IS NULL
+           JOIN teams t ON t.id=scope.team_id AND t.department_id=d.id AND t.is_active AND t.deleted_at IS NULL
+           WHERE o.entity_type='purchase_order' AND o.entity_id::text=$2 AND NOT o.is_deleted
+             AND p.id::text=$3 AND c.id::text=$4 AND o.payload_json->>'countryId'=c.id::text
+             AND o.payload_json->>'departmentId'=d.id::text AND o.payload_json->>'teamId'=t.id::text
+           FOR SHARE OF o,p,c,b,scope,d,t`,
+          [
+            input.actorId,
+            current.payload_json.orderId,
+            current.payload_json.projectId,
+            payment.countryId,
+          ],
+        )
+        if (
+          scope.rowCount !== 1 ||
+          payment.orderId !== current.payload_json.orderId ||
+          payment.projectId !== current.payload_json.projectId ||
+          payment.createdBy !== input.actorId ||
+          (current.payload_json.countryId !== undefined &&
+            payment.countryId !== current.payload_json.countryId)
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'FORBIDDEN',
+          }
+        }
+      }
       const currentVersion = current ? Number(current.version) : 0
       if (input.event.entityType === 'exchange_rate' && currentVersion === 0) {
         const business = await client.query(
@@ -1051,14 +1101,13 @@ export class PostgresSyncStore implements SyncStore {
             [p.correctsExpenditureId],
           )
           const originalPayload = original.rows[0]?.payload_json
-          const duplicate = await client.query(
-            'SELECT 1 FROM procurement_expenditures WHERE corrects_expenditure_id=$1',
+          const duplicate = await client.query<StoredEntity>(
+            `SELECT e.version,e.payload_json FROM procurement_expenditures p JOIN sync_entities e ON e.entity_type='procurement_expenditure' AND e.entity_id=p.id AND NOT e.is_deleted WHERE p.corrects_expenditure_id=$1`,
             [p.correctsExpenditureId],
           )
           valid =
             valid &&
             !!originalPayload &&
-            duplicate.rowCount === 0 &&
             [
               'orderId',
               'projectId',
@@ -1079,6 +1128,22 @@ export class PostgresSyncStore implements SyncStore {
                 input.event.payload[key] ?? null,
               ),
             )
+          if (valid && duplicate.rows[0]) {
+            const winner = duplicate.rows[0]
+            const result: SyncEventResult = {
+              eventId: input.event.eventId,
+              status: 'conflict',
+              serverVersion: Number(winner.version),
+              errorCode: 'PAYMENT_REVERSAL_CONFLICT',
+            }
+            await this.recordConflict(client, input, winner, result)
+            await client.query(
+              "UPDATE sync_events SET result_error_code='PAYMENT_REVERSAL_CONFLICT' WHERE event_id=$1",
+              [input.event.eventId],
+            )
+            await client.query('COMMIT')
+            return result
+          }
         }
         if (!valid) {
           await client.query('ROLLBACK')
@@ -2409,6 +2474,13 @@ export class PostgresSyncStore implements SyncStore {
              WHERE b.user_id = $3
                AND b.deleted_at IS NULL
                AND b.project_id::text = c.payload_json->>'projectId'
+               AND (c.entity_type <> 'payment_conflict_resolution' OR (
+                 c.payload_json->>'countryId'=p.country_id::text
+                 AND EXISTS (SELECT 1 FROM countries country WHERE country.id=p.country_id AND country.is_active AND country.deleted_at IS NULL)
+                 AND EXISTS (SELECT 1 FROM sync_entities o WHERE o.entity_type='purchase_order' AND o.entity_id::text=c.payload_json->>'orderId' AND NOT o.is_deleted
+                   AND o.payload_json->>'projectId'=p.id::text AND o.payload_json->>'countryId'=p.country_id::text
+                   AND o.payload_json->>'departmentId'=d.id::text AND o.payload_json->>'teamId'=t.id::text)
+               ))
                AND (c.entity_type <> 'purchase_order' OR c.payload_json->>'countryId' IS NULL OR c.payload_json->>'countryId' = p.country_id::text)
            ))
          )

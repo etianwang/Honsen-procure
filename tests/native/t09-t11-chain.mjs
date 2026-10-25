@@ -13,11 +13,13 @@ import {
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
+import { createServer } from 'node:http'
 import { chromium, expect } from '@playwright/test'
-import { Pool } from 'pg'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const root = resolve(process.env.HONSEN_NATIVE_EVIDENCE_ROOT)
+const guest = process.env.HONSEN_NATIVE_GUEST === '1'
+const resultRoot = guest ? resolve(process.env.HONSEN_NATIVE_RESULT_ROOT) : root
 assert.ok(
   root.startsWith(resolve(process.env.HONSEN_NATIVE_RESOURCE_ROOT) + sep),
 )
@@ -28,7 +30,7 @@ const children = [],
   calls = [],
   exePids = []
 const ids = Array.from(
-  { length: 14 },
+  { length: 15 },
   (_, n) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
 )
 const orderId = randomUUID(),
@@ -36,22 +38,30 @@ const orderId = randomUUID(),
   receiptId = randomUUID()
 const paymentIds = [randomUUID(), randomUUID()],
   reversalId = randomUUID()
-const databaseUrl = new URL(process.env.HONSEN_PROCURE_TEST_DATABASE_URL)
-assert.equal(databaseUrl.hostname, '127.0.0.1')
-assert.ok(databaseUrl.pathname.includes('test'))
-const pool = new Pool({ connectionString: databaseUrl.toString() })
+let pool
+if (!guest) {
+  const databaseUrl = new URL(process.env.HONSEN_PROCURE_TEST_DATABASE_URL)
+  assert.equal(databaseUrl.hostname, '127.0.0.1')
+  assert.ok(databaseUrl.pathname.includes('test'))
+  const { Pool } = await import('pg')
+  pool = new Pool({ connectionString: databaseUrl.toString() })
+}
 const report = {
   mode: 't09-t11-native-chain',
-  baseSha: execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: repo,
-    encoding: 'utf8',
-  }).trim(),
-  workingTreeDirty: Boolean(
-    execFileSync('git', ['status', '--porcelain'], {
-      cwd: repo,
-      encoding: 'utf8',
-    }).trim(),
-  ),
+  baseSha: guest
+    ? process.env.HONSEN_NATIVE_BASE_SHA
+    : execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: repo,
+        encoding: 'utf8',
+      }).trim(),
+  workingTreeDirty: guest
+    ? process.env.HONSEN_NATIVE_SOURCE_DIRTY === '1'
+    : Boolean(
+        execFileSync('git', ['status', '--porcelain'], {
+          cwd: repo,
+          encoding: 'utf8',
+        }).trim(),
+      ),
   artifactBoundary:
     'exeHash identifies the exact tested executable; baseSha does not identify uncommitted source changes',
   orderId,
@@ -61,6 +71,18 @@ const report = {
   seedErrors: [],
 }
 let phase = 'fixture'
+let staticServer
+async function hostObserver(operation, request) {
+  writeFileSync(
+    join(resultRoot, `${operation}-request.test.json`),
+    JSON.stringify(request),
+  )
+  const response = join(resultRoot, `${operation}-ready.test.json`)
+  await expect.poll(() => existsSync(response), { timeout: 30_000 }).toBe(true)
+  const result = JSON.parse(readFileSync(response, 'utf8'))
+  assert.equal(result.ok, true, result.error)
+  return result
+}
 function readDb(index, sql, ...args) {
   const db = new DatabaseSync(profiles[index], { readOnly: true })
   try {
@@ -204,6 +226,53 @@ async function login(app, username, offline = false) {
     },
   })
 }
+async function uiLogin(app, username) {
+  await app.page.getByLabel('账号', { exact: true }).fill(username)
+  await app.page
+    .getByLabel('密码', { exact: true })
+    .fill(
+      process.env[
+        `HONSEN_TEST_${username.replace('-', '_').toUpperCase()}_PASSWORD`
+      ],
+    )
+  await app.page
+    .getByRole('button', { name: '获取验证码', exact: true })
+    .click()
+  await expect(app.page.locator('label[for="cloud-captcha"]')).toBeVisible()
+  for (const field of ['captcha', 'cloud-captcha']) {
+    const question = (
+      await app.page.locator(`label[for="${field}"]`).innerText()
+    )
+      .split('：')
+      .at(-1)
+    await app.page.locator(`#${field}`).fill(String(answer(question)))
+  }
+  await app.page.getByRole('button', { name: '在线登录', exact: true }).click()
+  await expect(
+    app.page.getByRole('button', { name: '采购执行', exact: true }),
+  ).toBeVisible()
+}
+async function network(connected, cycle) {
+  writeFileSync(
+    join(
+      resultRoot,
+      `${cycle}${connected ? 'reconnect' : 'disconnect'}.signal`,
+    ),
+    '',
+  )
+  await expect
+    .poll(
+      () =>
+        existsSync(
+          join(
+            resultRoot,
+            `${cycle}${connected ? 'reconnected' : 'disconnected'}.signal`,
+          ),
+        ),
+      { timeout: 30_000 },
+    )
+    .toBe(true)
+}
 async function push(app) {
   const result = await call(app, 'push_pending_sync')
   assert.equal(result.pendingCount, 0)
@@ -268,7 +337,21 @@ try {
         .installation_id,
   )
   assert.notEqual(...report.installations)
-  for (const [table, id] of report.seedErrors.length
+  if (guest && !report.seedErrors.length) {
+    await hostObserver('fixture', {
+      countryCode: readDb(
+        0,
+        'SELECT business_code FROM local_countries WHERE id=?',
+        ids[1],
+      )[0].business_code,
+      projectCode: readDb(
+        0,
+        'SELECT business_code FROM local_projects WHERE id=?',
+        ids[2],
+      )[0].business_code,
+    })
+  }
+  for (const [table, id] of report.seedErrors.length || guest
     ? []
     : [
         ['countries', ids[1]],
@@ -284,7 +367,7 @@ try {
       code,
     ])
   }
-  for (const user of [ids[11], ids[13]]) {
+  for (const user of guest ? [] : [ids[11], ids[13], ids[14]]) {
     await pool.query(
       'INSERT INTO user_project_bindings (user_id,project_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
       [user, ids[2]],
@@ -294,19 +377,49 @@ try {
       [user, ids[2], ids[3], ids[4]],
     )
   }
-  const vite = spawn(
-    process.execPath,
-    [
-      join(repo, 'node_modules/vite/bin/vite.js'),
-      '--host',
-      '127.0.0.1',
-      '--port',
-      '1420',
-      '--strictPort',
-    ],
-    { cwd: join(repo, 'apps/desktop'), windowsHide: true, stdio: 'ignore' },
-  )
-  children.push(vite)
+  if (guest) {
+    const dist = resolve(process.env.HONSEN_NATIVE_FRONTEND_DIST)
+    staticServer = createServer((request, response) => {
+      const file = resolve(
+        dist,
+        '.' + new URL(request.url, 'http://localhost').pathname,
+      )
+      if (!file.startsWith(dist + sep) && file !== dist) {
+        response.writeHead(403)
+        response.end()
+        return
+      }
+      const target =
+        file !== dist && existsSync(file) ? file : join(dist, 'index.html')
+      const contentType = target.endsWith('.js')
+        ? 'text/javascript'
+        : target.endsWith('.css')
+          ? 'text/css'
+          : target.endsWith('.svg')
+            ? 'image/svg+xml'
+            : 'text/html'
+      response.setHeader('Content-Type', contentType)
+      response.end(readFileSync(target))
+    })
+    await new Promise((resolve, reject) => {
+      staticServer.once('error', reject)
+      staticServer.listen(1420, '127.0.0.1', resolve)
+    })
+  } else {
+    const vite = spawn(
+      process.execPath,
+      [
+        join(repo, 'node_modules/vite/bin/vite.js'),
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '1420',
+        '--strictPort',
+      ],
+      { cwd: join(repo, 'apps/desktop'), windowsHide: true, stdio: 'ignore' },
+    )
+    children.push(vite)
+  }
   await ready('http://127.0.0.1:1420')
   let a = await launch(0),
     b = await launch(1)
@@ -320,7 +433,7 @@ try {
         failures.push({ index, error: error.message })
       }
       await app.page.screenshot({
-        path: join(root, `blocked-device-${index}.png`),
+        path: join(resultRoot, `blocked-device-${index}.png`),
       })
     }
     report.nativeLoginFailures = failures
@@ -410,7 +523,7 @@ try {
       items: [{ orderItemId: lineId, quantity: '3', unit: '米' }],
     },
   })
-  await login(a, 'purchaser')
+  await login(a, 'purchaser-b')
   for (const [index, id] of paymentIds.entries())
     await call(a, 'record_procurement_expenditure', {
       input: {
@@ -468,9 +581,9 @@ try {
   assert.equal(reversed.paidMinor, '200')
   assert.equal(reversed.records.length, 3)
   phase = 'offline-restart'
-  writeFileSync(join(root, 'disconnect.signal'), '')
+  writeFileSync(join(resultRoot, 'disconnect.signal'), '')
   await expect
-    .poll(() => existsSync(join(root, 'disconnected.signal')), {
+    .poll(() => existsSync(join(resultRoot, 'disconnected.signal')), {
       timeout: 30_000,
     })
     .toBe(true)
@@ -479,7 +592,7 @@ try {
   a = await launch(0)
   const locked = await raw(a, 'list_confirmed_procurement_orders')
   assert.equal(locked.ok, false)
-  await login(a, 'purchaser', true)
+  await login(a, 'purchaser-b', true)
   const offlineId = randomUUID()
   await call(a, 'record_procurement_expenditure', {
     input: {
@@ -504,15 +617,121 @@ try {
       offlineId,
     ).length,
   )
-  writeFileSync(join(root, 'reconnect.signal'), '')
+  writeFileSync(join(resultRoot, 'reconnect.signal'), '')
   await expect
-    .poll(() => existsSync(join(root, 'reconnected.signal')), {
+    .poll(() => existsSync(join(resultRoot, 'reconnected.signal')), {
       timeout: 30_000,
     })
     .toBe(true)
-  await login(a, 'purchaser')
+  await login(a, 'purchaser-b')
   await push(a)
   await call(b, 'pull_sync')
+  phase = 'competing-reversal-resolution'
+  const competingPayment = randomUUID(),
+    winner = randomUUID(),
+    loser = randomUUID()
+  await call(a, 'record_procurement_expenditure', {
+    input: {
+      id: competingPayment,
+      orderId,
+      payeeName: 'Synthetic reconciliation payee',
+      currency: 'XOF',
+      amountMinor: '100',
+      paymentDate: '2026-10-24',
+      paymentType: 'other',
+      paymentMethod: 'cash',
+      voucherReference: null,
+      notes: 'Native competing correction',
+    },
+  })
+  await push(a)
+  await call(b, 'pull_sync')
+  await network(false, 'conflict-')
+  await call(a, 'reverse_procurement_expenditure', {
+    input: {
+      id: winner,
+      expenditureId: competingPayment,
+      reason: 'Synthetic A offline reversal',
+    },
+  })
+  await call(b, 'reverse_procurement_expenditure', {
+    input: {
+      id: loser,
+      expenditureId: competingPayment,
+      reason: 'Synthetic B offline reversal',
+    },
+  })
+  await network(true, 'conflict-')
+  await push(a)
+  await call(b, 'push_pending_sync')
+  const conflict = (await call(a, 'list_payment_sync_conflicts')).find(
+    (item) => item.entityId === loser,
+  )
+  assert.ok(conflict?.eventId)
+  assert.equal(conflict.entityType, 'procurement_expenditure')
+  const originals = [conflict.localPayloadJson, conflict.serverPayloadJson]
+  await uiLogin(a, 'purchaser-b')
+  await a.page.getByRole('button', { name: '同步冲突', exact: true }).click()
+  await expect(
+    a.page.getByRole('button', {
+      name: '确认云端付款并保留冲突原件',
+      exact: true,
+    }),
+  ).toBeVisible()
+  await network(false, 'resolution-')
+  await a.page
+    .getByLabel('处理原因', { exact: true })
+    .fill('Synthetic verified reconciliation')
+  await a.page
+    .getByRole('button', { name: '确认云端付款并保留冲突原件', exact: true })
+    .click()
+  await expect(
+    a.page.getByText('处置待同步，尚未获得服务器确认。', { exact: true }),
+  ).toBeVisible()
+  await a.page.screenshot({
+    path: join(resultRoot, 'native-resolution-pending.png'),
+    fullPage: true,
+  })
+  await network(true, 'resolution-')
+  await push(a)
+  await call(a, 'pull_sync')
+  await call(b, 'pull_sync')
+  for (const app of [a, b]) {
+    const resolved = (await call(app, 'list_payment_sync_conflicts')).find(
+      (item) => item.id === conflict.id,
+    )
+    assert.equal(resolved?.paymentResolutionState, 'confirmed')
+    assert.deepEqual(
+      [resolved.localPayloadJson, resolved.serverPayloadJson],
+      originals,
+    )
+    const payment = (await call(app, 'list_confirmed_procurement_orders')).find(
+      (item) => item.id === orderId,
+    ).paymentSummary
+    assert.equal(payment.paidMinor, '250')
+  }
+  await a.page
+    .getByRole('button', { name: '刷新付款处置状态', exact: true })
+    .click()
+  await expect(
+    a.page.getByText('服务器已确认付款对账处置。', { exact: true }),
+  ).toBeVisible()
+  await a.page.screenshot({
+    path: join(resultRoot, 'native-resolution-confirmed.png'),
+    fullPage: true,
+  })
+  report.paymentConflict = {
+    id: conflict.id,
+    eventId: conflict.eventId,
+    winner,
+    loser,
+    originalsPreserved: true,
+    acknowledged: true,
+    bothPaidMinor: '250',
+  }
+  await stop(a)
+  a = await launch(0)
+  await login(a, 'purchaser-b')
   phase = 'files'
   const fixtures = [
     {
@@ -593,25 +812,15 @@ try {
   )
   phase = 'immutability'
   assert.deepEqual(unchanged(), stable)
-  const ledger = await pool.query(
-    "SELECT count(*)::int AS count FROM sync_entities WHERE entity_type='procurement_expenditure' AND payload_json->>'orderId'=$1",
-    [orderId],
-  )
-  assert.equal(ledger.rows[0].count, 4)
+  const ledger = guest
+    ? { rows: [await hostObserver('ledger', { orderId })] }
+    : await pool.query(
+        "SELECT count(*)::int AS count FROM sync_entities WHERE entity_type='procurement_expenditure' AND payload_json->>'orderId'=$1",
+        [orderId],
+      )
+  assert.equal(ledger.rows[0].count, 6)
   phase = 'native-production-ui'
-  await b.page.getByLabel('账号', { exact: true }).fill('purchaser')
-  await b.page
-    .getByLabel('密码', { exact: true })
-    .fill(process.env.HONSEN_TEST_PURCHASER_PASSWORD)
-  await b.page.getByRole('button', { name: '获取验证码', exact: true }).click()
-  await expect(b.page.locator('label[for="cloud-captcha"]')).toBeVisible()
-  for (const field of ['captcha', 'cloud-captcha']) {
-    const question = (await b.page.locator(`label[for="${field}"]`).innerText())
-      .split('：')
-      .at(-1)
-    await b.page.locator(`#${field}`).fill(String(answer(question)))
-  }
-  await b.page.getByRole('button', { name: '在线登录', exact: true }).click()
+  await uiLogin(b, 'purchaser')
   await b.page.getByRole('button', { name: '采购执行', exact: true }).click()
   await expect(
     b.page.getByRole('heading', { name: '采购执行', exact: true }),
@@ -620,13 +829,13 @@ try {
     b.page.getByText('Synthetic market payee', { exact: true }).first(),
   ).toBeVisible()
   await b.page.screenshot({
-    path: join(root, 'native-device-b.png'),
+    path: join(resultRoot, 'native-device-b.png'),
     fullPage: true,
   })
   report.nativeDomVerified = true
   report.result = 'PASS'
   report.snapshotReceiptUnchanged = true
-  report.serverLedgerCount = 4
+  report.serverLedgerCount = 6
 } catch (error) {
   report.result = report.seedErrors.length ? 'BLOCKED_ENV' : 'FAIL'
   report.phase = phase
@@ -634,10 +843,11 @@ try {
   throw error
 } finally {
   writeFileSync(
-    join(root, 'evidence.test.json'),
+    join(resultRoot, 'evidence.test.json'),
     JSON.stringify(report, null, 2),
   )
   for (const browser of browsers) await browser.close().catch(() => {})
   for (const child of children) if (child.exitCode === null) child.kill()
-  await pool.end()
+  if (staticServer) await new Promise((resolve) => staticServer.close(resolve))
+  await pool?.end()
 }

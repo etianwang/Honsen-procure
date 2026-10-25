@@ -5,6 +5,7 @@ import {
   projectDefaultsSchema,
   referenceMasterDataSchema,
   procurementExpenditureSchema,
+  paymentConflictResolutionRequestSchema,
   uuidSchema,
   syncPullQuerySchema,
   syncPushRequestSchema,
@@ -65,6 +66,18 @@ const rfqPayloadSchema = z.strictObject({
 
 export class SyncService {
   constructor(private readonly store: SyncStore) {}
+
+  async listPaymentConflicts(actor: SyncActor) {
+    if (
+      !actor.roles.some(
+        (role) => role === 'administrator' || role === 'super_administrator',
+      )
+    )
+      throw new CategoryRepairError('FORBIDDEN')
+    if (!this.store.listPaymentConflicts)
+      throw new CategoryRepairError('UNAVAILABLE')
+    return this.store.listPaymentConflicts(actor)
+  }
 
   async listCategoryQuarantine(actor: SyncActor) {
     if (
@@ -205,6 +218,20 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'payment_conflict_resolution') {
+      const request = paymentConflictResolutionRequestSchema.safeParse(
+        event.payload,
+      )
+      return (
+        event.operation === 'upsert' &&
+        event.baseVersion === 0 &&
+        request.success &&
+        request.data.id === event.entityId &&
+        actor.roles.some(
+          (role) => role === 'administrator' || role === 'super_administrator',
+        )
+      )
+    }
     if (event.entityType === 'attachment') return false
     if (event.entityType === 'order_comment' && event.operation !== 'upsert')
       return false

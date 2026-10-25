@@ -89,6 +89,13 @@
       "updateColumns": ["status", "version_id"]
     }
   ],
+  "013_payment_conflict_resolutions.sql": [
+    {
+      "kind": "table",
+      "name": "payment_conflict_resolutions",
+      "privileges": ["SELECT", "INSERT"]
+    }
+  ],
   "012_payment_sync_compatibility.sql": [
     {
       "kind": "routine",

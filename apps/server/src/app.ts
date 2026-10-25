@@ -273,6 +273,23 @@ export function createApp(
   }
 
   if (sync) {
+    app.get('/api/sync/payment-conflicts', async (request, reply) => {
+      try {
+        if (typeof request.headers.authorization !== 'string')
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        return await sync.listPaymentConflicts(
+          await authenticateRequest(request),
+        )
+      } catch (error) {
+        if (error instanceof AuthenticationError)
+          return reply.status(401).send({ code: 'UNAUTHENTICATED' })
+        if (error instanceof CategoryRepairError)
+          return reply
+            .status(error.code === 'FORBIDDEN' ? 403 : 503)
+            .send({ code: error.code })
+        throw error
+      }
+    })
     app.get('/api/sync/category-quarantine', async (request, reply) => {
       try {
         if (typeof request.headers.authorization !== 'string')

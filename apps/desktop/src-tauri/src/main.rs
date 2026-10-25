@@ -156,6 +156,8 @@ fn main() {
             commands::pull_sync,
             commands::sync_status,
             commands::list_sync_conflicts,
+            commands::list_payment_sync_conflicts,
+            commands::resolve_payment_sync_conflict,
             commands::list_local_category_conflicts,
             commands::list_pending_remote_category_repairs,
             commands::repair_local_category_conflict,

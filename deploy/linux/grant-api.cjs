@@ -210,6 +210,13 @@ async function main() {
           throw new Error('Archive immutability trigger is missing or disabled')
       }
     }
+    const paymentDecisionGuard = await client.query(
+      "SELECT count(*)::int AS count FROM pg_trigger WHERE tgrelid='public.payment_conflict_resolutions'::regclass AND tgname='payment_conflict_resolutions_immutable' AND tgfoid='public.preserve_procurement_expenditure()'::regprocedure AND tgenabled='O' AND tgtype=27 AND NOT tgisinternal",
+    )
+    if (paymentDecisionGuard.rows[0].count !== 1)
+      throw new Error(
+        'Payment decision immutability trigger is missing or disabled',
+      )
     const routine =
       await client.query(`SELECT p.prosrc, p.prosecdef, p.prokind, p.pronargs,
       p.prorettype = 'pg_catalog.trigger'::regtype AS returns_trigger,
