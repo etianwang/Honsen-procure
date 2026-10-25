@@ -28,7 +28,7 @@ RELEASE_DIR=/var/lib/honsen-build/candidate npm_config_cache=/var/cache/honsen-n
 
 运行环境参考 `.env.production.example`。COS 使用私有 Bucket，配置 `COS_REGION`、`COS_BUCKET`、`COS_SECRET_ID`、`COS_SECRET_KEY`，可选 TTL。四项全空禁用附件归档，部分配置必须拒绝启动；占位符不能用于上线。临时凭据仅授予特定对象 Put/Get/Head，不公开 Bucket。详见 [付款/COS 交接](../../docs/T09-T11-RELEASE-HANDOFF.md)。
 
-迁移身份是完整文件名，不能只按数字前缀去重。包含 PostgreSQL `005_procurement_expenditures.sql`、`006_attachments.sql`、`011_attachment_derivation.sql`、`012_payment_sync_compatibility.sql` 及其他全部迁移。SQLite 0032/0033/0034 和 0056/0057/0058 由新版桌面执行，绝不能送入 PostgreSQL。
+迁移身份是完整文件名，不能只按数字前缀去重。包含 PostgreSQL `005_procurement_expenditures.sql`、`006_attachments.sql`、`011_attachment_derivation.sql`、`012_payment_sync_compatibility.sql`、`013_payment_conflict_resolutions.sql` 及其他全部迁移。SQLite 0032/0033/0034 和 0056/0057/0058/0059 由新版桌面执行，绝不能送入 PostgreSQL。付款冲突决策表运行角色仅有 SELECT/INSERT；原付款及决策不可变保护必须通过现有授权检查器，不能放宽 UPDATE/DELETE。
 
 ## systemd、宝塔 HTTPS 与受控部署
 

@@ -4,6 +4,49 @@
 
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## Main controller — frozen multi-agent RC source — 2026-10-25
+
+- Selected T15 integration only. Three actual isolated agents completed bounded
+  work: A `ca44150c966fe5c2041442f4d34f0c6ed7b2342c`, B
+  `5915335cdb16d97861fa99a587c831b8e5070566`, C
+  `e23de5b447e91ac26e6368e3d32098608882abc8`; all remote source SHAs verified.
+  Controller worktree is `C:/Users/This PC/.codex/worktrees/v1-rc-control/Honsen materials`,
+  branch `codex/v1-rc-control-20261025`, based on existing RC `700387b` because
+  attaching the other chat's RC tree was rejected. Source imports are documented
+  in [the controller ledger](docs/planning/V1-MULTI-AGENT-CONTROL-20261025.md).
+  This containing checkpoint freezes the numeric `0.1.2` candidate source; package
+  results will be attached in an evidence-only controller checkpoint. No formal
+  Release/tag, PR/main merge, production deployment or business-data removal.
+- Independent static C review matched A12/B3 production-file hashes to their
+  final SHAs, with no unresolved P0/P1 within the selected fixes. Controller
+  fresh combined-source Rust payment-conflict3/3, allocation1/1 and Runner8/8,
+  Rust fmt/bins check, workspace format/lint/typecheck/build and allocation DOM3/3 passed.
+  Unchanged server/shared/home/payment boundaries also passed shared25,
+  desktop16, API/service27, release7 and home/payment/conflict DOM3 after A's
+  import; exact comparisons are in the ledger. Original task/milestone
+  checkboxes and locks are unchanged. Source code is identical to tested
+  `8bfa3d3` except this documentation. Final exact-RC CI/package results remain
+  pending at freeze and must not be inferred from earlier runs.
+- Initial controller failures retained: old generated PDB LNK1207, resolved by
+  regenerating only that cache file; unsupported release-profile lib tests
+  referenced existing debug-only helpers, replaced by the passing standard
+  debug-profile run without changing code/hooks. New cache/TEMP/targets and
+  generated output use E:. The legacy native credential failure is historical;
+  this run did not reproduce it or inspect production configuration.
+- **BLOCKER:** final packages/exact-RC CI until produced; Windows revoked-session
+  re-login, installed dual-client payments/COS, Toolbox contract/installed
+  install-update-uninstall-repair, formal business/print/export/full localization,
+  backup/restore and original parent/security/Formal gates remain open.
+  **DEFERRED:** further child tasks beyond these three bounded fixes.
+  **WARNING:** >500 historical payment-conflict discovery limit, existing React/
+  Clippy/bundle warnings and npm audit findings. Native/live COS/physical print/
+  production backup and install tests are not run: missing authorized test COS
+  configuration and required installed/physical/staging environments; these
+  acceptance items remain unpassed. CI supplies disposable PostgreSQL checks,
+  never a production database. Preserved source dirt: A clean, B AppShell label,
+  C four pre-existing release files; controller tracked-clean after this commit,
+  with ignored generated output junctions. Other dirty trees are untouched.
+
 ## Agent B — T08-C supplier quote allocation repair (2026-10-25)
 
 - Continue `codex/v1-business-flow` from `03614e2f053ec1707a6f43a34749c767ea2e9b1e`; this entry's containing commit is the selected task checkpoint. The existing uncommitted allocation regression and error message were reviewed and completed. The unrelated existing `apps/desktop/src/components/AppShell.tsx` role-label edit is preserved and excluded from the checkpoint. No other worktree is modified.

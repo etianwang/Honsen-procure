@@ -4,6 +4,13 @@ The 2026-10-25 Agent C correction keeps optional COS disabled in the deployment 
 
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.
 
+2026-10-25: three real isolated agents delivered payment-conflict, quote-allocation
+and deployment-template fixes into a frozen `0.1.2` RC source. Independent static
+review and combined targeted checks are recorded in the
+[controller handoff](planning/V1-MULTI-AGENT-CONTROL-20261025.md). This is partial T15
+integration, not V1 readiness; exact-source CI/packages and original final gates
+remain required. No milestone is closed.
+
 2026-10-25 Agent A: PR #19 immutable-payment conflict reconciliation has builder code and focused PostgreSQL/SQLite/production-route DOM evidence, including canonical voucher-target recovery. [Scope and evidence](planning/PR19-PAYMENT-CONFLICT-CLOSURE.md). Independent recheck, exact-head CI and installed Windows two-client payment/COS acceptance remain open. This round did not rerun native login; the 2026-10-24 credential-storage failure below is historical evidence, not a fresh diagnosis. No parent, security/Formal hold or milestone is closed.
 
 2026-10-24 PR #19: HEIC conversion and real COS source/derivative verification are implemented; unified-baseline conflicts are resolved with additive payment compatibility. Actual two-client Windows payment/COS acceptance remains BLOCKED_ENV (system credential storage). [Handoff](T09-T11-RELEASE-HANDOFF.md). No parent or milestone is closed.

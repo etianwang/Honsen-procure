@@ -87,3 +87,25 @@ Actual source now includes NSIS registry hooks, both Runner commands, manifest g
 Preflight read in required order on 2026-10-24. Contract discrepancies are recorded, not silently repaired: build/hook default UpdateManifestUrl points to download/manifest.json instead of the canonical GitHub releases/latest API; launch starts the registered EXE without the required update-choice flow; existing upstream integration-contract prose also records Toolbox launch-argument/apply gaps. URL/Runner contract repair requires the requested user approval and independent tests. No Toolbox catalog mutation or stable Release is authorized.
 
 RC evidence must name exact source commit, installer SHA-256, OS and each actual install/update/uninstall outcome. Windows Credential Manager error8 remains a native login blocker; no credential deletion or protection bypass is allowed. Unchanged synthetic Runner tests do not constitute Toolbox joint E2E.
+
+## Multi-agent RC preflight — 2026-10-25
+
+The controller read the five required upstream documents in order again. Their
+GitHub blob SHAs were README `2f133170104f07e8ae8b1d84b8dba929e65194f0`,
+Windows standard `8f3a48d4e6c9eec6b6600df16687e53b74829c13`, update protocol
+`4fdb16c07faf30ccb66799b39569df227c597311`, integration contract
+`0d885811aa4a7b8e105f3ae21830d3abc8d53b51`, and schema
+`b2717e866a3024e6688ee9a88ba4a3eb7ab80dea`.
+
+The approved identity and existing NSIS exception above are preserved. No
+Runner arguments, result JSON, registry identity, update URL, uninstall boundary
+or Toolbox catalog was changed. The URL/launch/apply gaps above still prevent
+Toolbox acceptance; repairing the conflicting implementation requires the
+approval specified by AGENTS.md. Candidate version `0.1.2` is a local/CI package
+target, not a published stable Release. Exact source, package evidence and open
+gates are tracked in the [controller handoff](planning/V1-MULTI-AGENT-CONTROL-20261025.md).
+
+No install/update/uninstall/repair case has passed on this candidate. The prior
+credential-store error is historical; this round has not rerun the dual-native
+chain without an authorized test COS configuration. Building a new installer
+does not replace those gates or qualify financial/file workflows for production.

@@ -1,5 +1,12 @@
 # Build Tasks: Zero to Production
 
+2026-10-25 main controller T15 integration: A `ca44150`, B `5915335` and C
+`e23de5b` are integrated with source-specific independent static review and fresh
+combined Rust/DOM/workspace checks. Candidate `0.1.2` remains RELEASE_BLOCKED;
+frozen-source CI/artifacts and every original Windows/Toolbox/business/print/
+localization/backup security gate remain required. No parent checkbox or
+dependency changes. [Controller handoff](planning/V1-MULTI-AGENT-CONTROL-20261025.md).
+
 ## 2026-10-25 Agent C bounded deployment-template correction
 
 T15/T11 deployment template leaves optional COS commented until explicitly configured together. Release regressions passed 4/4 on Node.js 24.18.0; no runtime, migration or UI change. Original checkboxes and dependencies remain unchanged. RC `700387b` supplies the protected service/controller; pending legacy manual/service changes are excluded. See `memory.md` for source and preserved dirty paths. This is builder evidence awaiting main-agent independent recheck, not T15 acceptance.
