@@ -5,6 +5,10 @@ test('workbench replaces demo orders with authorized saved data and clears stale
 }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning')
+      errors.push(message.text())
+  })
   await page.addInitScript(() => {
     Object.assign(window, { __workbenchFail: false })
     Object.assign(window, {
