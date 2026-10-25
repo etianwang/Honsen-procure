@@ -10,6 +10,8 @@ The authoritative execution order and mandatory per-task DOM testing gate are in
 
 ## Current delivery path — 2026-10-19
 
+2026-10-25: Agent B repairs T08-C supplier allocation quote binding and retained child quote/supplier snapshots, with a failing-first file-SQLite regression and scoped DOM3/3. No migration, formal-issue or payment change. Builder evidence is in `memory.md`; independent integrated recheck and all original parent/security/Formal gates remain open.
+
 2026-10-24: home demo orders/projects and fixed counts are replaced by authorized saved-history reads, parent-order state counts and separate-currency integer totals, with refresh/error recovery. Bounded desktop unit/DOM/build and existing trusted-history tests pass; no parent or milestone closure. HPA/SPO, formal exports, complete localization and retention acceptance remain required.
 
 2026-10-23: PR #17's historical reference contract P1 has a bounded implementation and PostgreSQL→SQLite builder proof. [Evidence](reviews/PR17-REFERENCE-CONTRACT-REPAIR.md); this does not replace the original independent failure verdict until targeted independent recheck passes. Draft and Windows EXE online-relogin production-release hold remain unchanged.
