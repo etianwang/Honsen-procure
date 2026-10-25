@@ -1,5 +1,7 @@
 # Build Tasks: Zero to Production
 
+2026-10-25 Agent B T08-C defect repair (B): supplier allocation now validates the saved catalog quote, rejects assigning its price to another supplier, and preserves catalog quote identity/source and the approved supplier snapshot in the child and atomic Outbox payload. The new file-SQLite regression fails before the fix and passes afterward, including revoked/changed quotes, late-Outbox rollback and repeat-allocation rejection; desktop unit14/14, scoped DOM3/3 and affected frontend gates pass. No migration or API/Toolbox contract change. Independent recheck and original T08-C/T10/Formal gates stay OPEN; see the latest `memory.md` handoff. HPA/SPO, exports and full localization remain required.
+
 ## Global completion gate
 
 2026-10-24 business-flow sprint: the normal home route now loads authorized saved requisitions across all pages, shows actual parent-order state counts and independent-currency integer totals, and removes static demo orders/projects. Refresh failure hides old totals and records. Desktop unit14/14, focused workbench DOM1/1, lint/typecheck/build pass; existing Rust draft-conflict/role/history regressions pass. No migration or sync mutation. This is bounded dashboard implementation evidence; HPA/SPO, T12 exports, full T13 localization and complete closure acceptance remain open. See the current `memory.md` handoff.

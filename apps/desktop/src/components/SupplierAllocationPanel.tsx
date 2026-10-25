@@ -87,7 +87,9 @@ export function SupplierAllocationPanel({
       onCreated?.()
       setMessage(`已创建 ${saved.length} 张供应商子单，父单明细分配已锁定。`)
     } catch {
-      setMessage('拆单失败：请确认父单已确认、每行仅分配一次且供应商仍可用。')
+      setMessage(
+        '拆单失败：目录报价只能分配给对应供应商，且币种、单价与报价必须一致。请检查报价仍有效、父单已批准且每行仅分配一次；原分配内容已保留。',
+      )
     }
   }
 

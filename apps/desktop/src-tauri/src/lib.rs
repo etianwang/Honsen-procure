@@ -3724,6 +3724,7 @@ impl LocalAuthService {
         {
             return Err(AuthError::InvalidInput);
         }
+        validate_saved_catalog_quotes(&transaction, parent_order_id)?;
 
         let mut item_statement = transaction
             .prepare(
@@ -3756,6 +3757,14 @@ impl LocalAuthService {
                 .get(&allocation.parent_item_id.to_string())
                 .ok_or(AuthError::InvalidInput)?;
             if item.5 != allocation.currency {
+                return Err(AuthError::InvalidInput);
+            }
+            let mismatched_supplier: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_material_prices p ON p.id = i.catalog_price_id WHERE i.id = ?1 AND p.supplier_id != ?2)",
+                params![allocation.parent_item_id.to_string(), allocation.supplier_id.to_string()],
+                |row| row.get(0),
+            ).map_err(|_| AuthError::Database)?;
+            if mismatched_supplier {
                 return Err(AuthError::InvalidInput);
             }
         }
@@ -3811,7 +3820,7 @@ impl LocalAuthService {
                 source_total = source_total
                     .checked_add(line_total)
                     .ok_or(AuthError::InvalidInput)?;
-                child_items.push((allocation.parent_item_id, item.clone(), as_i64(line_total)?));
+                child_items.push((allocation.parent_item_id, as_i64(line_total)?));
             }
             let source_total = as_i64(source_total)?;
             let primary_total =
@@ -3825,14 +3834,12 @@ impl LocalAuthService {
                     params![child_order_id.to_string(), parent_order_id.to_string(), display_no, parent.0, parent.1, parent.2, parent.3, parent.4, parent.5, supplier_id.to_string(), supplier_snapshot, currency, parent.6, exchange_rate, parent.7, parent.8, parent.9, parent.10, parent.11, parent.12, parent.13, source_total, unix_seconds(now)],
                 )
                 .map_err(|_| AuthError::Database)?;
-            for (sort_order, (parent_item_id, item, line_total)) in
-                child_items.into_iter().enumerate()
-            {
+            for (sort_order, (parent_item_id, line_total)) in child_items.into_iter().enumerate() {
                 let child_item_id = Uuid::new_v4();
                 transaction
                     .execute(
-                        "INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', 0, ?10, ?11, ?12, ?12)",
-                        params![child_item_id.to_string(), child_order_id.to_string(), item.0, item.1, supplier_snapshot, currency, item.2, item.3, item.4, line_total, sort_order as i64, unix_seconds(now)],
+                        "INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at, catalog_price_id, price_source) SELECT ?1, ?2, material_id, material_snapshot_json, CASE WHEN catalog_price_id IS NOT NULL THEN supplier_snapshot_json ELSE ?3 END, currency, quantity_decimal, unit, unit_price_minor, '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', 0, ?4, ?5, ?6, ?6, catalog_price_id, price_source FROM local_purchase_order_items WHERE id = ?7 AND order_id = ?8",
+                        params![child_item_id.to_string(), child_order_id.to_string(), supplier_snapshot, line_total, sort_order as i64, unix_seconds(now), parent_item_id.to_string(), parent_order_id.to_string()],
                     )
                     .map_err(|_| AuthError::Database)?;
                 transaction
@@ -15134,6 +15141,186 @@ mod tests {
         assert_eq!(
             convert_minor_by_rate(100, "XOF", "XOF", "1.01"),
             Err(AuthError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn supplier_allocation_keeps_selected_quote_identity_and_rejects_another_supplier() {
+        let path =
+            std::env::temp_dir().join(format!("honsen-child-quote-{}.sqlite", Uuid::new_v4()));
+        let service = LocalAuthService::open_file_for_test(path.to_str().unwrap()).unwrap();
+        let now = SystemTime::now();
+        let actor = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id: actor,
+                    username: "child-quote".into(),
+                    roles: vec![Role::Purchaser],
+                    enabled: true,
+                    requires_password_change: false,
+                },
+                "correct-password",
+                now,
+            )
+            .unwrap();
+        let captcha = service.issue_captcha(now).unwrap();
+        service
+            .offline_login(
+                "child-quote",
+                "correct-password",
+                captcha.id,
+                answer(&captcha.question),
+                now,
+            )
+            .unwrap();
+        let (parent, item, supplier, project, material, price, other_supplier) = (
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        );
+        seed_rfq_pull_dependencies(&service, parent, item, supplier, project);
+        let (department, team, country): (String, String, String) = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT department_id,team_id,country_id FROM local_purchase_orders WHERE id=?1",
+                [parent.to_string()],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        grant_test_scope(
+            &service,
+            actor,
+            project,
+            Uuid::parse_str(&department).unwrap(),
+            Uuid::parse_str(&team).unwrap(),
+            now,
+        );
+        {
+            let db = service.connection.lock().unwrap();
+            db.execute("INSERT INTO local_materials(id,name_zh,model,specification,unit,is_active,version) VALUES(?1,'material','M','S','pcs',1,1)", [material.to_string()]).unwrap();
+            db.execute("INSERT INTO local_suppliers(id,business_code,name,country_id,is_active,is_blacklisted,version) VALUES(?1,'QUOTE-OTHER','other supplier',?2,1,0,1)", params![other_supplier.to_string(),country]).unwrap();
+            db.execute("INSERT INTO local_material_prices(id,material_id,supplier_id,currency,unit_price_minor,unit,effective_at,is_active,version) VALUES(?1,?2,?3,'XOF',1250,'pcs','2026-10-15',1,1)", params![price.to_string(),material.to_string(),supplier.to_string()]).unwrap();
+            let snapshot =
+                serde_json::json!({"id":supplier,"name":"approved supplier name"}).to_string();
+            db.execute("UPDATE local_purchase_orders SET procurement_mode='honsen_self_purchase',total_minor=1250,subtotal_minor=1250 WHERE id=?1", [parent.to_string()]).unwrap();
+            db.execute("UPDATE local_purchase_order_items SET material_id=?2,material_snapshot_json='{\"nameZh\":\"material\",\"nameFr\":null,\"model\":\"M\",\"specification\":\"S\"}',catalog_price_id=?3,price_source='catalog',unit_price_minor=1250,line_total_minor=1250,supplier_snapshot_json=?4 WHERE id=?1", params![item.to_string(),material.to_string(),price.to_string(),snapshot]).unwrap();
+        }
+        let allocation = |supplier_id| {
+            vec![SupplierChildAllocationInput {
+                parent_item_id: item,
+                supplier_id,
+                currency: "XOF".into(),
+                child_display_no: "QUOTE-CHILD".into(),
+                locked_exchange_rate_decimal: "1".into(),
+            }]
+        };
+        assert_eq!(
+            service.allocate_supplier_child_orders(parent, allocation(other_supplier), now),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT count(*) FROM local_purchase_orders WHERE parent_order_id=?1",
+                    [parent.to_string()],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        for change in ["is_active=0", "unit_price_minor=1251", "currency='USD'"] {
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .execute(
+                    &format!("UPDATE local_material_prices SET {change} WHERE id=?1"),
+                    [price.to_string()],
+                )
+                .unwrap();
+            assert_eq!(
+                service.allocate_supplier_child_orders(parent, allocation(supplier), now),
+                Err(AuthError::QuoteUnavailable)
+            );
+            service.connection.lock().unwrap().execute("UPDATE local_material_prices SET is_active=1,unit_price_minor=1250,currency='XOF' WHERE id=?1", [price.to_string()]).unwrap();
+        }
+        service.connection.lock().unwrap().execute_batch("CREATE TEMP TRIGGER fail_child_outbox BEFORE INSERT ON local_sync_outbox BEGIN SELECT RAISE(ABORT, 'injected outbox failure'); END;").unwrap();
+        assert_eq!(
+            service.allocate_supplier_child_orders(parent, allocation(supplier), now),
+            Err(AuthError::Database)
+        );
+        {
+            let db = service.connection.lock().unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM local_purchase_orders WHERE parent_order_id=?1",
+                    [parent.to_string()],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM local_supplier_order_allocations",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM local_order_audit_entries", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap(),
+                0
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM local_sync_outbox", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            db.execute_batch("DROP TRIGGER fail_child_outbox;").unwrap();
+        }
+        let children = service
+            .allocate_supplier_child_orders(parent, allocation(supplier), now)
+            .unwrap();
+        let child = children[0].child_order_id;
+        let (quote,source,minor,snapshot):(String,String,i64,String)=service.connection.lock().unwrap().query_row("SELECT catalog_price_id,price_source,unit_price_minor,supplier_snapshot_json FROM local_purchase_order_items WHERE order_id=?1", [child.to_string()], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(
+            (quote, source, minor),
+            (price.to_string(), "catalog".into(), 1250)
+        );
+        assert!(snapshot.contains("approved supplier name"));
+        let event = service
+            .pending_sync_events(100, now)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.entity_type == "purchase_order" && e.entity_id == child)
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&event.payload_json).unwrap();
+        assert_eq!(payload["lines"][0]["catalogPriceId"], price.to_string());
+        assert_eq!(payload["lines"][0]["priceSource"], "catalog");
+        let event_count = service.pending_sync_events(100, now).unwrap().len();
+        assert_eq!(
+            service.allocate_supplier_child_orders(parent, allocation(supplier), now),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service.pending_sync_events(100, now).unwrap().len(),
+            event_count
         );
     }
 
