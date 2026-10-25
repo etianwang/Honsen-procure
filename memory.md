@@ -21,13 +21,29 @@
   formatting passed. Necessary Rust authorization-context country projection
   RED(Null)→GREEN1/1 also proves ungranted selection denial and expiry. No broad
   Rust/server/PG/payment/COS suite was manually rerun. Existing warnings remain.
-  C's independent static review found no P0/P1; final hash confirmation pending.
-- Native screenshots remain pending a committed-source EXE; the clean Sandbox
-  and actual fixture login/CDP path are ready. Synthetic browser responses use
-  requested names only for tests, not production identity. Native capture will
-  use the existing fixture accounts honestly, without production-account edits,
-  mock IPC or DOM changes. **BLOCKER for this requested final delivery:** native
-  capture until executed. **BLOCKER for V1:** NSIS split-install/protected
+  C's independent static review and final unchanged-file hash confirmation found
+  no P0/P1 on pushed source `6b2f5a6fac32a7c4fe4a63169b823b2d31331076`.
+  Exact-source hosted quality40195426400 passed, including47 browser tests;
+  three opt-in real-COS tests remain skipped and do not close native gates.
+- Unsigned0.1.3 UI verification EXE SHA256
+  `a42539719c8cd4ac9b8fdddcd38e15d61a44c4cdd8667df7d851f0695a8ebabd`,
+  source6b2f5a6, is stored at
+  `E:/Honsen-build/rc/header-identity-6b2f5a6/HonsenProcure.exe`.
+  Clean Sandbox normal password/CAPTCHA offline login succeeded for fixture
+  purchaser. Root viewed real GDI screenshots `native-purchaser-home.png` and
+  `native-purchaser-min1024.png` under
+  `E:/Honsen-build/agent-a/ui-identity-6b2f5a6/output`: real username/role/avatar,
+  trusted fixture country/project and1024×700 native wrapping verified.
+  Initial CDP capture failed (release exposed no listener); intermediate
+  login-state PNGs are retained as failed attempts, never home-screen passes.
+  Final path uses guest-local foreground-PID-checked keyboard input, without
+  mock IPC/DOM changes. Requested Chinese names occur only in UI regressions;
+  production accounts are untouched. Actual lock cleared the old header.
+  **BLOCKED_CAPTURE:** native second-account form input was unreliable; its
+  single submission failed, so testing stopped. No second-account native PASS
+  or product-authentication defect is inferred. Browser account/country switch
+  coverage passed; native cross-country was not exercised (fixtures share a
+  scope). **BLOCKER for V1:** NSIS split-install/protected
   Toolbox contract, original native/online/COS/formal/export/localization/backup
   gates. **DEFERRED:** A/B/C stabilization handoffs and next RC integration.
   **WARNING:** existing lint/bundle warnings. Retained unrelated dirty path:

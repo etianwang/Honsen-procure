@@ -2,7 +2,9 @@
 
 2026-10-25 RC follow-up header identity/context repair is bounded T13 UI work;
 real session username and trusted country/project projection replace the static
-avatar/role-only header. Tests and native-capture boundary are in the
+avatar/role-only header. Source6b2f5a6 hosted quality passed; real fixture login
+and1024px EXE screenshots verified, second-account native capture incomplete.
+Tests and native-capture boundary are in the
 [repair record](reviews/RC-HEADER-IDENTITY-20261025.md). Frozen RC and all original
 milestone/security/Formal gates remain unchanged.
 

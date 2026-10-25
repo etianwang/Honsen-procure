@@ -51,22 +51,55 @@ identity text at narrower widths.
   server/PostgreSQL, payment/COS or release suite was manually rerun.
 - Agent C independently read all callers and both trusted queries, confirmed
   display-only scope and unchanged authorization, and found no P0/P1 in the
-  selected repair. Final source-file hashes are bound after commit.
+  selected repair. Its final unchanged-file hash confirmation binds application
+  commit `6b2f5a6fac32a7c4fe4a63169b823b2d31331076`.
+- That exact application commit is pushed. Hosted quality
+  [run40195426400](https://github.com/etianwang/Honsen-procure/actions/runs/40195426400)
+  passed, including47 browser tests. The existing three opt-in real-COS tests
+  remain skipped; hosted success does not close native/production gates.
+- A native unsigned0.1.3 EXE was built from that source with the existing Tauri
+  CLI using `--no-bundle` and an external version-only configuration. File:
+  `E:/Honsen-build/rc/header-identity-6b2f5a6/HonsenProcure.exe`; SHA-256:
+  `a42539719c8cd4ac9b8fdddcd38e15d61a44c4cdd8667df7d851f0695a8ebabd`.
+  This is a UI verification executable, not a new frozen RC or installer.
 
 ## Screenshot boundary and remaining work
 
-Native screenshot preparation is ready in the existing clean Sandbox. After a
-fresh EXE is built from the committed repair, it will sign into newly isolated
-test profiles through real password/CAPTCHA controls using existing fixture
-accounts (`purchaser`, `engineer-a`), without mock IPC or DOM alteration. It must
-be labelled as a native test-account screenshot, never a production login by the
-two named people. No production account/credentials are accessed or changed.
-Actual native outcome and source/EXE hashes are appended before handoff.
+The actual unsigned EXE above ran in the existing clean Windows Sandbox using
+a newly isolated test profile and the existing packaged fixture utility.
+Release WebView2 exposed no CDP listener, so the first capture attempt timed
+out before login. The app itself remained responsive. That failed attempt and
+the intermediate login screenshots are retained; none is called a home-screen
+pass. Agent A then used guest-local foreground-PID-checked keyboard input and
+GDI window screenshots, with no mock IPC, DOM alteration or added debug hook.
+
+Normal password plus the displayed local arithmetic CAPTCHA successfully
+signed in fixture `purchaser`. Root independently viewed
+`E:/Honsen-build/agent-a/ui-identity-6b2f5a6/output/native-purchaser-home.png`:
+the actual shell shows avatar `P`, `purchaser · 采购员`, and
+`Synthetic test country / Synthetic OPA project` from its fixture master data.
+These are native test-account screenshots, never production login by the two
+named people. No production account/credentials were accessed or changed.
+Root also independently viewed `native-purchaser-min1024.png` in that same
+directory: measured native client size1024×700, header wraps without identity
+or context overlap. The product's existing minimum width1024 is preserved;
+480px evidence is the browser layout regression, not a native-window claim.
+
+Actual lock returned to the login UI without the previous identity/header.
+Second-account native capture is **BLOCKED_CAPTURE**: the guest UIA/SendKeys
+focus route did not reliably populate engineer-a's form, and its one submission
+returned invalid account/password/CAPTCHA. No second-account success or product
+authentication defect is inferred; testing stopped rather than guessing input
+or weakening login. Cross-account/cross-country display and late-response
+protection passed the scoped browser regressions; native cross-account success
+remains unverified. Both fixture accounts share the same country/project, so
+there is no native cross-country claim either.
 
 BLOCKER for full V1: previously confirmed NSIS split-install and other protected
 Toolbox gaps, real online/revocation/two-client/COS, original formal/print/
 localization/backup/security acceptance. This bounded header fix closes none of
 those gates. DEFERRED: other agents' separately authorized slices and integration
 into the next candidate. WARNING: browser fixture evidence alone is not native
-acceptance. The unrelated pending Toolbox proposal remains untracked and is
+acceptance. Native second-account capture remains incomplete as above. The
+unrelated pending Toolbox proposal remains untracked and is
 excluded from this UI checkpoint.
