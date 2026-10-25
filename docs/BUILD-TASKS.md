@@ -1,5 +1,12 @@
 # Build Tasks: Zero to Production
 
+2026-10-25 final T15 candidate evidence: frozen `f4756af` has exact-SHA hosted
+quality PASS (run40191375930), Windows0.1.2 installer and traceable Linux API
+archive with verified hashes. Three real-COS opt-in tests remain skipped and a
+fresh task-unique Windows vault probe fails error8. Installed/native/Toolbox,
+HPA/SPO/export/localization/backup and all original acceptance gates remain
+OPEN; no checkbox changes. [Inventory](reviews/V1-RC-20261025.json).
+
 2026-10-25 main controller T15 integration: A `ca44150`, B `5915335` and C
 `e23de5b` are integrated with source-specific independent static review and fresh
 combined Rust/DOM/workspace checks. Candidate `0.1.2` remains RELEASE_BLOCKED;

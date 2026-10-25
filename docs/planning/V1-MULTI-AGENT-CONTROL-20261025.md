@@ -1,6 +1,6 @@
 # V1 multi-agent RC control — 2026-10-25
 
-Status: SOURCE INTEGRATED / RELEASE_BLOCKED. This is the existing T15 integration
+Status: CANDIDATE BUILT AND CHECKED / RELEASE_BLOCKED. This is the existing T15 integration
 slice, not a new task register. Original T00–T15, milestone dependencies,
 security and Formal holds remain unchanged.
 
@@ -86,6 +86,49 @@ owned worktree.
 
 ## Packages and deployment boundary
 
+Frozen source and remote `codex/v1-release-candidate`:
+`f4756afdb01ebac7b17ae9016d9ad56ab450fea5`. This reference stays fixed. The later
+controller checkpoint records evidence only; it is not a different application
+candidate. [Sanitized full delivery inventory](../reviews/V1-RC-20261025.json).
+
+| Artifact                       | SHA-256                                                          |
+| ------------------------------ | ---------------------------------------------------------------- |
+| Honsen-Procure-0.1.2-Setup.exe | 23ac1e5cc35b2840e905a4078b2d333b9f0faa60bbe91c0cdd96116b63f78577 |
+| candidate.tar.gz               | d456de3978312a8c1c5333b38264b2abbdb993984821e3c0690e4bd7ebbdeec3 |
+
+Both files, release/app/external manifests, Runner/main EXEs, `.sha256` files,
+`SHA256SUMS.txt` and `delivery-inventory.json` are under
+`E:/Honsen-build/rc/artifacts/f4756afdb01ebac7b17ae9016d9ad56ab450fea5`.
+Windows build succeeded on OS build26200; main file/product version and both
+manifests are0.1.2, installer/manifest hashes agree. The generated NSIS script
+contains main, Runner and app manifest resources. Installer is **NotSigned**;
+no installation/update/uninstall/repair was executed. Runner8/8 is unit evidence,
+not Toolbox joint acceptance. Existing auxiliary CLI binaries are listed in the
+inventory rather than hidden from delivery.
+
+[Exact-RC quality run40191375930](https://github.com/etianwang/Honsen-procure/actions/runs/40191375930)
+passed: desktop16, server162, shared25, release7, restricted PostgreSQL grants,
+real isolated Linux nginx/systemd/controller checks, API build/package and
+browser45/45. Three opt-in real-COS tests were skipped because
+`HONSEN_COS_LIVE` and authorized live credentials were not supplied: synthetic-PDF
+transfer/hash/denied access, genuinely expired URL, and actual Rust HEIC/JPEG
+pair archive/readback. Exact names/reasons/affected T09/T11 gates are in the
+inventory; live COS/current native acceptance is not claimed.
+
+Downloaded artifact12598102738 matches the frozen source. Local verification
+checked archive SHA-256, detached `.git/HEAD`, safe member paths, API/controller
+entries, all71 migration hashes against the source, and every30322 manifest
+entry against actual tar contents without executing or extracting them. POSIX
+ownership/protected-parent deployment verification remains an operator gate.
+
+After the new native binaries existed, the controller ran the existing vault
+probe with fresh task-unique test-profile identifiers. It failed with Windows
+secure storage error8 on2026-10-25; no production configuration or existing
+business credential was read/changed. The utility hash, time and exit status are
+recorded in the inventory. This is a fresh secure-store failure, not a full
+online-login/two-client attempt, and supersedes the earlier statement that only
+historical credential-store evidence existed.
+
 Candidate Windows version is fixed to `0.1.2` for this integration; this does not
 create a Git tag or GitHub Release. A built candidate must retain its exact
 source SHA, installer/Runner/manifest versions and SHA-256. Linux packaging must
@@ -95,10 +138,11 @@ Windows installer may stand in for the new application source.
 
 ## Open gates
 
-- BLOCKER: final combined CI and exact-source package evidence until produced.
+- Final combined CI and exact-source package/integrity evidence: PASS within the
+  scope above; no original final gate is automatically closed.
 - BLOCKER: real Windows revoked-session re-login and two-client payment,
-  reversal, restart and COS acceptance. The previous error8 is historical; this
-  run has not reproduced it or bypassed secure credential storage.
+  reversal, restart and COS acceptance. The fresh task-unique secure-store probe
+  failed error8; the full chain was not run and credential protection was not bypassed.
 - BLOCKER: installed Windows/Toolbox install, update, uninstall, repair and
   retained-data proof. Upstream update URL, launch-choice and third-party apply
   discrepancies require the contract approval already mandated by AGENTS.md.
@@ -116,6 +160,8 @@ Retained source dirt: A clean; B only the pre-existing
 `deploy/linux/test-release-package.sh`. No old dirty files were imported into RC.
 
 Recovery checkpoint during execution: `E:/Honsen-build/rc/recovery.json`.
-The frozen RC is the containing source checkpoint; final package hashes and CI
-results will be recorded in an evidence-only controller checkpoint and external
-delivery inventory without moving the frozen RC branch.
+The frozen RC is `f4756af`; the containing final controller checkpoint records
+only documentation/evidence beyond it. Main, other worktrees, stable Releases
+and production were not modified. Next priority is the existing T14 secure-store
+and Windows re-login/two-client gate on a working authorized Windows environment;
+Toolbox contract repairs separately require the approval prescribed by AGENTS.md.

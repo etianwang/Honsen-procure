@@ -1,0 +1,459 @@
+{
+  "version": "0.1.2",
+  "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5",
+  "sourceBranch": "codex/v1-release-candidate",
+  "status": "CANDIDATE_BUILT_RELEASE_BLOCKED",
+  "sources": {
+    "A": {
+      "branch": "codex/procurement-t09a",
+      "sha": "ca44150c966fe5c2041442f4d34f0c6ed7b2342c",
+      "ci": {
+        "conclusion": "success",
+        "runId": 40190559857
+      }
+    },
+    "B": {
+      "branch": "codex/v1-business-flow",
+      "sha": "5915335cdb16d97861fa99a587c831b8e5070566",
+      "ci": {
+        "conclusion": "success",
+        "runId": 40190859791
+      }
+    },
+    "C": {
+      "branch": "codex/release-template-cos-default-20261025",
+      "sha": "e23de5b447e91ac26e6368e3d32098608882abc8"
+    }
+  },
+  "migrations": {
+    "postgres": [
+      {
+        "file": "001_auth_and_master_data.sql",
+        "sha256": "22d91cb12793cfacd1d1ccc69fc2ab0b5bf6bbe996b3ceb32346931910905f2d"
+      },
+      {
+        "file": "002_project_defaults_and_master_data.sql",
+        "sha256": "0f2fcd81052558f3e10e0f755cd5cf40205c4e33dc143838a04089c22319c3e4"
+      },
+      {
+        "file": "003_sync.sql",
+        "sha256": "5a8ef9f541d2045f07de9ce528c4b7f52a0eec2dbafd4e939c9bed96925f0fbd"
+      },
+      {
+        "file": "004_authorization_scopes.sql",
+        "sha256": "429485714ae30389d05bb4befb9bfb9b70e843a233bffca001f96f78c02b1e59"
+      },
+      {
+        "file": "005_nullable_project_default_contact.sql",
+        "sha256": "1ebf5ae461e691b80aa8372911989e3f9f49b0029ea8b295752023f163fde1e3"
+      },
+      {
+        "file": "005_procurement_expenditures.sql",
+        "sha256": "97e1410a77c5e4402557af935ffa6564d7775014a436fdd63458a62d6bda3026"
+      },
+      {
+        "file": "005_sync_event_origin.sql",
+        "sha256": "43f0a347e6f7b2716bdef452aa1470ec8eb5e1ffeece92c53d4aaf895f2acbf7"
+      },
+      {
+        "file": "006_attachments.sql",
+        "sha256": "ac771f29a0c79937f91afc24df28cda9d37cb5bb5f7a9643de33d8624f1126e3"
+      },
+      {
+        "file": "006_formal_issue_registry.sql",
+        "sha256": "b073941170d17b3ee8308150ab8c0dc95b13433e975cc500cb51cf0cb53b1626"
+      },
+      {
+        "file": "007_category_code_conflict.sql",
+        "sha256": "de1b277bd948bb5215a7eb6aa0a46b7c0eddce1a9c0156e1524b3519502c81b3"
+      },
+      {
+        "file": "008_category_code_quarantine.sql",
+        "sha256": "7158b37c33b4225f912bd78a23608cd7d94b773fc2086e2a1ae318ee3527d026"
+      },
+      {
+        "file": "009_category_code_repairs.sql",
+        "sha256": "b0892d604556d1cf564ab2ea3d9442f629c0316d551cf4a4bd063155cc959cd2"
+      },
+      {
+        "file": "010_catalog_sync_quarantine.sql",
+        "sha256": "6e28be8389d13cce7d87a8e1abdef1b4715485d67eb05b31eb9e367a33421b1a"
+      },
+      {
+        "file": "011_attachment_derivation.sql",
+        "sha256": "8cf3df7f54039a97f8b54e1a77ca8eb971785d3663b49645cc7a6b59338edbdf"
+      },
+      {
+        "file": "012_payment_sync_compatibility.sql",
+        "sha256": "c275eee2be25e06c0558d35a67fc7a1c414bbd0037544b831222cc0866f1bc01"
+      },
+      {
+        "file": "013_payment_conflict_resolutions.sql",
+        "sha256": "99b2f9fd9e9c7dd5c3b7f80cb2db2f57f9059ce4e1d3372d26a1569aec68f031"
+      }
+    ],
+    "sqlite": [
+      {
+        "file": "0001_local_auth.sql",
+        "sha256": "214f1e0791318ae13933ddc155a37c3df7d7af955dbc77684e89fc6fdb727a2e"
+      },
+      {
+        "file": "0002_master_data.sql",
+        "sha256": "bd273d797a912c26198631fb798fa43325ef67a8122ce61391fb04c3e91d5e5e"
+      },
+      {
+        "file": "0003_reference_master_data.sql",
+        "sha256": "f27aa28c25a3c6a327be44f278814aabe5c6465b055c1f6de6f60acb6116447e"
+      },
+      {
+        "file": "0004_local_catalog.sql",
+        "sha256": "7eaf20ec5209c6e7d0fdb4c2f835a3ced4863321bb09fea6cee66865c97492c2"
+      },
+      {
+        "file": "0005_local_material_images.sql",
+        "sha256": "6f403f0ed81a09d964661e166f12f7f1e78068f879cd9327e341b9f2c9018d45"
+      },
+      {
+        "file": "0006_local_requisitions.sql",
+        "sha256": "fbdffa914e3d5c961ecb438b8105b9321f1eb12ddf93e071cba3c6a993b6e4d8"
+      },
+      {
+        "file": "0007_order_workflow.sql",
+        "sha256": "2c802d4c5febd261d3e94b0c93c313e69d8da5079127fdf8093d1837748eeee0"
+      },
+      {
+        "file": "0008_approval_policy.sql",
+        "sha256": "910ccddab1106d067fc364cc7f074a5d43c84058d2100d580cc48c51afdde6e7"
+      },
+      {
+        "file": "0009_order_notifications.sql",
+        "sha256": "7d8194c374fa1f06201e178beb0eb1abddc05f1fd6db6e52b36459337c580778"
+      },
+      {
+        "file": "0010_supplier_child_orders.sql",
+        "sha256": "81fbcb5b3729617e9e9de647e955c48db8a90a57a5d200746e1001b909e17567"
+      },
+      {
+        "file": "0011_order_item_currency.sql",
+        "sha256": "f3fe53e94b60e56f52810f9c9972b9ace575ff88f2e6c09ac2bc62039716f79e"
+      },
+      {
+        "file": "0012_rfqs.sql",
+        "sha256": "80658a9239318b1440ee8a31a0d8c161b7d197e2f37f243401112237c45a94c7"
+      },
+      {
+        "file": "0013_receipts.sql",
+        "sha256": "5f49b3d242eb19912d0e8bff4fb41fbbb9a86bfff8ce59a944408d9343af6be3"
+      },
+      {
+        "file": "0014_supplier_child_terms.sql",
+        "sha256": "0da55b8774fef13c24f46531080e56d963878eac5dfff91d4c93790357e63cb6"
+      },
+      {
+        "file": "0015_receipt_attachment_links.sql",
+        "sha256": "f5a113f243296e99c66479141325cab80d4cd59369eaceff6b0b1c7e653713bd"
+      },
+      {
+        "file": "0016_local_sync_outbox.sql",
+        "sha256": "9c9fb501a9f0f6c3f9acc7dc80adbb4bdb0cdd9b09fd15f4b7545e084e4aca8c"
+      },
+      {
+        "file": "0017_local_sync_state.sql",
+        "sha256": "4d07c8ef7e59784dc614232c929f70c94d5319f5f015718deb461b48df706904"
+      },
+      {
+        "file": "0018_local_sync_remote_entities.sql",
+        "sha256": "806ed970e44007e06ac164ac10c481f717257b3f20712dbf9591e44054a8638b"
+      },
+      {
+        "file": "0019_local_exchange_rate_tombstones.sql",
+        "sha256": "965072268605653f6c72d2ff3fffc84773716054304eba63ab38237639293496"
+      },
+      {
+        "file": "0020_local_sync_outbox_superseded.sql",
+        "sha256": "1b862fc442600eae65cf297c56591b575739400431ef56daba591d6e32a550f3"
+      },
+      {
+        "file": "0021_local_sync_conflict_server_operation.sql",
+        "sha256": "2e98938e30655ef666b212bc7c7452ab06b0d7b118f0144176954af4761a560a"
+      },
+      {
+        "file": "0022_owner_purchase_pricing.sql",
+        "sha256": "3335d2b77309e88ccc515c02b508a6be1b11ee35230b259a7f2ad7e461df32d6"
+      },
+      {
+        "file": "0023_material_categories.sql",
+        "sha256": "7b122ff25465e13bb706d3542bd8b253c74512586984ffaea2c8940a436e7314"
+      },
+      {
+        "file": "0024_currency_expansion.sql",
+        "sha256": "4c020368906d24ead51a73f417cd2a62142f0a1d11fc82e39549b69c93f4b368"
+      },
+      {
+        "file": "0025_project_defaults_seed_compat.sql",
+        "sha256": "6d9689f9f6c3620bf27ea47c30a1181f479c8c31ad3c1ef5648d364e05f7d9d5"
+      },
+      {
+        "file": "0026_master_data_seed_audit.sql",
+        "sha256": "8130e831ac3780cfc66d173ae51337edac07cffc34c157fcdb846c418a52d4eb"
+      },
+      {
+        "file": "0027_master_data_audit.sql",
+        "sha256": "a12785dab61cbc84e99f47aedfd23f8c1f093eca6573a3e86ff402e809925553"
+      },
+      {
+        "file": "0028_authorization_snapshots.sql",
+        "sha256": "558bf3ce737621f8bc48732fe2042e114a7782a19fbd82a6ef59091be0c287a3"
+      },
+      {
+        "file": "0029_authorization_selection.sql",
+        "sha256": "a986375853a3557939f17e0b6682685c45592b11d4b30d5febd387d20ff8e988"
+      },
+      {
+        "file": "0030_authorization_remote_cache.sql",
+        "sha256": "0ce2723b9b504e2bebe9775fd9dabad934b90673f40ffcd81f892f2a48551729"
+      },
+      {
+        "file": "0031_procurement_workflow_states.sql",
+        "sha256": "2f35331f45e74097ce89c5c1de7b5a5223e512b056977c2d1b372617a0af3a03"
+      },
+      {
+        "file": "0032_procurement_expenditures.sql",
+        "sha256": "f2586fb2892b1e756393ca4463104629d0b785c18d8536c4484dff59a0dd1afd"
+      },
+      {
+        "file": "0032_rfq_display_numbers.sql",
+        "sha256": "1198d2be7de45f8b2dfd46647a0eff38799191e41e2b53f0016ccffd37c8520f"
+      },
+      {
+        "file": "0033_expenditure_immutability.sql",
+        "sha256": "c5ab182dd72dda63e8d7cd5f2100cac140352ec19014c13d757e0774d21a2181"
+      },
+      {
+        "file": "0034_attachment_transfers.sql",
+        "sha256": "cdd36e6a47b620f7405554d7d32a5ea1f560e5e2cf8003b8eb939cc70b37d2f7"
+      },
+      {
+        "file": "0040_unit_master_data_audit.sql",
+        "sha256": "573657d6c7f43a911ce31e098e3772fd9d8af7fe9f29639bae4e0cf7f2d9f2d9"
+      },
+      {
+        "file": "0041_organization_master_data_audit.sql",
+        "sha256": "0a1bdf521417cb799ee7f815da4c50c9eae9882ec7d154e80d6db5e07d072040"
+      },
+      {
+        "file": "0042_tax_template_audit.sql",
+        "sha256": "c84ccd5c6dab3bccc6557bbed2d0a648095a2eac812e4883d23436772dafa7d8"
+      },
+      {
+        "file": "0043_exchange_rate_audit.sql",
+        "sha256": "7bf4453a17beedd80d62e1e35c4b0a55c6a19e39f9c0a345bf0f521c36818559"
+      },
+      {
+        "file": "0044_local_formal_issue.sql",
+        "sha256": "51015e47112a7752bd9b2b10b3e3ccdc11797dd412d96c7dcf53e5843a3c09a8"
+      },
+      {
+        "file": "0045_procurement_expenditures.sql",
+        "sha256": "70041ed98f41c1a1ff33842eb389d837b5ae496d48aefd421fc21b61718ec09d"
+      },
+      {
+        "file": "0046_sync_outbox_account_boundary.sql",
+        "sha256": "adb4b767ecb5232eb87c2f1bc4e8e2bfab9bd4866c362e82d3650451da4e03c6"
+      },
+      {
+        "file": "0047_sync_account_pull_state.sql",
+        "sha256": "399bb04dddc6bc6778a1e0feff397a91e88d670a49077156ef76f71d8eb1c2ce"
+      },
+      {
+        "file": "0048_material_category_audit.sql",
+        "sha256": "b6d67a05e10d6e3c9151f2cc90c4b11424225e783beafbefe1645726c1094ccf"
+      },
+      {
+        "file": "0049_material_category_audit_compat.sql",
+        "sha256": "36280a297859398ac05f9c6b59bf0a43d784e68584c3528420f32f9a47f97480"
+      },
+      {
+        "file": "0050_sync_projection_quarantine.sql",
+        "sha256": "70b8d6847b0b491aa8348bc139594c8997b958204b7e812fc885eb682b0e4046"
+      },
+      {
+        "file": "0051_local_category_code_repairs.sql",
+        "sha256": "511830152c26f82b00978afe72d89fcf38c3c2c490484c9e7d372d4538a4fca8"
+      },
+      {
+        "file": "0052_remote_category_repair_intents.sql",
+        "sha256": "8aaff0c85c3ab06f6d16891301461318e5785f03e96bebd39a6fcb78a74efb01"
+      },
+      {
+        "file": "0053_requisition_catalog_quote.sql",
+        "sha256": "22be0681ee91214dd5355921d33393652273275b9a5719f1afbccb4b298d0cea"
+      },
+      {
+        "file": "0054_authorization_replay.sql",
+        "sha256": "0e661b2d83e452a8410b488ac18f983172c1e17af64567f5e95d81aebe15a3eb"
+      },
+      {
+        "file": "0055_catalog_history_quarantine.sql",
+        "sha256": "8c1088f0f961746bf521b8c98b04e88267882465831b70430619bd1c8ec678ec"
+      },
+      {
+        "file": "0056_expenditure_branch_compat.sql",
+        "sha256": "4c1c5ffedcbb326d1fb1cc7e052cba78ee84c72e8b6a277577eb87df0d7dd7f5"
+      },
+      {
+        "file": "0057_attachment_derivation.sql",
+        "sha256": "664d6e7a23ee721de4fa436796dee8d87de0e576838ba4fe1826843df4d7c77b"
+      },
+      {
+        "file": "0058_payment_sync_metadata.sql",
+        "sha256": "4296cb42d1addf728a1ed2323a0806b79fe2558546c0bb8c3e653938c87f0f10"
+      },
+      {
+        "file": "0059_payment_conflict_decisions.sql",
+        "sha256": "9687bf221362a5df82841aae654e93b3ebf63efe12121e440471c1f8f7fae0d1"
+      }
+    ]
+  },
+  "ci": {
+    "runId": 40191375930,
+    "headSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5",
+    "status": "completed",
+    "conclusion": "success",
+    "url": "https://github.com/etianwang/Honsen-procure/actions/runs/40191375930",
+    "browserTests": "45 passed",
+    "unitIntegrationTests": {
+      "desktop": 16,
+      "serverPassed": 162,
+      "serverSkipped": 3,
+      "shared": 25
+    },
+    "skips": [
+      {
+        "file": "apps/server/src/attachments/cos-live.test.ts",
+        "test": "uploads, inspects, downloads and hashes a synthetic PDF; rejects invalid authorization; removes only its object",
+        "reason": "HONSEN_COS_LIVE is not enabled; no authorized live COS test credentials",
+        "affectedAcceptance": "T11 real COS transfer/integrity/authorization remains open"
+      },
+      {
+        "file": "apps/server/src/attachments/cos-live.test.ts",
+        "test": "rejects a genuinely expired download URL without creating an object",
+        "reason": "HONSEN_COS_LIVE is not enabled; no authorized live COS test credentials",
+        "affectedAcceptance": "T11 real signed-URL expiry remains unverified on this RC"
+      },
+      {
+        "file": "apps/server/src/attachments/service-postgres.test.ts",
+        "test": "uploads the actual Rust HEIC source/JPEG pair and verifies independent COS reads",
+        "reason": "HONSEN_COS_LIVE is not enabled; no authorized live COS test credentials",
+        "affectedAcceptance": "T09/T11 real source/derivative archive and cross-device file acceptance remains open"
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "file": "Honsen-Procure-0.1.2-Setup.exe",
+      "bytes": 7111211,
+      "sha256": "23ac1e5cc35b2840e905a4078b2d333b9f0faa60bbe91c0cdd96116b63f78577",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "Honsen-Procure-0.1.2-Setup.exe.sha256",
+      "bytes": 97,
+      "sha256": "87b3843126feeae51c794e0e5a2ace65bc5376185da8569261cc09c0f5096160",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "HonsenProcure.exe",
+      "bytes": 20197888,
+      "sha256": "71b7518ca03730518e6c6c1456c74cbc0f7ef0a7aa4529d49374096fe7181eb5",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "HonsenUpdateRunner.exe",
+      "bytes": 3350016,
+      "sha256": "c2a6afdb1b1c3295aa6aa154ed69a79ebab9be659cae031d8cd2ecee6ea2849f",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "honsen.app.json",
+      "bytes": 326,
+      "sha256": "4d4f046c958952c8eb4b28da9adc26b40398cbe0e0ab7ab63e98ebb67b128587",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "windows-release-manifest.json",
+      "bytes": 255,
+      "sha256": "d247a66d5918de00b419966f35e78e3068cb1d306d0bc29d5e836e8452239c81",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "candidate.tar.gz",
+      "bytes": 74343922,
+      "sha256": "d456de3978312a8c1c5333b38264b2abbdb993984821e3c0690e4bd7ebbdeec3",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "candidate.tar.gz.sha256",
+      "bytes": 108,
+      "sha256": "ca04420cecc096e8010101f3ccca9be37cf373bea5abd405abf858af52b02f7b",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "candidate.manifest.json",
+      "bytes": 4180071,
+      "sha256": "a2deb6b3f4ff062657f6d85a818e9c25b4d7b616fe44a5822235808abf734ada",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    },
+    {
+      "file": "linux-candidate-f4756af.zip",
+      "bytes": 75399799,
+      "sha256": "34619fcd4acd29ff18f34211b3873876d14f0272e12263992f879c3a54bc5aa6",
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5"
+    }
+  ],
+  "unpassedGates": [
+    "Windows revoked-session re-login",
+    "installed dual-client payment/reversal/restart/COS",
+    "Toolbox URL/launch/apply contract and installed install/update/uninstall/repair",
+    "HPA/SPO formal workflow",
+    "PDF/print/Excel",
+    "complete three-language UI",
+    "independent backup/restore",
+    "original security/Formal/parent acceptance"
+  ],
+  "windows": {
+    "build": "PASS",
+    "installerSignature": "NotSigned",
+    "applicationFileVersion": "0.1.2",
+    "applicationProductVersion": "0.1.2",
+    "osBuild": "26200",
+    "installedAcceptance": "NOT_RUN",
+    "toolboxJointAcceptance": "NOT_RUN",
+    "note": "Manifest URL/launch/apply contract gaps remain open; no Release was created.",
+    "secureStorageProbe": {
+      "sourceSha": "f4756afdb01ebac7b17ae9016d9ad56ab450fea5",
+      "probe": "task-unique Windows credential write/readback through built native utility",
+      "exitCode": 1,
+      "fullNativeChain": "NOT_RUN",
+      "timestamp": "2026-10-25T12:09:24.0376334Z",
+      "error": "Platform secure storage failure: Windows error code 8",
+      "utilitySha256": "dcf67230ebefcda6e70fe3a16191e535563a6ec8af65a8f8896ef0167b83cbe7"
+    },
+    "packagedAuxiliaryBinaries": [
+      "honsen-procure-bootstrap-admin.exe",
+      "honsen-procure-seed.exe",
+      "honsen-procure-test-profile.exe"
+    ],
+    "packageScriptResourceCheck": "Generated NSIS script names main EXE, Runner and honsen.app.json; no installed-bundle PASS"
+  },
+  "linux": {
+    "package": "PASS",
+    "archivePathSafety": "PASS",
+    "gitHead": "PASS",
+    "migrationManifestMatches": "71/71",
+    "archiveEntries": 30358,
+    "artifactId": 12598102738,
+    "fullArchiveManifestVerification": "PASS 30322/30322"
+  },
+  "finalEvidencePolicy": "Frozen RC branch stays at f4756afdb01ebac7b17ae9016d9ad56ab450fea5; later controller commit changes evidence only."
+}

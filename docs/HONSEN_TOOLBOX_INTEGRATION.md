@@ -109,3 +109,20 @@ No install/update/uninstall/repair case has passed on this candidate. The prior
 credential-store error is historical; this round has not rerun the dual-native
 chain without an authorized test COS configuration. Building a new installer
 does not replace those gates or qualify financial/file workflows for production.
+
+### Actual candidate evidence
+
+Frozen source `f4756afdb01ebac7b17ae9016d9ad56ab450fea5`, version0.1.2,
+OS build26200. NSIS build passed; main file/product and generated manifests
+agree. Installer SHA256
+`23ac1e5cc35b2840e905a4078b2d333b9f0faa60bbe91c0cdd96116b63f78577`;
+Authenticode status NotSigned. Generated NSIS resource script includes main EXE,
+Runner and `honsen.app.json`. Runner contract units8/8 passed. Exact-source CI
+run40191375930 passed; [full package inventory](reviews/V1-RC-20261025.json).
+
+Actual install, duplicate-instance, shortcut/Toolbox launch, update comparison,
+app/Toolbox apply, failure-injection update, uninstall/data retention and manual
+registration repair remain **NOT RUN** for this candidate. A fresh task-unique
+native secure-store probe now reproduces Windows error8; it is not a successful
+native-login or installed-bundle test. Existing contract discrepancies above
+remain unchanged and require approval before their implementation is repaired.

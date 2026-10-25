@@ -4,6 +4,11 @@ The 2026-10-25 Agent C correction keeps optional COS disabled in the deployment 
 
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.
 
+2026-10-25 final RC evidence: frozen `f4756af` quality PASS and both candidate
+packages/integrity checks are recorded in the [inventory](reviews/V1-RC-20261025.json).
+Fresh Windows secure-storage error8 and the original native/Toolbox/business/
+backup gates keep V1 RELEASE_BLOCKED. Milestone statuses remain unchanged.
+
 2026-10-25: three real isolated agents delivered payment-conflict, quote-allocation
 and deployment-template fixes into a frozen `0.1.2` RC source. Independent static
 review and combined targeted checks are recorded in the

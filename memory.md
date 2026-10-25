@@ -4,6 +4,55 @@
 
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## Main controller final delivery — 2026-10-25
+
+- **CANDIDATE_BUILT / RELEASE_BLOCKED**, no `V1_RELEASE_CANDIDATE_READY` claim.
+  Frozen source and verified remote `codex/v1-release-candidate` remain
+  **`f4756afdb01ebac7b17ae9016d9ad56ab450fea5`**. The containing controller commit
+  on `codex/v1-rc-control-20261025` is an evidence-only descendant; never confuse
+  it with the binary/API source SHA. [Complete handoff](docs/planning/V1-MULTI-AGENT-CONTROL-20261025.md),
+  [sanitized inventory](docs/reviews/V1-RC-20261025.json). A/B/C source SHAs and
+  preserved dirty paths below were freshly verified again. Controller has no
+  tracked dirt after this evidence commit; ignored E:-backed output junctions
+  remain for recovery. Original checkout and all other worktrees are untouched.
+- Exact-RC CI [40191375930](https://github.com/etianwang/Honsen-procure/actions/runs/40191375930)
+  PASS: desktop16/server162/shared25, release7, restricted PG grants, real isolated
+  Linux nginx/systemd/controller, traceable Linux build and browser45. Three
+  deliberately opt-in COS tests skipped: PDF upload/hash/authorization, real
+  expired URL, actual Rust HEIC/JPEG archive/readback. CI lacks authorized live
+  credentials/`HONSEN_COS_LIVE`; these T09/T11 gates remain unpassed. Inventory
+  gives exact test names, reasons and acceptance effects. No manual physical
+  print, installed Toolbox/Windows update, independent production-topology
+  backup/restore or full two-client native chain was executed.
+- Windows numeric0.1.2 NSIS build PASS, unsigned, main file/product and manifests
+  agree; installer SHA256
+  `23ac1e5cc35b2840e905a4078b2d333b9f0faa60bbe91c0cdd96116b63f78577`.
+  Linux archive SHA256
+  `d456de3978312a8c1c5333b38264b2abbdb993984821e3c0690e4bd7ebbdeec3`.
+  Output `E:/Honsen-build/rc/artifacts/f4756afdb01ebac7b17ae9016d9ad56ab450fea5`
+  contains both packages, manifests, hashes, native binaries and inventory.
+  Downloaded Linux artifact12598102738 has exact HEAD, all71 migration hashes
+  and30322/30322 actual tar-manifest entries verified locally. No package was
+  installed or executed as an API/deployment. Runner8/8 remains unit proof only.
+- **Fresh failure after freeze:** built native vault probe with fresh task-unique
+  identifiers returned Windows error8, exit1. Exact utility hash/time in inventory.
+  This supersedes the earlier historical-only statement; no existing credential
+  or production configuration was used. Full dual-Windows payment/reversal/COS
+  and revoked-session re-login remain BLOCKER; no secure-storage bypass or broad
+  credential cleanup was attempted.
+- **BLOCKER for V1:** secure store/native gates; unsigned/installed Windows and
+  Toolbox URL/launch/apply contract/registration/update/uninstall/repair; required
+  HPA/SPO/print/PDF/Excel/full localization, backup/restore and original security/
+  Formal/parent gates. Conflicting Toolbox implementation is unchanged, awaiting
+  prescribed approval. **DEFERRED:** further original child tasks, no scope
+  expansion. **WARNING:** >500 history discovery, existing lint/Clippy/bundle/npm
+  audit findings. Build/CI/integrity success never closes these gates. No main/PR
+  merge, Release/tag, production deployment or business-data deletion occurred.
+  Recommended next work: existing T14 Windows secure-store/re-login/two-client
+  acceptance in an authorized working environment, then the next approved
+  original business slice. All agent local builds stopped; A's disposable
+  Compose was removed with volumes and no task containers remain by its check.
+
 ## Main controller — frozen multi-agent RC source — 2026-10-25
 
 - Selected T15 integration only. Three actual isolated agents completed bounded
