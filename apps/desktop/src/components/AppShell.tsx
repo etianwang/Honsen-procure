@@ -59,7 +59,7 @@ export function AppShell({
     <div className="app-shell">
       <aside className="sidebar" aria-label="主导航">
         <div className="brand">
-          <span className="brand-mark">H</span>
+          <img className="brand-mark" src="/logo.png" alt="" />
           <span>HONSEN</span>
         </div>
         <nav>

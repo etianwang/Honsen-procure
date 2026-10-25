@@ -65,9 +65,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
     return (
       <main className="login-page">
         <Card className="login-card">
-          <div className="login-brand" aria-hidden="true">
-            H
-          </div>
+          <img className="login-brand" src="/logo.png" alt="" />
           <h1>登录 HONSEN Procure</h1>
           <p>浏览器预览不连接本地凭据；桌面程序使用真实离线登录。</p>
           <Alert
@@ -92,9 +90,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
   return (
     <main className="login-page">
       <Card className="login-card">
-        <div className="login-brand" aria-hidden="true">
-          H
-        </div>
+        <img className="login-brand" src="/logo.png" alt="" />
         <h1>登录 HONSEN Procure</h1>
         <p>离线登录仅接受已缓存、启用且仍在 24 小时窗口内的账户。</p>
         {message && (

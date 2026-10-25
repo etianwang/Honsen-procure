@@ -183,3 +183,7 @@ This is a sequencing plan only; it does not change any task or milestone status.
 Obtain authority for **T04-A/B/C**, then complete T08/T09 prerequisite acceptance. T10 then verifies server registration, idempotency and formal-document conflicts without rewriting local issued snapshots. T11–T15 remain in their original sequence.
 
 The original initial recommendation was to start T00 to establish repository shape, CI gates and an automated DOM harness without production behavior or packaging identity. That foundation is now accepted; it is not the current next task.
+
+# User-directed artwork slice — 2026-10-25
+
+Classification D, bounded T15 artwork preparation authorized by the user's root `logo.png` request. Login/sidebar branding, favicon and the existing Tauri Windows ICO use that source; root `logo.ico` is ready for installer consumption. No schema, migration, API, authorization or sync effects. Focused branding/navigation DOM proof, desktop quality checks and ICO source/dimension checks cover this slice only. Installer icon wiring and real installed-package visual acceptance remain blocked by the absent installer on baseline `5139cc8`; T15 and all parent milestones remain unchecked. See `HONSEN_TOOLBOX_INTEGRATION.md` and `memory.md` for exact evidence and skipped gates.

@@ -112,3 +112,7 @@ Obtain authority for T04 authorized initial-record acceptance, then complete the
 ## Original foundation instruction (retained; not current progress)
 
 Implement Milestone 0 only. Do not scaffold sync, PDF, installer or update machinery until architecture/contracts and migrations are reviewed.
+
+# Artwork checkpoint — 2026-10-25
+
+User-directed T15 artwork preparation uses the approved root `logo.png` in the login/sidebar, favicon and Tauri Windows icon. Installer artwork is prepared as root `logo.ico`; no installer or release acceptance is claimed. T15/M4 status and original dependencies are unchanged; evidence and remaining gates are recorded in BUILD-TASKS, HONSEN_TOOLBOX_INTEGRATION and memory.

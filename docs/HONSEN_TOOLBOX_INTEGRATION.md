@@ -74,4 +74,12 @@ When the missing identity is approved, implementation must conform to these rule
 
 ## Change control
 
+## Application artwork — 2026-10-25
+
+User-approved source: repository-root `logo.png` (1254 × 1254, SHA-256 `668c93400f8cf3e978d39fad3928aa038ae47f7a1a2e70e8981898acc38113cd`). The source is copied unchanged to `apps/desktop/public/logo.png` for login and sidebar branding. Tauri CLI `icon` generates the Windows ICO, containing 16, 24, 32, 48, 64 and 256 pixel images. Identical copies are stored at `logo.ico`, `apps/desktop/public/icon.ico` (browser favicon), and `apps/desktop/src-tauri/icons/icon.ico` (existing Tauri executable/window icon configuration).
+
+The root `logo.ico` is the artwork input for the future installer. No installer exists on the selected `origin/main` baseline `5139cc8`; `bundle.active` remains false. Installer setup/uninstall/shortcut icon wiring and installed Windows visual evidence are therefore **not accepted** by this asset change. T15 and every release/Toolbox E2E gate remain open. No identity, manifest, registry, Runner argument, update or uninstall behavior changed.
+
+Upstream preflight was repeated in the required order on 2026-10-25. Existing gaps remain: installer, Runner, manifest, registry, release integrity and Windows E2E evidence. Upstream also records pending Toolbox `apply` integration and additional `launch` arguments; this artwork change does not repair or rely on those behaviors. Evidence for this slice: source/ICO equality and dimensions, focused Playwright login-to-workbench branding/navigation with no console errors, and desktop lint/typecheck/unit/build gates. A frontend build is not installed-package acceptance.
+
 If a future implementation conflicts with this contract, report the exact conflict, its user impact and a repair plan before modifying it. Do not make a local exception or silently change an upstream field, result JSON, Runner argument, registry path or deletion boundary.

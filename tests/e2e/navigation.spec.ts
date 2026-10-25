@@ -12,9 +12,23 @@ test('development sign-in placeholder opens the workbench and navigates accessib
   await expect(
     page.getByRole('heading', { name: '登录 HONSEN Procure' }),
   ).toBeVisible()
+  await expect(page.locator('.login-brand')).toHaveAttribute('src', '/logo.png')
+  await expect(page.locator('.login-brand')).toHaveJSProperty(
+    'naturalWidth',
+    1254,
+  )
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+    'href',
+    '/icon.ico',
+  )
   await page.getByRole('button', { name: '打开界面预览' }).click()
 
   await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()
+  await expect(page.locator('.brand-mark')).toHaveAttribute('src', '/logo.png')
+  await expect(page.locator('.brand-mark')).toHaveJSProperty(
+    'naturalWidth',
+    1254,
+  )
   await page.getByRole('button', { name: '材料库', exact: true }).click()
   await expect(
     page.getByRole('heading', { name: '材料库总览' }).last(),
