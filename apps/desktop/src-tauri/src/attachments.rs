@@ -133,7 +133,10 @@ fn owner_exists(
     let table = match owner_type {
         "purchase_order" => return Ok(owner_id == order_id),
         "receipt" => "local_receipts",
-        "procurement_expenditure" => "local_procurement_expenditures",
+        "procurement_expenditure" => {
+            return Ok(expenditures::read_payment(connection, owner_id)?
+                .is_some_and(|payment| payment.order_id == order_id));
+        }
         _ => return Ok(false),
     };
     connection
@@ -323,14 +326,7 @@ impl LocalAuthService {
             owner_id: order_id,
             description: String::new(),
         }];
-        for (table, kind, column) in [
-            ("local_receipts", "receipt", "received_at"),
-            (
-                "local_procurement_expenditures",
-                "procurement_expenditure",
-                "payment_date || ' · ' || payee_name || ' · ' || CAST(amount_minor AS TEXT) || ' ' || currency",
-            ),
-        ] {
+        for (table, kind, column) in [("local_receipts", "receipt", "received_at")] {
             let query =
                 format!("SELECT id,{column} FROM {table} WHERE order_id=?1 ORDER BY created_at,id");
             let rows = connection
@@ -349,6 +345,21 @@ impl LocalAuthService {
                 .map_err(|_| AuthError::Database)?;
             targets.extend(rows);
         }
+        targets.extend(
+            expenditures::effective_records(&connection, order_id)?
+                .into_iter()
+                .map(|payment| AttachmentTarget {
+                    owner_type: "procurement_expenditure".into(),
+                    owner_id: payment.id,
+                    description: format!(
+                        "{} · {} · {} {}",
+                        payment.payment_date,
+                        payment.payee_name,
+                        payment.amount_minor,
+                        payment.currency
+                    ),
+                }),
+        );
         Ok(targets)
     }
 }

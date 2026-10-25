@@ -127,6 +127,18 @@ describe.skipIf(!url)('PostgreSQL payment ledger', () => {
             ...first,
             eventId: randomUUID(),
             baseVersion: 1,
+            payload: { ...first.payload, orderId: children[1] },
+          },
+        ])
+      )[0],
+    ).toMatchObject({ status: 'validation_error', errorCode: 'FORBIDDEN' })
+    expect(
+      (
+        await push([
+          {
+            ...first,
+            eventId: randomUUID(),
+            baseVersion: 1,
             payload: { ...first.payload, amountMinor: '999' },
           },
         ])
@@ -155,7 +167,7 @@ describe.skipIf(!url)('PostgreSQL payment ledger', () => {
         .flat()
         .map((r) => r.status)
         .sort(),
-    ).toEqual(['accepted', 'validation_error'])
+    ).toEqual(['accepted', 'conflict'])
     const amounts = await pool.query<{ order_id: string; paid: string }>(
       `SELECT order_id, SUM(CASE WHEN status='reversed' THEN -amount_minor ELSE amount_minor END)::text AS paid FROM procurement_expenditures WHERE project_id=$1 GROUP BY order_id`,
       [projectId],
@@ -187,6 +199,365 @@ describe.skipIf(!url)('PostgreSQL payment ledger', () => {
       amount_minor: '100',
       status: 'recorded',
     })
+  })
+  it('adjudicates another creator payment conflict through normal sync without changing either ledger original', async () => {
+    const admin = {
+      id: randomUUID(),
+      installationId: randomUUID(),
+      roles: ['administrator'] as const,
+    }
+    await pool.query(
+      "INSERT INTO users(id,business_code,username,password_hash,ui_locale) VALUES($1::uuid,$1::text,$1::text,'fixture','zh-CN')",
+      [admin.id],
+    )
+    await pool.query(
+      "INSERT INTO user_roles(user_id,role) VALUES($1,'administrator')",
+      [admin.id],
+    )
+    await pool.query(
+      'INSERT INTO user_project_bindings(user_id,project_id) VALUES($1,$2)',
+      [admin.id, projectId],
+    )
+    await pool.query(
+      'INSERT INTO user_project_scope_bindings(user_id,project_id,department_id,team_id) VALUES($1,$2,$3,$4)',
+      [admin.id, projectId, departmentId, teamId],
+    )
+    const original = payment(children[0]!)
+    const send = async (
+      who: typeof actor | typeof admin,
+      event: typeof original,
+    ) =>
+      (
+        await service.push(who, {
+          deviceId: who.installationId,
+          events: [event],
+        })
+      ).results[0]!
+    expect((await send(actor, original)).status).toBe('accepted')
+    const rejected = {
+      ...original,
+      eventId: randomUUID(),
+      baseVersion: 1,
+      payload: { ...original.payload, amountMinor: '999' },
+    }
+    expect((await send(actor, rejected)).status).toBe('conflict')
+    const listed = await service.listPaymentConflicts(admin)
+    const conflict = listed.conflicts.find(
+      (c) => c.eventId === rejected.eventId,
+    )!
+    expect(conflict).toMatchObject({
+      entityId: original.entityId,
+      originAccountId: actor.id,
+      localPayload: rejected.payload,
+      serverPayload: original.payload,
+    })
+    await expect(service.listPaymentConflicts(actor)).rejects.toThrow(
+      'FORBIDDEN',
+    )
+    const resolutionId = randomUUID()
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'payment_conflict_resolution' as const,
+      entityId: resolutionId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload: {
+        id: resolutionId,
+        conflictId: conflict.conflictId,
+        eventId: rejected.eventId,
+        action: 'use_server',
+        reason: 'Compared immutable originals',
+      },
+    }
+    const decide = async (who = admin, e = event) =>
+      (await service.push(who, { deviceId: who.installationId, events: [e] }))
+        .results[0]!
+    expect(
+      await decide({ ...admin, roles: [] as unknown as typeof admin.roles }),
+    ).toMatchObject({ status: 'validation_error', errorCode: 'FORBIDDEN' })
+    await pool.query(
+      'UPDATE user_project_scope_bindings SET deleted_at=NOW() WHERE user_id=$1',
+      [admin.id],
+    )
+    expect((await service.listPaymentConflicts(admin)).conflicts).toHaveLength(
+      0,
+    )
+    expect(await decide()).toMatchObject({
+      status: 'validation_error',
+      errorCode: 'FORBIDDEN',
+    })
+    await pool.query(
+      'UPDATE user_project_scope_bindings SET deleted_at=NULL WHERE user_id=$1',
+      [admin.id],
+    )
+    await pool.query('UPDATE users SET is_enabled=FALSE WHERE id=$1', [
+      admin.id,
+    ])
+    await expect(store.listPaymentConflicts(admin)).rejects.toThrow('FORBIDDEN')
+    expect(await decide()).toMatchObject({
+      status: 'validation_error',
+      errorCode: 'FORBIDDEN',
+    })
+    await pool.query('UPDATE users SET is_enabled=TRUE WHERE id=$1', [admin.id])
+    await pool.query(
+      "DELETE FROM user_roles WHERE user_id=$1 AND role='administrator'",
+      [admin.id],
+    )
+    expect(await decide()).toMatchObject({
+      status: 'validation_error',
+      errorCode: 'FORBIDDEN',
+    })
+    await pool.query(
+      "INSERT INTO user_roles(user_id,role) VALUES($1,'administrator')",
+      [admin.id],
+    )
+    await pool.query('UPDATE countries SET is_active=FALSE WHERE id=$1', [
+      countryId,
+    ])
+    expect((await service.listPaymentConflicts(admin)).conflicts).toHaveLength(
+      0,
+    )
+    expect(await decide()).toMatchObject({
+      status: 'validation_error',
+      errorCode: 'FORBIDDEN',
+    })
+    await pool.query('UPDATE countries SET is_active=TRUE WHERE id=$1', [
+      countryId,
+    ])
+    expect(await decide()).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    expect(await decide()).toMatchObject({
+      status: 'accepted',
+      serverVersion: 1,
+    })
+    const otherId = randomUUID()
+    expect(
+      await decide(admin, {
+        ...event,
+        eventId: randomUUID(),
+        entityId: otherId,
+        payload: { ...event.payload, id: otherId },
+      }),
+    ).toMatchObject({
+      status: 'validation_error',
+      errorCode: 'PAYMENT_CONFLICT_ALREADY_RESOLVED',
+    })
+    const page = await service.pull(actor, { cursor: '0', limit: 500 })
+    const decision = page.changes.find(
+      (c) =>
+        c.entityType === 'payment_conflict_resolution' &&
+        c.entityId === resolutionId,
+    )
+    expect(decision?.payload).toMatchObject({
+      ...event.payload,
+      entityId: original.entityId,
+      canonicalEntityId: original.entityId,
+      localPayload: rejected.payload,
+      serverPayload: original.payload,
+      originAccountId: actor.id,
+      resolvedBy: admin.id,
+      orderId: children[0]!,
+      projectId,
+      countryId,
+    })
+    expect(decision?.payload.resolvedAt).toEqual(expect.any(String))
+    expect(
+      (await service.listPaymentConflicts(admin)).conflicts.find(
+        (c) => c.conflictId === conflict.conflictId,
+      )?.resolution?.id,
+    ).toBe(resolutionId)
+    expect(
+      (
+        await pool.query(
+          'SELECT payload_json FROM procurement_expenditures WHERE id=$1',
+          [original.entityId],
+        )
+      ).rows[0]?.payload_json,
+    ).toEqual(original.payload)
+    expect(
+      (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM payment_conflict_resolutions WHERE conflict_id=$1',
+          [conflict.conflictId],
+        )
+      ).rows[0]?.n,
+    ).toBe(1)
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS n FROM audit_entries WHERE id=$1 AND action='payment_conflict_use_server'",
+          [resolutionId],
+        )
+      ).rows[0]?.n,
+    ).toBe(1)
+    await expect(
+      pool.query(
+        "UPDATE payment_conflict_resolutions SET reason='rewrite' WHERE id=$1",
+        [resolutionId],
+      ),
+    ).rejects.toThrow('append-only')
+    const winner = {
+      ...payment(children[0]!),
+      payload: {} as Record<string, unknown>,
+    }
+    winner.payload = {
+      ...original.payload,
+      id: winner.entityId,
+      status: 'reversed',
+      correctsExpenditureId: original.entityId,
+      correctionReason: 'First correction',
+    }
+    expect((await send(actor, winner)).status).toBe('accepted')
+    const loser = { ...winner, eventId: randomUUID(), entityId: randomUUID() }
+    loser.payload = {
+      ...winner.payload,
+      id: loser.entityId,
+      correctionReason: 'Offline competing correction',
+    }
+    const rejectedResult = await send(actor, loser)
+    expect(rejectedResult).toMatchObject({
+      status: 'conflict',
+      errorCode: 'PAYMENT_REVERSAL_CONFLICT',
+      serverPayload: winner.payload,
+      serverVersion: 1,
+    })
+    expect(await send(actor, loser)).toEqual(rejectedResult)
+    const reversalConflict = (
+      await service.listPaymentConflicts(admin)
+    ).conflicts.find((c) => c.eventId === loser.eventId)!
+    const correctionDecisionId = randomUUID()
+    const correctionEvent = {
+      ...event,
+      eventId: randomUUID(),
+      entityId: correctionDecisionId,
+      payload: {
+        ...event.payload,
+        id: correctionDecisionId,
+        conflictId: reversalConflict.conflictId,
+        eventId: loser.eventId,
+      },
+    }
+    // A failure after every business/audit insert must still leave no decision.
+    await pool.query(
+      `CREATE FUNCTION reject_test_payment_resolution() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.entity_type='payment_conflict_resolution' AND NEW.entity_id='${correctionDecisionId}' THEN RAISE EXCEPTION 'synthetic publication failure'; END IF; RETURN NEW; END $$`,
+    )
+    await pool.query(
+      'CREATE TRIGGER reject_test_payment_resolution BEFORE INSERT ON server_change_log FOR EACH ROW EXECUTE FUNCTION reject_test_payment_resolution()',
+    )
+    try {
+      await expect(decide(admin, correctionEvent)).rejects.toThrow(
+        'synthetic publication failure',
+      )
+      expect(
+        (
+          await pool.query(
+            'SELECT count(*)::int AS n FROM payment_conflict_resolutions WHERE id=$1',
+            [correctionDecisionId],
+          )
+        ).rows[0]?.n,
+      ).toBe(0)
+      expect(
+        (
+          await pool.query(
+            'SELECT count(*)::int AS n FROM sync_events WHERE event_id=$1',
+            [correctionEvent.eventId],
+          )
+        ).rows[0]?.n,
+      ).toBe(0)
+      expect(
+        (
+          await pool.query(
+            'SELECT count(*)::int AS n FROM audit_entries WHERE id=$1',
+            [correctionDecisionId],
+          )
+        ).rows[0]?.n,
+      ).toBe(0)
+    } finally {
+      await pool.query(
+        'DROP TRIGGER reject_test_payment_resolution ON server_change_log',
+      )
+      await pool.query('DROP FUNCTION reject_test_payment_resolution()')
+    }
+    const competingId = randomUUID()
+    const results = await Promise.all([
+      decide(admin, correctionEvent),
+      decide(admin, {
+        ...correctionEvent,
+        eventId: randomUUID(),
+        entityId: competingId,
+        payload: { ...correctionEvent.payload, id: competingId },
+      }),
+    ])
+    expect(results.map((r) => r.status).sort()).toEqual([
+      'accepted',
+      'validation_error',
+    ])
+    const pulled = (
+      await service.pull(actor, { cursor: '0', limit: 500 })
+    ).changes.filter(
+      (c) =>
+        c.entityType === 'payment_conflict_resolution' &&
+        c.payload.conflictId === reversalConflict.conflictId,
+    )
+    expect(pulled).toHaveLength(1)
+    expect(pulled[0]?.payload).toMatchObject({
+      entityId: loser.entityId,
+      canonicalEntityId: winner.entityId,
+      localPayload: loser.payload,
+      serverPayload: winner.payload,
+    })
+    expect(
+      (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM procurement_expenditures WHERE corrects_expenditure_id=$1',
+          [original.entityId],
+        )
+      ).rows[0]?.n,
+    ).toBe(1)
+    expect(
+      (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM procurement_expenditures WHERE id=$1',
+          [loser.entityId],
+        )
+      ).rows[0]?.n,
+    ).toBe(0)
+    const staleSource = { ...rejected, eventId: randomUUID() }
+    expect((await send(actor, staleSource)).status).toBe('conflict')
+    const stale = (await service.listPaymentConflicts(admin)).conflicts.find(
+      (c) => c.eventId === staleSource.eventId,
+    )!
+    await pool.query(
+      "UPDATE sync_conflicts SET server_payload_json=jsonb_set(server_payload_json,'{amountMinor}','\"777\"') WHERE id=$1",
+      [stale.conflictId],
+    )
+    const staleId = randomUUID()
+    expect(
+      await decide(admin, {
+        ...event,
+        eventId: randomUUID(),
+        entityId: staleId,
+        payload: {
+          ...event.payload,
+          id: staleId,
+          conflictId: stale.conflictId,
+          eventId: staleSource.eventId,
+        },
+      }),
+    ).toMatchObject({
+      status: 'validation_error',
+      errorCode: 'STALE_PAYMENT_CONFLICT',
+    })
+    expect(
+      (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM payment_conflict_resolutions WHERE id=$1',
+          [staleId],
+        )
+      ).rows[0]?.n,
+    ).toBe(0)
   })
   it('retries missing receipt dependencies without accepting wrong-order vouchers', async () => {
     const event = payment(children[0]!)
@@ -413,6 +784,85 @@ describe.skipIf(!url)('PostgreSQL payment ledger', () => {
           )
         ).rows[0].payload_json,
       ).toEqual(canonical)
+      // The baseline archived envelopes lack country/type/creator/time. Keep
+      // those originals while publishing a separate verified canonical value.
+      await isolated.query(
+        "INSERT INTO user_roles(user_id,role) VALUES($1,'administrator')",
+        [user],
+      )
+      const legacyRejected = randomUUID(),
+        legacyConflict = randomUUID(),
+        legacyDecision = randomUUID()
+      const oldLocal = { ...old, amountMinor: '1300' }
+      await isolated.query(
+        `INSERT INTO sync_events(event_id,installation_id,actor_id,origin_account_id,origin_installation_id,origin_status,origin_attested_at,entity_type,entity_id,operation,base_version,result_status,server_version) VALUES($1,$2,$3,$3,$2,'attested',NOW(),'procurement_expenditure',$4,'upsert',1,'conflict',1)`,
+        [legacyRejected, upgradedActor.installationId, user, id],
+      )
+      await isolated.query(
+        `INSERT INTO sync_conflicts(id,event_id,origin_account_id,origin_installation_id,origin_status,entity_type,entity_id,base_version,server_version,local_payload_json,server_payload_json) VALUES($1,$2,$3,$4,'attested','procurement_expenditure',$5,1,1,$6,$7)`,
+        [
+          legacyConflict,
+          legacyRejected,
+          user,
+          upgradedActor.installationId,
+          id,
+          oldLocal,
+          old,
+        ],
+      )
+      const upgradedAdmin = {
+        ...upgradedActor,
+        roles: ['administrator'] as const,
+      }
+      expect(
+        (await upgradedStore.listPaymentConflicts(upgradedAdmin)).conflicts[0],
+      ).toMatchObject({ localPayload: oldLocal, serverPayload: old })
+      const resolution = await new SyncService(upgradedStore).push(
+        upgradedAdmin,
+        {
+          deviceId: upgradedAdmin.installationId,
+          events: [
+            {
+              eventId: randomUUID(),
+              entityId: legacyDecision,
+              entityType: 'payment_conflict_resolution',
+              operation: 'upsert',
+              baseVersion: 0,
+              payload: {
+                id: legacyDecision,
+                conflictId: legacyConflict,
+                eventId: legacyRejected,
+                action: 'use_server',
+                reason: 'Verified legacy originals',
+              },
+            },
+          ],
+        },
+      )
+      expect(resolution.results[0]).toMatchObject({
+        status: 'accepted',
+        serverVersion: 1,
+      })
+      const reconciled = await upgradedStore.pullChanges({
+        actor: upgradedActor,
+        cursor: '0',
+        limit: 500,
+      })
+      expect(
+        reconciled.changes.find((c) => c.entityId === legacyDecision)?.payload,
+      ).toMatchObject({
+        localPayload: oldLocal,
+        serverPayload: old,
+        canonicalPayload: canonical,
+      })
+      expect(
+        (
+          await isolated.query(
+            "SELECT payload_json FROM sync_entities WHERE entity_type='procurement_expenditure' AND entity_id=$1",
+            [id],
+          )
+        ).rows[0]?.payload_json,
+      ).toEqual(old)
       const reversal = randomUUID()
       const result = await new SyncService(upgradedStore).push(upgradedActor, {
         deviceId: upgradedActor.installationId,

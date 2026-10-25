@@ -724,6 +724,16 @@ pub struct SyncConflictView {
     pub local_payload_json: String,
     pub server_payload_json: String,
     pub server_operation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_resolution_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_by: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -3305,7 +3315,10 @@ impl LocalAuthService {
                                currency: &str,
                                payable: i64|
          -> Result<ProcurementPaymentSummaryView, AuthError> {
-            let records = connection.prepare("SELECT id, payee_name, currency, amount_minor, payment_date, payment_type, status, voucher_reference, notes, corrects_expenditure_id, (EXISTS(SELECT 1 FROM local_attachment_transfers t WHERE t.owner_type='procurement_expenditure' AND t.owner_id=local_procurement_expenditures.id) OR EXISTS(SELECT 1 FROM local_procurement_expenditure_vouchers v WHERE v.expenditure_id=local_procurement_expenditures.id)) FROM local_procurement_expenditures WHERE order_id = ?1 ORDER BY created_at, id").map_err(|_| AuthError::Database)?.query_map([order_id], |row| Ok(ProcurementExpenditureView { voucher_warning:!row.get::<_,bool>(10)?, has_voucher:row.get(10)?, id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, order_id: Uuid::parse_str(order_id).map_err(|_| rusqlite::Error::InvalidQuery)?, payee_name: row.get(1)?, currency: row.get(2)?, amount_minor: row.get::<_, i64>(3)?.to_string(), payment_date: row.get(4)?, payment_type: row.get(5)?, status: row.get(6)?, corrects_expenditure_id: row.get::<_,Option<String>>(9)?.map(|v|Uuid::parse_str(&v)).transpose().map_err(|_|rusqlite::Error::InvalidQuery)?, voucher_reference: row.get(7)?, notes: row.get(8)? })).map_err(|_| AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_| AuthError::Database)?;
+            let records = expenditures::effective_records(
+                &connection,
+                Uuid::parse_str(order_id).map_err(|_| AuthError::Database)?,
+            )?;
             if records.iter().any(|record| record.currency != currency) {
                 return Err(AuthError::Database);
             }
@@ -5790,7 +5803,10 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         let account_id = self.active_session_user_id()?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let tx = connection.transaction().map_err(|_| AuthError::Database)?;
+        expenditures::recover_rejected_reversals(&tx, account_id, now)?;
+        tx.commit().map_err(|_| AuthError::Database)?;
         connection
             .prepare("SELECT o.event_id, o.entity_type, o.entity_id, o.operation, o.base_version, o.payload_json FROM local_sync_outbox o WHERE o.owner_account_id = ?1 AND o.acknowledged_at IS NULL AND o.superseded_at IS NULL AND o.rejected_at IS NULL AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = o.event_id) AND NOT EXISTS (SELECT 1 FROM local_sync_outbox blocked WHERE blocked.owner_account_id = o.owner_account_id AND blocked.entity_type = o.entity_type AND blocked.entity_id = o.entity_id AND blocked.acknowledged_at IS NULL AND blocked.superseded_at IS NULL AND blocked.last_error = 'CATEGORY_CODE_CONFLICT' AND NOT EXISTS (SELECT 1 FROM local_category_code_repair_events r WHERE r.event_id = blocked.event_id)) ORDER BY o.created_at, o.rowid LIMIT ?2")
             .map_err(|_| AuthError::Database)?
@@ -5991,7 +6007,9 @@ impl LocalAuthService {
                 params![change.entity_type, change.entity_id.to_string(), account_id_text],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).optional().map_err(|_| AuthError::Database)?;
-            if let Some((event_id, base_version, local_payload, owner)) = pending {
+            if let Some((event_id, base_version, local_payload, owner)) =
+                pending.filter(|_| change.entity_type != "payment_conflict_resolution")
+            {
                 if owner.as_deref() != Some(account_id_text.as_str()) {
                     return Err(AuthError::SyncAccountBoundary);
                 }
@@ -6030,6 +6048,7 @@ impl LocalAuthService {
         project_staged_purchase_orders(&transaction, now)?;
         project_staged_rfqs(&transaction, now)?;
         project_staged_order_comments(&transaction)?;
+        expenditures::project_decisions(&transaction, now)?;
         expenditures::project_staged(&transaction)?;
         attachments::project_staged(&transaction)?;
         expenditures::project_staged(&transaction)?;
@@ -6072,7 +6091,7 @@ impl LocalAuthService {
         let account_id = Self::require_conflict_resolution(&connection, now)?;
         connection.prepare("SELECT c.id, c.entity_type, c.entity_id, c.server_version, c.local_payload_json, c.server_payload_json, c.server_operation FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id = c.event_id WHERE c.resolved_at IS NULL AND o.owner_account_id = ?1 AND o.owner_account_id = (SELECT user_id FROM local_session) ORDER BY c.created_at, c.id")
             .map_err(|_| AuthError::Database)?
-            .query_map([account_id.to_string()], |row| Ok(SyncConflictView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, server_version: row.get(3)?, local_payload_json: row.get(4)?, server_payload_json: row.get(5)?, server_operation: row.get(6)? }))
+            .query_map([account_id.to_string()], |row| Ok(SyncConflictView { id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?, entity_type: row.get(1)?, entity_id: Uuid::parse_str(&row.get::<_, String>(2)?).map_err(|_| rusqlite::Error::InvalidQuery)?, server_version: row.get(3)?, local_payload_json: row.get(4)?, server_payload_json: row.get(5)?, server_operation: row.get(6)?, event_id: None, payment_resolution_state: None, resolved_by: None, resolved_at: None, resolution_reason: None }))
             .map_err(|_| AuthError::Database)?.collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)
     }
 
@@ -7269,6 +7288,24 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn list_payment_sync_conflicts(
+        auth: State<'_, LocalAuthService>,
+    ) -> Result<Vec<super::SyncConflictView>, CommandError> {
+        auth.list_payment_sync_conflicts(SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn resolve_payment_sync_conflict(
+        auth: State<'_, LocalAuthService>,
+        input: super::expenditures::ResolvePaymentConflictInput,
+    ) -> Result<(), CommandError> {
+        auth.resolve_payment_sync_conflict(input, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn list_sync_conflicts(
         auth: State<'_, LocalAuthService>,
     ) -> Result<Vec<super::SyncConflictView>, CommandError> {
@@ -8192,6 +8229,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0058_payment_sync_metadata",
             include_str!("../migrations/0058_payment_sync_metadata.sql"),
+        ),
+        (
+            "0059_payment_conflict_decisions",
+            include_str!("../migrations/0059_payment_conflict_decisions.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));

@@ -48,6 +48,10 @@ class SyncFixture implements SyncStore {
   pushed = 0
   lastInstallationId: string | null = null
 
+  async listPaymentConflicts() {
+    return { conflicts: [] }
+  }
+
   async pushEvent(input: Parameters<SyncStore['pushEvent']>[0]) {
     this.pushed += 1
     this.lastInstallationId = input.installationId
@@ -85,6 +89,42 @@ function captchaAnswer(question: string): string {
 }
 
 describe('sync API', () => {
+  it('uses the authenticated administrator for cloud payment conflict discovery', async () => {
+    const admin = { ...account, roles: ['administrator' as const] }
+    const app = createApp(
+      new AuthService(new AuthFixture(admin), { verify: async () => true }),
+      undefined,
+      new SyncService(new SyncFixture()),
+    )
+    try {
+      const captcha = (
+        await app.inject({ method: 'GET', url: '/api/auth/captcha' })
+      ).json<{ id: string; question: string }>()
+      const login = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers: {
+          'x-installation-id': '00000000-0000-4000-8000-000000000099',
+        },
+        payload: {
+          username: admin.username,
+          password: 'fixture-password',
+          captchaId: captcha.id,
+          captchaAnswer: captchaAnswer(captcha.question),
+        },
+      })
+      const token = login.json<{ accessToken: string }>().accessToken
+      const result = await app.inject({
+        method: 'GET',
+        url: '/api/sync/payment-conflicts',
+        headers: { authorization: `Bearer ${token}` },
+      })
+      expect(result.statusCode).toBe(200)
+      expect(result.json()).toEqual({ conflicts: [] })
+    } finally {
+      await app.close()
+    }
+  })
   it('rejects category repair requests without an authenticated administrator', async () => {
     const authStore = new AuthFixture()
     const app = createApp(
@@ -106,6 +146,14 @@ describe('sync API', () => {
         payload,
       })
       expect(anonymous.statusCode).toBe(401)
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: '/api/sync/payment-conflicts',
+          })
+        ).statusCode,
+      ).toBe(401)
       expect(
         (
           await app.inject({
@@ -132,6 +180,15 @@ describe('sync API', () => {
         },
       })
       const token = login.json<{ accessToken: string }>().accessToken
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: '/api/sync/payment-conflicts',
+            headers: { authorization: `Bearer ${token}` },
+          })
+        ).statusCode,
+      ).toBe(403)
       const forbidden = await app.inject({
         method: 'POST',
         url: '/api/sync/category-repairs',
