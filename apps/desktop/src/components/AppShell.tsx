@@ -42,7 +42,7 @@ type AppShellProps = PropsWithChildren<{
 const roleLabel: Record<UserRole, string> = {
   engineer: '工程师',
   purchaser: '采购员',
-  administrator: '管理员',
+  administrator: '审批管理员',
   viewer: '查看者',
   super_administrator: '超级管理员',
 }
