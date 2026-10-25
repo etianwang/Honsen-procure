@@ -3,11 +3,13 @@ import {
   adjustmentSchema,
   calculateOwnerLinePrice,
   currencySchema,
+  minorAmountSchema,
+  positiveQuantitySchema,
   uuidSchema,
 } from '@honsen/shared'
 
 export type FormalIssue = {
-  documentType: 'OPA'
+  documentType: 'OPA' | 'HPA'
   documentNo: string
   installationId: string
   sequence: string
@@ -44,11 +46,13 @@ export function parseFormalIssue(
   const parsedCountryId = uuidSchema.safeParse(countryId)
   const parsedProjectId = uuidSchema.safeParse(projectId)
   const parsedPrimaryCurrency = currencySchema.safeParse(primaryCurrency)
+  const owner = documentType === 'OPA'
+  const mode = owner ? 'owner_self_purchase' : 'honsen_self_purchase'
   if (
-    documentType !== 'OPA' ||
-    payload.procurementMode !== 'owner_self_purchase' ||
+    (documentType !== 'OPA' && documentType !== 'HPA') ||
+    payload.procurementMode !== mode ||
     ![
-      'formally_issued',
+      owner ? 'formally_issued' : 'executing',
       'receiving',
       'completed',
       'completed_with_conditions',
@@ -71,7 +75,8 @@ export function parseFormalIssue(
     !/^\d{4}-\d{2}-\d{2}$/.test(orderDate) ||
     !parsedPrimaryCurrency.success ||
     !Array.isArray(lines) ||
-    lines.length === 0
+    lines.length === 0 ||
+    lines.length > 500
   )
     return 'invalid'
 
@@ -83,7 +88,7 @@ export function parseFormalIssue(
   }
   if (!isRecord(snapshot)) return 'invalid'
   if (
-    snapshot.procurementMode !== 'owner_self_purchase' ||
+    snapshot.procurementMode !== mode ||
     !['approved', 'confirmed'].includes(String(snapshot.workflowStatus)) ||
     snapshot.countryId !== countryId ||
     snapshot.projectId !== projectId ||
@@ -93,8 +98,32 @@ export function parseFormalIssue(
   )
     return 'invalid'
 
+  const hpaLineIds = new Set<string>()
   for (const line of lines) {
     if (!isRecord(line)) return 'invalid'
+    if (!owner) {
+      if (
+        !uuidSchema.safeParse(line.id).success ||
+        hpaLineIds.has(String(line.id)) ||
+        !currencySchema.safeParse(line.currency).success ||
+        !positiveQuantitySchema.safeParse(line.quantity).success ||
+        typeof line.unit !== 'string' ||
+        !line.unit.trim() ||
+        line.unit.length > 64 ||
+        Object.entries(line).some(
+          ([key, value]) => key.startsWith('owner') && value != null,
+        ) ||
+        [line.unitPriceMinor, line.lineTotalMinor].some(
+          (value) =>
+            !minorAmountSchema.safeParse(value).success ||
+            BigInt(String(value)) < 0n ||
+            BigInt(String(value)) > 9223372036854775807n,
+        )
+      )
+        return 'invalid'
+      hpaLineIds.add(String(line.id))
+      continue
+    }
     const markup = parseMarkup(line.ownerMarkupJson)
     const parsedLineId = uuidSchema.safeParse(line.id)
     const parsedSourceCurrency = currencySchema.safeParse(line.currency)

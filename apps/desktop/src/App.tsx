@@ -98,6 +98,9 @@ const previewRequisitionApi: RequisitionApi = {
     }
   },
   async submitRequisitionDraft() {},
+  async issueHonsenFormalOrder() {
+    throw new Error('正式签发需要桌面主机')
+  },
   async withdrawRequisition() {},
 }
 
@@ -445,8 +448,20 @@ function App() {
         >
           {page === 'home' ? (
             <HomePage
+              key={`${session?.user_id ?? 'preview'}:${authorizationContext?.projectId ?? ''}`}
+              api={
+                (
+                  window as Window & {
+                    __TAURI__?: { core?: { invoke?: unknown } }
+                  }
+                ).__TAURI__?.core?.invoke
+                  ? tauriRequisitionApi
+                  : previewRequisitionApi
+              }
+              projectId={authorizationContext?.projectId}
               onOpenMaterials={() => setPage('materials')}
               onNewRequisition={() => setPage('requisition')}
+              onOpenExecution={() => setPage('execution')}
             />
           ) : page === 'materials' ? (
             <MaterialsPage

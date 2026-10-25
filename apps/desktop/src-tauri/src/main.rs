@@ -170,6 +170,7 @@ fn main() {
             commands::save_owner_purchase_pricing,
             commands::set_procurement_mode,
             commands::issue_owner_formal_order,
+            commands::issue_honsen_formal_order,
             commands::record_receipt,
             commands::record_procurement_expenditure,
             commands::save_supplier_child_terms,
