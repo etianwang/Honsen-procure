@@ -1,5 +1,9 @@
 # Build Tasks: Zero to Production
 
+## 2026-10-25 Agent C bounded deployment-template correction
+
+T15/T11 deployment template leaves optional COS commented until explicitly configured together. Release regressions passed 4/4 on Node.js 24.18.0; no runtime, migration or UI change. Original checkboxes and dependencies remain unchanged. RC `700387b` supplies the protected service/controller; pending legacy manual/service changes are excluded. See `memory.md` for source and preserved dirty paths. This is builder evidence awaiting main-agent independent recheck, not T15 acceptance.
+
 ## Global completion gate
 
 Every task is a separately reviewable vertical slice. Do not start a dependent task until the prior task has passed its own gate.
