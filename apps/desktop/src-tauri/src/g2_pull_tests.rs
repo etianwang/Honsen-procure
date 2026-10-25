@@ -118,6 +118,52 @@ fn issued() -> Value {
     payload
 }
 
+#[test]
+fn hpa_pull_freezes_the_complete_honsen_snapshot_and_advances_to_receiving() {
+    let (service, path, now) = service();
+    dependencies(&service, true);
+    let mut payload = approved();
+    payload["procurementMode"] = json!("honsen_self_purchase");
+    for line in payload["lines"].as_array_mut().unwrap() {
+        for field in LINE_FIELDS {
+            line[field] = Value::Null;
+        }
+    }
+    service
+        .apply_sync_pull_page(page(payload.clone(), 1, 1), now)
+        .unwrap();
+    payload["formalSnapshotJson"] = json!(payload.to_string());
+    payload["workflowStatus"] = json!("executing");
+    payload["documentType"] = json!("HPA");
+    payload["formalDocumentNo"] = json!("G2C-G2P-20261019-HPA-00000001-7");
+    payload["formalInstallationId"] = json!("00000000-0000-4000-8000-000000000001");
+    payload["formalSequence"] = json!("7");
+    payload["formallyIssuedAt"] = json!(1);
+    service
+        .apply_sync_pull_page(page(payload.clone(), 2, 2), now)
+        .unwrap();
+    assert_eq!(stored(&service), payload);
+    payload["workflowStatus"] = json!("receiving");
+    service
+        .apply_sync_pull_page(page(payload.clone(), 3, 3), now)
+        .unwrap();
+    assert_eq!(stored(&service), payload);
+    drop(service);
+    let service = LocalAuthService::open_file_for_test(path.to_str().unwrap()).unwrap();
+    service
+        .activate_online_session(id(1), &"x".repeat(32), now)
+        .unwrap();
+    service
+        .apply_sync_pull_page(page(payload.clone(), 3, 3), now)
+        .unwrap();
+    assert_eq!(stored(&service), payload);
+    let mut bad = payload.clone();
+    bad["lines"][0]["unitPriceMinor"] = json!("101");
+    assert!(service.apply_sync_pull_page(page(bad, 4, 4), now).is_err());
+    assert_eq!(stored(&service), payload);
+    assert_eq!(service.pull_cursor_for_account(id(1)).unwrap(), "3");
+}
+
 fn page(payload: Value, cursor: i64, version: i64) -> SyncPullPageInput {
     SyncPullPageInput {
         changes: vec![SyncPullChangeInput {

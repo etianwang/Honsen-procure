@@ -1389,13 +1389,25 @@ export class PostgresSyncStore implements SyncStore {
         return current ?? { version: '0', payload_json: {}, is_deleted: false }
       return null
     }
+    if (formal.documentType === 'HPA') {
+      const issuer = await client.query(
+        `SELECT 1 FROM users u JOIN user_roles r ON r.user_id = u.id
+         WHERE u.id = $1 AND u.is_enabled AND u.deleted_at IS NULL
+           AND NOT u.requires_password_change AND r.role IN ('purchaser','administrator')
+         LIMIT 1`,
+        [input.actorId],
+      )
+      if (issuer.rowCount !== 1) return 'validation_error'
+    }
     if (
       !current ||
       current.is_deleted ||
       current.payload_json.formalDocumentNo != null
     )
       return current ?? 'validation_error'
-    if (input.event.payload.workflowStatus !== 'formally_issued')
+    const issuedStatus =
+      formal.documentType === 'OPA' ? 'formally_issued' : 'executing'
+    if (input.event.payload.workflowStatus !== issuedStatus)
       return 'validation_error'
     if (!isDeepStrictEqual(current.payload_json, formal.snapshot))
       return current
@@ -1409,7 +1421,7 @@ export class PostgresSyncStore implements SyncStore {
       Number(current.payload_json.confirmedAt) <= 0 ||
       !isDeepStrictEqual(input.event.payload, {
         ...formal.snapshot,
-        workflowStatus: 'formally_issued',
+        workflowStatus: issuedStatus,
         documentType: formal.documentType,
         formalDocumentNo: formal.documentNo,
         formalInstallationId: formal.installationId,
@@ -1440,7 +1452,7 @@ export class PostgresSyncStore implements SyncStore {
     if (
       !code ||
       formal.documentNo !==
-        `${code.country_code}-${code.project_code}-${formal.orderDate.replaceAll('-', '')}-OPA-${formalShortCode(formal.installationId)}-${formal.sequence}`
+        `${code.country_code}-${code.project_code}-${formal.orderDate.replaceAll('-', '')}-${formal.documentType}-${formalShortCode(formal.installationId)}-${formal.sequence}`
     )
       return 'validation_error'
     const inserted = await client.query(
@@ -2465,7 +2477,8 @@ async function validParentWithExistingRfqs(
 }
 
 function validFormalTransition(before: unknown, after: unknown): boolean {
-  if (before === 'formally_issued') return after === 'receiving'
+  if (before === 'formally_issued' || before === 'executing')
+    return after === 'receiving'
   if (before === 'receiving')
     return [
       'receiving',

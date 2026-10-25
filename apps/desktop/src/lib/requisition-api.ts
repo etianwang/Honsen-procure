@@ -109,6 +109,7 @@ export type RequisitionApi = {
     revisionReason: string | null
   }): Promise<OwnerLinePricingView[]>
   issueOwnerFormalOrder(orderId: string): Promise<FormalIssueView>
+  issueHonsenFormalOrder(orderId: string): Promise<FormalIssueView>
   submitRequisitionDraft(orderId: string): Promise<void>
   withdrawRequisition(orderId: string): Promise<void>
 }
@@ -143,6 +144,8 @@ export const tauriRequisitionApi: RequisitionApi = {
     }),
   issueOwnerFormalOrder: (orderId) =>
     tauriInvoke()<FormalIssueView>('issue_owner_formal_order', { orderId }),
+  issueHonsenFormalOrder: (orderId) =>
+    tauriInvoke()<FormalIssueView>('issue_honsen_formal_order', { orderId }),
   submitRequisitionDraft: (orderId) =>
     tauriInvoke()<void>('submit_requisition_draft', { orderId }),
   withdrawRequisition: (orderId) =>

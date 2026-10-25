@@ -833,17 +833,18 @@ impl RemotePurchaseOrderPayload {
             .as_deref()
             .ok_or(AuthError::InvalidInput)?;
         let parsed_sequence = remote_minor(sequence)?;
-        if self.document_type.as_deref() != Some("OPA")
-            || self.procurement_mode.as_deref() != Some("owner_self_purchase")
+        let (mode, issued_status) = match self.document_type.as_deref() {
+            Some("OPA") => ("owner_self_purchase", "formally_issued"),
+            Some("HPA") => ("honsen_self_purchase", "executing"),
+            _ => return Err(AuthError::InvalidInput),
+        };
+        if self.procurement_mode.as_deref() != Some(mode)
             || self.parent_order_id.is_some()
-            || !matches!(
-                self.workflow_status.as_str(),
-                "formally_issued"
-                    | "receiving"
-                    | "completed"
-                    | "completed_with_conditions"
-                    | "cancelled"
-            )
+            || !(self.workflow_status == issued_status
+                || matches!(
+                    self.workflow_status.as_str(),
+                    "receiving" | "completed" | "completed_with_conditions" | "cancelled"
+                ))
             || !self
                 .formal_document_no
                 .as_ref()
@@ -878,6 +879,16 @@ impl RemotePurchaseOrderPayload {
         expected.formal_snapshot_json = self.formal_snapshot_json.clone();
         if expected != *self {
             return Err(AuthError::InvalidInput);
+        }
+        if self.document_type.as_deref() == Some("HPA") {
+            if self
+                .lines
+                .iter()
+                .any(RemotePurchaseOrderLine::has_owner_pricing)
+            {
+                return Err(AuthError::InvalidInput);
+            }
+            return Ok(Some(snapshot));
         }
         for line in &self.lines {
             match line.owner_quote_source.as_deref() {
@@ -941,6 +952,19 @@ impl RemotePurchaseOrderPayload {
 }
 
 impl RemotePurchaseOrderLine {
+    fn has_owner_pricing(&self) -> bool {
+        self.owner_quote_source.is_some()
+            || self.owner_catalog_price_id.is_some()
+            || self.owner_manual_reference_reason.is_some()
+            || self.owner_manual_reference_actor_id.is_some()
+            || self.owner_manual_reference_at.is_some()
+            || self.owner_source_unit_price_minor.is_some()
+            || self.owner_locked_exchange_rate_decimal.is_some()
+            || self.owner_converted_reference_unit_minor.is_some()
+            || self.owner_markup_json.is_some()
+            || self.owner_final_unit_price_minor.is_some()
+    }
+
     fn without_owner_pricing(mut self) -> Self {
         // Repricing also advances this timestamp after approval.
         self.updated_at = 0;
@@ -3488,6 +3512,28 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<FormalIssueView, AuthError> {
+        self.issue_formal_order(order_id, "OPA", now)
+    }
+
+    pub fn issue_honsen_formal_order(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<FormalIssueView, AuthError> {
+        self.issue_formal_order(order_id, "HPA", now)
+    }
+
+    fn issue_formal_order(
+        &self,
+        order_id: Uuid,
+        document_type: &str,
+        now: SystemTime,
+    ) -> Result<FormalIssueView, AuthError> {
+        let (expected_mode, issued_status) = match document_type {
+            "OPA" => ("owner_self_purchase", "formally_issued"),
+            "HPA" => ("honsen_self_purchase", "executing"),
+            _ => return Err(AuthError::InvalidInput),
+        };
         if !self.require_order_mutation(now)? {
             return Err(AuthError::Forbidden);
         }
@@ -3512,30 +3558,53 @@ impl LocalAuthService {
             .optional()
             .map_err(|_| AuthError::Database)?
             .ok_or(AuthError::Forbidden)?;
-        if mode.as_deref() != Some("owner_self_purchase")
+        if mode.as_deref() != Some(expected_mode)
             || !matches!(status.as_str(), "confirmed" | "approved")
             || issued.is_some()
         {
             return Err(AuthError::Forbidden);
         }
-        let invalid_catalog_quote: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_material_prices p ON p.id = i.owner_catalog_price_id LEFT JOIN local_suppliers s ON s.id = p.supplier_id WHERE i.order_id = ?1 AND i.owner_quote_source = 'catalog_price' AND (p.id IS NULL OR p.material_id IS NOT i.material_id OR p.is_active != 1 OR p.deleted_at IS NOT NULL OR p.unit_price_minor IS NOT i.owner_source_unit_price_minor OR p.currency IS NOT i.currency OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
-        if invalid_catalog_quote {
-            return Err(AuthError::QuoteUnavailable);
-        }
-        let valid_line_count: i64 = transaction.query_row(
+        if document_type == "OPA" {
+            let invalid_catalog_quote: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_order_items i JOIN local_purchase_orders o ON o.id = i.order_id LEFT JOIN local_material_prices p ON p.id = i.owner_catalog_price_id LEFT JOIN local_suppliers s ON s.id = p.supplier_id WHERE i.order_id = ?1 AND i.owner_quote_source = 'catalog_price' AND (p.id IS NULL OR p.material_id IS NOT i.material_id OR p.is_active != 1 OR p.deleted_at IS NOT NULL OR p.unit_price_minor IS NOT i.owner_source_unit_price_minor OR p.currency IS NOT i.currency OR s.country_id IS NOT o.country_id OR s.is_active != 1 OR s.is_blacklisted != 0 OR s.deleted_at IS NOT NULL))", [order_id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+            if invalid_catalog_quote {
+                return Err(AuthError::QuoteUnavailable);
+            }
+            let valid_line_count: i64 = transaction.query_row(
             "SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1 AND owner_quote_source IS NOT NULL AND owner_source_unit_price_minor IS NOT NULL AND owner_locked_exchange_rate_decimal IS NOT NULL AND owner_converted_reference_unit_minor IS NOT NULL AND owner_markup_json IS NOT NULL AND owner_final_unit_price_minor IS NOT NULL AND ((currency = ?2 AND owner_locked_exchange_rate_decimal = '1') OR (currency <> ?2 AND EXISTS (SELECT 1 FROM local_exchange_rates r WHERE r.from_currency = local_purchase_order_items.currency AND r.to_currency = ?2 AND r.rate_decimal = local_purchase_order_items.owner_locked_exchange_rate_decimal AND r.effective_at <= ?3 AND r.deleted_at IS NULL)))",
             params![order_id.to_string(), primary_currency, order_date],
             |row| row.get(0),
         ).map_err(|_| AuthError::Database)?;
-        let line_count: i64 = transaction
-            .query_row(
-                "SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1",
-                [order_id.to_string()],
-                |row| row.get(0),
-            )
-            .map_err(|_| AuthError::Database)?;
-        if line_count == 0 || valid_line_count != line_count {
-            return Err(AuthError::InvalidInput);
+            let line_count: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM local_purchase_order_items WHERE order_id = ?1",
+                    [order_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| AuthError::Database)?;
+            if line_count == 0 || valid_line_count != line_count {
+                return Err(AuthError::InvalidInput);
+            }
+        } else {
+            let ready: bool = transaction.query_row(
+                "SELECT enabled = 1 AND requires_password_change = 0 FROM local_accounts WHERE id = ?1",
+                [actor_id.to_string()], |row| row.get(0),
+            ).map_err(|_| AuthError::Database)?;
+            if !ready {
+                return Err(AuthError::Forbidden);
+            }
+            validate_saved_catalog_quotes(&transaction, order_id)?;
+            let payload: RemotePurchaseOrderPayload =
+                serde_json::from_str(&order_sync_payload(&transaction, order_id)?)
+                    .map_err(|_| AuthError::InvalidInput)?;
+            validate_remote_purchase_order(&payload)?;
+            if payload.lines.is_empty()
+                || payload
+                    .lines
+                    .iter()
+                    .any(RemotePurchaseOrderLine::has_owner_pricing)
+            {
+                return Err(AuthError::InvalidInput);
+            }
         }
         let (installation_id, persisted_short_code, sequence): (String, String, i64) = transaction.query_row(
             "SELECT installation_id, installation_short_code, next_formal_sequence FROM local_sync_state WHERE singleton = 1",
@@ -3554,16 +3623,16 @@ impl LocalAuthService {
             return Err(AuthError::InvalidInput);
         }
         let formal_document_no =
-            format!("{country_code}-{project_code}-{date}-OPA-{short_code}-{sequence}");
+            format!("{country_code}-{project_code}-{date}-{document_type}-{short_code}-{sequence}");
         let snapshot = order_sync_payload(&transaction, order_id)?;
         let issued_at = unix_seconds(now);
         transaction.execute(
             "UPDATE local_sync_state SET installation_short_code = ?1, next_formal_sequence = ?2 WHERE singleton = 1",
-            params![short_code, sequence + 1],
+            params![short_code, sequence.checked_add(1).ok_or(AuthError::InvalidInput)?],
         ).map_err(|_| AuthError::Database)?;
         let changed = transaction.execute(
-            "UPDATE local_purchase_orders SET document_type = 'OPA', formal_document_no = ?2, formal_installation_id = ?3, formal_sequence = ?4, formally_issued_at = ?5, formal_snapshot_json = ?6, workflow_status = 'formally_issued', version = version + 1, updated_at = ?5 WHERE id = ?1 AND formally_issued_at IS NULL",
-            params![order_id.to_string(), formal_document_no, installation_id, sequence, issued_at, snapshot],
+            "UPDATE local_purchase_orders SET document_type = ?7, formal_document_no = ?2, formal_installation_id = ?3, formal_sequence = ?4, formally_issued_at = ?5, formal_snapshot_json = ?6, workflow_status = ?8, version = version + 1, updated_at = ?5 WHERE id = ?1 AND formally_issued_at IS NULL",
+            params![order_id.to_string(), formal_document_no, installation_id, sequence, issued_at, snapshot, document_type, issued_status],
         ).map_err(|_| AuthError::Database)?;
         if changed != 1 {
             return Err(AuthError::Forbidden);
@@ -3575,14 +3644,14 @@ impl LocalAuthService {
             "formally_issued",
             None,
             Some(&status),
-            Some("formally_issued"),
+            Some(issued_status),
             now,
         )?;
         let payload = order_sync_payload(&transaction, order_id)?;
         insert_local_sync_outbox(&transaction, "purchase_order", order_id, &payload, now)?;
         transaction.commit().map_err(|_| AuthError::Database)?;
         Ok(FormalIssueView {
-            document_type: "OPA".into(),
+            document_type: document_type.into(),
             formal_document_no,
             formal_installation_id: installation_uuid,
             formal_sequence: sequence,
@@ -7228,6 +7297,15 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn issue_honsen_formal_order(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<super::FormalIssueView, CommandError> {
+        auth.issue_honsen_formal_order(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub fn record_receipt(
         auth: State<'_, LocalAuthService>,
         input: super::RecordReceiptInput,
@@ -9120,8 +9198,9 @@ fn formal_workflow_can_advance(previous: &str, next: &str) -> bool {
         | "rejected"
         | "approved"
         | "confirmed"
-        | "formally_issued" => true,
-        "receiving" => next != "formally_issued",
+        | "formally_issued"
+        | "executing" => true,
+        "receiving" => !matches!(next, "formally_issued" | "executing"),
         _ => previous == next,
     }
 }
@@ -9133,8 +9212,12 @@ fn validate_remote_formal_number(
     let (country, project): (String, String) = transaction.query_row("SELECT c.business_code, p.business_code FROM local_countries c JOIN local_projects p ON p.country_id = c.id WHERE c.id = ?1 AND p.id = ?2",
         params![order.country_id.to_string(),order.project_id.to_string()], |row| Ok((row.get(0)?,row.get(1)?))).map_err(|_| AuthError::InvalidInput)?;
     let expected = format!(
-        "{country}-{project}-{}-OPA-{}-{}",
+        "{country}-{project}-{}-{}-{}-{}",
         order.order_date.replace('-', ""),
+        order
+            .document_type
+            .as_deref()
+            .ok_or(AuthError::InvalidInput)?,
         installation_short_code(
             order
                 .formal_installation_id
@@ -15142,6 +15225,170 @@ mod tests {
             convert_minor_by_rate(100, "XOF", "XOF", "1.01"),
             Err(AuthError::InvalidInput)
         );
+    }
+
+    #[test]
+    fn hpa_issue_is_authorized_atomic_and_keeps_approved_snapshots_with_existing_children() {
+        for with_children in [false, true] {
+            let path = std::env::temp_dir().join(format!("honsen-hpa-{}.sqlite", Uuid::new_v4()));
+            let service = LocalAuthService::open_file_for_test(path.to_str().unwrap()).unwrap();
+            let now = SystemTime::now();
+            let actor = Uuid::new_v4();
+            service
+                .cache_verified_account(
+                    CachedAccount {
+                        id: actor,
+                        username: "hpa-purchaser".into(),
+                        roles: vec![Role::Purchaser],
+                        enabled: true,
+                        requires_password_change: false,
+                    },
+                    "synthetic-password",
+                    now,
+                )
+                .unwrap();
+            service
+                .activate_online_session(actor, &"x".repeat(32), now)
+                .unwrap();
+            let (parent, item, supplier, project) = (
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+            );
+            seed_rfq_pull_dependencies(&service, parent, item, supplier, project);
+            let (department, team): (String, String) = service
+                .connection
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT department_id,team_id FROM local_purchase_orders WHERE id=?1",
+                    [parent.to_string()],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            grant_test_scope(
+                &service,
+                actor,
+                project,
+                Uuid::parse_str(&department).unwrap(),
+                Uuid::parse_str(&team).unwrap(),
+                now,
+            );
+            {
+                let db = service.connection.lock().unwrap();
+                db.execute("UPDATE local_purchase_orders SET procurement_mode='honsen_self_purchase',subtotal_minor=1250,total_minor=1250,confirmed_by=?2,confirmed_at=1 WHERE id=?1", params![parent.to_string(),actor.to_string()]).unwrap();
+                db.execute("UPDATE local_purchase_order_items SET unit_price_minor=1250,line_total_minor=1250,price_source='manual',material_snapshot_json='{\"nameZh\":\"frozen HPA material\",\"model\":\"old\",\"specification\":\"old\"}' WHERE id=?1", [item.to_string()]).unwrap();
+            }
+            if with_children {
+                service
+                    .allocate_supplier_child_orders(
+                        parent,
+                        vec![SupplierChildAllocationInput {
+                            parent_item_id: item,
+                            supplier_id: supplier,
+                            currency: "XOF".into(),
+                            child_display_no: "HPA-CHILD".into(),
+                            locked_exchange_rate_decimal: "1".into(),
+                        }],
+                        now,
+                    )
+                    .unwrap();
+            }
+            let state = || {
+                let db = service.connection.lock().unwrap();
+                let tx = db.unchecked_transaction().unwrap();
+                let snapshot = order_sync_payload(&tx, parent).unwrap();
+                let counts:(i64,i64,i64)=tx.query_row("SELECT next_formal_sequence,(SELECT count(*) FROM local_sync_outbox),(SELECT count(*) FROM local_order_audit_entries) FROM local_sync_state",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+                (snapshot, counts)
+            };
+            let before = state();
+            for (change, restore) in [
+                ("requires_password_change=1", "requires_password_change=0"),
+                ("enabled=0", "enabled=1"),
+                (
+                    "roles_json='[\"engineer\"]'",
+                    "roles_json='[\"purchaser\"]'",
+                ),
+                ("roles_json='[\"viewer\"]'", "roles_json='[\"purchaser\"]'"),
+                (
+                    "roles_json='[\"super_administrator\"]'",
+                    "roles_json='[\"purchaser\"]'",
+                ),
+            ] {
+                service
+                    .connection
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        &format!("UPDATE local_accounts SET {change} WHERE id=?1"),
+                        [actor.to_string()],
+                    )
+                    .unwrap();
+                let denied = service.issue_honsen_formal_order(parent, now);
+                service
+                    .connection
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        &format!("UPDATE local_accounts SET {restore} WHERE id=?1"),
+                        [actor.to_string()],
+                    )
+                    .unwrap();
+                assert_eq!(denied, Err(AuthError::Forbidden));
+                assert_eq!(state(), before);
+            }
+            assert_eq!(
+                service.issue_owner_formal_order(parent, now),
+                Err(AuthError::Forbidden)
+            );
+            service.connection.lock().unwrap().execute_batch("CREATE TEMP TRIGGER fail_hpa_outbox BEFORE INSERT ON local_sync_outbox BEGIN SELECT RAISE(ABORT,'injected HPA Outbox failure'); END;").unwrap();
+            assert_eq!(
+                service.issue_honsen_formal_order(parent, now),
+                Err(AuthError::Database)
+            );
+            assert_eq!(state(), before);
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .execute_batch("DROP TRIGGER fail_hpa_outbox;")
+                .unwrap();
+            let issued = service.issue_honsen_formal_order(parent, now).unwrap();
+            assert_eq!(issued.document_type, "HPA");
+            assert!(issued.formal_document_no.contains("-HPA-"));
+            let after = state();
+            let payload: serde_json::Value = serde_json::from_str(&after.0).unwrap();
+            assert_eq!(payload["workflowStatus"], "executing");
+            assert_eq!(payload["formalSnapshotJson"], before.0);
+            assert_eq!(after.1.0, before.1.0 + 1);
+            assert_eq!(after.1.1, before.1.1 + 1);
+            assert_eq!(
+                service.issue_honsen_formal_order(parent, now),
+                Err(AuthError::Forbidden)
+            );
+            assert_eq!(state(), after);
+            assert_eq!(
+                service.set_procurement_mode(parent, "owner_self_purchase".into(), now),
+                Err(AuthError::Forbidden)
+            );
+            let events = service.pending_sync_events(100, now).unwrap();
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e.entity_id == parent && e.payload_json == after.0)
+            );
+            let db = service.connection.lock().unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM local_purchase_orders WHERE parent_order_id=?1",
+                    [parent.to_string()],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                i64::from(with_children)
+            );
+        }
     }
 
     #[test]
