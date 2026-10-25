@@ -5611,6 +5611,16 @@ impl LocalAuthService {
         if local_status != "draft" || server_status != Some("draft") {
             return Err(AuthError::InvalidInput);
         }
+        #[cfg(debug_assertions)]
+        if input.resolution == "replace_draft"
+            && std::env::var("HONSEN_PROCURE_TEST_RESOLVER_FAIL_AT")
+                .ok()
+                .as_deref()
+                == Some("before_original_outbox")
+            && std::env::var("HONSEN_PROCURE_PROFILE").ok().as_deref() == Some("test")
+        {
+            return Err(AuthError::Database);
+        }
         transaction.execute("UPDATE local_sync_outbox SET superseded_at = ?2, last_error = 'resolved_by_administrator' WHERE event_id = ?1", params![row.2, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
         transaction.execute("INSERT INTO local_sync_entity_versions (entity_type, entity_id, server_version) VALUES ('purchase_order', ?1, ?2) ON CONFLICT(entity_type, entity_id) DO UPDATE SET server_version = MAX(server_version, excluded.server_version)", params![row.1, row.3]).map_err(|_| AuthError::Database)?;
         if input.resolution == "use_server" {
@@ -5628,6 +5638,16 @@ impl LocalAuthService {
             }
         } else {
             let payload = order_sync_payload(&transaction, entity_id)?;
+            #[cfg(debug_assertions)]
+            if input.resolution == "replace_draft"
+                && std::env::var("HONSEN_PROCURE_TEST_RESOLVER_FAIL_AT")
+                    .ok()
+                    .as_deref()
+                    == Some("before_replacement_outbox")
+                && std::env::var("HONSEN_PROCURE_PROFILE").ok().as_deref() == Some("test")
+            {
+                return Err(AuthError::Database);
+            }
             insert_local_sync_outbox(&transaction, "purchase_order", entity_id, &payload, now)?;
             append_order_audit(
                 &transaction,
@@ -5641,6 +5661,16 @@ impl LocalAuthService {
             )?;
         }
         transaction.execute("UPDATE local_sync_conflicts SET resolved_at = ?2, resolved_by = ?3, resolution_reason = ?4 WHERE id = ?1", params![input.conflict_id.to_string(), unix_seconds(now), actor_id.to_string(), input.reason]).map_err(|_| AuthError::Database)?;
+        #[cfg(debug_assertions)]
+        if input.resolution == "replace_draft"
+            && std::env::var("HONSEN_PROCURE_TEST_RESOLVER_FAIL_AT")
+                .ok()
+                .as_deref()
+                == Some("before_commit")
+            && std::env::var("HONSEN_PROCURE_PROFILE").ok().as_deref() == Some("test")
+        {
+            return Err(AuthError::Database);
+        }
         transaction.commit().map_err(|_| AuthError::Database)
     }
 

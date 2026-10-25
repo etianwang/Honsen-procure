@@ -64,9 +64,10 @@ async function ready(url) {
     )
     .toBe(true)
 }
-async function launch(profile, port) {
+async function launch(profile, port, extraEnv = {}) {
   const env = {
     ...process.env,
+    ...extraEnv,
     HONSEN_PROCURE_TEST_DB_PATH: profile,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1`,
     WEBVIEW2_USER_DATA_FOLDER: `${profile}.webview`,
@@ -242,6 +243,7 @@ try {
   const a = await launch(profileA, 9241)
   const b = await launch(profileB, 9242)
   const password = process.env.HONSEN_TEST_PURCHASER_PASSWORD
+  const resolverFault = process.env.HONSEN_PROCURE_TEST_RESOLVER_FAIL_AT
 
   async function createConflict(label) {
     const id = randomUUID()
@@ -342,7 +344,56 @@ try {
     [purchaser],
   )
   const replace = await createConflict('REPLACE-DRAFT')
-  await call(b, 'resolve_purchase_order_conflict', {
+  if (resolverFault) {
+    const before = sqliteSnapshot(
+      `rollback-${resolverFault}-before`,
+      profileB,
+      replace.id,
+      replace.conflict.id,
+    )
+    await denied(
+      b,
+      'resolve_purchase_order_conflict',
+      {
+        input: {
+          conflictId: replace.conflict.id,
+          resolution: 'replace_draft',
+          reason: `QA injected ${resolverFault}`,
+        },
+      },
+      'local_storage_error',
+    )
+    const after = sqliteSnapshot(
+      `rollback-${resolverFault}-after`,
+      profileB,
+      replace.id,
+      replace.conflict.id,
+    )
+    assert.deepEqual({ ...after, name: null }, { ...before, name: null })
+    for (const child of children.filter((child) =>
+      child.spawnfile.endsWith('HonsenProcure.exe'),
+    )) await stopChild(child)
+    const retry = await launch(profileB, 9243, {
+      HONSEN_PROCURE_TEST_RESOLVER_FAIL_AT: '',
+    })
+    await loginCore(retry, 'purchaser', password)
+    await call(retry, 'resolve_purchase_order_conflict', {
+      input: {
+        conflictId: replace.conflict.id,
+        resolution: 'replace_draft',
+        reason: `QA retry ${resolverFault}`,
+      },
+    })
+    const retried = sqliteSnapshot(
+      `rollback-${resolverFault}-retry`,
+      profileB,
+      replace.id,
+      replace.conflict.id,
+    )
+    assert.equal(retried.outbox.length, before.outbox.length + 1)
+    writeFileSync(resultPath, JSON.stringify({ mode: 't10d-order-conflict', transactionRollback: 'PASS', resolverFault, snapshots, exePids: children.filter((child) => child.spawnfile.endsWith('HonsenProcure.exe')).map((child) => child.pid), ipc: 'real WebView2 -> Tauri commands', completedAt: new Date().toISOString() }, null, 2))
+  } else {
+    await call(b, 'resolve_purchase_order_conflict', {
     input: {
       conflictId: replace.conflict.id,
       resolution: 'replace_draft',
@@ -475,6 +526,7 @@ try {
       2,
     ),
   )
+  }
 } catch (error) {
   writeFileSync(
     resultPath,

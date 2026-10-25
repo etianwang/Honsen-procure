@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('g2-formal-pull', 'g1-conflict-origin', 't10d-order-conflict', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [ValidateSet('g2-formal-pull', 'g1-conflict-origin', 't10d-order-conflict', 't10d-resolver-rollback', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security',
   [ValidateSet('before-commit', 'after-commit')]
   [string]$TerminationBoundary = 'before-commit',
@@ -46,6 +46,7 @@ $composeErrorLog = Join-Path $logRoot "$runId-compose-error.log"
 $nativeLog = Join-Path $logRoot "$runId-client.log"
 $nativeErrorLog = Join-Path $logRoot "$runId-client-error.log"
 $composeProject = "honsen-$runId"
+$resolverRollbackResults = @()
 $server = $null
 $wslHolder = $null
 $certificate = $null
@@ -101,6 +102,7 @@ try {
   $env:HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX = if ($Mode -eq 'g1-conflict-origin') { Join-Path $qaRoot "$runId-auth.test" } else { '' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
   $env:HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE = if ($Mode -eq 'g2-formal-pull') { '1' } else { '0' }
+  $env:HONSEN_PROCURE_TEST_RESOLVER_FAIL_AT = ''
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
   for ($launch = 0; $launch -lt 3; $launch++) {
@@ -149,6 +151,27 @@ try {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
       node (Join-Path $repo 'tests/native/t10d-order-conflict.mjs') *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native T10-D order-conflict driver failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 't10d-resolver-rollback') {
+      Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
+      $faultPoints = @('before_original_outbox', 'before_replacement_outbox', 'before_commit')
+      for ($faultIndex = 0; $faultIndex -lt $faultPoints.Count; $faultIndex++) {
+        $faultPoint = $faultPoints[$faultIndex]
+        $env:HONSEN_PROCURE_TEST_RESOLVER_FAIL_AT = $faultPoint
+        $faultResult = Join-Path $qaRoot "$runId-resolver-$faultPoint.test.json"
+        $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $faultResult
+        node (Join-Path $repo 'tests/native/t10d-order-conflict.mjs') *>> $nativeLog
+        if ($LASTEXITCODE -ne 0) { throw "native T10-D resolver rollback driver failed at $faultPoint; inspect $nativeLog" }
+        $resolverRollbackResults += $faultResult
+        if ($faultIndex -lt ($faultPoints.Count - 1)) {
+          foreach ($profile in $profileA, $profileB) {
+            $env:HONSEN_PROCURE_TEST_DB_PATH = $profile
+            & (Join-Path $desktop 'target\debug\honsen-procure-test-profile.exe') clean
+            if ($LASTEXITCODE -ne 0) { throw "could not reset isolated profile $profile between resolver fault points" }
+            & (Join-Path $desktop 'target\debug\honsen-procure-test-profile.exe') seed
+            if ($LASTEXITCODE -ne 0) { throw "could not reseed isolated profile $profile between resolver fault points" }
+          }
+        }
+      }
     } elseif ($Mode -eq 'ab-sync-security') {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
       & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
@@ -281,6 +304,12 @@ try {
       throw "native T10-D order-conflict result is invalid: $result"
     }
     Write-Output "PASS native T10-D draft order conflict resolver: $result"
+  } elseif ($Mode -eq 't10d-resolver-rollback') {
+    $rollbacks = @($resolverRollbackResults | ForEach-Object { Get-Content -Raw $_ | ConvertFrom-Json })
+    if ($rollbacks.Count -ne 3 -or @($rollbacks | Where-Object { $_.mode -ne 't10d-order-conflict' -or $_.transactionRollback -ne 'PASS' -or $_.resolverFault -notin @('before_original_outbox', 'before_replacement_outbox', 'before_commit') }).Count -ne 0) {
+      throw "native T10-D resolver rollback result is invalid: $($resolverRollbackResults -join ', ')"
+    }
+    Write-Output "PASS native T10-D resolver rollback: $($resolverRollbackResults -join ', ')"
   } elseif ($Mode -eq 'ab-sync-security') {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
     if ($smoke.mode -ne 'ab-sync-security' -or $smoke.independentInstallations -ne 'PASS' -or $smoke.forgedDeviceIdTrustedOrigin -ne 'PASS' -or $smoke.accountIsolation -ne 'PASS' -or $smoke.conflictIsolation -ne 'PASS' -or $smoke.pushReplayIdempotency -ne 'PASS') {
