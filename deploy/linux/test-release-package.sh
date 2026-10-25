@@ -26,12 +26,14 @@ for script in preflight.sh build-release.sh backup.sh restore.sh; do
   }
 done
 
-grep -Fq 'User=honsen-procure' "$root/deploy/linux/honsen-procure.service"
+grep -Fq 'User=www' "$root/deploy/linux/honsen-procure.service"
+grep -Fq 'WorkingDirectory=/www/Honsen-procure/app/current/app' "$root/deploy/linux/honsen-procure.service"
 grep -Fq 'proxy_pass http://127.0.0.1:3000' "$root/deploy/linux/nginx/honsen-procure.conf"
 grep -Fq 'GRANT CONNECT' "$root/deploy/linux/postgres/create-role.sql"
 grep -Fq 'pg_dump --format=custom' "$root/deploy/linux/scripts/backup.sh"
 grep -Fq 'I_UNDERSTAND_THIS_REPLACES_THE_DATABASE' "$root/deploy/linux/scripts/restore.sh"
 grep -Fq 'POSTGRES_URL=' "$root/deploy/linux/.env.production.example"
+grep -Fq 'COS_SIGNED_URL_TTL_SECONDS=900' "$root/deploy/linux/.env.production.example"
 grep -Fq 'npm run build --workspace @honsen/server' "$root/deploy/linux/scripts/build-release.sh"
 
 echo 'linux release package checks passed'
