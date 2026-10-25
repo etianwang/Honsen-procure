@@ -1,5 +1,7 @@
 # Build Tasks: Zero to Production
 
+2026-10-25 screenshot evidence attempt (C): exact remote RC `f4756af` yielded one real native login screenshot at 1920x1080. Fresh isolated account seed failed; Windows credential write error 8 blocks pages 02–22. Required named identity/country header is absent in RC, formal document generation has no discovered entry (23 NOT_IMPLEMENTED), and no Toolbox window was available (24 BLOCKED_ENV). Partial reports/archive live at `E:/Honsen-build/V1-Demo-Screenshots/` and sibling ZIP. See `memory.md` for commands, isolation and handoff. No application change, business acceptance, parent closure or new task system; all original gates remain open.
+
 2026-10-25 main controller T15 integration: A `ca44150`, B `5915335` and C
 `e23de5b` are integrated with source-specific independent static review and fresh
 combined Rust/DOM/workspace checks. Candidate `0.1.2` remains RELEASE_BLOCKED;

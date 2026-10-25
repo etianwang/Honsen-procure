@@ -1,5 +1,7 @@
 # Roadmap and Development Tasks
 
+2026-10-25 demonstration evidence: RC `f4756af` produced one genuine native login screenshot; the Bethel2 business demonstration remains BLOCKED_ENV after fresh credential-vault failure. Header identity/context gaps and missing formal-document entry remain documented, not repaired. Partial artifact location and handoff are in `memory.md`; no milestone or original acceptance gate is closed by this screenshot attempt.
+
 The 2026-10-25 Agent C correction keeps optional COS disabled in the deployment template until configured. Release regressions passed 4/4; independent recheck and original M4/T14/T15 live gates remain open. Pending legacy `www` service/manual changes are excluded; RC protected controller remains authoritative. See `memory.md` for source and preserved dirty paths.
 
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.

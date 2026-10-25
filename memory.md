@@ -2,6 +2,18 @@
 
 **Last updated:** 2026-10-25
 
+## V1 screenshot attempt — 2026-10-25 — BLOCKED_ENV
+
+- Scope: class C evidence collection for the user-requested Bethel2 demonstration; no application implementation. Branch `codex/v1-demo-screenshots` starts at remote RC `f4756afdb01ebac7b17ae9016d9ad56ab450fea5`. Checkpoint is the commit containing this entry (`git log -1` on that branch).
+- Partial output: `E:/Honsen-build/V1-Demo-Screenshots/` contains one original 1920x1080 native login PNG, 24-entry index, management report, derived overview and capture evidence. ZIP: `E:/Honsen-build/V1-Demo-Screenshots.zip`. No full-workflow success claimed.
+- Evidence: exact RC EXE SHA256 matches inventory (`71b7518ca03730518e6c6c1456c74cbc0f7ef0a7aa4529d49374096fe7181eb5`). Playwright CDP reached real `http://tauri.localhost/`, confirmed native invoke and captured local CAPTCHA presentation without mock IPC or DOM replacement.
+- BLOCKER: fresh isolated test-profile seed failed with secure credential storage error. Fresh Windows keyring-shaped probe returned CredWriteW error 8 and same/cross-process read error 1168. Neither requested named account was successfully created/logged in; pages 02–22 remain BLOCKED_ENV. No business success records fabricated.
+- BLOCKER: exact RC header lacks username and explicit country and hardcodes avatar 张. The requested header identity/context cannot be met without a separately scoped product change; none made.
+- DEFERRED: working authorized Windows vault, legal named-account/Bethel2 initialization and linked XOF workflow screenshots. No formal purchase-document generation entry found (23 NOT_IMPLEMENTED). No Toolbox window available (24 BLOCKED_ENV); no installation/registry changes attempted.
+- WARNING: screenshot proves launch/CAPTCHA presentation only. Release/security/Formal gates stay open. npm ci reported existing dependency audit warnings; dependencies/lockfile unchanged.
+- Checks: applicable documentation formatting, reference/status consistency, original image dimensions and archive integrity. Full QA, package tests/build, PostgreSQL/COS and business E2E skipped for this evidence-only attempt; login/approval/receipt/payment/attachment acceptance remains unproven because initialization failed. No migration or sync change.
+- Isolation: incomplete `.test.sqlite`, WebView data and runtime scripts retained under `E:/Honsen-build/V1-Demo-Runtime`; private data excluded from ZIP. Original dirty worktree and other agents' worktrees untouched. No production access, push, PR, merge, release or deployment. Worktree is intended clean after the local documentation checkpoint.
+
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
 ## Main controller — frozen multi-agent RC source — 2026-10-25
