@@ -1,5 +1,7 @@
 # Roadmap and Development Tasks
 
+RC stabilization on 2026-10-25 reproduced a T15 installer P1 on fixed `f4756af` in a fresh Sandbox: directory split despite setup exit0, followed by failed Runner launch. The bounded NSIS adapter/default-initialization contract repair awaits approval; no milestone is closed. [Gap list and exact evidence](reviews/RC-STABILIZATION-TOOLBOX-APPROVAL-20261025.md) preserves remaining release gates.
+
 The 2026-10-25 Agent C correction keeps optional COS disabled in the deployment template until configured. Release regressions passed 4/4; independent recheck and original M4/T14/T15 live gates remain open. Pending legacy `www` service/manual changes are excluded; RC protected controller remains authoritative. See `memory.md` for source and preserved dirty paths.
 
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.

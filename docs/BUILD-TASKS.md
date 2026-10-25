@@ -1,5 +1,9 @@
 # Build Tasks: Zero to Production
 
+## 2026-10-25 RC stabilization: T15 installation defect confirmed
+
+Frozen `f4756af` setup actually failed Unicode/space target installation in a fresh eligible Sandbox: setup exit0 but files versus registration/uninstaller split; standard Runner launch failed. This is exact-candidate failure evidence, not a parent-gate closure. [Bounded NSIS adapter and initialization approval request](reviews/RC-STABILIZATION-TOOLBOX-APPROVAL-20261025.md) remains pending before conflicting code changes. Original IDs, dependencies and checkboxes are unchanged; see `memory.md` for raw evidence and preserved dirty files.
+
 ## 2026-10-25 Agent C bounded deployment-template correction
 
 T15/T11 deployment template leaves optional COS commented until explicitly configured together. Release regressions passed 4/4 on Node.js 24.18.0; no runtime, migration or UI change. Original checkboxes and dependencies remain unchanged. RC `700387b` supplies the protected service/controller; pending legacy manual/service changes are excluded. See `memory.md` for source and preserved dirty paths. This is builder evidence awaiting main-agent independent recheck, not T15 acceptance.
