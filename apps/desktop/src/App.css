@@ -60,10 +60,11 @@
 .topbar {
   min-height: 70px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 0 30px;
+  padding: 12px 30px;
   background: white;
   border-bottom: 1px solid #dce9e2;
 }
@@ -79,19 +80,52 @@
 }
 .identity {
   display: flex;
+  flex: 1 1 32rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 10px;
   color: #476359;
   font-size: 13px;
 }
 .identity select {
-  max-width: min(36vw, 26rem);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 2.25rem;
   border: 1px solid #a9c2b4;
   border-radius: 0.4rem;
   padding: 0.25rem 0.5rem;
   background: white;
   color: #183d2c;
+}
+.authorization-context {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 15rem;
+  min-width: 0;
+  max-width: 26rem;
+}
+.authorization-summary,
+.sync-status,
+.account-label {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.sync-status {
+  flex: 1 1 12rem;
+}
+.account-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.account-label {
+  max-width: 14rem;
 }
 .sr-only {
   position: absolute;
@@ -143,6 +177,7 @@
   place-items: center;
   width: 34px;
   height: 34px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: #d7f0e5;
   color: #176045;
@@ -626,7 +661,8 @@
     align-items: start;
     flex-direction: column;
   }
-  .identity span {
-    display: none;
+  .identity {
+    flex-basis: 100%;
+    justify-content: flex-start;
   }
 }

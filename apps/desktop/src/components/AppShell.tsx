@@ -18,6 +18,8 @@ export type AppPage =
   | 'authorization'
 
 export type AuthorizationContextOption = {
+  countryId: string
+  countryName: string
   projectId: string
   projectName: string
   site: string
@@ -31,10 +33,15 @@ type AppShellProps = PropsWithChildren<{
   page: AppPage
   pageTitle: string
   role: UserRole
+  username?: string
   onNavigate: (page: AppPage) => void
   onLock?: () => void
   syncState?: SyncState
   authorizationContexts?: AuthorizationContextOption[]
+  authorizationContext?: Pick<
+    AuthorizationContextOption,
+    'countryName' | 'projectName'
+  >
   selectedAuthorizationContext?: string
   onSelectAuthorizationContext?: (value: string) => void
 }>
@@ -42,7 +49,7 @@ type AppShellProps = PropsWithChildren<{
 const roleLabel: Record<UserRole, string> = {
   engineer: '工程师',
   purchaser: '采购员',
-  administrator: '管理员',
+  administrator: '审批管理员',
   viewer: '查看者',
   super_administrator: '超级管理员',
 }
@@ -52,13 +59,19 @@ export function AppShell({
   page,
   pageTitle,
   role,
+  username,
   onNavigate,
   onLock,
   syncState,
   authorizationContexts,
+  authorizationContext,
   selectedAuthorizationContext,
   onSelectAuthorizationContext,
 }: AppShellProps) {
+  const userLabel = username?.trim() || '界面预览'
+  const scopeLabel = authorizationContext
+    ? `${authorizationContext.countryName?.trim() || '国家名称未同步'} / ${authorizationContext.projectName}`
+    : '未选择授权范围'
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="主导航">
@@ -141,33 +154,45 @@ export function AppShell({
             <h1>{pageTitle}</h1>
           </div>
           <div className="identity">
-            {authorizationContexts && authorizationContexts.length > 0 && (
-              <label>
-                <span className="sr-only">当前授权范围</span>
-                <select
-                  aria-label="当前授权范围"
-                  value={selectedAuthorizationContext}
-                  onChange={(event) =>
-                    onSelectAuthorizationContext?.(event.target.value)
-                  }
-                >
-                  {authorizationContexts.map((context) => {
-                    const value = [
-                      context.projectId,
-                      context.departmentId,
-                      context.teamId,
-                    ].join(':')
-                    return (
-                      <option key={value} value={value}>
-                        {context.projectName} · {context.site} ·{' '}
-                        {context.departmentName} · {context.teamName}
-                      </option>
-                    )
-                  })}
-                </select>
-              </label>
-            )}
-            <span role="status" aria-label="同步状态">
+            <div className="authorization-context">
+              <span
+                className="authorization-summary"
+                aria-label="当前国家及项目"
+                title={scopeLabel}
+              >
+                {scopeLabel}
+              </span>
+              {authorizationContexts && authorizationContexts.length > 0 && (
+                <label>
+                  <span className="sr-only">当前授权范围</span>
+                  <select
+                    aria-label="当前授权范围"
+                    value={selectedAuthorizationContext}
+                    onChange={(event) =>
+                      onSelectAuthorizationContext?.(event.target.value)
+                    }
+                  >
+                    {authorizationContexts.map((context) => {
+                      const value = [
+                        context.projectId,
+                        context.departmentId,
+                        context.teamId,
+                      ].join(':')
+                      return (
+                        <option key={value} value={value}>
+                          {context.countryName
+                            ? `${context.countryName} / `
+                            : ''}
+                          {context.projectName} · {context.site} ·{' '}
+                          {context.departmentName} · {context.teamName}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </label>
+              )}
+            </div>
+            <span className="sync-status" role="status" aria-label="同步状态">
               {syncState?.kind === 'syncing'
                 ? '同步中'
                 : syncState?.kind === 'synced'
@@ -198,8 +223,18 @@ export function AppShell({
                 ? ` · 上次拉取成功 ${new Date(syncState.lastSuccessAt * 1000).toLocaleString()}`
                 : ''}
             </span>
-            <span className="avatar">张</span>
-            <span>{roleLabel[role]}</span>
+            <span
+              className="account-identity"
+              aria-label="当前登录用户"
+              title={`${userLabel} · ${roleLabel[role]}`}
+            >
+              <span className="avatar" aria-hidden="true">
+                {Array.from(userLabel)[0]?.toLocaleUpperCase()}
+              </span>
+              <span className="account-label">
+                {userLabel} · {roleLabel[role]}
+              </span>
+            </span>
             {onLock && (
               <button type="button" onClick={onLock}>
                 锁定

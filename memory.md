@@ -4,6 +4,37 @@
 
 **Purpose:** persistent engineering handoff. Update this file at the end of every completed task, bug fix, migration or architecture decision. Record facts and test evidence only; never write passwords, tokens, connection strings, supplier contacts or production data.
 
+## RC follow-up — login identity and country/project header — 2026-10-25
+
+- User-selected confirmed presentation defect only, branch
+  `codex/rc-login-context-display` from `710edd7`; the containing application
+  checkpoint is the recovery SHA. Frozen source/remote RC `f4756af` remains
+  fixed. [Scope and checks](docs/reviews/RC-HEADER-IDENTITY-20261025.md).
+- AppShell receives actual Session username (no displayName exists), derives
+  avatar and displays role; no production employee names are hardcoded.
+  CountryName is an additive read-only projection from the selected authorized
+  project's country. Existing role/WHERE/expiry/selection/row-set behavior,
+  business schema, server grants and Outbox are unchanged. Header wraps instead
+  of hiding identity. Request epochs prevent old-account context callbacks.
+- Fresh targeted evidence: new header DOM2 RED→GREEN; together with original
+  context/binding routes DOM4/4; desktop unit16/16, lint/types/build and relevant
+  formatting passed. Necessary Rust authorization-context country projection
+  RED(Null)→GREEN1/1 also proves ungranted selection denial and expiry. No broad
+  Rust/server/PG/payment/COS suite was manually rerun. Existing warnings remain.
+  C's independent static review found no P0/P1; final hash confirmation pending.
+- Native screenshots remain pending a committed-source EXE; the clean Sandbox
+  and actual fixture login/CDP path are ready. Synthetic browser responses use
+  requested names only for tests, not production identity. Native capture will
+  use the existing fixture accounts honestly, without production-account edits,
+  mock IPC or DOM changes. **BLOCKER for this requested final delivery:** native
+  capture until executed. **BLOCKER for V1:** NSIS split-install/protected
+  Toolbox contract, original native/online/COS/formal/export/localization/backup
+  gates. **DEFERRED:** A/B/C stabilization handoffs and next RC integration.
+  **WARNING:** existing lint/bundle warnings. Retained unrelated dirty path:
+  untracked `docs/planning/RC-STABILIZATION-TOOLBOX-APPROVAL.md`, excluded from
+  the UI commit; all other worktrees preserved. No main/PR merge, Release or
+  production access/deployment. Commit/push explicitly authorized by user.
+
 ## Main controller final delivery — 2026-10-25
 
 - **CANDIDATE_BUILT / RELEASE_BLOCKED**, no `V1_RELEASE_CANDIDATE_READY` claim.

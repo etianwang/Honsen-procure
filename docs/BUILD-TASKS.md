@@ -1,5 +1,11 @@
 # Build Tasks: Zero to Production
 
+2026-10-25 T13 bounded header defect: actual Session username/avatar/role and
+trusted authorized country/project names now render in the production shell,
+including account-switch stale-response rejection and narrow layouts. Targeted
+DOM4/4, desktop16/16 and necessary Rust context1/1 pass; native capture remains
+pending. No permission/schema change or parent closure. [Evidence](reviews/RC-HEADER-IDENTITY-20261025.md).
+
 2026-10-25 final T15 candidate evidence: frozen `f4756af` has exact-SHA hosted
 quality PASS (run40191375930), Windows0.1.2 installer and traceable Linux API
 archive with verified hashes. Three real-COS opt-in tests remain skipped and a

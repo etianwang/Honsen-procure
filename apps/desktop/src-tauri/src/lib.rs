@@ -74,6 +74,7 @@ pub struct AuthenticatedSession {
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationContextView {
     pub country_id: Uuid,
+    pub country_name: String,
     pub project_id: Uuid,
     pub project_name: String,
     pub site: String,
@@ -7028,9 +7029,10 @@ impl LocalAuthService {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let account_id = Self::catalog_account_on_connection(&connection, now)?;
         connection.query_row(
-            "SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair
+            "SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair, COALESCE(c.name, '')
              FROM local_authorization_snapshots a
              JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL
+             LEFT JOIN local_countries c ON c.id = p.country_id
              JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL
              JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL
              LEFT JOIN local_selected_authorization_contexts s ON s.account_id = a.account_id AND s.project_id = a.project_id AND s.department_id = a.department_id AND s.team_id = a.team_id
@@ -7039,6 +7041,7 @@ impl LocalAuthService {
             params![account_id.to_string(), unix_seconds(now)],
             |row| Ok(AuthorizationContextView {
                 country_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                country_name: row.get(11)?,
                 project_id: Uuid::parse_str(&row.get::<_, String>(1)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
                 project_name: row.get(2)?,
                 site: row.get(3)?,
@@ -7059,12 +7062,13 @@ impl LocalAuthService {
     ) -> Result<Vec<AuthorizationContextView>, AuthError> {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let account_id = Self::catalog_account_on_connection(&connection, now)?;
-        let mut statement = connection.prepare("SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 ORDER BY p.name, d.name, t.name").map_err(|_| AuthError::Database)?;
+        let mut statement = connection.prepare("SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair, COALESCE(c.name, '') FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL LEFT JOIN local_countries c ON c.id = p.country_id JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 ORDER BY p.name, d.name, t.name").map_err(|_| AuthError::Database)?;
         statement
             .query_map(params![account_id.to_string(), unix_seconds(now)], |row| {
                 Ok(AuthorizationContextView {
                     country_id: Uuid::parse_str(&row.get::<_, String>(0)?)
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    country_name: row.get(11)?,
                     project_id: Uuid::parse_str(&row.get::<_, String>(1)?)
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
                     project_name: row.get(2)?,
@@ -13455,11 +13459,17 @@ mod tests {
         let context = service.authorization_context(now).unwrap();
         assert_eq!(context.project_id, project_id);
         assert_eq!(context.country_id, country_id);
+        assert_eq!(
+            serde_json::to_value(&context).unwrap()["countryName"],
+            "authorization country"
+        );
         assert_eq!(context.site, "authorized site");
         assert_eq!(context.department_id, department_id);
         assert_eq!(context.team_id, team_id);
         let second_project_id = Uuid::new_v4();
-        service.connection.lock().unwrap().execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, 'AUTH-SECOND', 'second project', 'second site', 'authorization department', 'XOF', 'zh_fr', 1, 1)", params![second_project_id.to_string(), country_id.to_string()]).unwrap();
+        let second_country_id = Uuid::new_v4();
+        service.connection.lock().unwrap().execute("INSERT INTO local_countries (id, business_code, name, time_zone, is_active, version) VALUES (?1, 'AUTH-CM', 'second authorization country', 'Africa/Douala', 1, 1)", [second_country_id.to_string()]).unwrap();
+        service.connection.lock().unwrap().execute("INSERT INTO local_projects (id, country_id, business_code, name, site, department_name, default_currency, default_language_pair, is_active, version) VALUES (?1, ?2, 'AUTH-SECOND', 'second project', 'second site', 'authorization department', 'XOF', 'zh_fr', 1, 1)", params![second_project_id.to_string(), second_country_id.to_string()]).unwrap();
         grant_test_scope(
             &service,
             account.id,
@@ -13469,6 +13479,15 @@ mod tests {
             now,
         );
         assert_eq!(service.list_authorization_contexts(now).unwrap().len(), 2);
+        assert!(
+            service
+                .list_authorization_contexts(now)
+                .unwrap()
+                .iter()
+                .any(|row| row.project_id == second_project_id
+                    && serde_json::to_value(row).unwrap()["countryName"]
+                        == "second authorization country")
+        );
         service
             .select_authorization_context(
                 AuthorizationContextSelectionInput {
@@ -13482,6 +13501,10 @@ mod tests {
         assert_eq!(
             service.authorization_context(now).unwrap().project_id,
             second_project_id
+        );
+        assert_eq!(
+            serde_json::to_value(service.authorization_context(now).unwrap()).unwrap()["countryName"],
+            "second authorization country"
         );
         assert_eq!(
             service.select_authorization_context(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   readSyncStatus,
   startSyncLifecycle,
@@ -45,6 +45,9 @@ import { tauriWorkflowApi, type WorkflowApi } from './lib/workflow-api'
 import type { UserRole } from './lib/permissions'
 import { startProcurementSync, syncProcurement } from './lib/procurement-sync'
 import './App.css'
+
+type AuthorizedRequisitionContext = RequisitionContext &
+  Pick<AuthorizationContextOption, 'countryName' | 'projectName'>
 
 const previewRequisitionContext: RequisitionContext = {
   displayNo: 'FIXTURE-REQUISITION-0001',
@@ -199,10 +202,11 @@ function App() {
     kind: 'offline-pending',
   })
   const [authorizationContext, setAuthorizationContext] =
-    useState<RequisitionContext | null>(null)
+    useState<AuthorizedRequisitionContext | null>(null)
   const [authorizationContexts, setAuthorizationContexts] = useState<
     AuthorizationContextOption[]
   >([])
+  const authorizationRequest = useRef(0)
   const [contextError, setContextError] = useState('')
   const authorizationRefreshReady =
     session?.onlineAuthenticated &&
@@ -246,6 +250,7 @@ function App() {
     }
   }, [session])
   useEffect(() => {
+    const request = ++authorizationRequest.current
     if (!session) {
       setAuthorizationContext(null)
       return
@@ -261,7 +266,7 @@ function App() {
       invoke<AuthorizationContextOption[]>('list_authorization_contexts'),
       invoke<
         Omit<
-          RequisitionContext,
+          AuthorizedRequisitionContext,
           | 'displayNo'
           | 'applicantId'
           | 'urgency'
@@ -274,7 +279,7 @@ function App() {
       >('get_authorization_context'),
     ])
       .then(([contexts, context]) => {
-        if (!active) return
+        if (!active || request !== authorizationRequest.current) return
         setAuthorizationContexts(contexts)
         setAuthorizationContext({
           ...context,
@@ -290,7 +295,7 @@ function App() {
         setContextError('')
       })
       .catch(() => {
-        if (!active) return
+        if (!active || request !== authorizationRequest.current) return
         setAuthorizationContexts([])
         setAuthorizationContext(null)
         setContextError('当前账户没有有效的离线授权范围，无法新建采购申请。')
@@ -313,25 +318,29 @@ function App() {
       }
     ).__TAURI__?.core?.invoke
     if (!invoke || !projectId || !departmentId || !teamId || !session) return
+    const request = ++authorizationRequest.current
     void invoke<void>('select_authorization_context', {
       selection: { projectId, departmentId, teamId },
     })
       .then(() =>
-        invoke<
-          Omit<
-            RequisitionContext,
-            | 'displayNo'
-            | 'applicantId'
-            | 'urgency'
-            | 'urgencyReason'
-            | 'orderDate'
-            | 'deliveryAddress'
-            | 'expectedDeliveryDate'
-            | 'notes'
-          >
-        >('get_authorization_context'),
+        request === authorizationRequest.current
+          ? invoke<
+              Omit<
+                AuthorizedRequisitionContext,
+                | 'displayNo'
+                | 'applicantId'
+                | 'urgency'
+                | 'urgencyReason'
+                | 'orderDate'
+                | 'deliveryAddress'
+                | 'expectedDeliveryDate'
+                | 'notes'
+              >
+            >('get_authorization_context')
+          : null,
       )
       .then((context) => {
+        if (!context || request !== authorizationRequest.current) return
         setAuthorizationContext({
           ...context,
           displayNo: `REQ-${crypto.randomUUID()}`,
@@ -345,7 +354,10 @@ function App() {
         })
         setContextError('')
       })
-      .catch(() => setContextError('无法切换到所选授权范围。'))
+      .catch(() => {
+        if (request === authorizationRequest.current)
+          setContextError('无法切换到所选授权范围。')
+      })
   }
   const role: UserRole = session?.roles.includes('super_administrator')
     ? 'super_administrator'
@@ -416,8 +428,12 @@ function App() {
                         : '基础资料管理'
           }
           role={session ? role : 'purchaser'}
+          username={session?.username}
           onNavigate={setPage}
           authorizationContexts={session ? authorizationContexts : undefined}
+          authorizationContext={
+            session ? (authorizationContext ?? undefined) : undefined
+          }
           selectedAuthorizationContext={
             authorizationContext
               ? [
@@ -432,6 +448,7 @@ function App() {
           onLock={
             session
               ? () => {
+                  authorizationRequest.current += 1
                   const invoke = (
                     window as Window & {
                       __TAURI__?: {
@@ -555,6 +572,7 @@ function App() {
       ) : (
         <LoginPage
           onLogin={(authenticated, mode) => {
+            authorizationRequest.current += 1
             setAuthorizationContexts([])
             setAuthorizationContext(null)
             setSyncState({
