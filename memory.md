@@ -371,3 +371,25 @@ Build shared contracts and exact money/quantity helpers only:
 3. Add unit tests for XOF/CNY/USD/EUR formatting, quantity parsing and half-up rounding.
 4. Add a development-only currency preview used by a Playwright DOM click/select test.
 5. Before marking T01 done, run every quality gate and record exact commands/results in this file.
+
+## 2026-11-04 WSL2 环境恢复检查点
+
+- 分支：codex/wsl2-environment-recovery，基于本次 fetch 的 origin/main；检查点为该分支本次 docs 提交（可用 git log -1 定位）。
+- HANDOVER_FREEZE 保持；完整证据统一记录 docs/WINDOWS11-DEV-ENV-STATUS.md。
+- PASS：Ubuntu 24.04/WSL2、systemd、代理 GitHub HTTP 200、H 盘源码访问。
+- BLOCKER：rootroot uid=1000；sudo -n true 要求密码，系统安装不能继续；下一步为本机安全交互授权，不采集密码、不绕过 sudo。
+- 未执行 Docker/PG16/迁移/同步/受限角色测试，因 Docker 未安装；上述环境及数据库验收均未完成。
+- WARNING：既有未跟踪 .cache/ 保留；无业务、schema、迁移或数据变更。DEFERRED：授权后继续安装和全部验收。
+- 本次仅文档检查点，无受影响应用包；应用 lint/typecheck/build/unit 未运行，不提供应用或环境完整验收证明。
+
+## 2026-11-04 管理员环境恢复后续
+
+此前 sudo 阻塞已由用户更改默认 root 环境解除，实际核实 root/0、Windows 管理员 True。Docker/Compose/Buildx 安装成功；PostgreSQL16.15 事务探针与受限角色验证通过；3 个 PG 定向文件 5 测试、同步 API/service 11 测试、Rust SQLite/Tauri 19 测试、shared16 测试通过。lint/typecheck/桌面前端 build 通过（现有警告）。Compose 已 down --volumes 清理。
+
+准确证据统一在 docs/WINDOWS11-DEV-ENV-STATUS.md。BLOCKER：Sandbox 实际启动未验证，默认 Windows Node 仍26（已校验的24在.cache供显式使用），Ubuntu更新会话99826尚未确认结束。tauri info会话77508已输出环境成功，需取最终退出状态。WARNING：npm审计3漏洞、已有.cache未跟踪保留。DEFERRED：不修改冻结业务。检查点未提交（Git身份缺失）；dirty为本报告、memory.md及既有.cache，.env.test被忽略且不得提交。无业务/schema/生产数据变更。
+
+## 2026-11-04 FINALIZATION 主目录收敛
+
+Windows环境已验收READY，最新证据见WINDOWS11-DEV-ENV-STATUS.md；此前sudo/Node/更新/Sandbox阻塞已解除。另worktree的Codex环境报告已安全复制到主目录，原worktree未提交memory增量记录的CODEX_ENV_BLOCKED历史亦保留，原目录未清理。持久角色配置.codex/已写入，新CLI可调度三角色，Node/browser工具失败仍属BLOCKER；桌面全新验证chat01a1a373-03c2-7ea1-b06f-cb89d7e6e94a待结果。Git身份用户已确认。用户已授权commit+push本任务分支，禁止合并/发布。WARNING：.cache未跟踪保留、测试.env.test忽略；无业务/schema/生产数据影响。
+
+最终检查点：WINDOWS11_DEV_ENV_READY；CODEX_ENV_READY（桌面新会话）。桌面新chat01a1a373-03c2-7ea1-b06f-cb89d7e6e94a真实完成角色重载、三个子Agent、GitHub查询、Node REPL=2、浏览器about:blank。WARNING：独立CLI read-only的helper/kernel问题保留；如改用CLI无人值守才需修复，不绕过隔离。DEFERRED：任何业务/RC/发布继续freeze。本任务文件仅两份报告、memory和.codex角色配置。另worktree全部未提交文件原样保留；.cache使用本地info/exclude忽略，.env.test仍忽略，无秘密提交。检查点为本分支本轮finalization提交（git log -1准确定位）；已获用户push授权，远端SHA由推送后ls-remote核对。无业务/schema/migration/data影响。格式与diff检查通过，未重跑已通过全套业务测试；不影响本轮配置验收。
