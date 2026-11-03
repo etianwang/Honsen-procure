@@ -798,3 +798,7 @@ Build shared contracts and exact money/quantity helpers only:
 - BLOCKER: unified RC integration and actual Windows/Toolbox/native cross-client/Linux acceptance remain open. PR #19 `98537d2` is Draft with hosted CI success and native credential-storage environment failure.
 - DEFERRED: production deployment, PR merge and formal Release are not authorized.
 - WARNING: npm ci reported 1 low, 1 moderate and 1 high dependency advisory; no automatic dependency/lockfile rewrite. This checkpoint contains only formatting and this handoff.
+
+## 2026-11-04 V1恢复执行检查点
+
+用户解除冻结，授权Commit+Push，不授权merge/release/生产。当前codex/v1-resume-20261104基于f4756af；三真实Agent完成凭据及Linux静态校验和HPA基线核对。状态入口docs/V1交接进度表.md保留原要求并追加鲜测证据。BLOCKER：统一RC缺HPA实现，需审查集成a2b73ae9及a869a526；安装P1有限合同修复待批准。DEFERRED：真实双端付款/COS/HPA、完整三语/导出、生产恢复。WARNING：凭据探针不替代在线登录业务验收，Linux静态3/3不替代恢复。无schema/迁移/业务修改，无生产连接。只新增记录；检查点见本分支最新commit，提交后无选定任务脏文件。跳过HPA native因RC缺trusted命令，直接影响该原生验收；付款链因本轮仅验证最小凭据边界未执行。不得标父任务完成。
