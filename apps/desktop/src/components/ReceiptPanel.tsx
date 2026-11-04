@@ -1,5 +1,7 @@
 import { Alert, Button, Card, Input } from 'antd'
 import { useState } from 'react'
+import { useUiLocale } from '../lib/ui-locale'
+import { receiptText, type ReceiptMessage } from '../lib/receipt-messages'
 import type { ReceiptApi } from '../lib/receipt-api'
 
 type ReceiptLine = {
@@ -28,6 +30,8 @@ export function ReceiptPanel({
   initialStatus,
   onChanged,
 }: ReceiptPanelProps) {
+  const { locale } = useUiLocale()
+  const t = (key: ReceiptMessage) => receiptText(locale, key)
   const [quantities, setQuantities] = useState(() =>
     Object.fromEntries(lines.map((line) => [line.id, ''])),
   )
@@ -40,7 +44,8 @@ export function ReceiptPanel({
         ? '收货中'
         : '已发送供应商',
   )
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<ReceiptMessage | null>(null)
+  const [receivedCount, setReceivedCount] = useState(0)
 
   async function record() {
     const items = lines
@@ -71,7 +76,8 @@ export function ReceiptPanel({
             ? '收货中'
             : '已发送供应商',
       )
-      setMessage(`收货已登记，共 ${receipt.receivedItemCount} 条明细。`)
+      setReceivedCount(receipt.receivedItemCount)
+      setMessage('收货已登记，共 {count} 条明细。')
       onChanged?.()
     } catch {
       setMessage('收货失败：超收必须填写原因，且订单必须处于可收货状态。')
@@ -94,19 +100,28 @@ export function ReceiptPanel({
   }
 
   return (
-    <Card className="card" title="收货登记">
+    <Card className="card" title={t('收货登记')}>
       <p>
-        当前状态：<strong aria-label="收货状态">{status}</strong>
+        {t('当前状态')}：
+        <strong aria-label={t('收货状态')}>
+          {t(status as ReceiptMessage)}
+        </strong>
       </p>
-      {message ? <Alert title={message} type="info" showIcon /> : null}
-      <div className="requisition-lines" aria-label="收货明细">
+      {message ? (
+        <Alert
+          title={t(message).replace('{count}', String(receivedCount))}
+          type="info"
+          showIcon
+        />
+      ) : null}
+      <div className="requisition-lines" aria-label={t('收货明细')}>
         {lines.map((line) => (
           <label className="requisition-line" key={line.id}>
-            {line.materialName} · 订购 {line.orderedQuantity} {line.unit} ·
-            累计实收 {line.receivedQuantity} {line.unit} · 待收{' '}
+            {line.materialName} · {t('订购')} {line.orderedQuantity} {line.unit}{' '}
+            ·{t('累计实收')} {line.receivedQuantity} {line.unit} · {t('待收')}{' '}
             {line.remainingQuantity} {line.unit}
             <Input
-              aria-label={`${line.materialName} 实收数量`}
+              aria-label={`${line.materialName} ${t('实收数量')}`}
               inputMode="decimal"
               value={quantities[line.id]}
               onChange={(event) =>
@@ -120,27 +135,27 @@ export function ReceiptPanel({
         ))}
       </div>
       <label>
-        超收原因
+        {t('超收原因')}
         <Input
-          aria-label="超收原因"
+          aria-label={t('超收原因')}
           value={overReason}
           onChange={(event) => setOverReason(event.target.value)}
         />
       </label>
       <Button type="primary" onClick={() => void record()}>
-        登记收货
+        {t('登记收货')}
       </Button>
       <hr />
       <label>
-        有条件完成原因
+        {t('有条件完成原因')}
         <Input
-          aria-label="有条件完成原因"
+          aria-label={t('有条件完成原因')}
           value={closeReason}
           onChange={(event) => setCloseReason(event.target.value)}
         />
       </label>
       <Button onClick={() => void closeWithConditions()}>
-        按有条件完成关闭
+        {t('按有条件完成关闭')}
       </Button>
     </Card>
   )
