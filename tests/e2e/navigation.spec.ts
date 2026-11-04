@@ -319,6 +319,17 @@ test('regular requisition page completes owner pricing rejection and resubmissio
   await expect(
     page.getByText(/换算参考价：944 · 加价：.*1000.*最终价格：1038/),
   ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByText(/Final price:1038/)).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Internal pricing details' }),
+  ).not.toContainText('最终价格')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.getByText(/Prix final :1038/)).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Détails internes des prix' }),
+  ).not.toContainText('最终价格')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
   await page.getByLabel('驳回原因').fill('请调整加价。')
   await page.getByRole('button', { name: '驳回订单' }).click()
   await expect(
@@ -2278,6 +2289,29 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     '待确认',
   )
+  await page.getByLabel('驳回原因').fill('Synthetic retained reason')
+  await page.getByLabel('留言（支持 @某人）').fill('Synthetic retained comment')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByLabel('Rejection reason')).toHaveValue(
+    'Synthetic retained reason',
+  )
+  await expect(page.getByLabel('Comment (supports @mentions)')).toHaveValue(
+    'Synthetic retained comment',
+  )
+  await expect(
+    page.getByRole('button', { name: 'Confirm order', exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.getByLabel('Motif du rejet')).toHaveValue(
+    'Synthetic retained reason',
+  )
+  await expect(
+    page.getByLabel('Commentaire (mentions @ prises en charge)'),
+  ).toHaveValue('Synthetic retained comment')
+  await expect(
+    page.getByRole('button', { name: 'Confirmer la commande', exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
   await page.getByRole('button', { name: '确认订单' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     '已批准',
@@ -2348,7 +2382,7 @@ test('authenticated desktop switches between cached authorization scopes', async
   await page.getByRole('button', { name: '查看详情：REQ-HISTORY-1' }).click()
   await page.getByRole('button', { name: '撤回历史申请' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
-    'draft',
+    '草稿',
   )
   await page.getByLabel('搜索单号、项目或工地').fill('不存在')
   await page.getByRole('button', { name: '筛选' }).click()

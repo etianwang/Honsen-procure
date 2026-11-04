@@ -1,3 +1,9 @@
+import { useUiLocale, type UiLocale } from '../lib/ui-locale'
+import {
+  workflowText,
+  commentSentText,
+  type WorkflowMessage,
+} from '../lib/workflow-messages'
 import { Alert, Button, Card, Input, Space } from 'antd'
 import { Check, MessageSquare, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -24,12 +30,14 @@ export function OrderWorkflowPanel({
   onChanged,
   onRejected,
 }: OrderWorkflowPanelProps) {
+  const { locale } = useUiLocale()
+  const t = (key: WorkflowMessage) => workflowText(locale, key)
   const [status, setStatus] = useState(workflowStatus)
   const [reason, setReason] = useState('')
   const [comment, setComment] = useState('')
   const [comments, setComments] = useState<OrderCommentView[]>([])
   const [audits, setAudits] = useState<OrderAuditView[]>([])
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<WorkflowMessage | number | null>(null)
 
   useEffect(() => {
     api
@@ -75,29 +83,50 @@ export function OrderWorkflowPanel({
       const saved = await api.addOrderComment(orderId, comment.trim())
       setComments((current) => [...current, saved])
       setComment('')
-      setMessage(
-        `评论已发送，已通知 ${saved.notificationCount} 位被提及成员；发送后不可编辑或删除。`,
-      )
+      setMessage(saved.notificationCount)
     } catch {
       setMessage('评论发送失败。')
     }
   }
 
   return (
-    <Card className="card" title="审批与内部留言">
+    <Card className="card" title={t('审批与内部留言')}>
       <p>
-        当前状态：{' '}
-        <strong aria-label="审批状态">
+        {t('当前状态：')}{' '}
+        <strong aria-label={t('审批状态')}>
           {status === 'pending_confirmation'
-            ? '待确认'
+            ? t('待确认')
             : status === 'confirmed'
-              ? '已确认'
+              ? t('已确认')
               : status === 'rejected'
-                ? '已驳回'
-                : status}
+                ? t('已驳回')
+                : t(
+                    (
+                      {
+                        draft: '草稿',
+                        approved: '已批准',
+                        formally_issued: '已正式签发',
+                        executing: '执行中',
+                        receiving: '收货中',
+                        completed: '已完成',
+                        completed_with_conditions: '有条件完成',
+                        cancelled: '已取消',
+                      } as Record<string, WorkflowMessage>
+                    )[status] ?? '未知状态',
+                  )}
         </strong>
       </p>
-      {message ? <Alert title={message} type="info" showIcon /> : null}
+      {message !== null ? (
+        <Alert
+          title={
+            typeof message === 'number'
+              ? commentSentText(locale, message)
+              : t(message)
+          }
+          type="info"
+          showIcon
+        />
+      ) : null}
       {canApprove && status === 'pending_confirmation' ? (
         <Space className="workflow-actions" wrap>
           <Button
@@ -105,28 +134,31 @@ export function OrderWorkflowPanel({
             icon={<Check size={16} />}
             onClick={() => void confirm()}
           >
-            确认订单
+            {t('确认订单')}
           </Button>
           <Input
-            aria-label="驳回原因"
-            placeholder="填写驳回原因（必填）"
+            aria-label={t('驳回原因')}
+            placeholder={t('填写驳回原因（必填）')}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
           />
           <Button danger icon={<X size={16} />} onClick={() => void reject()}>
-            驳回订单
+            {t('驳回订单')}
           </Button>
         </Space>
       ) : null}
-      <section className="workflow-audits" aria-label="修改留痕">
-        <h3>修改留痕</h3>
+      <section className="workflow-audits" aria-label={t('修改留痕')}>
+        <h3>{t('修改留痕')}</h3>
         {audits
           .filter((item) => item.action === 'confirmed_revised')
           .map((item) => (
             <article className="workflow-audit" key={item.id}>
-              <p>修改原因：{item.reason}</p>
-              <ul aria-label="字段差异">
-                {changedFields(item.previousJson, item.nextJson).map(
+              <p>
+                {t('修改原因：')}
+                {item.reason}
+              </p>
+              <ul aria-label={t('字段差异')}>
+                {changedFields(item.previousJson, item.nextJson, locale).map(
                   (field) => (
                     <li className="workflow-change" key={field.label}>
                       <strong>{field.label}</strong>：{field.before} →{' '}
@@ -138,33 +170,45 @@ export function OrderWorkflowPanel({
             </article>
           ))}
       </section>
-      <section className="workflow-audits" aria-label="内部报价明细">
-        <h3>内部报价明细</h3>
-        {ownerPricingLines(audits).map((line) => (
+      <section className="workflow-audits" aria-label={t('内部报价明细')}>
+        <h3>{t('内部报价明细')}</h3>
+        {ownerPricingLines(audits, locale).map((line) => (
           <article className="workflow-audit" key={line.id}>
             <p>
               {line.material} ·{' '}
-              {line.source === 'manual_reference' ? '手工参考报价' : '目录报价'}
+              {line.source === 'manual_reference'
+                ? t('手工参考报价')
+                : t('目录报价')}
             </p>
             {line.source === 'manual_reference' ? (
-              <p className="owner-manual-reference">手工例外：{line.reason}</p>
+              <p className="owner-manual-reference">
+                {t('手工例外：')}
+                {line.reason}
+              </p>
             ) : null}
             {line.revisionReason !== '—' ? (
-              <p>报价修订原因：{line.revisionReason}</p>
+              <p>
+                {t('报价修订原因：')}
+                {line.revisionReason}
+              </p>
             ) : null}
             <p>
-              供应商：{line.supplier} · 原始价格：{line.sourcePrice}{' '}
-              {line.currency} · 汇率：{line.rate}
+              {t('供应商：')}
+              {line.supplier} · {t('原始价格：')}
+              {line.sourcePrice} {line.currency} · {t('汇率：')}
+              {line.rate}
             </p>
             <p>
-              换算参考价：{line.converted} · 加价：{line.markup} · 最终价格：
+              {t('换算参考价：')}
+              {line.converted} · {t('加价：')}
+              {line.markup} · {t('最终价格：')}
               {line.final}
             </p>
           </article>
         ))}
       </section>
-      <section className="workflow-comments" aria-label="内部评论">
-        <h3>内部评论</h3>
+      <section className="workflow-comments" aria-label={t('内部评论')}>
+        <h3>{t('内部评论')}</h3>
         {comments.map((item) => (
           <article className="workflow-comment" key={item.id}>
             <MessageSquare size={15} aria-hidden="true" />
@@ -172,21 +216,21 @@ export function OrderWorkflowPanel({
           </article>
         ))}
         <label>
-          留言（支持 @某人）
+          {t('留言（支持 @某人）')}
           <Input.TextArea
-            aria-label="留言（支持 @某人）"
+            aria-label={t('留言（支持 @某人）')}
             maxLength={4000}
             value={comment}
             onChange={(event) => setComment(event.target.value)}
           />
         </label>
-        <Button onClick={() => void sendComment()}>发送评论</Button>
+        <Button onClick={() => void sendComment()}>{t('发送评论')}</Button>
       </section>
     </Card>
   )
 }
 
-function ownerPricingLines(audits: OrderAuditView[]) {
+function ownerPricingLines(audits: OrderAuditView[], locale: UiLocale) {
   const audit = [...audits]
     .reverse()
     .find((item) => item.action === 'owner_pricing_saved')
@@ -202,8 +246,9 @@ function ownerPricingLines(audits: OrderAuditView[]) {
         const supplier = line.supplier as { name?: string } | undefined
         return {
           id: String(line.id),
-          material: material?.nameZh ?? '材料',
-          supplier: supplier?.name ?? '手工参考价（无供应商）',
+          material: material?.nameZh ?? workflowText(locale, '材料'),
+          supplier:
+            supplier?.name ?? workflowText(locale, '手工参考价（无供应商）'),
           source: String(line.ownerQuoteSource),
           reason: String(line.ownerManualReferenceReason ?? '—'),
           revisionReason: String(audit.reason ?? '—'),
@@ -220,7 +265,7 @@ function ownerPricingLines(audits: OrderAuditView[]) {
   }
 }
 
-const labels: Record<string, string> = {
+const labels: Record<string, WorkflowMessage> = {
   currency: '币种',
   deliveryAddress: '交付地址',
   expectedDeliveryDate: '期望到货日期',
@@ -230,7 +275,11 @@ const labels: Record<string, string> = {
   lines: '采购明细',
 }
 
-function changedFields(previousJson: string | null, nextJson: string | null) {
+function changedFields(
+  previousJson: string | null,
+  nextJson: string | null,
+  locale: UiLocale,
+) {
   try {
     const previous = JSON.parse(previousJson ?? '{}') as Record<string, unknown>
     const next = JSON.parse(nextJson ?? '{}') as Record<string, unknown>
@@ -239,16 +288,23 @@ function changedFields(previousJson: string | null, nextJson: string | null) {
         (key) => JSON.stringify(previous[key]) !== JSON.stringify(next[key]),
       )
       .map((key) => ({
-        label: labels[key],
-        before: displayValue(previous[key]),
-        after: displayValue(next[key]),
+        label: workflowText(locale, labels[key]!),
+        before: displayValue(previous[key], locale),
+        after: displayValue(next[key], locale),
       }))
   } catch {
     return []
   }
 }
 
-function displayValue(value: unknown) {
-  if (value === null || value === undefined || value === '') return '（空）'
-  return Array.isArray(value) ? `共 ${value.length} 条` : String(value)
+function displayValue(value: unknown, locale: UiLocale) {
+  if (value === null || value === undefined || value === '')
+    return workflowText(locale, '（空）')
+  return Array.isArray(value)
+    ? locale === 'zh'
+      ? '共 ' + value.length + ' 条'
+      : locale === 'en'
+        ? value.length + ' items'
+        : value.length + ' éléments'
+    : String(value)
 }
