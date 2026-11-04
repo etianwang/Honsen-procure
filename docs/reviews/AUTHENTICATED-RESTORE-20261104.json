@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "scope": "actual restored API password/CAPTCHA login and scoped SPO/payment/reversal/attachment-reference Pull; no object bytes, TLS or Windows native acceptance",
+  "loginStatus": 200,
+  "pullStatus": 200,
+  "formalNumberPreserved": true,
+  "frozenSnapshotPreserved": true,
+  "originalPaymentPreserved": true,
+  "reversalPreserved": true,
+  "netMinor": "250",
+  "attachmentReferencePreserved": true,
+  "secretsLogged": false,
+  "isolatedContainerVerified": true,
+  "expectedClusterIdsMatched": true
+}
