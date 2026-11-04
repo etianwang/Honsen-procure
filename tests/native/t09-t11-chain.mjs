@@ -293,6 +293,8 @@ async function login(app, username, offline = false) {
       cloudCaptchaAnswer: String(answer(cloud.question)),
     },
   })
+  // Seeded offline snapshots are not authoritative for a newly online account.
+  await call(app, 'refresh_authorization')
 }
 async function uiLogin(app, username) {
   await app.page.getByLabel('账号', { exact: true }).fill(username)
@@ -592,9 +594,7 @@ try {
     },
   })
   await login(a, 'purchaser-b')
-  // This account is not part of the local profile seed. Obtain its cloud-authorized
-  // scope through the real IPC/HTTPS boundary before attempting an offline write.
-  await call(a, 'refresh_authorization')
+  // Online login must have obtained this account's own cloud-authorized scope.
   assert.ok(
     readDb(
       0,
