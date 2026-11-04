@@ -32,7 +32,14 @@ Section
  FileWrite $9 "deleteDuringPublishHandle=$0 error=$1$\r$\n"
  StrCmp $0 -1 0 failed_open
  StrCmp $1 32 0 failed
+ !ifdef STALE_ERRORS
+   SetErrors
+ !endif
  Call HonsenRunnerFinish
+ !ifdef STALE_ERRORS
+   IfFileExists "$INSTDIR\.honsen-runner-inuse-$HR_LogUuid.exe" failed
+   IfFileExists "$INSTDIR\.honsen-runner-inuse-$HR_LogUuid.owner.ini" failed
+ !endif
  System::Call 'kernel32::CreateFileW(w "$HR_Target", i 0x40000000, i 7, p 0, i 3, i 0, p 0) p.r0 ?e'
  Pop $1
  FileWrite $9 "writeAfterFinishHandle=$0 error=$1$\r$\n"

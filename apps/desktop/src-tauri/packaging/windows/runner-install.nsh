@@ -429,6 +429,7 @@ FunctionEnd
 ; Only owner records are enumerated. No wildcard Delete or recursive removal.
 Function ${P}HR_CleanupRecords
   StrCpy $HR_SavedUuid $HR_Uuid
+  ClearErrors
   FindFirst $HR_Find $HR_Name "$INSTDIR\.honsen-runner-inuse-*.owner.ini"
   IfErrors hr_cleanup_done
 hr_cleanup_next:
@@ -465,6 +466,7 @@ hr_cleanup_close_owner:
 hr_cleanup_skip:
   StrCpy $HR_Phase "owner-cleanup-complete-or-retained"
   Call ${P}HR_Log
+  ClearErrors
   FindNext $HR_Find $HR_Name
   IfErrors hr_cleanup_close_find
   Goto hr_cleanup_next
