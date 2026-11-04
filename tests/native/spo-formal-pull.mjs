@@ -5,7 +5,14 @@ import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { createConnection } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  unlinkSync,
+  rmSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -289,7 +296,7 @@ async function login(app, username, password) {
 }
 async function push(app) {
   const result = await call(app, 'push_pending_sync')
-  assert.equal(result.acceptedCount, 1)
+  assert.ok(result.acceptedCount >= 1)
   assert.equal(result.pendingCount, 0)
   return result
 }
@@ -512,16 +519,21 @@ try {
   await push(issuer)
   const childrenSpo = await call(issuer, 'allocate_supplier_child_orders', {
     parentOrderId: orderId,
-    allocations: [catalogLine, manualLine].map((parentItemId) => ({
+    allocations: [catalogLine, manualLine].map((parentItemId, index) => ({
       parentItemId,
       supplierId: ids[6],
-      currency: 'XOF',
-      childDisplayNo: 'SPO-' + runId,
+      currency: index === 0 ? 'XOF' : 'CNY',
+      childDisplayNo: 'SPO-' + runId + '-' + index,
       lockedExchangeRateDecimal: '1',
     })),
   })
-  assert.equal(childrenSpo.length, 1)
-  const childId = childrenSpo[0].childOrderId
+  assert.equal(childrenSpo.length, 2)
+  const childId = childrenSpo.find(
+    (child) => child.currency === 'XOF',
+  ).childOrderId
+  const concurrentChildId = childrenSpo.find(
+    (child) => child.currency === 'CNY',
+  ).childOrderId
   report.childId = childId
   const childState = (profile) =>
     readDb(
@@ -561,6 +573,26 @@ try {
     input: {
       orderId: childId,
       lines: childLines.map((line) => ({
+        orderItemId: line.id,
+        lineDiscount: zero,
+        lineFreight: zero,
+        freightIncluded: false,
+      })),
+      orderDiscount: zero,
+      orderFreight: zero,
+      taxRateBasisPoints: 0,
+    },
+  })
+  await push(issuer)
+  const concurrentLines = readDb(
+    profiles[1],
+    'SELECT id FROM local_purchase_order_items WHERE order_id=?',
+    concurrentChildId,
+  )
+  await call(issuer, 'save_supplier_child_terms', {
+    input: {
+      orderId: concurrentChildId,
+      lines: concurrentLines.map((line) => ({
         orderItemId: line.id,
         lineDiscount: zero,
         lineFreight: zero,
@@ -630,6 +662,8 @@ try {
     1,
   )
   phase = 'spo-send'
+  const faultGate = join(root, runId + '-spo-fault.signal')
+  writeFileSync(faultGate, childId)
   await call(issuer, 'lock_session')
   await issuer.page.getByLabel('账号', { exact: true }).fill('purchaser')
   await issuer.page
@@ -655,13 +689,15 @@ try {
   await issuer.page
     .getByRole('button', { name: 'G2-' + runId, exact: true })
     .click()
-  await issuer.page
+  const childUi = issuer.page.getByRole('region', {
+    name: '供应商子订单 SPO-' + runId + '-0',
+    exact: true,
+  })
+  await childUi
     .getByRole('button', { name: '保存子单条款', exact: true })
     .click()
   await expect(issuer.page.getByText(/子单条款已保存/)).toBeVisible()
-  await issuer.page
-    .getByRole('button', { name: '发送供应商', exact: true })
-    .click()
+  await childUi.getByRole('button', { name: '发送供应商', exact: true }).click()
   await expect(issuer.page.getByText(/供应商子单已签发/)).toBeVisible()
   report.nativeUiSend = true
   const issuedRow = childState(profiles[1])
@@ -689,6 +725,47 @@ try {
   assert.equal(frozenChild.workflow_status, 'sent')
   assert.equal(frozenChild.formal_document_no, spo.formalDocumentNo)
   assert.ok(frozenChild.formal_snapshot_json)
+  const initialRace = await issuer.page.evaluate(
+    async (orderId) =>
+      Promise.allSettled([
+        window.__TAURI__.core.invoke('send_supplier_order', { orderId }),
+        window.__TAURI__.core.invoke('send_supplier_order', { orderId }),
+      ]),
+    concurrentChildId,
+  )
+  assert.equal(
+    initialRace.filter((value) => value.status === 'fulfilled').length,
+    1,
+  )
+  assert.equal(
+    initialRace.filter((value) => value.status === 'rejected').length,
+    1,
+  )
+  report.concurrentInitialSend = {
+    childId: concurrentChildId,
+    results: initialRace,
+  }
+  const failedPush = await issuer.page.evaluate(async () => {
+    try {
+      return {
+        ok: true,
+        value: await window.__TAURI__.core.invoke('push_pending_sync'),
+      }
+    } catch (error) {
+      return { ok: false, error }
+    }
+  })
+  const stillPending = readDb(
+    profiles[1],
+    'SELECT count(*) AS count FROM local_sync_outbox WHERE entity_id=? AND acknowledged_at IS NULL AND superseded_at IS NULL',
+    childId,
+  )[0].count
+  assert.ok(stillPending > 0)
+  report.serverFailureRetainedPending = {
+    result: failedPush,
+    pending: stillPending,
+  }
+  unlinkSync(faultGate)
   const spoPush = await call(issuer, 'push_pending_sync')
   assert.equal(spoPush.pendingCount, 0)
   assert.ok(spoPush.acceptedCount >= 1)
@@ -814,6 +891,7 @@ try {
   report.error = String(error.stack ?? error)
   throw error
 } finally {
+  rmSync(join(root, runId + '-spo-fault.signal'), { force: true })
   for (const browser of browsers) await browser.close().catch(() => {})
   for (const child of children.reverse()) {
     if (child.exitCode === null && child.signalCode === null) {

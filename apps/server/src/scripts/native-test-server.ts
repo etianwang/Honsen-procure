@@ -6,7 +6,8 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { createApp } from '../app.js'
 import { AuthService, hashToken } from '../auth/service.js'
@@ -514,6 +515,39 @@ nativeApp.addHook('onSend', async (request, reply, payload) => {
       pushTerminationEvidence!,
     )
     pushTerminationSnapshotRecorded = false
+  }
+  // Test-server-only fault gate; path is derived, never supplied by a renderer.
+  if (nativeTestRunId && /^native-smoke-[0-9]{14}$/u.test(nativeTestRunId)) {
+    const gate = resolve(
+      fileURLToPath(new URL('../../../../', import.meta.url)),
+      '.honsen-native-qa',
+      nativeTestRunId + '-spo-fault.signal',
+    )
+    if (existsSync(gate)) {
+      const target = readFileSync(gate, 'utf8').trim()
+      if (
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+          target,
+        ) &&
+        Array.isArray((request.body as { events?: unknown })?.events) &&
+        (request.body as { events: unknown[] }).events.some(
+          (event) =>
+            event !== null &&
+            typeof event === 'object' &&
+            'entityId' in event &&
+            event.entityId === target,
+        )
+      ) {
+        reply.code(503)
+        writeDiagnostic({
+          route: 'POST /api/sync/push',
+          serverStatus: 503,
+          injectedSpoPostCommitFault: true,
+          eventIds,
+        })
+        return JSON.stringify({ error: 'native SPO post-commit fault' })
+      }
+    }
   }
   if (
     process.env.HONSEN_PROCURE_TEST_FAIL_FIRST_PUSH_RESPONSE === '1' &&
