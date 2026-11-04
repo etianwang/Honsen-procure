@@ -1,0 +1,69 @@
+.formal-print-sheet table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.formal-print-sheet th,
+.formal-print-sheet td {
+  border: 1px solid #888;
+  padding: 6px;
+  overflow-wrap: anywhere;
+}
+
+.formal-print-sheet th:first-child {
+  width: 42%;
+}
+
+.honsen-print-root {
+  display: none;
+}
+
+@page honsen-formal {
+  size: A4 portrait;
+  margin: 15mm;
+}
+
+@media print {
+  body.honsen-printing-formal {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body.honsen-printing-formal > :not(.honsen-print-root) {
+    display: none !important;
+  }
+
+  body.honsen-printing-formal > .honsen-print-root {
+    display: block !important;
+    page: honsen-formal;
+    color: #000;
+    background: #fff;
+  }
+
+  .honsen-print-root .formal-print-sheet {
+    position: static;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    font-size: 10pt;
+    line-height: 1.35;
+  }
+
+  .honsen-print-root .formal-print-sheet > :first-child {
+    margin-top: 0;
+  }
+
+  .honsen-print-root thead {
+    display: table-header-group;
+  }
+
+  .honsen-print-root tr {
+    break-inside: avoid;
+  }
+}

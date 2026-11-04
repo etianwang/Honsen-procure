@@ -1,0 +1,34 @@
+{
+  "nativeRed": {
+    "path": ".cache/native-print-100-RED.pdf",
+    "sha256": "93addb612ac1cbb9f933312b030b21bb255096ec6f2c2b1096c05fc9d420cc9e",
+    "pageObjectCount": 4,
+    "testedApplicationSha": "100011d41383bac4a7533c388572b4ac65bb97ee",
+    "result": "FAIL",
+    "producer": "Microsoft Print To PDF (root native observation)",
+    "fixturePreparationRaw": ".honsen-native-qa/native-smoke-20261104083328-offline.test.json"
+  },
+  "implementationCheckpoint": "Containing implementation commit; exact SHA assigned by controller",
+  "builder": {
+    "desktopUnit": "27/27 PASS",
+    "typecheck": "PASS",
+    "lint": "PASS with existing warnings",
+    "build": "PASS",
+    "paginationLifecycleDom": "1/1 PASS",
+    "existingPreviewDom": "1/1 PASS"
+  },
+  "supplementalHeadless": {
+    "path": ".cache\\formal-print-pagination\\22793f86-b8f7-485b-9a5b-04c34acc736c\\selected-two-line.pdf",
+    "sha256": "f69c5667853638a1b4b0e8ea63c81999ab7178e311d6b100394d5049ddb83d4c",
+    "pageObjectCount": 1,
+    "result": "PASS",
+    "scope": "Browser component fixture, not actual native system print acceptance"
+  },
+  "fixedNativeStatus": "NOT_RUN",
+  "review": "Independent Agent C read-only diff review found no P0/P1 within this fix",
+  "limitations": [
+    "New-candidate actual native system print still required",
+    "No physical printer acceptance",
+    "No complete bilingual/long-document release gate closure"
+  ]
+}

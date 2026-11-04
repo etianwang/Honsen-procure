@@ -10,7 +10,13 @@ import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { createConnection } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -610,16 +616,50 @@ try {
         .update(row().formal_snapshot_json)
         .digest('hex'),
     })
+    if (process.env.HONSEN_PROCURE_NATIVE_PRINT_HOLD === '1') {
+      const releaseSignal = join(root, runId + '-print-release.signal')
+      const ready = {
+        mode: 'native-print-observation-only',
+        sourceSha: report.testedSha,
+        executableSha256: report.sourceExeSha256,
+        frontend: report.frontend,
+        processId: issuer.child.pid,
+        profile: profiles[index],
+        orderId,
+        childId,
+        formalDocumentNo: issue.formalDocumentNo,
+        releaseSignal,
+        screenshot: resultPath + '-device-' + index + '-preview.png',
+      }
+      writeFileSync(
+        join(root, runId + '-print-ready.test.json'),
+        JSON.stringify(ready, null, 2),
+      )
+      const deadline = Date.now() + 20 * 60 * 1000
+      while (!existsSync(releaseSignal) && Date.now() < deadline)
+        await delay(500)
+      assert.ok(
+        existsSync(releaseSignal),
+        'Native print observation hold expired',
+      )
+      report.printObservationHandedBack = true
+      await call(issuer, 'lock_session')
+      await stop(issuer)
+      break
+    }
     await call(issuer, 'lock_session')
     await stop(issuer)
   }
-  assert.notEqual(
-    report.devices[0].issue.formalDocumentNo,
-    report.devices[1].issue.formalDocumentNo,
-  )
+  if (process.env.HONSEN_PROCURE_NATIVE_PRINT_HOLD !== '1')
+    assert.notEqual(
+      report.devices[0].issue.formalDocumentNo,
+      report.devices[1].issue.formalDocumentNo,
+    )
   report.result = 'PASS'
   report.scope =
-    'Offline native IPC/independent SQLite only; no HTTPS PostgreSQL or cross-client convergence acceptance'
+    process.env.HONSEN_PROCURE_NATIVE_PRINT_HOLD === '1'
+      ? 'One fresh synthetic native preview fixture; print/PDF outcome must be independently observed, no print PASS inferred'
+      : 'Offline native IPC/independent SQLite only; no HTTPS PostgreSQL or cross-client convergence acceptance'
 } catch (error) {
   report.result = 'FAIL'
   report.failedPhase = phase

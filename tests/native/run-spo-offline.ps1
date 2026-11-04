@@ -1,9 +1,10 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$NativeExe, [Parameter(Mandatory)][string]$ProfileExe, [Parameter(Mandatory)][string]$FrontendSnapshot, [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$SourceSha)
+param([Parameter(Mandatory)][string]$NativeExe, [Parameter(Mandatory)][string]$ProfileExe, [Parameter(Mandatory)][string]$FrontendSnapshot, [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$SourceSha, [switch]$HoldForPrint)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $snapshot = (Resolve-Path -LiteralPath $FrontendSnapshot).Path
 if (!$snapshot.StartsWith((Join-Path $repo '.cache') + '\') -or !(Test-Path (Join-Path $snapshot 'index.html'))) { throw 'An isolated .cache frontend snapshot is required' }
+$env:HONSEN_PROCURE_NATIVE_PRINT_HOLD = if ($HoldForPrint) {'1'} else {'0'}
 $env:HONSEN_PROCURE_PROFILE = 'test'
 $env:HONSEN_NATIVE_WEBVIEW_TEST = 'config'
 $env:HONSEN_PROCURE_NATIVE_EXE = (Resolve-Path -LiteralPath $NativeExe).Path
