@@ -638,7 +638,12 @@ unsafe extern "system" fn dialog_proc(
         _ => 0,
     }
 }
-fn dialog(text: &str, buttons: &[(u16, &str)], default: u16) -> Result<u16, RunnerError> {
+fn dialog(
+    locale: Locale,
+    text: &str,
+    buttons: &[(u16, &str)],
+    default: u16,
+) -> Result<u16, RunnerError> {
     let mut template = Template(Vec::new());
     template.dword(WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME as u32 | DS_SETFONT as u32);
     template.dword(0);
@@ -650,7 +655,12 @@ fn dialog(text: &str, buttons: &[(u16, &str)], default: u16) -> Result<u16, Runn
     template.word(0);
     template.text("Honsen Procure");
     template.word(9);
-    template.text("Segoe UI");
+    // GDI font linking is not guaranteed in an en-US Sandbox. Select the
+    // Windows-recommended Simplified Chinese UI face for Chinese text.
+    template.text(match locale {
+        Locale::Zh => "Microsoft YaHei UI",
+        Locale::En | Locale::Fr => "Segoe UI",
+    });
     template.item(10, 12, 12, 366, 65, 0x82, text, false);
     for (index, (id, label)) in buttons.iter().enumerate() {
         let width = if buttons.len() == 3 { 116 } else { 174 };
@@ -701,6 +711,7 @@ fn choose(locale: Locale, installed: &str, new: &str) -> Result<UpdateChoice, Ru
         new
     );
     match dialog(
+        locale,
         &message,
         &[
             (
@@ -735,6 +746,7 @@ pub fn choose_update(installed: &str, new: &str) -> Result<UpdateChoice, RunnerE
 pub fn confirm_local_after_failure() -> Result<bool, RunnerError> {
     let l = locale();
     Ok(dialog(
+        l,
         localized(
             l,
             "更新检查、下载或校验未完成，未确认本地版本为最新。只有确认后才会重新核验并启动本地版本。是否继续？",
@@ -759,6 +771,7 @@ pub fn confirm_local_after_failure() -> Result<bool, RunnerError> {
 pub fn show_launch_error() {
     let l = locale();
     let _ = dialog(
+        l,
         localized(
             l,
             "无法安全启动或更新。请检查安装登记和本地更新日志。未自动回滚或启动应用。",
@@ -773,6 +786,7 @@ pub fn show_launch_error() {
 pub fn show_preferences_warning() -> Result<(), RunnerError> {
     let l = locale();
     dialog(
+        l,
         localized(
             l,
             "无法读取或保存更新偏好。本次仍会检查更新，不会永久跳过更新。",

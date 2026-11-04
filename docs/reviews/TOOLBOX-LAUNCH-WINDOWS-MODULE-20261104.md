@@ -71,3 +71,11 @@ Microsoft ShowWindow documentation confirms the launching STARTUPINFO can overri
 Fresh Windows module5/5 tests and bins compile check pass. Rebuilt test executable SHA256 E61284DC9D6AF906DECDE7AAC22507F27E3D9AB4B9792D2BCCF99740674CD1D0 is ready for the controller’s independent hidden-parent native probe. That actual GREEN interaction is still pending at this implementation checkpoint; prior11bb installed evidence does not include the repair.
 
 [Microsoft ShowWindow startup behavior](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow).
+
+## Installed019 Chinese glyph failure and explicit font repair
+
+Independent installed Sandbox acceptance on source ab322af found the offline launch warning/button Chinese text rendered as tofu boxes. Guest font files (including Microsoft YaHei/SimSun) were present and the host Chinese probe was readable; missing font installation was not established. Esc cancellation exited0 without starting a client, but readable UI acceptance FAILED and remains recorded against019.
+
+Microsoft’s [GDI fonts and text metrics guidance](https://learn.microsoft.com/en-us/windows/win32/menurc/fonts-and-font-metrics) and [Windows typography recommendations](https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/typography) identify Microsoft YaHei UI for Simplified Chinese. The native template now receives its chosen locale explicitly and uses Microsoft YaHei UI for Chinese, retaining Segoe UI for English/French. The existing GetUserDefaultUILanguage policy is unchanged. No fonts were installed or OS language, Manifest, protocol or security settings changed.
+
+This is a production font-selection repair, not evidence that the updated installed guest is readable. A new source/package must be built and independently inspected in the existing official Sandbox workflow. Prior019 failure is not transferred into a PASS.
