@@ -132,7 +132,11 @@ mod tests {
         assert_eq!(print["languagePair"], "zh_en");
         assert_eq!(print["lines"][0]["nameEn"], "Frozen material");
         assert!(print["lines"][0]["nameFr"].is_null());
-        raw["lines"][0]["materialSnapshotJson"] = serde_json::json!("{\"nameZh\":\"冻结材料\",\"nameFr\":\"Matériau\"}");
-        assert_eq!(project("TEST-SPO-1", "SPO", &raw.to_string()), Err(AuthError::InvalidInput));
+        raw["lines"][0]["materialSnapshotJson"] =
+            serde_json::json!("{\"nameZh\":\"冻结材料\",\"nameFr\":\"Matériau\"}");
+        assert_eq!(
+            project("TEST-SPO-1", "SPO", &raw.to_string()),
+            Err(AuthError::InvalidInput)
+        );
     }
 }
