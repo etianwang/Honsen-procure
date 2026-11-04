@@ -11,6 +11,7 @@ import {
 import { execFileSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { selectNsisInstaller } from './select-nsis-installer.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const version = process.env.HONSEN_RELEASE_VERSION
@@ -98,11 +99,14 @@ execFileSync(
     },
   )
   const nsisDirectory = join(targetDirectory, 'release', 'bundle', 'nsis')
-  const generatedInstaller = readdirSync(nsisDirectory).find((file) =>
-    file.endsWith('-setup.exe'),
+  const { productName } = JSON.parse(
+    readFileSync(join(tauriDirectory, 'tauri.conf.json'), 'utf8'),
   )
-  if (!generatedInstaller)
-    throw new Error('Tauri did not produce an NSIS setup executable')
+  const generatedInstaller = selectNsisInstaller(
+    readdirSync(nsisDirectory),
+    productName,
+    version,
+  )
   const installer = join(nsisDirectory, `Honsen-Procure-${version}-Setup.exe`)
   renameSync(join(nsisDirectory, generatedInstaller), installer)
   const sha256 = createHash('sha256')
