@@ -340,6 +340,7 @@ describe('SyncService', () => {
             materialSnapshot: {
               nameZh: 'fixture',
               nameFr: null,
+              nameEn: 'Frozen English RFQ material',
               model: '',
               specification: '',
             },

@@ -25,6 +25,7 @@ export type CatalogMaterialView = {
   sku: string | null
   nameZh: string
   nameFr: string | null
+  nameEn?: string | null
   aliases: string[]
   brand: string | null
   model: string

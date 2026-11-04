@@ -848,7 +848,7 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
           invoke(
             command: string,
             args?: {
-              material?: { nameZh?: string }
+              material?: { nameZh?: string; nameEn?: string }
               image?: { squareCropBase64?: string }
             },
           ) {
@@ -856,6 +856,7 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
             if (command === 'save_material') {
               Object.assign(window, {
                 __catalogSaveName: args?.material?.nameZh,
+                __catalogSaveEnglish: args?.material?.nameEn,
               })
               return Promise.resolve()
             }
@@ -877,6 +878,7 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
   await page.getByRole('button', { name: '材料库', exact: true }).click()
   await page.getByRole('button', { name: '新增材料' }).click()
   await page.getByLabel('材料名称').fill('边界测试材料')
+  await page.getByLabel('英语名称').fill('Frozen English material')
   await page.getByLabel('型号').fill('FX-02')
   await page.getByLabel('规格').fill('fixture specification')
   await page.getByLabel('单位').fill('件')
@@ -904,6 +906,13 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
         (window as Window & { __imageSaveSquare?: string }).__imageSaveSquare,
     ),
   ).resolves.toMatch(/^iVBOR/)
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __catalogSaveEnglish?: string })
+          .__catalogSaveEnglish,
+    ),
+  ).toBe('Frozen English material')
   await expect(browserErrors).toEqual([])
 })
 

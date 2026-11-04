@@ -24,7 +24,7 @@ impl LocalAuthService {
 }
 
 fn project(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, AuthError> {
-    let snapshot: RemotePurchaseOrderPayload =
+    let mut snapshot: RemotePurchaseOrderPayload =
         serde_json::from_str(raw).map_err(|_| AuthError::InvalidInput)?;
     if !matches!(snapshot.language_pair.as_str(), "zh_fr" | "zh_en")
         || !matches!(kind, "OPA" | "HPA" | "SPO")
@@ -44,6 +44,63 @@ fn project(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, Aut
             .unwrap_or(serde_json::Value::Null);
         serde_json::json!({"name": value.get("name"), "contactName": value.get("contactName"), "address": value.get("address"), "phone": value.get("phone"), "email": value.get("email")})
     };
+    if kind == "OPA" && snapshot.owner_print_totals_json.is_some() {
+        let discount: AdjustmentInput = serde_json::from_str(
+            snapshot
+                .order_discount_json
+                .as_deref()
+                .ok_or(AuthError::InvalidInput)?,
+        )
+        .map_err(|_| AuthError::InvalidInput)?;
+        let freight: AdjustmentInput = serde_json::from_str(
+            snapshot
+                .order_freight_json
+                .as_deref()
+                .ok_or(AuthError::InvalidInput)?,
+        )
+        .map_err(|_| AuthError::InvalidInput)?;
+        let totals =
+            owner_print_totals::calculate_owner_print_totals(&snapshot, &discount, &freight)?;
+        let saved: serde_json::Value =
+            serde_json::from_str(snapshot.owner_print_totals_json.as_deref().unwrap())
+                .map_err(|_| AuthError::InvalidInput)?;
+        if totals != saved {
+            return Err(AuthError::InvalidInput);
+        }
+        // Reuse only the allowlisted supplier projection after replacing every
+        // money value with independently checked frozen owner-facing amounts.
+        for (line, total) in snapshot
+            .lines
+            .iter_mut()
+            .zip(totals["lines"].as_array().ok_or(AuthError::InvalidInput)?)
+        {
+            line.currency = snapshot.primary_currency.clone();
+            line.unit_price_minor = line
+                .owner_final_unit_price_minor
+                .clone()
+                .ok_or(AuthError::InvalidInput)?;
+            line.line_total_minor = total["totalMinor"]
+                .as_str()
+                .ok_or(AuthError::InvalidInput)?
+                .to_owned();
+        }
+        snapshot.currency = snapshot.primary_currency.clone();
+        snapshot.supplier_snapshot_json = None;
+        snapshot.subtotal_minor = totals["subtotalMinor"].as_str().unwrap().to_owned();
+        snapshot.line_discount_minor = totals["lineDiscountMinor"].as_str().unwrap().to_owned();
+        snapshot.order_discount_minor = totals["orderDiscountMinor"].as_str().unwrap().to_owned();
+        snapshot.freight_minor = totals["freightMinor"].as_str().unwrap().to_owned();
+        snapshot.tax_minor = totals["taxMinor"].as_str().unwrap().to_owned();
+        snapshot.total_minor = totals["totalMinor"].as_str().unwrap().to_owned();
+        let mut projected = project(
+            number,
+            "HPA",
+            &serde_json::to_string(&snapshot).map_err(|_| AuthError::InvalidInput)?,
+        )?;
+        projected["documentType"] = serde_json::json!("OPA");
+        projected["supplier"] = serde_json::Value::Null;
+        return Ok(projected);
+    }
     // Owner historical line/header totals may still be source-price totals. Derive
     // final-facing amounts solely from frozen final unit prices and quantities.
     // Non-zero adjustments lack a frozen primary-currency derivation contract.
@@ -132,6 +189,40 @@ mod tests {
         assert_eq!(print["languagePair"], "zh_en");
         assert_eq!(print["lines"][0]["nameEn"], "Frozen material");
         assert!(print["lines"][0]["nameFr"].is_null());
+        let mut owner_raw = raw.clone();
+        owner_raw["lines"][0]["ownerFinalUnitPriceMinor"] = serde_json::json!("1000");
+        owner_raw["lines"][0]["ownerLockedExchangeRateDecimal"] = serde_json::json!("0.5");
+        owner_raw["lines"][0]["currency"] = serde_json::json!("USD");
+        owner_raw["lines"][0]["lineDiscountJson"] =
+            serde_json::json!(r#"{"kind":"fixed_minor","minor":"100"}"#);
+        owner_raw["lines"][0]["lineFreightJson"] =
+            serde_json::json!(r#"{"kind":"percent_basis_points","basisPoints":1000}"#);
+        owner_raw["orderDiscountJson"] =
+            serde_json::json!(r#"{"kind":"percent_basis_points","basisPoints":1000}"#);
+        owner_raw["orderFreightJson"] = serde_json::json!(r#"{"kind":"fixed_minor","minor":"20"}"#);
+        owner_raw["taxRateBasisPoints"] = serde_json::json!(500);
+        let parsed: RemotePurchaseOrderPayload = serde_json::from_value(owner_raw.clone()).unwrap();
+        let totals = owner_print_totals::calculate_owner_print_totals(
+            &parsed,
+            &AdjustmentInput::PercentBasisPoints { basis_points: 1000 },
+            &AdjustmentInput::FixedMinor { minor: "20".into() },
+        )
+        .unwrap();
+        assert_eq!(totals["totalMinor"], "2594");
+        owner_raw["ownerPrintTotalsJson"] = serde_json::json!(totals.to_string());
+        let owner = project("TEST-OPA-1", "OPA", &owner_raw.to_string()).unwrap();
+        assert_eq!(owner["totalMinor"], "2594");
+        assert_eq!(owner["lineDiscountMinor"], "50");
+        assert_eq!(owner["freightMinor"], "265");
+        assert_eq!(owner["lines"][0]["currency"], "EUR");
+        assert_eq!(owner["lines"][0]["unitPriceMinor"], "1000");
+        assert!(owner["supplier"].is_null());
+        assert!(!owner.to_string().contains("USD"));
+        assert!(!owner.to_string().contains("ownerLockedExchangeRateDecimal"));
+        let frozen = owner_raw.to_string();
+        assert_eq!(project("TEST-OPA-1", "OPA", &frozen).unwrap(), owner);
+        owner_raw["ownerPrintTotalsJson"] = serde_json::json!("{}");
+        assert!(project("TEST-OPA-1", "OPA", &owner_raw.to_string()).is_err());
         raw["lines"][0]["materialSnapshotJson"] =
             serde_json::json!("{\"nameZh\":\"冻结材料\",\"nameFr\":\"Matériau\"}");
         assert_eq!(

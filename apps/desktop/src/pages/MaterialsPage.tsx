@@ -41,6 +41,7 @@ type MaterialsPageProps = {
 type MaterialFormValues = {
   sku?: string
   nameZh: string
+  nameEn?: string
   nameFr?: string
   aliases?: string
   brand?: string
@@ -141,6 +142,7 @@ export function MaterialsPage({
         ? {
             sku: material.sku ?? undefined,
             nameZh: material.nameZh,
+            nameEn: material.nameEn ?? undefined,
             nameFr: material.nameFr ?? undefined,
             aliases: material.aliases.join(', '),
             brand: material.brand ?? undefined,
@@ -203,6 +205,7 @@ export function MaterialsPage({
       id: existing?.id ?? crypto.randomUUID(),
       sku: optionalText(values.sku),
       nameZh: values.nameZh.trim(),
+      nameEn: optionalText(values.nameEn),
       nameFr: optionalText(values.nameFr),
       aliases: (values.aliases ?? '')
         .split(',')
@@ -538,6 +541,9 @@ export function MaterialsPage({
           </Form.Item>
           <Form.Item label={t('材料编码 / SKU')} name="sku">
             <Input maxLength={128} />
+          </Form.Item>
+          <Form.Item label={t('英语名称')} name="nameEn">
+            <Input />
           </Form.Item>
           <Form.Item label={t('法语名称')} name="nameFr">
             <Input maxLength={255} />

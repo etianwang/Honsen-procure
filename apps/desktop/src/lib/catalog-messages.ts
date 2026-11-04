@@ -1,5 +1,6 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  英语名称: ['English name', 'Nom anglais'],
   无法读取本地材料库: [
     'Unable to read local catalog',
     'Impossible de lire le catalogue local',

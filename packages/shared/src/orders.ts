@@ -84,6 +84,7 @@ export const requisitionLineSchema = z.object({
   materialSnapshot: z.object({
     nameZh: z.string().trim().min(1).max(255),
     nameFr: z.string().trim().min(1).max(255).nullable(),
+    nameEn: z.string().trim().min(1).max(255).nullable().optional(),
     model: z.string().trim().min(1).max(255),
     specification: z.string().trim().min(1).max(2000),
   }),

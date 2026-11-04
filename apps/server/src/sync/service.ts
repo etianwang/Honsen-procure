@@ -53,6 +53,7 @@ const rfqPayloadSchema = z.strictObject({
         materialSnapshot: z.strictObject({
           nameZh: z.string().trim().min(1),
           nameFr: z.string().nullable(),
+          nameEn: z.string().trim().min(1).max(255).nullable().optional(),
           model: z.string(),
           specification: z.string(),
         }),

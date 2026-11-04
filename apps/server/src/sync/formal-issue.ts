@@ -1,3 +1,4 @@
+import { calculateOwnerPrintTotals } from './owner-print-totals.js'
 import { isDeepStrictEqual } from 'node:util'
 import {
   adjustmentSchema,
@@ -124,6 +125,40 @@ export function parseFormalIssue(
       snapshot.supplierTermsCompletedAt !== payload.supplierTermsCompletedAt)
   )
     return 'invalid'
+  if (
+    owner &&
+    [
+      payload.ownerPrintTotalsJson,
+      payload.orderDiscountJson,
+      payload.orderFreightJson,
+      snapshot.ownerPrintTotalsJson,
+      snapshot.orderDiscountJson,
+      snapshot.orderFreightJson,
+    ].some((value) => value != null)
+  ) {
+    try {
+      if (
+        typeof payload.ownerPrintTotalsJson !== 'string' ||
+        typeof payload.orderDiscountJson !== 'string' ||
+        typeof payload.orderFreightJson !== 'string' ||
+        snapshot.ownerPrintTotalsJson !== payload.ownerPrintTotalsJson ||
+        snapshot.orderDiscountJson !== payload.orderDiscountJson ||
+        snapshot.orderFreightJson !== payload.orderFreightJson
+      )
+        return 'invalid'
+      const expected = calculateOwnerPrintTotals(
+        payload,
+        JSON.parse(payload.orderDiscountJson),
+        JSON.parse(payload.orderFreightJson),
+      )
+      if (
+        !isDeepStrictEqual(expected, JSON.parse(payload.ownerPrintTotalsJson))
+      )
+        return 'invalid'
+    } catch {
+      return 'invalid'
+    }
+  }
   const hpaLineIds = new Set<string>()
   for (const line of lines) {
     if (!isRecord(line)) return 'invalid'

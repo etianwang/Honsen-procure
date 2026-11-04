@@ -545,8 +545,11 @@ fn g2_pull_backfills_prior_projector_missing_fields_at_same_version() {
 fn g2_pull_production_issue_outbox_reaches_second_file_without_changing_issuer_namespace() {
     let (producer, _, now) = service();
     dependencies(&producer, true);
+    let mut incoming = approved();
+    incoming["orderDiscountJson"] = serde_json::json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
+    incoming["orderFreightJson"] = serde_json::json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
     producer
-        .apply_sync_pull_page(page(approved(), 1, 1), now)
+        .apply_sync_pull_page(page(incoming, 1, 1), now)
         .unwrap();
     {
         let c = producer.connection.lock().unwrap();
@@ -558,6 +561,14 @@ fn g2_pull_production_issue_outbox_reaches_second_file_without_changing_issuer_n
         c.execute("UPDATE local_material_prices SET is_active = 1, deleted_at = NULL, unit_price_minor = 1234 WHERE id = ?1", [id(8).to_string()]).unwrap();
         c.execute("INSERT INTO local_authorization_snapshots (account_id,project_id,department_id,team_id,verified_at,expires_at) VALUES (?1,?2,?3,?4,?5,?6)", params![id(1).to_string(),id(3).to_string(),id(4).to_string(),id(5).to_string(),unix_seconds(now),unix_seconds(now+AUTHORIZATION_CACHE_WINDOW)]).unwrap();
         c.execute("INSERT INTO local_exchange_rates (id,from_currency,to_currency,rate_decimal,effective_at,source,version) VALUES (?1,'CNY','XOF','76.5','2026-10-19','public_daily',1)", [id(30).to_string()]).unwrap();
+    }
+    {
+        let c = producer.connection.lock().unwrap();
+        let rules: (Option<String>, Option<String>) = c.query_row("SELECT order_discount_json,order_freight_json FROM local_purchase_orders WHERE id=?1", [id(9).to_string()], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert!(
+            rules.0.is_some() && rules.1.is_some(),
+            "new approved rules must survive Pull"
+        );
     }
     let issued = producer.issue_owner_formal_order(id(9), now).unwrap();
     let wire: String = producer
@@ -666,4 +677,30 @@ fn g2_pull_dirty_order_preserves_outbox_and_conflict_instead_of_projecting_stage
     assert_eq!(stored(&service)["formalDocumentNo"], Value::Null);
     let counts:(i64,i64)=service.connection.lock().unwrap().query_row("SELECT (SELECT COUNT(*) FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL),(SELECT COUNT(*) FROM local_sync_conflicts WHERE resolved_at IS NULL)",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(counts, (1, 1));
+}
+
+#[test]
+fn g2_old_approved_rules_cannot_be_backfilled_by_later_pull() {
+    let (service, _, now) = service();
+    dependencies(&service, true);
+    service
+        .apply_sync_pull_page(page(approved(), 1, 1), now)
+        .unwrap();
+    let mut later = approved();
+    later["orderDiscountJson"] = json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
+    later["orderFreightJson"] = json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
+    service
+        .apply_sync_pull_page(page(later, 2, 2), now)
+        .unwrap();
+    let saved: (Option<String>, Option<String>) = service
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT order_discount_json,order_freight_json FROM local_purchase_orders WHERE id=?1",
+            [id(9).to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(saved, (None, None));
 }

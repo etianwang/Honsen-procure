@@ -78,12 +78,12 @@ try {
   $composeCommand = "cd '$wslRepo' && docker compose --project-name $composeProject --env-file .env.test -f compose.test.yaml up -d --wait && exec tail -f /dev/null"
   $wslHolder = Start-Process -FilePath wsl.exe -ArgumentList @('-d', $WslDistribution, '-u', $WslUser, '--', 'bash', '-lc', $composeCommand) -PassThru -RedirectStandardOutput $composeLog -RedirectStandardError $composeErrorLog -WindowStyle Hidden
   for ($attempt = 0; $attempt -lt 30; $attempt++) {
-    if ((Test-NetConnection -ComputerName localhost -Port $env:POSTGRES_TEST_PORT -InformationLevel Quiet)) { break }
+    if ((Test-NetConnection -ComputerName 127.0.0.1 -Port $env:POSTGRES_TEST_PORT -InformationLevel Quiet)) { break }
     if ($wslHolder.HasExited) { throw "WSL Compose holder exited; inspect $composeLog" }
     Start-Sleep -Milliseconds 500
   }
   if ($wslHolder.HasExited) { throw 'WSL Compose holder exited before the isolated PostgreSQL service became available' }
-  if (!(Test-NetConnection -ComputerName localhost -Port $env:POSTGRES_TEST_PORT -InformationLevel Quiet)) { throw "isolated PostgreSQL service did not listen; inspect $composeLog" }
+  if (!(Test-NetConnection -ComputerName 127.0.0.1 -Port $env:POSTGRES_TEST_PORT -InformationLevel Quiet)) { throw "isolated PostgreSQL service did not listen; inspect $composeLog" }
 
   }
 
@@ -123,11 +123,11 @@ try {
     if ($launch -eq 2) { throw "native HTTPS server repeatedly exited; inspect $serverLog" }
   }
   for ($attempt = 0; $attempt -lt 30; $attempt++) {
-    if ((Test-NetConnection -ComputerName localhost -Port 3443 -InformationLevel Quiet)) { break }
+    if ((Test-NetConnection -ComputerName 127.0.0.1 -Port 3443 -InformationLevel Quiet)) { break }
     if ($server.HasExited) { throw "native HTTPS server exited; inspect $serverLog" }
     Start-Sleep -Milliseconds 500
   }
-  if (!(Test-NetConnection -ComputerName localhost -Port 3443 -InformationLevel Quiet)) { throw "native HTTPS server did not listen; inspect $serverLog" }
+  if (!(Test-NetConnection -ComputerName 127.0.0.1 -Port 3443 -InformationLevel Quiet)) { throw "native HTTPS server did not listen; inspect $serverLog" }
 
   $desktop = Join-Path $repo 'apps\desktop\src-tauri'
   if (!$NativeExe) { $NativeExe = Join-Path $desktop 'target\debug\HonsenProcure.exe' }
@@ -253,7 +253,7 @@ try {
       if (!(Test-Path $offlineReady)) { throw "native offline harness did not reach the online baseline; inspect $nativeLog / $nativeErrorLog" }
       Stop-Process -Id $server.Id -Force
       $server.WaitForExit()
-      if (Test-NetConnection -ComputerName localhost -Port 3443 -InformationLevel Quiet) { throw 'native offline harness could still reach the HTTPS endpoint after stop' }
+      if (Test-NetConnection -ComputerName 127.0.0.1 -Port 3443 -InformationLevel Quiet) { throw 'native offline harness could still reach the HTTPS endpoint after stop' }
       New-Item -ItemType File -Path $offlineContinue | Out-Null
       if (!$offlineProcess.WaitForExit(30000)) { throw "native offline EXE did not exit after the disconnected Push; inspect $nativeLog / $nativeErrorLog" }
       if ($offlineProcess.ExitCode -ne 0) { throw "native offline EXE failed; inspect $nativeLog / $nativeErrorLog" }
@@ -264,11 +264,11 @@ try {
         if ($launch -eq 2) { throw "native HTTPS server did not restart; inspect $serverLog / $serverErrorLog" }
       }
       for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        if ((Test-NetConnection -ComputerName localhost -Port 3443 -InformationLevel Quiet)) { break }
+        if ((Test-NetConnection -ComputerName 127.0.0.1 -Port 3443 -InformationLevel Quiet)) { break }
         if ($server.HasExited) { throw "native HTTPS server exited during restart; inspect $serverLog / $serverErrorLog" }
         Start-Sleep -Milliseconds 500
       }
-      if (!(Test-NetConnection -ComputerName localhost -Port 3443 -InformationLevel Quiet)) { throw "native HTTPS server did not restart; inspect $serverLog / $serverErrorLog" }
+      if (!(Test-NetConnection -ComputerName 127.0.0.1 -Port 3443 -InformationLevel Quiet)) { throw "native HTTPS server did not restart; inspect $serverLog / $serverErrorLog" }
       $offline = Get-Content -Raw $offlineResult | ConvertFrom-Json
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_PUSH_PHASE = 'recovered'
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_ENTITY_ID = $offline.entityId

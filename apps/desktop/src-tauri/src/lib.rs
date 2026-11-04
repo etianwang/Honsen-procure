@@ -23,6 +23,7 @@ use uuid::Uuid;
 mod attachments;
 mod expenditures;
 pub mod formal_print;
+mod owner_print_totals;
 pub use attachments::{AttachmentInput, AttachmentTarget, AttachmentView, ProcurementSyncReport};
 mod seed;
 mod update_launch;
@@ -195,6 +196,8 @@ pub struct MaterialInput {
     pub category_id: Option<Uuid>,
     pub name_zh: String,
     pub name_fr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_en: Option<String>,
     pub aliases: Vec<String>,
     pub brand: Option<String>,
     pub model: String,
@@ -328,6 +331,8 @@ pub struct RequisitionLineInput {
 pub struct MaterialSnapshotInput {
     pub name_zh: String,
     pub name_fr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_en: Option<String>,
     pub model: String,
     pub specification: String,
 }
@@ -785,7 +790,7 @@ struct SyncPullEnvelope {
     replay_until: String,
 }
 
-#[derive(Clone, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct RemotePurchaseOrderPayload {
     parent_order_id: Option<Uuid>,
@@ -829,10 +834,13 @@ struct RemotePurchaseOrderPayload {
     formal_sequence: Option<String>,
     formally_issued_at: Option<i64>,
     formal_snapshot_json: Option<String>,
+    order_discount_json: Option<String>,
+    order_freight_json: Option<String>,
+    owner_print_totals_json: Option<String>,
     lines: Vec<RemotePurchaseOrderLine>,
 }
 
-#[derive(Clone, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct RemotePurchaseOrderLine {
     id: Uuid,
@@ -1089,6 +1097,8 @@ struct RemoteRfqItem {
 struct RemoteRfqMaterialSnapshot {
     name_zh: String,
     name_fr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name_en: Option<String>,
     model: String,
     specification: String,
 }
@@ -1164,6 +1174,7 @@ pub struct CatalogMaterialView {
     pub sku: Option<String>,
     pub name_zh: String,
     pub name_fr: Option<String>,
+    pub name_en: Option<String>,
     pub aliases: Vec<String>,
     pub brand: Option<String>,
     pub model: String,
@@ -2925,13 +2936,13 @@ impl LocalAuthService {
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         transaction
             .execute(
-                "INSERT INTO local_materials (id, sku, category_id, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, is_active, version)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-                 ON CONFLICT(id) DO UPDATE SET sku = excluded.sku, name_zh = excluded.name_zh, name_fr = excluded.name_fr,
+                "INSERT INTO local_materials (id, sku, category_id, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, is_active, version, name_en)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 ON CONFLICT(id) DO UPDATE SET sku = excluded.sku, name_zh = excluded.name_zh, name_fr = excluded.name_fr, name_en = excluded.name_en,
                    category_id = excluded.category_id, aliases_json = excluded.aliases_json, brand = excluded.brand, model = excluded.model,
                    specification = excluded.specification, unit = excluded.unit, notes = excluded.notes,
                    is_active = excluded.is_active, version = excluded.version, deleted_at = NULL",
-                params![material.id.to_string(), material.sku, material.category_id.map(|value| value.to_string()), material.name_zh, material.name_fr, aliases, material.brand, material.model, material.specification, material.unit, material.notes, material.is_active as i64, material.version],
+                params![material.id.to_string(), material.sku, material.category_id.map(|value| value.to_string()), material.name_zh, material.name_fr, aliases, material.brand, material.model, material.specification, material.unit, material.notes, material.is_active as i64, material.version, material.name_en],
             )
             .map_err(|_| AuthError::Database)?;
         insert_local_sync_outbox(&transaction, "material", material.id, &payload, now)?;
@@ -3781,6 +3792,33 @@ impl LocalAuthService {
             {
                 return Err(AuthError::InvalidInput);
             }
+        }
+        if document_type == "OPA" {
+            let owner: RemotePurchaseOrderPayload =
+                serde_json::from_str(&order_sync_payload(&transaction, order_id)?)
+                    .map_err(|_| AuthError::InvalidInput)?;
+            let discount: AdjustmentInput = serde_json::from_str(
+                owner
+                    .order_discount_json
+                    .as_deref()
+                    .ok_or(AuthError::InvalidInput)?,
+            )
+            .map_err(|_| AuthError::InvalidInput)?;
+            let freight: AdjustmentInput = serde_json::from_str(
+                owner
+                    .order_freight_json
+                    .as_deref()
+                    .ok_or(AuthError::InvalidInput)?,
+            )
+            .map_err(|_| AuthError::InvalidInput)?;
+            let totals =
+                owner_print_totals::calculate_owner_print_totals(&owner, &discount, &freight)?;
+            transaction
+                .execute(
+                    "UPDATE local_purchase_orders SET owner_print_totals_json=?2 WHERE id=?1",
+                    params![order_id.to_string(), totals.to_string()],
+                )
+                .map_err(|_| AuthError::Database)?;
         }
         let (installation_id, persisted_short_code, sequence): (String, String, i64) = transaction.query_row(
             "SELECT installation_id, installation_short_code, next_formal_sequence FROM local_sync_state WHERE singleton = 1",
@@ -5074,6 +5112,7 @@ impl LocalAuthService {
                 params![draft.id.to_string(), draft.display_no, draft.country_id.to_string(), draft.project_id.to_string(), draft.site, draft.department_id.to_string(), draft.team_id.to_string(), draft.applicant_id.to_string(), draft.currency, draft.primary_currency, draft.language_pair, workflow_status, draft.urgency, draft.urgency_reason, draft.order_date, draft.delivery_address, draft.expected_delivery_date, draft.notes, calculated.subtotal, calculated.line_discount, calculated.order_discount, calculated.freight, draft.tax_rate_basis_points, calculated.tax, calculated.total, version, unix_seconds(now)],
             )
             .map_err(|_| AuthError::Database)?;
+        transaction.execute("UPDATE local_purchase_orders SET order_discount_json=?2, order_freight_json=?3, owner_print_totals_json=NULL WHERE id=?1", params![draft.id.to_string(), serde_json::to_string(&draft.order_discount).map_err(|_| AuthError::InvalidInput)?, serde_json::to_string(&draft.order_freight).map_err(|_| AuthError::InvalidInput)?]).map_err(|_| AuthError::Database)?;
         for line in &calculated.lines {
             if line.input.material_id.is_some()
                 && line.input.supplier_id.is_some()
@@ -5519,7 +5558,7 @@ impl LocalAuthService {
                 "SELECT id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, version
                  FROM local_materials
                  WHERE is_active = 1 AND deleted_at IS NULL
-                   AND (?1 = '%%' OR name_zh LIKE ?1 COLLATE NOCASE OR COALESCE(name_fr, '') LIKE ?1 COLLATE NOCASE
+                   AND (?1 = '%%' OR name_zh LIKE ?1 COLLATE NOCASE OR COALESCE(name_fr, '') LIKE ?1 COLLATE NOCASE OR COALESCE(name_en, '') LIKE ?1 COLLATE NOCASE
                      OR aliases_json LIKE ?1 COLLATE NOCASE OR model LIKE ?1 COLLATE NOCASE
                      OR specification LIKE ?1 COLLATE NOCASE OR COALESCE(sku, '') LIKE ?1 COLLATE NOCASE)
                  ORDER BY name_zh, model
@@ -5642,11 +5681,19 @@ impl LocalAuthService {
                             })
                         })
                         .collect::<Result<Vec<_>, AuthError>>()?;
+                    let name_en = connection
+                        .query_row(
+                            "SELECT name_en FROM local_materials WHERE id=?1",
+                            [&id],
+                            |row| row.get::<_, Option<String>>(0),
+                        )
+                        .map_err(|_| AuthError::Database)?;
                     Ok(CatalogMaterialView {
                         id: material_id,
                         sku,
                         name_zh,
                         name_fr,
+                        name_en,
                         aliases,
                         brand,
                         model,
@@ -8368,6 +8415,14 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0059_payment_conflict_decisions",
             include_str!("../migrations/0059_payment_conflict_decisions.sql"),
         ),
+        (
+            "0060_owner_print_snapshot",
+            include_str!("../migrations/0060_owner_print_snapshot.sql"),
+        ),
+        (
+            "0061_material_english_name",
+            include_str!("../migrations/0061_material_english_name.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -8779,6 +8834,7 @@ fn validate_material(material: &MaterialInput) -> Result<(), AuthError> {
             .iter()
             .any(|value| !valid_required_text(value, 255))
         || !valid_optional_text(&material.name_fr, 255)
+        || !valid_optional_text(&material.name_en, 255)
         || !valid_optional_text(&material.brand, 1000)
         || !valid_optional_text(&material.notes, 1000)
     {
@@ -8880,13 +8936,13 @@ fn project_remote_catalog_change(
                 serde_json::to_string(&material.aliases).map_err(|_| AuthError::InvalidInput)?;
             transaction
                 .execute(
-                    "INSERT INTO local_materials (id, sku, category_id, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, is_active, version)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-                     ON CONFLICT(id) DO UPDATE SET sku = excluded.sku, name_zh = excluded.name_zh, name_fr = excluded.name_fr,
+                    "INSERT INTO local_materials (id, sku, category_id, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, is_active, version, name_en)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                     ON CONFLICT(id) DO UPDATE SET sku = excluded.sku, name_zh = excluded.name_zh, name_fr = excluded.name_fr, name_en = excluded.name_en,
                        category_id = excluded.category_id, aliases_json = excluded.aliases_json, brand = excluded.brand, model = excluded.model,
                        specification = excluded.specification, unit = excluded.unit, notes = excluded.notes,
                        is_active = excluded.is_active, version = excluded.version, deleted_at = NULL",
-                    params![material.id.to_string(), material.sku, material.category_id.map(|value| value.to_string()), material.name_zh, material.name_fr, aliases, material.brand, material.model, material.specification, material.unit, material.notes, material.is_active as i64, change.version],
+                    params![material.id.to_string(), material.sku, material.category_id.map(|value| value.to_string()), material.name_zh, material.name_fr, aliases, material.brand, material.model, material.specification, material.unit, material.notes, material.is_active as i64, change.version, material.name_en],
                 )
                 .map_err(|_| AuthError::Database)?;
         }
@@ -9648,8 +9704,10 @@ fn project_remote_purchase_order_change(
             ],
         )
         .map_err(|_| AuthError::Database)?;
+    transaction.execute("UPDATE local_purchase_orders SET order_discount_json=?2, order_freight_json=?3, owner_print_totals_json=?4 WHERE id=?1", params![change.entity_id.to_string(), order.order_discount_json, order.order_freight_json, order.owner_print_totals_json]).map_err(|_| AuthError::Database)?;
     if is_formal {
         // Freeze only after lines are complete; both operations and the cursor share the page transaction.
+
         transaction.execute("UPDATE local_purchase_orders SET document_type = ?2, formal_document_no = ?3, formal_installation_id = ?4, formal_sequence = ?5, formally_issued_at = ?6, formal_snapshot_json = ?7 WHERE id = ?1 AND formally_issued_at IS NULL",
             params![change.entity_id.to_string(), order.document_type, order.formal_document_no, order.formal_installation_id.map(|id| id.to_string()), order.formal_sequence.as_deref().map(remote_minor).transpose()?, order.formally_issued_at, order.formal_snapshot_json]).map_err(|_| AuthError::Database)?;
     }
@@ -9985,6 +10043,28 @@ fn remote_order_references_exist(
 }
 
 fn validate_remote_purchase_order(order: &RemotePurchaseOrderPayload) -> Result<(), AuthError> {
+    if let Some(raw) = &order.owner_print_totals_json {
+        let discount: AdjustmentInput = serde_json::from_str(
+            order
+                .order_discount_json
+                .as_deref()
+                .ok_or(AuthError::InvalidInput)?,
+        )
+        .map_err(|_| AuthError::InvalidInput)?;
+        let freight: AdjustmentInput = serde_json::from_str(
+            order
+                .order_freight_json
+                .as_deref()
+                .ok_or(AuthError::InvalidInput)?,
+        )
+        .map_err(|_| AuthError::InvalidInput)?;
+        let actual: serde_json::Value =
+            serde_json::from_str(raw).map_err(|_| AuthError::InvalidInput)?;
+        if actual != owner_print_totals::calculate_owner_print_totals(order, &discount, &freight)? {
+            return Err(AuthError::InvalidInput);
+        }
+    }
+
     if order.lines.is_empty()
         || order.lines.len() > 500
         || !valid_required_text(&order.display_no, 128)
@@ -10354,6 +10434,7 @@ fn validate_requisition_draft(draft: &RequisitionDraftInput) -> Result<(), AuthE
             || !valid_required_text(&line.material_snapshot.name_zh, 255)
             || !valid_required_text(&line.material_snapshot.model, 255)
             || !valid_required_text(&line.material_snapshot.specification, 2000)
+            || !valid_optional_text(&line.material_snapshot.name_en, 255)
             || line
                 .material_snapshot
                 .name_fr
@@ -10654,9 +10735,9 @@ fn installation_short_code(installation_id: Uuid) -> String {
 fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<String, AuthError> {
     let header = transaction
         .query_row(
-            "SELECT parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at, procurement_mode, document_type, formal_document_no, formal_installation_id, formal_sequence, formally_issued_at, formal_snapshot_json FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at, procurement_mode, document_type, formal_document_no, formal_installation_id, formal_sequence, formally_issued_at, formal_snapshot_json, order_discount_json, order_freight_json, owner_print_totals_json FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
             [order_id.to_string()],
-            |row| Ok(serde_json::json!({
+            |row| { let mut value = serde_json::json!({
                 "parentOrderId": row.get::<_, Option<String>>(0)?,
                 "displayNo": row.get::<_, String>(1)?,
                 "countryId": row.get::<_, String>(2)?,
@@ -10698,7 +10779,11 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
                 "formalSequence": row.get::<_, Option<i64>>(38)?.map(|value| value.to_string()),
                 "formallyIssuedAt": row.get::<_, Option<i64>>(39)?,
                 "formalSnapshotJson": row.get::<_, Option<String>>(40)?,
-            })),
+            });
+            value["orderDiscountJson"] = serde_json::json!(row.get::<_, Option<String>>(41)?);
+            value["orderFreightJson"] = serde_json::json!(row.get::<_, Option<String>>(42)?);
+            value["ownerPrintTotalsJson"] = serde_json::json!(row.get::<_, Option<String>>(43)?);
+            Ok(value) },
         )
         .map_err(|_| AuthError::Database)?;
     let lines = transaction
@@ -10761,6 +10846,15 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
         lines
     };
     let mut payload = header.as_object().cloned().ok_or(AuthError::Database)?;
+    for key in [
+        "orderDiscountJson",
+        "orderFreightJson",
+        "ownerPrintTotalsJson",
+    ] {
+        if payload.get(key).is_some_and(serde_json::Value::is_null) {
+            payload.remove(key);
+        }
+    }
     payload.insert("lines".into(), serde_json::Value::Array(lines));
     serde_json::to_string(&serde_json::Value::Object(payload)).map_err(|_| AuthError::Database)
 }
@@ -10981,14 +11075,14 @@ fn material_snapshot(
     if let Some(material_id) = line.material_id {
         let row = transaction
             .query_row(
-                "SELECT name_zh, name_fr, model, specification FROM local_materials WHERE id = ?1 AND is_active = 1 AND deleted_at IS NULL",
+                "SELECT name_zh, name_fr, model, specification, name_en FROM local_materials WHERE id = ?1 AND is_active = 1 AND deleted_at IS NULL",
                 [material_id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?)),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, Option<String>>(4)?)),
             )
             .optional()
             .map_err(|_| AuthError::Database)?
             .ok_or(AuthError::InvalidInput)?;
-        serde_json::to_string(&serde_json::json!({ "nameZh": row.0, "nameFr": row.1, "model": row.2, "specification": row.3 }))
+        serde_json::to_string(&serde_json::json!({ "nameZh": row.0, "nameFr": row.1, "nameEn": row.4, "model": row.2, "specification": row.3 }))
             .map_err(|_| AuthError::Database)
     } else {
         serde_json::to_string(&line.material_snapshot).map_err(|_| AuthError::Database)
@@ -11695,6 +11789,7 @@ mod tests {
             category_id: None,
             name_zh: "replayed fixture".into(),
             name_fr: None,
+            name_en: None,
             aliases: vec![],
             brand: None,
             model: "fixture".into(),
@@ -14294,6 +14389,7 @@ mod tests {
             category_id: None,
             name_zh: "Material".into(),
             name_fr: None,
+            name_en: None,
             aliases: vec![],
             brand: None,
             model: "Model".into(),
@@ -14482,6 +14578,7 @@ mod tests {
             category_id: Some(duplicate),
             name_zh: "fixture".into(),
             name_fr: None,
+            name_en: None,
             aliases: vec![],
             brand: None,
             model: "fixture".into(),
@@ -14707,6 +14804,7 @@ mod tests {
             category_id: None,
             name_zh: "remote fixture".into(),
             name_fr: None,
+            name_en: None,
             aliases: vec![],
             brand: None,
             model: "fixture".into(),
@@ -14820,6 +14918,7 @@ mod tests {
                     category_id: None,
                     name_zh: "local fixture".into(),
                     name_fr: None,
+                    name_en: None,
                     aliases: vec![],
                     brand: None,
                     model: "fixture".into(),
@@ -16925,6 +17024,11 @@ mod tests {
             transaction.commit().unwrap();
         }
         service.connection.lock().unwrap().execute("UPDATE local_purchase_order_items SET material_snapshot_json=json_set(material_snapshot_json,'$.nameFr','Câble figé') WHERE order_id=?1", [order_id.to_string()]).unwrap();
+        assert_eq!(
+            service.issue_owner_formal_order(order_id, now),
+            Err(AuthError::InvalidInput)
+        );
+        service.connection.lock().unwrap().execute("UPDATE local_purchase_orders SET order_discount_json=?2, order_freight_json=?2 WHERE id=?1", params![order_id.to_string(), r#"{"kind":"fixed_minor","minor":"0"}"#]).unwrap();
         let issued = service.issue_owner_formal_order(order_id, now).unwrap();
         let print = service.get_formal_print_document(order_id, now).unwrap();
         assert_eq!(print["supplier"], serde_json::Value::Null);
@@ -17079,6 +17183,7 @@ mod tests {
                         material_snapshot: MaterialSnapshotInput {
                             name_zh: "owner material".into(),
                             name_fr: None,
+                            name_en: None,
                             model: "OP".into(),
                             specification: "fixture".into(),
                         },
@@ -17281,6 +17386,7 @@ mod tests {
                         material_snapshot: MaterialSnapshotInput {
                             name_zh: "owner material".into(),
                             name_fr: None,
+                            name_en: None,
                             model: "OP".into(),
                             specification: "fixture".into(),
                         },
@@ -18519,6 +18625,7 @@ mod tests {
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "synthetic".into(),
                     name_fr: None,
+                    name_en: None,
                     model: "test".into(),
                     specification: "test".into(),
                 },
@@ -18642,6 +18749,30 @@ mod tests {
     }
 
     #[test]
+    fn english_material_migration_preserves_legacy_catalog_and_snapshots() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/0004_local_catalog.sql"))
+            .unwrap();
+        db.execute("INSERT INTO local_materials(id,name_zh,model,specification,unit,is_active,version) VALUES ('legacy','Legacy','M','S','pcs',1,1)", []).unwrap();
+        db.execute_batch(include_str!("../migrations/0061_material_english_name.sql"))
+            .unwrap();
+        let row: (String, Option<String>) = db
+            .query_row(
+                "SELECT name_zh,name_en FROM local_materials WHERE id='legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("Legacy".into(), None));
+        let old: MaterialSnapshotInput = serde_json::from_value(
+            serde_json::json!({"nameZh":"Legacy","nameFr":null,"model":"M","specification":"S"}),
+        )
+        .unwrap();
+        assert_eq!(old.name_en, None);
+        assert!(serde_json::to_value(old).unwrap().get("nameEn").is_none());
+    }
+
+    #[test]
     fn catalog_writes_are_role_protected_and_price_changes_keep_history() {
         let service = LocalAuthService::open_in_memory().unwrap();
         let now = SystemTime::now();
@@ -18651,6 +18782,7 @@ mod tests {
             category_id: None,
             name_zh: "测试材料".into(),
             name_fr: None,
+            name_en: Some("Frozen English material".into()),
             aliases: vec!["fixture alias".into()],
             brand: None,
             model: "M16".into(),
@@ -18706,6 +18838,12 @@ mod tests {
         let country_id = Uuid::new_v4();
         grant_new_test_scope(&service, purchaser_id, country_id, now);
         service.save_material(material.clone(), now).unwrap();
+        assert_eq!(
+            service.search_catalog("Frozen English", None, now).unwrap()[0]
+                .name_en
+                .as_deref(),
+            Some("Frozen English material")
+        );
         service.connection.lock().unwrap().execute("UPDATE local_authorization_snapshots SET verified_at = ?1, expires_at = ?2 WHERE account_id = ?3", params![unix_seconds(now) - 2, unix_seconds(now) - 1, purchaser_id.to_string()]).unwrap();
         assert_eq!(
             service.save_material(material.clone(), now),
@@ -18902,6 +19040,7 @@ mod tests {
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "forged".into(),
                     name_fr: None,
+                    name_en: None,
                     model: "forged".into(),
                     specification: "forged".into(),
                 },
@@ -18920,6 +19059,20 @@ mod tests {
         };
         let totals = service.save_requisition_draft(draft.clone(), now).unwrap();
         assert_eq!(totals.total_minor, "3564");
+        let frozen: String = service
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT material_snapshot_json FROM local_purchase_order_items WHERE order_id=?1",
+                [requisition_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&frozen).unwrap()["nameEn"],
+            "Frozen English material"
+        );
         let outbox_before_identity_change: i64 = service.connection.lock().unwrap().query_row(
             "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1",
             [requisition_id.to_string()],
@@ -21051,6 +21204,7 @@ mod tests {
                 material_snapshot: MaterialSnapshotInput {
                     name_zh: "forged".into(),
                     name_fr: None,
+                    name_en: None,
                     model: "M".into(),
                     specification: "S".into(),
                 },

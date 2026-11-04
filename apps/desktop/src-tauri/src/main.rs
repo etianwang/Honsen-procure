@@ -1706,6 +1706,7 @@ fn native_sync_draft(order_id: Uuid, applicant_id: Uuid) -> RequisitionDraftInpu
             material_snapshot: MaterialSnapshotInput {
                 name_zh: "Native sync fixture".into(),
                 name_fr: None,
+                name_en: None,
                 model: "NATIVE-SYNC".into(),
                 specification: "Native HTTPS synchronization fixture".into(),
             },

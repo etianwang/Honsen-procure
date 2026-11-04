@@ -47,10 +47,17 @@ const ids = Array.from(
   { length: 14 },
   (_, n) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
 )
-const lineCount = Number(process.env.HONSEN_PROCURE_NATIVE_PRINT_LINES ?? '2')
-assert.ok(Number.isInteger(lineCount) && lineCount >= 2 && lineCount <= 100)
+const ownerPrint = process.env.HONSEN_PROCURE_NATIVE_PRINT_KIND === 'OPA'
+const documentPair = process.env.HONSEN_PROCURE_NATIVE_PRINT_PAIR ?? 'zh_fr'
+assert.ok(['zh_fr', 'zh_en'].includes(documentPair))
+const lineCount = Number(
+  process.env.HONSEN_PROCURE_NATIVE_PRINT_LINES ?? (ownerPrint ? '1' : '2'),
+)
+assert.ok(Number.isInteger(lineCount) && lineCount >= 1 && lineCount <= 100)
 const lineIds = Array.from({ length: lineCount }, () => randomUUID())
-const expectedTotal = String(lineCount * 100)
+const expectedTotal = ownerPrint ? '2594' : String(lineCount * 100)
+if (ownerPrint)
+  assert.equal(lineCount, 1, 'OPA arithmetic fixture has one line')
 let orderId = randomUUID()
 const exePaths = ['device-a', 'device-b'].map((device) =>
   join(root, `${runId}-${device}`, 'HonsenProcure.exe'),
@@ -397,6 +404,33 @@ try {
     orderId = randomUUID()
     const receiver = await launch(index, index === 0 ? 9241 : 9242),
       issuer = receiver
+    const fixtureMaterialId = ownerPrint ? randomUUID() : ids[5]
+    if (ownerPrint) {
+      await login(
+        receiver,
+        'purchaser',
+        process.env.HONSEN_TEST_PURCHASER_PASSWORD,
+      )
+      await call(receiver, 'save_material', {
+        material: {
+          id: fixtureMaterialId,
+          sku: null,
+          categoryId: null,
+          nameZh: '合成冻结材料',
+          nameFr: 'Synthétique figé',
+          nameEn: 'Frozen synthetic material',
+          aliases: [],
+          brand: null,
+          model: 'OPA',
+          specification: 'Synthetic snapshot',
+          unit: '米',
+          notes: null,
+          isActive: true,
+          version: 1,
+        },
+      })
+      await call(receiver, 'lock_session')
+    }
     await login(
       receiver,
       'engineer-a',
@@ -413,44 +447,70 @@ try {
         departmentId: ids[3],
         teamId: ids[4],
         applicantId: ids[11],
-        currency: 'XOF',
-        primaryCurrency: 'XOF',
-        languagePair: 'zh_fr',
+        currency: ownerPrint ? 'EUR' : 'XOF',
+        primaryCurrency: ownerPrint ? 'EUR' : 'XOF',
+        languagePair: documentPair,
         urgency: 'normal',
         urgencyReason: null,
         orderDate: '2026-10-19',
         deliveryAddress: 'Synthetic HPA delivery',
         expectedDeliveryDate: null,
         notes: 'HPA independent acceptance only',
-        orderDiscount: zero,
-        orderFreight: zero,
-        taxRateBasisPoints: 0,
+        orderDiscount: ownerPrint
+          ? { kind: 'percent_basis_points', basisPoints: 1000 }
+          : zero,
+        orderFreight: ownerPrint ? { kind: 'fixed_minor', minor: '20' } : zero,
+        taxRateBasisPoints: ownerPrint ? 500 : 0,
         lines: lineIds.map((id, index) => ({
           id,
-          materialId: ids[5],
+          materialId: fixtureMaterialId,
           materialSnapshot: {
             nameZh: '合成冻结材料',
             nameFr: 'Synthétique figé',
+            nameEn: 'Frozen synthetic material',
             model: 'HPA',
             specification: 'Synthetic snapshot',
           },
           supplierId: null,
-          currency: 'XOF',
-          quantity: '1',
+          currency: ownerPrint ? 'USD' : 'XOF',
+          quantity: ownerPrint ? '2.5' : '1',
           unit: '米',
           unitPriceMinor: '100',
-          lineDiscount: zero,
-          lineFreight: zero,
+          lineDiscount: ownerPrint
+            ? { kind: 'fixed_minor', minor: '100' }
+            : zero,
+          lineFreight: ownerPrint
+            ? { kind: 'percent_basis_points', basisPoints: 1000 }
+            : zero,
           freightIncluded: false,
           sortOrder: index,
         })),
       },
     })
-    phase = 'mode'
-    await call(receiver, 'set_procurement_mode', {
-      orderId,
-      mode: 'honsen_self_purchase',
-    })
+    if (ownerPrint) {
+      await call(receiver, 'save_owner_purchase_pricing', {
+        input: {
+          orderId,
+          revisionReason: null,
+          lines: lineIds.map((orderItemId) => ({
+            orderItemId,
+            quoteSource: {
+              kind: 'manual_reference',
+              unit_price_minor: '2000',
+              reason: 'Synthetic native OPA reference',
+            },
+            lockedExchangeRateDecimal: '0.5',
+            markup: zero,
+          })),
+        },
+      })
+    } else {
+      phase = 'mode'
+      await call(receiver, 'set_procurement_mode', {
+        orderId,
+        mode: 'honsen_self_purchase',
+      })
+    }
     phase = 'submit'
     await call(receiver, 'submit_requisition_draft', { orderId })
     await call(receiver, 'lock_session')
@@ -467,83 +527,110 @@ try {
       'confirmed',
     )
 
-    await call(issuer, 'save_supplier', {
-      supplier: {
-        id: ids[6],
-        businessCode: readDb(
-          profiles[index],
-          'SELECT business_code FROM local_suppliers WHERE id=?',
-          ids[6],
-        )[0].business_code,
-        name: 'Synthetic offline supplier',
-        countryId: ids[1],
-        contactName: null,
-        address: null,
-        city: null,
-        country: null,
-        phone: null,
-        whatsapp: null,
-        email: null,
-        paymentTerms: null,
-        deliveryLeadTime: null,
-        isPreferred: true,
-        isBlacklisted: false,
-        isActive: true,
-        version: 1,
-      },
-    })
-    const allocated = await call(issuer, 'allocate_supplier_child_orders', {
-      parentOrderId: orderId,
-      allocations: lineIds.map((parentItemId) => ({
-        parentItemId,
-        supplierId: ids[6],
-        currency: 'XOF',
-        childDisplayNo: 'OFFLINE-SPO-' + runId,
-        lockedExchangeRateDecimal: '1',
-      })),
-    })
-    assert.equal(allocated.length, 1)
-    const childId = allocated[0].childOrderId
-    const row = () =>
+    let childId = orderId
+    let row = () =>
       readDb(
         profiles[index],
         'SELECT * FROM local_purchase_orders WHERE id=?',
         childId,
       )[0]
-    assert.equal(row().formal_document_no, null)
-    const childLines = readDb(
-      profiles[index],
-      'SELECT id FROM local_purchase_order_items WHERE order_id=?',
-      childId,
-    )
-    await call(issuer, 'save_supplier_child_terms', {
-      input: {
-        orderId: childId,
-        lines: childLines.map((line) => ({
-          orderItemId: line.id,
-          lineDiscount: zero,
-          lineFreight: zero,
-          freightIncluded: false,
+    let issue
+    if (ownerPrint) {
+      issue = await call(issuer, 'issue_owner_formal_order', { orderId })
+    } else {
+      await call(issuer, 'save_supplier', {
+        supplier: {
+          id: ids[6],
+          businessCode: readDb(
+            profiles[index],
+            'SELECT business_code FROM local_suppliers WHERE id=?',
+            ids[6],
+          )[0].business_code,
+          name: 'Synthetic offline supplier',
+          countryId: ids[1],
+          contactName: null,
+          address: null,
+          city: null,
+          country: null,
+          phone: null,
+          whatsapp: null,
+          email: null,
+          paymentTerms: null,
+          deliveryLeadTime: null,
+          isPreferred: true,
+          isBlacklisted: false,
+          isActive: true,
+          version: 1,
+        },
+      })
+      const allocated = await call(issuer, 'allocate_supplier_child_orders', {
+        parentOrderId: orderId,
+        allocations: lineIds.map((parentItemId) => ({
+          parentItemId,
+          supplierId: ids[6],
+          currency: 'XOF',
+          childDisplayNo: 'OFFLINE-SPO-' + runId,
+          lockedExchangeRateDecimal: '1',
         })),
-        orderDiscount: zero,
-        orderFreight: zero,
-        taxRateBasisPoints: 0,
-      },
-    })
-    const issue = await call(issuer, 'send_supplier_order', {
-      orderId: childId,
-    })
-    assert.equal(issue.documentType, 'SPO')
-    assert.equal(row().workflow_status, 'sent')
-    assert.equal(row().formal_document_no, issue.formalDocumentNo)
+      })
+      assert.equal(allocated.length, 1)
+      childId = allocated[0].childOrderId
+      row = () =>
+        readDb(
+          profiles[index],
+          'SELECT * FROM local_purchase_orders WHERE id=?',
+          childId,
+        )[0]
+      assert.equal(row().formal_document_no, null)
+      const childLines = readDb(
+        profiles[index],
+        'SELECT id FROM local_purchase_order_items WHERE order_id=?',
+        childId,
+      )
+      await call(issuer, 'save_supplier_child_terms', {
+        input: {
+          orderId: childId,
+          lines: childLines.map((line) => ({
+            orderItemId: line.id,
+            lineDiscount: zero,
+            lineFreight: zero,
+            freightIncluded: false,
+          })),
+          orderDiscount: zero,
+          orderFreight: zero,
+          taxRateBasisPoints: 0,
+        },
+      })
+      issue = await call(issuer, 'send_supplier_order', {
+        orderId: childId,
+      })
+      assert.equal(issue.documentType, 'SPO')
+      assert.equal(row().workflow_status, 'sent')
+      assert.equal(row().formal_document_no, issue.formalDocumentNo)
+    }
     const printDocument = await call(issuer, 'get_formal_print_document', {
       orderId: childId,
     })
     assert.equal(printDocument.formalDocumentNo, issue.formalDocumentNo)
-    assert.equal(printDocument.documentType, 'SPO')
+    assert.equal(printDocument.documentType, ownerPrint ? 'OPA' : 'SPO')
     assert.equal(printDocument.totalMinor, expectedTotal)
     assert.equal(printDocument.lines.length, lineCount)
-    assert.ok(printDocument.lines.every((line) => line.nameZh && line.nameFr))
+    if (ownerPrint) {
+      assert.equal(printDocument.currency, 'EUR')
+      assert.equal(printDocument.subtotalMinor, '2500')
+      assert.equal(printDocument.lineDiscountMinor, '50')
+      assert.equal(printDocument.orderDiscountMinor, '245')
+      assert.equal(printDocument.freightMinor, '265')
+      assert.equal(printDocument.taxMinor, '124')
+      assert.equal(printDocument.lines[0].unitPriceMinor, '1000')
+      assert.equal(printDocument.lines[0].lineTotalMinor, '2695')
+    }
+    assert.ok(
+      printDocument.lines.every(
+        (line) =>
+          line.nameZh && (documentPair === 'zh_en' ? line.nameEn : line.nameFr),
+      ),
+    )
     const before = readDb(
       profiles[index],
       'SELECT * FROM local_sync_outbox WHERE acknowledged_at IS NULL AND superseded_at IS NULL ORDER BY rowid',
@@ -583,14 +670,23 @@ try {
     await issuer.page
       .getByRole('button', { name: '离线登录', exact: true })
       .click()
-    await issuer.page
-      .getByRole('button', { name: '采购执行', exact: true })
-      .click()
-    await issuer.page
-      .getByRole('button', { name: 'G2-' + runId, exact: true })
-      .click()
+    if (ownerPrint) {
+      await issuer.page
+        .getByRole('button', { name: '采购申请单', exact: true })
+        .click()
+      await issuer.page
+        .getByRole('button', { name: '查看详情：G2-' + runId, exact: true })
+        .click()
+    } else {
+      await issuer.page
+        .getByRole('button', { name: '采购执行', exact: true })
+        .click()
+      await issuer.page
+        .getByRole('button', { name: 'G2-' + runId, exact: true })
+        .click()
+    }
     const childUi = issuer.page.getByRole('region', {
-      name: '供应商子订单 OFFLINE-SPO-' + runId,
+      name: ownerPrint ? '请购详情' : '供应商子订单 OFFLINE-SPO-' + runId,
       exact: true,
     })
     await childUi
@@ -598,8 +694,14 @@ try {
       .click()
     const preview = childUi.locator('.formal-print-sheet')
     await expect(preview).toContainText(issue.formalDocumentNo)
-    await expect(preview).toContainText(printDocument.lines[0].nameFr)
-    await expect(preview).toContainText(`${expectedTotal} XOF`)
+    await expect(preview).toContainText(
+      documentPair === 'zh_en'
+        ? printDocument.lines[0].nameEn
+        : printDocument.lines[0].nameFr,
+    )
+    await expect(preview).toContainText(
+      ownerPrint ? '25.94 EUR' : `${expectedTotal} XOF`,
+    )
     await issuer.page.screenshot({
       path: resultPath + '-device-' + index + '-preview.png',
       fullPage: true,

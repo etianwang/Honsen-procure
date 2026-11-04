@@ -19,6 +19,7 @@ export const materialSchema = z.object({
   sku: catalogText(128).min(1).nullable(),
   nameZh: catalogText(255).min(1),
   nameFr: catalogText(255).min(1).nullable(),
+  nameEn: catalogText(255).min(1).nullable().optional(),
   aliases: z.array(catalogText(255).min(1)).max(50),
   brand: optionalText,
   model: catalogText(255).min(1),

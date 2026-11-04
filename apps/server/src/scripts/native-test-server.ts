@@ -151,22 +151,25 @@ await pool.query(
    ON CONFLICT (id) DO NOTHING`,
   [nativeScope.teamId, nativeScope.departmentId],
 )
-await pool.query(
-  `INSERT INTO user_project_bindings (user_id, project_id)
+// Purchaser needs actual project/scope grants; engineer-b intentionally remains unbound.
+for (const scopeAccountId of [accounts[0][0], accounts[2][0]]) {
+  await pool.query(
+    `INSERT INTO user_project_bindings (user_id, project_id)
    VALUES ($1, $2) ON CONFLICT (user_id, project_id) DO UPDATE SET deleted_at = NULL`,
-  [accounts[0][0], nativeScope.projectId],
-)
-await pool.query(
-  `INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id)
+    [scopeAccountId, nativeScope.projectId],
+  )
+  await pool.query(
+    `INSERT INTO user_project_scope_bindings (user_id, project_id, department_id, team_id)
    VALUES ($1, $2, $3, $4)
    ON CONFLICT (user_id, project_id, department_id, team_id) DO UPDATE SET deleted_at = NULL, updated_at = NOW()`,
-  [
-    accounts[0][0],
-    nativeScope.projectId,
-    nativeScope.departmentId,
-    nativeScope.teamId,
-  ],
-)
+    [
+      scopeAccountId,
+      nativeScope.projectId,
+      nativeScope.departmentId,
+      nativeScope.teamId,
+    ],
+  )
+}
 
 const nativeApp = Fastify({
   logger: false,

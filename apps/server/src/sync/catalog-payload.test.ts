@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { catalogPayload } from './catalog-payload.js'
-import { supplierFixture, priceFixture } from './catalog-fixtures.js'
+import {
+  materialFixture,
+  supplierFixture,
+  priceFixture,
+} from './catalog-fixtures.js'
 
 describe('catalog transport projection compatibility', () => {
   const supplier = randomUUID()
@@ -79,4 +83,25 @@ describe('catalog transport projection compatibility', () => {
       }),
     ).toMatchObject({ sourceNote: null })
   })
+})
+
+it('preserves optional English names through material projection without rewriting legacy records', () => {
+  const id = randomUUID()
+  const base = materialFixture(id)
+  expect(
+    catalogPayload('material', id, {
+      ...base,
+      nameEn: 'Frozen English material',
+    }),
+  ).toMatchObject({ nameEn: 'Frozen English material' })
+  expect(
+    catalogPayload('material', id, {
+      ...base,
+      name_en: 'Frozen English material',
+    }),
+  ).toMatchObject({ nameEn: 'Frozen English material' })
+  expect(catalogPayload('material', id, base)).not.toHaveProperty('nameEn')
+  expect(
+    catalogPayload('material', id, { ...base, nameEn: '界'.repeat(86) }),
+  ).toBeNull()
 })
