@@ -1,3 +1,4 @@
+import { useMasterText } from '../lib/master-data-messages'
 import { Alert, Button, Card, Input, Select, Space, Table } from 'antd'
 import { useState } from 'react'
 import type {
@@ -21,6 +22,7 @@ export function TaxTemplateEditor({
   canEdit: boolean
   onSaved?: (template: TaxTemplateView) => void
 }) {
+  const t = useMasterText()
   const [items, setItems] = useState(templates)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
@@ -74,29 +76,29 @@ export function TaxTemplateEditor({
     rate <= 100_000
 
   return (
-    <Card title="税模板维护" aria-label="税模板维护">
+    <Card title={t('税模板维护')} aria-label={t('税模板维护')}>
       <Space orientation="vertical" style={{ width: '100%' }}>
-        {message && <Alert type="info" title={message} showIcon />}
+        {message && <Alert type="info" title={t(message)} showIcon />}
         <Space wrap>
           <Input
-            aria-label="税模板代码"
+            aria-label={t('税模板代码')}
             value={code}
             onChange={(event) => setCode(event.target.value)}
             disabled={!canEdit}
           />
           <Input
-            aria-label="税模板名称"
+            aria-label={t('税模板名称')}
             value={name}
             onChange={(event) => setName(event.target.value)}
             disabled={!canEdit}
           />
           <Select
-            aria-label="税模板国家"
+            aria-label={t('税模板国家')}
             value={countryId ?? ''}
             onChange={(value: string) => setCountryId(value || null)}
             disabled={!canEdit}
             options={[
-              { value: '', label: '所有国家' },
+              { value: '', label: t('所有国家') },
               ...countries
                 .filter((item) => item.is_active)
                 .map((item) => ({ value: item.id, label: item.name })),
@@ -104,7 +106,7 @@ export function TaxTemplateEditor({
             style={{ minWidth: 160 }}
           />
           <Input
-            aria-label="税率（基点）"
+            aria-label={t('税率（基点）')}
             type="number"
             min={0}
             max={100000}
@@ -114,7 +116,7 @@ export function TaxTemplateEditor({
             disabled={!canEdit}
           />
           <Input
-            aria-label="税模板生效日期"
+            aria-label={t('税模板生效日期')}
             type="date"
             value={effectiveAt}
             onChange={(event) => setEffectiveAt(event.target.value)}
@@ -135,7 +137,7 @@ export function TaxTemplateEditor({
               })
             }
           >
-            新增税模板
+            {t('新增税模板')}
           </Button>
         </Space>
         <Table
@@ -143,12 +145,12 @@ export function TaxTemplateEditor({
           dataSource={items}
           pagination={false}
           columns={[
-            { title: '代码', dataIndex: 'businessCode' },
+            { title: t('代码'), dataIndex: 'businessCode' },
             {
-              title: '名称',
+              title: t('名称'),
               render: (_: unknown, item: TaxTemplateView) => (
                 <Input
-                  aria-label={`编辑税模板名称-${item.businessCode}`}
+                  aria-label={`${t('税模板名称')}-${item.businessCode}`}
                   value={names[item.id] ?? item.name}
                   disabled={!canEdit}
                   onChange={(event) =>
@@ -161,16 +163,16 @@ export function TaxTemplateEditor({
               ),
             },
             {
-              title: '国家',
+              title: t('国家'),
               render: (_: unknown, item: TaxTemplateView) =>
                 countries.find((country) => country.id === item.countryId)
-                  ?.name ?? '所有国家',
+                  ?.name ?? t('所有国家'),
             },
             {
-              title: '税率（基点）',
+              title: t('税率（基点）'),
               render: (_: unknown, item: TaxTemplateView) => (
                 <Input
-                  aria-label={`编辑税率（基点）-${item.businessCode}`}
+                  aria-label={`${t('税率（基点）')}-${item.businessCode}`}
                   type="number"
                   min={0}
                   max={100000}
@@ -187,10 +189,10 @@ export function TaxTemplateEditor({
               ),
             },
             {
-              title: '生效日期',
+              title: t('生效日期'),
               render: (_: unknown, item: TaxTemplateView) => (
                 <Input
-                  aria-label={`编辑税模板生效日期-${item.businessCode}`}
+                  aria-label={`${t('税模板生效日期')}-${item.businessCode}`}
                   type="date"
                   value={dates[item.id] ?? item.effectiveAt}
                   disabled={!canEdit}
@@ -204,7 +206,7 @@ export function TaxTemplateEditor({
               ),
             },
             {
-              title: '操作',
+              title: t('操作'),
               render: (_: unknown, item: TaxTemplateView) => (
                 <Space>
                   <Button
@@ -240,7 +242,7 @@ export function TaxTemplateEditor({
                       })
                     }
                   >
-                    保存修改
+                    {t('保存修改')}
                   </Button>
                   <Button
                     size="small"
@@ -253,7 +255,7 @@ export function TaxTemplateEditor({
                       })
                     }
                   >
-                    {item.isActive ? '停用' : '启用'}
+                    {item.isActive ? t('停用') : t('启用')}
                   </Button>
                 </Space>
               ),

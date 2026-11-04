@@ -106,3 +106,33 @@ fn project(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, Aut
         serde_json::json!({"formalDocumentNo":number,"documentType":kind,"languagePair":snapshot.language_pair,"projectId":snapshot.project_id,"site":snapshot.site,"orderDate":snapshot.order_date,"deliveryAddress":snapshot.delivery_address,"expectedDeliveryDate":snapshot.expected_delivery_date,"notes":snapshot.notes,"currency":if kind == "SPO" { &snapshot.currency } else { &snapshot.primary_currency },"subtotalMinor":owner_totals.as_ref().map(|v| &v.1).unwrap_or(&snapshot.subtotal_minor),"taxMinor":owner_totals.as_ref().map(|v| &v.2).unwrap_or(&snapshot.tax_minor),"totalMinor":owner_totals.as_ref().map(|v| &v.3).unwrap_or(&snapshot.total_minor),"supplier":supplier,"lineDiscountMinor":snapshot.line_discount_minor,"orderDiscountMinor":snapshot.order_discount_minor,"freightMinor":snapshot.freight_minor,"taxRateBasisPoints":snapshot.tax_rate_basis_points,"selfApproved":snapshot.self_approved,"lines":lines}),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn formal_print_english_uses_frozen_translation_and_rejects_missing() {
+        let id = "10000000-0000-4000-8000-000000000001";
+        let mut raw = serde_json::json!({
+            "displayNo":"draft", "countryId":id,"projectId":id,"site":"test",
+            "departmentId":id,"teamId":id,"applicantId":id,
+            "currency":"EUR","primaryCurrency":"EUR","languagePair":"zh_en",
+            "status":"sent","workflowStatus":"sent","urgency":"normal",
+            "orderDate":"2026-11-05","deliveryAddress":"test",
+            "subtotalMinor":"250","lineDiscountMinor":"0","orderDiscountMinor":"0",
+            "freightMinor":"0","taxRateBasisPoints":0,"taxMinor":"0","totalMinor":"250",
+            "selfApproved":false,"lines":[{"id":id,
+                "materialSnapshotJson":"{\"nameZh\":\"冻结材料\",\"nameEn\":\"Frozen material\"}",
+                "currency":"EUR","quantity":"2.5","unit":"m","unitPriceMinor":"100",
+                "lineDiscountJson":"{}","lineFreightJson":"{}","freightIncluded":false,
+                "lineTotalMinor":"250","sortOrder":0,"createdAt":1,"updatedAt":1
+            }]
+        });
+        let print = project("TEST-SPO-1", "SPO", &raw.to_string()).unwrap();
+        assert_eq!(print["languagePair"], "zh_en");
+        assert_eq!(print["lines"][0]["nameEn"], "Frozen material");
+        assert!(print["lines"][0]["nameFr"].is_null());
+        raw["lines"][0]["materialSnapshotJson"] = serde_json::json!("{\"nameZh\":\"冻结材料\",\"nameFr\":\"Matériau\"}");
+        assert_eq!(project("TEST-SPO-1", "SPO", &raw.to_string()), Err(AuthError::InvalidInput));
+    }
+}

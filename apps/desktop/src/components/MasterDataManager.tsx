@@ -1,3 +1,4 @@
+import { useMasterText } from '../lib/master-data-messages'
 import { Alert, Button, Card, Input, Select, Space, Table, Tabs } from 'antd'
 import { useMemo, useState, type ReactNode } from 'react'
 import type {
@@ -14,6 +15,7 @@ type Props = {
 const newId = () => crypto.randomUUID()
 
 export function MasterDataManager({ api, records, canEdit }: Props) {
+  const t = useMasterText()
   const [items, setItems] = useState(records)
   const [message, setMessage] = useState<string | null>(null)
   const countries = useMemo(
@@ -107,19 +109,19 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
           })
         }
       >
-        {record.is_active ? '停用' : '启用'}
+        {record.is_active ? t('停用') : t('启用')}
       </Button>
     )
   }
 
   return (
-    <Card title="管理员基础资料" aria-label="管理员基础资料">
-      {message && <Alert type="info" title={message} showIcon />}
+    <Card title={t('管理员基础资料')} aria-label={t('管理员基础资料')}>
+      {message && <Alert type="info" title={t(message)} showIcon />}
       <Tabs
         items={[
           {
             key: 'countries',
-            label: '国家',
+            label: t('国家'),
             children: (
               <CountryEditor
                 countries={countries}
@@ -131,7 +133,7 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
           },
           {
             key: 'projects',
-            label: '项目',
+            label: t('项目'),
             children: (
               <ProjectEditor
                 countries={countries}
@@ -144,7 +146,7 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
           },
           {
             key: 'sites',
-            label: '项目站点',
+            label: t('项目站点'),
             children: (
               <SiteEditor
                 projects={projects}
@@ -157,7 +159,7 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
           },
           {
             key: 'units',
-            label: '单位',
+            label: t('单位'),
             children: (
               <UnitEditor
                 units={units}
@@ -169,7 +171,7 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
           },
           {
             key: 'departments',
-            label: '部门',
+            label: t('部门'),
             children: (
               <DepartmentEditor
                 departments={departments}
@@ -181,7 +183,7 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
           },
           {
             key: 'teams',
-            label: '团队',
+            label: t('团队'),
             children: (
               <TeamEditor
                 departments={departments}
@@ -194,7 +196,7 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
           },
           {
             key: 'material-categories',
-            label: '材料分类',
+            label: t('材料分类'),
             children: (
               <MaterialCategoryEditor
                 categories={categories}
@@ -221,19 +223,20 @@ function MaterialCategoryEditor({
   save: (item: ReferenceMasterDataView) => Promise<void>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
+  const t = useMasterText()
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
         <Input
-          aria-label="材料分类代码"
+          aria-label={t('材料分类代码')}
           value={code}
           onChange={(event) => setCode(event.target.value)}
           disabled={!canEdit}
         />
         <Input
-          aria-label="材料分类名称"
+          aria-label={t('材料分类名称')}
           value={name}
           onChange={(event) => setName(event.target.value)}
           disabled={!canEdit}
@@ -251,7 +254,7 @@ function MaterialCategoryEditor({
             })
           }
         >
-          新增材料分类
+          {t('新增材料分类')}
         </Button>
       </Space>
       <Table
@@ -259,12 +262,12 @@ function MaterialCategoryEditor({
         pagination={false}
         dataSource={categories}
         columns={[
-          { title: '代码', dataIndex: 'business_code' },
+          { title: t('代码'), dataIndex: 'business_code' },
           {
-            title: '名称',
+            title: t('名称'),
             render: (_, row) => (
               <Input
-                aria-label={`编辑材料分类名称-${row.business_code}`}
+                aria-label={`${t('编辑材料分类名称')}-${row.business_code}`}
                 defaultValue={row.name}
                 disabled={!canEdit}
                 onBlur={(event) => {
@@ -278,7 +281,7 @@ function MaterialCategoryEditor({
               />
             ),
           },
-          { title: '状态', render: (_, row) => status(row) },
+          { title: t('状态'), render: (_, row) => status(row) },
         ]}
       />
     </Space>
@@ -296,19 +299,20 @@ function DepartmentEditor({
   save: (item: ReferenceMasterDataView) => Promise<void>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
+  const t = useMasterText()
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
         <Input
-          aria-label="部门代码"
+          aria-label={t('部门代码')}
           value={code}
           onChange={(event) => setCode(event.target.value)}
           disabled={!canEdit}
         />
         <Input
-          aria-label="部门名称"
+          aria-label={t('部门名称')}
           value={name}
           onChange={(event) => setName(event.target.value)}
           disabled={!canEdit}
@@ -326,7 +330,7 @@ function DepartmentEditor({
             })
           }
         >
-          新增部门
+          {t('新增部门')}
         </Button>
       </Space>
       <Table
@@ -334,12 +338,12 @@ function DepartmentEditor({
         pagination={false}
         dataSource={departments}
         columns={[
-          { title: '代码', dataIndex: 'business_code' },
+          { title: t('代码'), dataIndex: 'business_code' },
           {
-            title: '名称',
+            title: t('名称'),
             render: (_, row) => (
               <Input
-                aria-label={`编辑部门名称-${row.business_code}`}
+                aria-label={`${t('编辑部门名称')}-${row.business_code}`}
                 defaultValue={row.name}
                 disabled={!canEdit}
                 onBlur={(event) => {
@@ -353,7 +357,7 @@ function DepartmentEditor({
               />
             ),
           },
-          { title: '状态', render: (_, row) => status(row) },
+          { title: t('状态'), render: (_, row) => status(row) },
         ]}
       />
     </Space>
@@ -373,6 +377,7 @@ function TeamEditor({
   save: (item: ReferenceMasterDataView) => Promise<void>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
+  const t = useMasterText()
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [departmentId, setDepartmentId] = useState('')
@@ -380,19 +385,19 @@ function TeamEditor({
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
         <Input
-          aria-label="团队代码"
+          aria-label={t('团队代码')}
           value={code}
           onChange={(event) => setCode(event.target.value)}
           disabled={!canEdit}
         />
         <Input
-          aria-label="团队名称"
+          aria-label={t('团队名称')}
           value={name}
           onChange={(event) => setName(event.target.value)}
           disabled={!canEdit}
         />
         <Select
-          aria-label="团队所属部门"
+          aria-label={t('团队所属部门')}
           value={departmentId || undefined}
           onChange={setDepartmentId}
           options={departments
@@ -402,7 +407,7 @@ function TeamEditor({
               label: department.name,
             }))}
           disabled={!canEdit}
-          placeholder="选择部门"
+          placeholder={t('选择部门')}
         />
         <Button
           disabled={!canEdit || !code.trim() || !name.trim() || !departmentId}
@@ -418,7 +423,7 @@ function TeamEditor({
             })
           }
         >
-          新增团队
+          {t('新增团队')}
         </Button>
       </Space>
       <Table
@@ -426,12 +431,12 @@ function TeamEditor({
         pagination={false}
         dataSource={teams}
         columns={[
-          { title: '代码', dataIndex: 'business_code' },
+          { title: t('代码'), dataIndex: 'business_code' },
           {
-            title: '名称',
+            title: t('名称'),
             render: (_, row) => (
               <Input
-                aria-label={`编辑团队名称-${row.business_code}`}
+                aria-label={`${t('编辑团队名称')}-${row.business_code}`}
                 defaultValue={row.name}
                 disabled={!canEdit}
                 onBlur={(event) => {
@@ -446,13 +451,13 @@ function TeamEditor({
             ),
           },
           {
-            title: '部门',
+            title: t('部门'),
             render: (_, row) =>
               departments.find(
                 (department) => department.id === row.department_id,
-              )?.name ?? '未知部门',
+              )?.name ?? t('未知部门'),
           },
-          { title: '状态', render: (_, row) => status(row) },
+          { title: t('状态'), render: (_, row) => status(row) },
         ]}
       />
     </Space>
@@ -470,19 +475,20 @@ function UnitEditor({
   save: (item: ReferenceMasterDataView) => Promise<void>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
+  const t = useMasterText()
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
         <Input
-          aria-label="单位代码"
+          aria-label={t('单位代码')}
           value={code}
           onChange={(event) => setCode(event.target.value)}
           disabled={!canEdit}
         />
         <Input
-          aria-label="单位名称"
+          aria-label={t('单位名称')}
           value={name}
           onChange={(event) => setName(event.target.value)}
           disabled={!canEdit}
@@ -500,7 +506,7 @@ function UnitEditor({
             })
           }
         >
-          新增单位
+          {t('新增单位')}
         </Button>
       </Space>
       <Table
@@ -508,12 +514,12 @@ function UnitEditor({
         pagination={false}
         dataSource={units}
         columns={[
-          { title: '代码', dataIndex: 'business_code' },
+          { title: t('代码'), dataIndex: 'business_code' },
           {
-            title: '名称',
+            title: t('名称'),
             render: (_, row) => (
               <Input
-                aria-label={`编辑单位名称-${row.business_code}`}
+                aria-label={`${t('编辑单位名称')}-${row.business_code}`}
                 defaultValue={row.name}
                 disabled={!canEdit}
                 onBlur={(event) => {
@@ -527,7 +533,7 @@ function UnitEditor({
               />
             ),
           },
-          { title: '状态', render: (_, row) => status(row) },
+          { title: t('状态'), render: (_, row) => status(row) },
         ]}
       />
     </Space>
@@ -545,6 +551,7 @@ function CountryEditor({
   save: (item: ReferenceMasterDataView) => Promise<void>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
+  const t = useMasterText()
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [timeZone, setTimeZone] = useState('Africa/Abidjan')
@@ -552,24 +559,24 @@ function CountryEditor({
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
         <Input
-          aria-label="国家代码"
+          aria-label={t('国家代码')}
           value={code}
           onChange={(event) => setCode(event.target.value)}
-          placeholder="国家代码"
+          placeholder={t('国家代码')}
           disabled={!canEdit}
         />
         <Input
-          aria-label="国家名称"
+          aria-label={t('国家名称')}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="国家名称"
+          placeholder={t('国家名称')}
           disabled={!canEdit}
         />
         <Input
-          aria-label="国家时区"
+          aria-label={t('国家时区')}
           value={timeZone}
           onChange={(event) => setTimeZone(event.target.value)}
-          placeholder="时区"
+          placeholder={t('时区')}
           disabled={!canEdit}
         />
         <Button
@@ -586,7 +593,7 @@ function CountryEditor({
             })
           }
         >
-          新增国家
+          {t('新增国家')}
         </Button>
       </Space>
       <Table
@@ -594,12 +601,12 @@ function CountryEditor({
         pagination={false}
         dataSource={countries}
         columns={[
-          { title: '代码', dataIndex: 'business_code' },
+          { title: t('代码'), dataIndex: 'business_code' },
           {
-            title: '名称',
+            title: t('名称'),
             render: (_, row) => (
               <Input
-                aria-label={`编辑国家名称-${row.business_code}`}
+                aria-label={`${t('编辑国家名称')}-${row.business_code}`}
                 defaultValue={row.name}
                 disabled={!canEdit}
                 onBlur={(event) => {
@@ -614,10 +621,10 @@ function CountryEditor({
             ),
           },
           {
-            title: '时区',
+            title: t('时区'),
             render: (_, row) => (
               <Input
-                aria-label={`编辑国家时区-${row.business_code}`}
+                aria-label={`${t('编辑国家时区')}-${row.business_code}`}
                 defaultValue={row.time_zone}
                 disabled={!canEdit}
                 onBlur={(event) => {
@@ -631,7 +638,7 @@ function CountryEditor({
               />
             ),
           },
-          { title: '状态', render: (_, row) => status(row) },
+          { title: t('状态'), render: (_, row) => status(row) },
         ]}
       />
     </Space>
@@ -651,6 +658,7 @@ function ProjectEditor({
   save: (item: ReferenceMasterDataView) => Promise<void>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
+  const t = useMasterText()
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [countryId, setCountryId] = useState('')
@@ -662,14 +670,14 @@ function ProjectEditor({
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
         <Input
-          aria-label="项目代码"
+          aria-label={t('项目代码')}
           value={code}
           onChange={(event) => setCode(event.target.value)}
-          placeholder="项目代码"
+          placeholder={t('项目代码')}
           disabled={!canEdit}
         />
         <Select
-          aria-label="项目默认币种"
+          aria-label={t('项目默认币种')}
           value={currency}
           onChange={setCurrency}
           options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
@@ -679,44 +687,44 @@ function ProjectEditor({
           disabled={!canEdit}
         />
         <Select
-          aria-label="项目默认语言"
+          aria-label={t('项目默认语言')}
           value={language}
           onChange={setLanguage}
           options={[
-            { value: 'zh_fr', label: '中文 + 法语' },
-            { value: 'zh_en', label: '中文 + 英文' },
+            { value: 'zh_fr', label: t('中文 + 法语') },
+            { value: 'zh_en', label: t('中文 + 英文') },
           ]}
           disabled={!canEdit}
         />
         <Input
-          aria-label="项目名称"
+          aria-label={t('项目名称')}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="项目名称"
+          placeholder={t('项目名称')}
           disabled={!canEdit}
         />
         <Select
-          aria-label="项目国家"
+          aria-label={t('项目国家')}
           value={countryId || undefined}
           onChange={setCountryId}
           options={countries
             .filter((country) => country.is_active)
             .map((country) => ({ value: country.id, label: country.name }))}
           disabled={!canEdit}
-          placeholder="选择国家"
+          placeholder={t('选择国家')}
         />
         <Input
-          aria-label="项目默认站点"
+          aria-label={t('项目默认站点')}
           value={site}
           onChange={(event) => setSite(event.target.value)}
-          placeholder="默认站点"
+          placeholder={t('默认站点')}
           disabled={!canEdit}
         />
         <Input
-          aria-label="项目部门"
+          aria-label={t('项目部门')}
           value={department}
           onChange={(event) => setDepartment(event.target.value)}
-          placeholder="部门"
+          placeholder={t('部门')}
           disabled={!canEdit}
         />
         <Button
@@ -737,7 +745,7 @@ function ProjectEditor({
             })
           }
         >
-          新增项目
+          {t('新增项目')}
         </Button>
       </Space>
       <Table
@@ -745,12 +753,12 @@ function ProjectEditor({
         pagination={false}
         dataSource={projects}
         columns={[
-          { title: '代码', dataIndex: 'business_code' },
+          { title: t('代码'), dataIndex: 'business_code' },
           {
-            title: '名称',
+            title: t('名称'),
             render: (_, row) => (
               <Input
-                aria-label={`编辑项目名称-${row.business_code}`}
+                aria-label={`${t('编辑项目名称')}-${row.business_code}`}
                 defaultValue={row.name}
                 disabled={!canEdit}
                 onBlur={(event) => {
@@ -765,10 +773,10 @@ function ProjectEditor({
             ),
           },
           {
-            title: '国家',
+            title: t('国家'),
             render: (_, row) => (
               <Select
-                aria-label={`编辑项目国家-${row.business_code}`}
+                aria-label={`${t('编辑项目国家')}-${row.business_code}`}
                 value={row.country_id}
                 disabled={!canEdit}
                 options={countries.map((country) => ({
@@ -782,10 +790,10 @@ function ProjectEditor({
             ),
           },
           {
-            title: '币种',
+            title: t('币种'),
             render: (_, row) => (
               <Select
-                aria-label={`编辑项目币种-${row.business_code}`}
+                aria-label={`${t('编辑项目币种')}-${row.business_code}`}
                 value={row.default_currency}
                 disabled={!canEdit}
                 options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
@@ -803,15 +811,15 @@ function ProjectEditor({
             ),
           },
           {
-            title: '语言',
+            title: t('语言'),
             render: (_, row) => (
               <Select
-                aria-label={`编辑项目语言-${row.business_code}`}
+                aria-label={`${t('编辑项目语言')}-${row.business_code}`}
                 value={row.default_language_pair}
                 disabled={!canEdit}
                 options={[
-                  { value: 'zh_fr', label: '中文 + 法语' },
-                  { value: 'zh_en', label: '中文 + 英文' },
+                  { value: 'zh_fr', label: t('中文 + 法语') },
+                  { value: 'zh_en', label: t('中文 + 英文') },
                 ]}
                 onChange={(default_language_pair) =>
                   void save({
@@ -823,7 +831,7 @@ function ProjectEditor({
               />
             ),
           },
-          { title: '状态', render: (_, row) => status(row) },
+          { title: t('状态'), render: (_, row) => status(row) },
         ]}
       />
     </Space>
@@ -843,6 +851,7 @@ function SiteEditor({
   save: (item: ReferenceMasterDataView) => Promise<void>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
+  const t = useMasterText()
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -850,28 +859,28 @@ function SiteEditor({
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
         <Input
-          aria-label="站点代码"
+          aria-label={t('站点代码')}
           value={code}
           onChange={(event) => setCode(event.target.value)}
-          placeholder="站点代码"
+          placeholder={t('站点代码')}
           disabled={!canEdit}
         />
         <Input
-          aria-label="站点名称"
+          aria-label={t('站点名称')}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="站点名称"
+          placeholder={t('站点名称')}
           disabled={!canEdit}
         />
         <Select
-          aria-label="站点项目"
+          aria-label={t('站点项目')}
           value={projectId || undefined}
           onChange={setProjectId}
           options={projects
             .filter((project) => project.is_active)
             .map((project) => ({ value: project.id, label: project.name }))}
           disabled={!canEdit}
-          placeholder="选择项目"
+          placeholder={t('选择项目')}
         />
         <Button
           disabled={!canEdit}
@@ -887,7 +896,7 @@ function SiteEditor({
             })
           }
         >
-          新增站点
+          {t('新增站点')}
         </Button>
       </Space>
       <Table
@@ -896,10 +905,10 @@ function SiteEditor({
         dataSource={sites}
         columns={[
           {
-            title: '站点',
+            title: t('站点'),
             render: (_, row) => (
               <Input
-                aria-label={`编辑站点名称-${row.business_code}`}
+                aria-label={`${t('编辑站点名称')}-${row.business_code}`}
                 defaultValue={row.name}
                 disabled={!canEdit}
                 onBlur={(event) => {
@@ -914,10 +923,10 @@ function SiteEditor({
             ),
           },
           {
-            title: '项目',
+            title: t('项目'),
             render: (_, row) => (
               <Select
-                aria-label={`编辑站点项目-${row.business_code}`}
+                aria-label={`${t('编辑站点项目')}-${row.business_code}`}
                 value={row.project_id}
                 disabled={!canEdit}
                 options={projects.map((project) => ({
@@ -930,7 +939,7 @@ function SiteEditor({
               />
             ),
           },
-          { title: '状态', render: (_, row) => status(row) },
+          { title: t('状态'), render: (_, row) => status(row) },
         ]}
       />
     </Space>

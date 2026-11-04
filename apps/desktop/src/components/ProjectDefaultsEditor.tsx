@@ -1,3 +1,4 @@
+import { useMasterText } from '../lib/master-data-messages'
 import { Alert, Button, Card, Input, Select, Space, Typography } from 'antd'
 import type { ProjectDefaults } from '@honsen/shared'
 import { useState } from 'react'
@@ -35,6 +36,7 @@ export function ProjectDefaultsEditor({
   taxTemplates,
   referenceData,
 }: ProjectDefaultsEditorProps) {
+  const t = useMasterText()
   const [projectId, setProjectId] = useState(projects[0]?.projectId ?? '')
   const project = projects.find((item) => item.projectId === projectId)
   const [draft, setDraft] = useState<ProjectDefaults | null>(
@@ -43,7 +45,7 @@ export function ProjectDefaultsEditor({
   const [message, setMessage] = useState<string | null>(null)
 
   if (!project || !draft) {
-    return <Alert type="info" title="尚无可维护的同步项目" showIcon />
+    return <Alert type="info" title={t('尚无可维护的同步项目')} showIcon />
   }
 
   const incomplete = [draft.departmentTitle, draft.companyAddress].some(
@@ -63,7 +65,7 @@ export function ProjectDefaultsEditor({
     (item) => item.id === draft.defaultTaxTemplateId,
   )
   const taxOptions = [
-    { value: '', label: '不使用默认税模板' },
+    { value: '', label: t('不使用默认税模板') },
     ...eligibleTaxTemplates.map((item) => ({
       value: item.id,
       label: item.name,
@@ -73,7 +75,7 @@ export function ProjectDefaultsEditor({
       ? [
           {
             value: selectedTax.id,
-            label: `${selectedTax.name}（当前不可用）`,
+            label: `${selectedTax.name}${t('当前不可用')}`,
             disabled: true,
           },
         ]
@@ -102,15 +104,17 @@ export function ProjectDefaultsEditor({
         className="project-default-editor"
       >
         <div>
-          <Typography.Title level={1}>项目默认设置</Typography.Title>
+          <Typography.Title level={1}>{t('项目默认设置')}</Typography.Title>
           <Typography.Paragraph>
-            管理员、采购员或超级管理员可维护打印抬头、币种、语言和税模板。业务编码不可在此更改。
+            {t(
+              '管理员、采购员或超级管理员可维护打印抬头、币种、语言和税模板。业务编码不可在此更改。',
+            )}
           </Typography.Paragraph>
         </div>
-        <label htmlFor="project-default-select">选择项目</label>
+        <label htmlFor="project-default-select">{t('选择项目')}</label>
         <Select
           id="project-default-select"
-          aria-label="选择项目"
+          aria-label={t('选择项目')}
           value={projectId}
           onChange={(nextProjectId: string) => {
             const nextProject = projects.find(
@@ -126,29 +130,29 @@ export function ProjectDefaultsEditor({
           }))}
         />
         <output data-testid="selected-project">{project.projectName}</output>
-        <dl className="master-defaults" aria-label="项目默认值">
+        <dl className="master-defaults" aria-label={t('项目默认值')}>
           <div>
-            <dt>工程地点</dt>
+            <dt>{t('工程地点')}</dt>
             <dd>{project.site}</dd>
           </div>
           <div>
-            <dt>默认文件语言</dt>
+            <dt>{t('默认文件语言')}</dt>
             <dd>
               {draft.defaultLanguagePair === 'zh_fr'
-                ? '中文 + 法语'
-                : '中文 + 英文'}
+                ? t('中文 + 法语')
+                : t('中文 + 英文')}
             </dd>
           </div>
           <div>
-            <dt>默认币种</dt>
+            <dt>{t('默认币种')}</dt>
             <dd>{draft.defaultCurrency}</dd>
           </div>
           <div>
-            <dt>默认税率</dt>
-            <dd>{project.taxTemplateName ?? '未设置默认税率'}</dd>
+            <dt>{t('默认税率')}</dt>
+            <dd>{project.taxTemplateName ?? t('未设置默认税率')}</dd>
           </div>
         </dl>
-        <label htmlFor="project-department-title">项目部抬头</label>
+        <label htmlFor="project-department-title">{t('项目部抬头')}</label>
         <Input
           id="project-department-title"
           value={draft.departmentTitle}
@@ -157,7 +161,7 @@ export function ProjectDefaultsEditor({
           }
           disabled={!canEdit}
         />
-        <label htmlFor="project-address">页脚地址</label>
+        <label htmlFor="project-address">{t('页脚地址')}</label>
         <Input
           id="project-address"
           value={draft.companyAddress}
@@ -166,20 +170,20 @@ export function ProjectDefaultsEditor({
           }
           disabled={!canEdit}
         />
-        <label htmlFor="project-contact">页脚联系方式</label>
+        <label htmlFor="project-contact">{t('页脚联系方式')}</label>
         <Input
           id="project-contact"
-          aria-label="页脚联系方式"
+          aria-label={t('页脚联系方式')}
           value={draft.companyContact ?? ''}
           onChange={(event) =>
             setDraft({ ...draft, companyContact: event.target.value })
           }
           disabled={!canEdit}
         />
-        <label htmlFor="project-currency">默认币种</label>
+        <label htmlFor="project-currency">{t('默认币种')}</label>
         <Select
           id="project-currency"
-          aria-label="默认币种"
+          aria-label={t('默认币种')}
           value={draft.defaultCurrency}
           disabled={!canEdit}
           onChange={(defaultCurrency: ProjectDefaults['defaultCurrency']) =>
@@ -190,24 +194,24 @@ export function ProjectDefaultsEditor({
             label: value,
           }))}
         />
-        <label htmlFor="project-language">默认文件语言</label>
+        <label htmlFor="project-language">{t('默认文件语言')}</label>
         <Select
           id="project-language"
-          aria-label="默认文件语言"
+          aria-label={t('默认文件语言')}
           value={draft.defaultLanguagePair}
           disabled={!canEdit}
           onChange={(
             defaultLanguagePair: ProjectDefaults['defaultLanguagePair'],
           ) => setDraft({ ...draft, defaultLanguagePair })}
           options={[
-            { value: 'zh_fr', label: '中文 + 法语' },
-            { value: 'zh_en', label: '中文 + 英文' },
+            { value: 'zh_fr', label: t('中文 + 法语') },
+            { value: 'zh_en', label: t('中文 + 英文') },
           ]}
         />
-        <label htmlFor="project-tax-template">默认税模板</label>
+        <label htmlFor="project-tax-template">{t('默认税模板')}</label>
         <Select
           id="project-tax-template"
-          aria-label="默认税模板"
+          aria-label={t('默认税模板')}
           value={draft.defaultTaxTemplateId ?? ''}
           options={taxOptions}
           onChange={(value: string) =>
@@ -219,12 +223,12 @@ export function ProjectDefaultsEditor({
           disabled={!canEdit}
         />
         <Button type="primary" onClick={save} disabled={!canEdit || incomplete}>
-          保存项目默认值
+          {t('保存项目默认值')}
         </Button>
         {message && (
           <Alert
             type={message === '项目默认值已保存' ? 'success' : 'error'}
-            title={message}
+            title={t(message)}
             showIcon
           />
         )}
