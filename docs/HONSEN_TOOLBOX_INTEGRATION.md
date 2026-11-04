@@ -1,5 +1,7 @@
 <!-- Current RC evidence below supersedes historical implementation-gap labels. -->
 
+2026-11-04 latest tested production source05e84ccf78761a3c187d04fc59886f55e62ee5f3 / local0.1.12 (pushed): actual old019 publicapply replacement, same-version exact-pair cleanup, sharing-lock refusal/no restart, explicit retry and uninstall data/unknown-file retention PASS within recorded scope. Prior011 cleanup FAIL retained. Fresh012 install is BLOCKED_ENV: automatic approval review rejected both requested variants, stating only blocked by policy; neither ran. Qualified live launch/apply/worker chain and UAC cancellation remain unverified; scope3 unapproved and original V1 security/recovery/export/language gates OPEN. Owned guests stopped. See reviews/WINDOWS-CANDIDATE-012-20261104.md and RUNNER-REPLACEMENT-P1-RESULT-20261104.md; no parent checkbox or final QA readiness is closed.
+
 # Honsen Toolbox Integration
 
 ## Current approved launch scope2 — 2026-11-04

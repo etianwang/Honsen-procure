@@ -1,0 +1,155 @@
+{
+  "sourceSha": "05e84ccf78761a3c187d04fc59886f55e62ee5f3",
+  "version": "0.1.12",
+  "status": "PARTIAL_ACCEPTANCE; original full update gate OPEN",
+  "installer": {
+    "path": "H:/Honsen/artifacts/windows/05e84cc-012/Honsen-Procure-0.1.12-Setup.exe",
+    "sha256": "747a66cfd4a760ad98d0c136a94410397ae148b814d5822b8797656000d286ea",
+    "effectiveRunnerSha256": "68b905dc34a340aa1c5ae4a86d2ec9824a297175247e5690b34c0b29f6b7a866",
+    "installedMainSha256": "eec80723dcc2cf368f55df4bc42bbfc5c54d093b0e5b32a4afbabb59d17b219d"
+  },
+  "cases": {
+    "old019Upgrade": {
+      "status": "PASS",
+      "actual": {
+        "exitCode": 0,
+        "operationId": "ea71587e-be30-495f-ae63-55f8a0b7b136",
+        "version": "0.1.12",
+        "manifestVersion": "0.1.12",
+        "directory": "C:\\Honsen Security Synthetic\\Honsen Procure",
+        "mainVersion": "0.1.12",
+        "runnerVersion": "0.1.12",
+        "runnerHash": "68B905DC34A340AA1C5AE4A86D2EC9824A297175247E5690B34C0B29F6B7A866",
+        "mainHash": "EEC80723DCC2CF368F55DF4BC42BBFC5C54D093B0E5B32A4AFBABB59D17B219D",
+        "sqliteHash": "EE79CF39D38B965138E462E0490253B73621561F3BEB3F902E30063661E09E97",
+        "markerHash": "EDB0346CA4E77EB705081F52C4D49652783B814AD995670CB828650C602862BD",
+        "clientCount": 0,
+        "privateFiles": [
+          ".honsen-runner-inuse-AE76EA62-570D-4544-B1C8-E3AEFB5D43EC.exe",
+          ".honsen-runner-inuse-AE76EA62-570D-4544-B1C8-E3AEFB5D43EC.owner.ini"
+        ]
+      }
+    },
+    "sameVersionCleanup": {
+      "status": "PASS",
+      "actual": {
+        "exitCode": 0,
+        "operationId": "e1375e9c-f909-48ab-90c2-a818ee361f38",
+        "runnerHash": "68B905DC34A340AA1C5AE4A86D2EC9824A297175247E5690B34C0B29F6B7A866",
+        "oldPrivateFiles": [
+          ".honsen-runner-inuse-AE76EA62-570D-4544-B1C8-E3AEFB5D43EC.exe",
+          ".honsen-runner-inuse-AE76EA62-570D-4544-B1C8-E3AEFB5D43EC.owner.ini"
+        ],
+        "oldPrivateFilesAllGone": true,
+        "newPrivateFiles": [
+          ".honsen-runner-inuse-6D324942-2FDC-4472-A106-8BA190D5B8E5.exe",
+          ".honsen-runner-inuse-6D324942-2FDC-4472-A106-8BA190D5B8E5.owner.ini"
+        ],
+        "sqliteHash": "EE79CF39D38B965138E462E0490253B73621561F3BEB3F902E30063661E09E97",
+        "markerHash": "EDB0346CA4E77EB705081F52C4D49652783B814AD995670CB828650C602862BD",
+        "clientCount": 0
+      }
+    },
+    "shareLockRefusal": {
+      "status": "PASS",
+      "actual": {
+        "exitCode": 1,
+        "operationId": "f868ee71-acab-4129-a848-c3da04e8e9ec",
+        "lockStillActive": true,
+        "runnerHash": "68B905DC34A340AA1C5AE4A86D2EC9824A297175247E5690B34C0B29F6B7A866",
+        "mainHash": "EEC80723DCC2CF368F55DF4BC42BBFC5C54D093B0E5B32A4AFBABB59D17B219D",
+        "registryVersion": "0.1.12",
+        "sqliteHash": "EE79CF39D38B965138E462E0490253B73621561F3BEB3F902E30063661E09E97",
+        "markerHash": "EDB0346CA4E77EB705081F52C4D49652783B814AD995670CB828650C602862BD",
+        "clientCount": 0
+      },
+      "result": {
+        "appId": "honsen.procure",
+        "operationId": "f868ee71-acab-4129-a848-c3da04e8e9ec",
+        "status": "failed",
+        "source": "toolbox",
+        "fromVersion": "unknown",
+        "toVersion": "0.1.12",
+        "step": "installer-exit",
+        "installerExitCode": 59,
+        "installerLogPath": null,
+        "message": "installer returned 59",
+        "completedAtUtc": "2026-11-04T11:46:29Z"
+      }
+    },
+    "explicitRetryAfterRelease": {
+      "status": "PASS",
+      "actual": {
+        "previousPairGone": true,
+        "exitCode": 0,
+        "markerHash": "EDB0346CA4E77EB705081F52C4D49652783B814AD995670CB828650C602862BD",
+        "sqliteHash": "EE79CF39D38B965138E462E0490253B73621561F3BEB3F902E30063661E09E97",
+        "runnerHash": "68B905DC34A340AA1C5AE4A86D2EC9824A297175247E5690B34C0B29F6B7A866",
+        "operationId": "826e3e28-6ae5-44da-9c04-bee79e27b04e",
+        "clientCount": 0
+      }
+    },
+    "uninstall": {
+      "status": "PASS scoped installed-state/data checks",
+      "actual": {
+        "unknownPreserved": true,
+        "eligibleAliasFiles": [],
+        "registrationAbsent": true,
+        "runnerAbsent": true,
+        "unknownHash": "1A777E141053A35751426A6224DCD699ABB1BC4004F76C8C8AF241F725BD7C7E",
+        "clientCount": 0,
+        "mainAbsent": true,
+        "manifestAbsent": true,
+        "sqliteHash": "EE79CF39D38B965138E462E0490253B73621561F3BEB3F902E30063661E09E97",
+        "uninstallRegistrationAbsent": true,
+        "invalidReceiptHash": "E8CAFE59D8F0C9328FCA2DB0653B13E2715999640DD12FD5DF36929B97956D11",
+        "markerHash": "EDB0346CA4E77EB705081F52C4D49652783B814AD995670CB828650C602862BD",
+        "parentExitCode": 0,
+        "invalidReceiptPreserved": true
+      }
+    },
+    "fresh012": {
+      "status": "BLOCKED_ENV",
+      "reason": "Automatic approval review rejected targeted synthetic teardown+reinstall, then a nondestructive fresh installation in a new empty guest directory. Both returned only blocked by policy; neither command executed; no retry via alternative tool/encoding/UI."
+    },
+    "wrongRunnerVersion": {
+      "status": "PASS on unchanged worker source3c2ceac/011; bounded reuse",
+      "evidence": "WINDOWS-CANDIDATE-011-20261104.json; p1-wrong-runner-result/after/adapter.log",
+      "comparison": "git diff --quiet 3c2ceac 05e84cc -- Rust Runner/launch/bin owning files exited0"
+    },
+    "liveCanonicalThreeLayer": {
+      "status": "BLOCKED_ENV",
+      "reason": "No qualified stable-asset live chain executed; guest networking disabled and current test seams cannot dispatch the real launch/apply/worker chain. Fakehost/sibling mappings do not qualify."
+    },
+    "uacCancel": {
+      "status": "BLOCKED_ENV",
+      "reason": "No interactive UAC prompt was available in the actual silent Sandbox runs. Requires an appropriate isolated Windows/UAC environment and manual security-dialog interaction; no security setting changed."
+    }
+  },
+  "finalGuestState": {
+    "markerHash": "EDB0346CA4E77EB705081F52C4D49652783B814AD995670CB828650C602862BD",
+    "freshDirectoryAbsent": true,
+    "runnerCount": 0,
+    "mainAbsent": true,
+    "invalidReceiptHash": "E8CAFE59D8F0C9328FCA2DB0653B13E2715999640DD12FD5DF36929B97956D11",
+    "sqliteHash": "EE79CF39D38B965138E462E0490253B73621561F3BEB3F902E30063661E09E97",
+    "runnerAbsent": true,
+    "clientCount": 0,
+    "registrationAbsent": true,
+    "unknownHash": "1A777E141053A35751426A6224DCD699ABB1BC4004F76C8C8AF241F725BD7C7E"
+  },
+  "guestCleanup": "Official wsb stop completed; wsb list returned no environments. Raw evidence retained on H.",
+  "knownCredentialScan": {
+    "filesChecked": 15,
+    "knownCredentialMatches": 0,
+    "scope": "known credentials, UTF8/UTF16LE buffers; package input allowlist also reviewed"
+  },
+  "originalDirectoryP1": "unchanged accepted scope reused; no matrix repeated",
+  "fullV1Ready": false,
+  "bootstrapEvidence": {
+    "files": ["summary.json", "runner-negative.json"],
+    "sourceSha": "ab322af2f1e1d32bf72c9d0569c3db9f4dabe373",
+    "version": "0.1.9",
+    "scope": "old baseline fixture only; never fresh012 acceptance"
+  }
+}
