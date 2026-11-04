@@ -45,7 +45,7 @@ export async function buildHistoryWorkbook(
       notes: '备注',
       self: '自批',
       material: '材料',
-      french: '法文材料名',
+      french: '冻结外文材料名',
       model: '型号',
       spec: '规格',
       quantity: '数量',
@@ -75,7 +75,7 @@ export async function buildHistoryWorkbook(
       notes: 'Notes',
       self: 'Auto-approbation',
       material: 'Matériau chinois',
-      french: 'Matériau français',
+      french: 'Matériau traduit figé',
       model: 'Modèle',
       spec: 'Spécification',
       quantity: 'Quantité',
@@ -105,7 +105,7 @@ export async function buildHistoryWorkbook(
       notes: 'Notes',
       self: 'Self approval',
       material: 'Chinese material',
-      french: 'French material',
+      french: 'Frozen translated material',
       model: 'Model',
       spec: 'Specification',
       quantity: 'Quantity',
@@ -307,7 +307,11 @@ export async function buildHistoryWorkbook(
           detail.id,
           number,
           'nameZh' in line ? line.nameZh : line.materialName,
-          'nameFr' in line ? line.nameFr : '',
+          'nameFr' in line
+            ? formal?.languagePair === 'zh_en'
+              ? (line.nameEn ?? '')
+              : line.nameFr
+            : '',
           line.model,
           line.specification,
           line.quantity,

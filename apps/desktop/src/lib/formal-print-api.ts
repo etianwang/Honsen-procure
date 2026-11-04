@@ -6,7 +6,7 @@ export const documentSchema = z
   .object({
     formalDocumentNo: z.string().min(1),
     documentType: z.enum(['OPA', 'HPA', 'SPO']),
-    languagePair: z.literal('zh_fr'),
+    languagePair: z.enum(['zh_fr', 'zh_en']),
     projectId: z.string().uuid(),
     site: z.string(),
     orderDate: z.string(),
@@ -37,7 +37,8 @@ export const documentSchema = z
         z
           .object({
             nameZh: z.string().min(1),
-            nameFr: z.string().min(1),
+            nameFr: z.string().min(1).nullable(),
+            nameEn: z.string().min(1).nullable().optional(),
             model: z.string().nullable(),
             specification: z.string().nullable(),
             quantity: z.string().regex(/^\d+(\.\d+)?$/),
@@ -51,6 +52,15 @@ export const documentSchema = z
       .min(1),
   })
   .strict()
+  .refine(
+    (document) =>
+      document.lines.every((line) =>
+        document.languagePair === 'zh_en'
+          ? Boolean(line.nameEn?.trim())
+          : Boolean(line.nameFr?.trim()),
+      ),
+    { message: 'Missing frozen document translation' },
+  )
 export function formatPrintMoney(value: string, currency: string): string {
   if (!/^-?\d+$/.test(value)) throw new Error('Invalid minor amount')
   const amount = BigInt(value)

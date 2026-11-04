@@ -26,7 +26,7 @@ impl LocalAuthService {
 fn project(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, AuthError> {
     let snapshot: RemotePurchaseOrderPayload =
         serde_json::from_str(raw).map_err(|_| AuthError::InvalidInput)?;
-    if snapshot.language_pair != "zh_fr"
+    if !matches!(snapshot.language_pair.as_str(), "zh_fr" | "zh_en")
         || !matches!(kind, "OPA" | "HPA" | "SPO")
         || snapshot.lines.is_empty()
     {
@@ -100,9 +100,9 @@ fn project(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, Aut
     let lines = snapshot.lines.iter().enumerate().map(|(index,line)| {
         let material: serde_json::Value = serde_json::from_str(&line.material_snapshot_json).map_err(|_| AuthError::InvalidInput)?;
         let required = |key| material.get(key).and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned).ok_or(AuthError::InvalidInput);
-        Ok(serde_json::json!({"nameZh":required("nameZh")?, "nameFr":required("nameFr")?, "model":material.get("model"), "specification":material.get("specification"), "quantity":line.quantity, "unit":line.unit, "currency":if kind == "OPA" { &snapshot.primary_currency } else { &snapshot.currency }, "unitPriceMinor":if kind == "OPA" { line.owner_final_unit_price_minor.as_ref().ok_or(AuthError::InvalidInput)? } else { &line.unit_price_minor }, "lineTotalMinor":owner_totals.as_ref().map(|v| &v.0[index]).unwrap_or(&line.line_total_minor)}))
+        Ok(serde_json::json!({"nameZh":required("nameZh")?, "nameFr": if snapshot.language_pair == "zh_fr" { Some(required("nameFr")?) } else { None }, "nameEn": if snapshot.language_pair == "zh_en" { Some(required("nameEn")?) } else { None }, "model":material.get("model"), "specification":material.get("specification"), "quantity":line.quantity, "unit":line.unit, "currency":if kind == "OPA" { &snapshot.primary_currency } else { &snapshot.currency }, "unitPriceMinor":if kind == "OPA" { line.owner_final_unit_price_minor.as_ref().ok_or(AuthError::InvalidInput)? } else { &line.unit_price_minor }, "lineTotalMinor":owner_totals.as_ref().map(|v| &v.0[index]).unwrap_or(&line.line_total_minor)}))
     }).collect::<Result<Vec<_>,AuthError>>()?;
     Ok(
-        serde_json::json!({"formalDocumentNo":number,"documentType":kind,"languagePair":"zh_fr","projectId":snapshot.project_id,"site":snapshot.site,"orderDate":snapshot.order_date,"deliveryAddress":snapshot.delivery_address,"expectedDeliveryDate":snapshot.expected_delivery_date,"notes":snapshot.notes,"currency":if kind == "SPO" { &snapshot.currency } else { &snapshot.primary_currency },"subtotalMinor":owner_totals.as_ref().map(|v| &v.1).unwrap_or(&snapshot.subtotal_minor),"taxMinor":owner_totals.as_ref().map(|v| &v.2).unwrap_or(&snapshot.tax_minor),"totalMinor":owner_totals.as_ref().map(|v| &v.3).unwrap_or(&snapshot.total_minor),"supplier":supplier,"lineDiscountMinor":snapshot.line_discount_minor,"orderDiscountMinor":snapshot.order_discount_minor,"freightMinor":snapshot.freight_minor,"taxRateBasisPoints":snapshot.tax_rate_basis_points,"selfApproved":snapshot.self_approved,"lines":lines}),
+        serde_json::json!({"formalDocumentNo":number,"documentType":kind,"languagePair":snapshot.language_pair,"projectId":snapshot.project_id,"site":snapshot.site,"orderDate":snapshot.order_date,"deliveryAddress":snapshot.delivery_address,"expectedDeliveryDate":snapshot.expected_delivery_date,"notes":snapshot.notes,"currency":if kind == "SPO" { &snapshot.currency } else { &snapshot.primary_currency },"subtotalMinor":owner_totals.as_ref().map(|v| &v.1).unwrap_or(&snapshot.subtotal_minor),"taxMinor":owner_totals.as_ref().map(|v| &v.2).unwrap_or(&snapshot.tax_minor),"totalMinor":owner_totals.as_ref().map(|v| &v.3).unwrap_or(&snapshot.total_minor),"supplier":supplier,"lineDiscountMinor":snapshot.line_discount_minor,"orderDiscountMinor":snapshot.order_discount_minor,"freightMinor":snapshot.freight_minor,"taxRateBasisPoints":snapshot.tax_rate_basis_points,"selfApproved":snapshot.self_approved,"lines":lines}),
     )
 }

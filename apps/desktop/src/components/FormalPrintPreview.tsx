@@ -12,34 +12,47 @@ import './FormalPrintPreview.css'
 let activePrintOwner: symbol | null = null
 
 function FormalDocumentSheet({ document }: { document: FormalPrintDocument }) {
+  const english = document.languagePair === 'zh_en'
+  const label = (fr: string, en: string) => (english ? en : fr)
   return (
     <article className="formal-print-sheet">
       <h2>
         {document.documentType} · {document.formalDocumentNo}
       </h2>
       <p>
-        项目 / Projet: {document.projectId} · {document.site}
+        项目 / {label('Projet', 'Project')}: {document.projectId} ·{' '}
+        {document.site}
       </p>
       <p>日期 / Date: {document.orderDate}</p>
-      <p>交货地址 / Livraison: {document.deliveryAddress}</p>
+      <p>
+        交货地址 / {label('Livraison', 'Delivery')}: {document.deliveryAddress}
+      </p>
       {document.supplier?.name && (
         <p>
-          供应商 / Fournisseur: {document.supplier.name} ·{' '}
-          {document.supplier.contactName} · {document.supplier.address} ·{' '}
+          供应商 / {label('Fournisseur', 'Supplier')}: {document.supplier.name}{' '}
+          · {document.supplier.contactName} · {document.supplier.address} ·{' '}
           {document.supplier.phone} · {document.supplier.email}
         </p>
       )}
-      <p>预计交期 / Date prévue: {document.expectedDeliveryDate ?? '—'}</p>
-      <p>条款及备注 / Conditions et notes: {document.notes ?? '—'}</p>
-      {document.selfApproved && <p>自行审批 / Auto-approbation</p>}
+      <p>
+        预计交期 / {label('Date prévue', 'Expected delivery')}:{' '}
+        {document.expectedDeliveryDate ?? '—'}
+      </p>
+      <p>
+        条款及备注 / {label('Conditions et notes', 'Terms and notes')}:{' '}
+        {document.notes ?? '—'}
+      </p>
+      {document.selfApproved && (
+        <p>自行审批 / {label('Auto-approbation', 'Self-approved')}</p>
+      )}
       <table>
         <thead>
           <tr>
-            <th>材料 / Désignation</th>
-            <th>数量 / Quantité</th>
-            <th>单位 / Unité</th>
-            <th>单价 / Prix unitaire</th>
-            <th>金额 / Montant</th>
+            <th>材料 / {label('Désignation', 'Description')}</th>
+            <th>数量 / {label('Quantité', 'Quantity')}</th>
+            <th>单位 / {label('Unité', 'Unit')}</th>
+            <th>单价 / {label('Prix unitaire', 'Unit price')}</th>
+            <th>金额 / {label('Montant', 'Amount')}</th>
           </tr>
         </thead>
         <tbody>
@@ -48,7 +61,7 @@ function FormalDocumentSheet({ document }: { document: FormalPrintDocument }) {
               <td>
                 {line.nameZh}
                 <br />
-                {line.nameFr}
+                {english ? line.nameEn : line.nameFr}
                 <br />
                 {line.model} · {line.specification}
               </td>
@@ -65,30 +78,39 @@ function FormalDocumentSheet({ document }: { document: FormalPrintDocument }) {
         </tbody>
       </table>
       <p>
-        小计 / Sous-total:{' '}
+        小计 / {label('Sous-total', 'Subtotal')}:{' '}
         {formatPrintMoney(document.subtotalMinor, document.currency)}
       </p>
       <p>
-        行折扣 / Remise des lignes:{' '}
+        行折扣 / {label('Remise des lignes', 'Line discounts')}:{' '}
         {formatPrintMoney(document.lineDiscountMinor, document.currency)}
       </p>
       <p>
-        订单折扣 / Remise commande:{' '}
+        订单折扣 / {label('Remise commande', 'Order discount')}:{' '}
         {formatPrintMoney(document.orderDiscountMinor, document.currency)}
       </p>
       <p>
-        运费 / Transport:{' '}
+        运费 / {label('Transport', 'Freight')}:{' '}
         {formatPrintMoney(document.freightMinor, document.currency)}
       </p>
-      <p>税率 / Taxe (bps): {document.taxRateBasisPoints}</p>{' '}
       <p>
-        税费 / Taxes: {formatPrintMoney(document.taxMinor, document.currency)}
+        税率 / {label('Taxe (bps)', 'Tax (bps)')}: {document.taxRateBasisPoints}
+      </p>{' '}
+      <p>
+        税费 / {label('Taxes', 'Tax')}:{' '}
+        {formatPrintMoney(document.taxMinor, document.currency)}
       </p>
       <p>
         合计 / Total: {formatPrintMoney(document.totalMinor, document.currency)}
       </p>
-      <p>申请人签字 / Signature demandeur: ____________________</p>
-      <p>审批人签字 / Signature approbateur: ____________________</p>
+      <p>
+        申请人签字 / {label('Signature demandeur', 'Applicant signature')}:
+        ____________________
+      </p>
+      <p>
+        审批人签字 / {label('Signature approbateur', 'Approver signature')}:
+        ____________________
+      </p>
     </article>
   )
 }

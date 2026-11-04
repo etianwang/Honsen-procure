@@ -22,6 +22,16 @@
 @page honsen-formal {
   size: A4 portrait;
   margin: 15mm;
+
+  @top-center {
+    content: 'HONSEN Procure';
+    font-size: 9pt;
+  }
+
+  @bottom-center {
+    content: counter(page) ' / ' counter(pages);
+    font-size: 9pt;
+  }
 }
 
 @media print {

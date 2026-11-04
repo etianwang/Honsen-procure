@@ -115,6 +115,73 @@ describe('authorized XLSX history export', () => {
       'Numéro officiel',
     )
   })
+  it('retains frozen English material names when UI export locale is French', async () => {
+    const formal = {
+      formalDocumentNo: 'TEST-HPA-1',
+      documentType: 'HPA',
+      languagePair: 'zh_en',
+      projectId: '10000000-0000-4000-8000-000000000002',
+      site: 'Frozen site',
+      orderDate: '2026-11-04',
+      deliveryAddress: 'Frozen address',
+      expectedDeliveryDate: null,
+      notes: null,
+      currency: 'CNY',
+      subtotalMinor: '250',
+      lineDiscountMinor: '0',
+      orderDiscountMinor: '0',
+      freightMinor: '0',
+      taxMinor: '0',
+      totalMinor: '250',
+      taxRateBasisPoints: 0,
+      selfApproved: false,
+      supplier: null,
+      lines: [
+        {
+          nameZh: '冻结材料',
+          nameFr: null,
+          nameEn: 'Frozen English material',
+          model: '',
+          specification: '',
+          quantity: '2.5',
+          unit: '米',
+          currency: 'CNY',
+          unitPriceMinor: '100',
+          lineTotalMinor: '250',
+        },
+      ],
+    }
+    const bytes = await buildHistoryWorkbook(
+      {
+        listOrderComments: async () => [],
+        listRequisitionHistory: async () => ({
+          records: [record],
+          nextCursor: null,
+        }),
+        getRequisitionDetail: async () => ({
+          ...detail,
+          formalDocumentNo: formal.formalDocumentNo,
+        }),
+        getFormalPrintDocument: async () => formal,
+      },
+      {},
+      'fr-FR',
+    )
+    const book = new Workbook()
+    await book.xlsx.load(bytes)
+    expect(book.getWorksheet('Commandes')?.getCell('B2').value).toBe(
+      'TEST-HPA-1',
+    )
+    expect(book.getWorksheet('Commandes')?.getCell('G2').value).toBe('2.50 CNY')
+    expect(book.getWorksheet('Commandes')?.getCell('I2').value).toBe('')
+    expect(book.getWorksheet('Lignes')?.getCell('D2').value).toBe(
+      'Frozen English material',
+    )
+    expect(book.getWorksheet('Lignes')?.getCell('C2').value).toBe('冻结材料')
+    expect(book.getWorksheet('Commandes')?.getCell('B1').value).toBe(
+      'Numéro officiel',
+    )
+  })
   it('round-trips Unicode and exact large money as text, never formulas', async () => {
     const bytes = await buildHistoryWorkbook(
       {
