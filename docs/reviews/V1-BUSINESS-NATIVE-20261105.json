@@ -1,0 +1,50 @@
+{
+  "testedSource": "c08ac9ddc0cfe3eeabe7ed464d0c10c034172360",
+  "runId": "native-smoke-20261104162423",
+  "exeSha256": "ed5afeaab5c47370f479c3184a30e5e5e598cbf3acecf557a1013de4cb3831ad",
+  "helperSha256": "b0a39b2847808418eb56810c1dd605c0e33d08fde8e6b08fcd2092b3b1e4c914",
+  "frontend": {
+    "files": [
+      {
+        "name": "assets/exceljs.min-SM6mMJai.js",
+        "sha256": "3d4166e0971e489864d5be54c01da8ff875a6b96485ecfa9b1a5589098ecb6b4"
+      },
+      {
+        "name": "assets/index-DZLlzzsd.js",
+        "sha256": "a8c9c3c42a47ce61dd96b68d52fd6a34b4c6e3504c909b1229eb08450499abff"
+      },
+      {
+        "name": "assets/index-u5jv6GD-.css",
+        "sha256": "fc32e06d521fb0045a8b066baa36d1ffb01dd1c7d38718be0bc9141223290155"
+      },
+      {
+        "name": "favicon.svg",
+        "sha256": "61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66"
+      },
+      {
+        "name": "icons.svg",
+        "sha256": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a"
+      },
+      {
+        "name": "index.html",
+        "sha256": "8f5b14c84dfb6de3b1468915ceb254263c62f17366ce174534dc5aaa90a9bf95"
+      }
+    ],
+    "sha256": "06793928138b02ad724264cf674048fcc8e2c6dee4159b3aaa59bd957f47ea8e"
+  },
+  "nativeLocal": "PASS",
+  "lines": 40,
+  "totalMinor": "4000",
+  "currency": "XOF",
+  "languagePair": "zh_fr",
+  "pdfPath": ".cache/v1-c08ac9d-native-40.pdf",
+  "pdfSha256": "c7c25b40b0da22740a46c1f6fea906a5ae599cba8342cac6b312003a3a6e3356",
+  "pages": 4,
+  "pageLineCounts": [10, 14, 14, 2],
+  "visualReview": "All four PNG pages inspected: Chinese/French legible, repeated table headings, HONSEN Procure header, pages 1/4 through 4/4, no clipped rows",
+  "nativeDualSync": "BLOCKED_ENV",
+  "blocker": "Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED",
+  "blockerLog": ".cache/v1-native-wsl-blocker.log",
+  "cosCredentialsRead": false,
+  "cosObjectsTouched": false
+}
