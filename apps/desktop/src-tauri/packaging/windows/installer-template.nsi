@@ -42,6 +42,9 @@ ${StrLoc}
 !define PRODUCTNAME "{{product_name}}"
 !define VERSION "{{version}}"
 !define VERSIONWITHBUILD "{{version_with_build}}"
+!ifdef HONSEN_RUNNER_HELPER
+  !include "${HONSEN_RUNNER_HELPER}"
+!endif
 !define HOMEPAGE "{{homepage}}"
 !define INSTALLMODE "{{install_mode}}"
 !define LICENSE "{{license}}"
@@ -643,6 +646,7 @@ Section WebView2
 SectionEnd
 
 Section Install
+  Call HonsenRunnerBegin
   SetOutPath $INSTDIR
 
   !ifmacrodef NSIS_HOOK_PREINSTALL
@@ -659,13 +663,34 @@ Section Install
     CreateDirectory "$INSTDIR\\{{this}}"
   {{/each}}
   {{#each resources}}
-    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+    !if "{{this.[1]}}" != "HonsenUpdateRunner.exe"
+      File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+    !endif
   {{/each}}
 
   ; Copy external binaries
   {{#each binaries}}
-    File /a "/oname={{this}}" "{{no-escape @key}}"
+    !if "{{this}}" == "HonsenUpdateRunner.exe"
+      !ifdef HONSEN_RUNNER_PAYLOAD_FOUND
+        !error "Duplicate Runner external payload"
+      !endif
+      !define HONSEN_RUNNER_PAYLOAD_FOUND
+      InitPluginsDir
+      SetOutPath $PLUGINSDIR
+      ClearErrors
+      File /oname=honsen-runner.payload.exe "{{no-escape @key}}"
+      IfErrors 0 +2
+        Call HonsenRunnerAbort
+      SetOutPath $INSTDIR
+    !else
+      File /a "/oname={{this}}" "{{no-escape @key}}"
+    !endif
   {{/each}}
+
+  !ifndef HONSEN_RUNNER_PAYLOAD_FOUND
+    !error "Runner external payload is required"
+  !endif
+  Call HonsenRunnerPublish
 
   ; Create file associations
   {{#each file_associations as |association| ~}}

@@ -738,10 +738,17 @@ fn apply_windows(
         || updated_manifest.version != request.expected_version
         || !updated.executable_path.is_file()
         || !updated.runner_path.is_file()
+        || !is_child_path(
+            &updated.runner_path,
+            &registration.install_location,
+            RUNNER_EXECUTABLE,
+        )
     {
         return Err(RunnerError::ManifestMismatch);
     }
     verify_file_version(&updated.executable_path, &request.expected_version)?;
+    reject_reparse_components(&updated.runner_path)?;
+    verify_file_version(&updated.runner_path, &request.expected_version)?;
     let result = OperationResult {
         app_id: APP_ID.into(),
         operation_id: request.operation_id.clone(),
@@ -946,19 +953,39 @@ fn verify_file_version(path: &Path, expected: &str) -> Result<(), RunnerError> {
             return Err(RunnerError::FileVersionMismatch);
         }
         let fixed = &*(fixed as *const VS_FIXEDFILEINFO);
-        let actual = format!(
-            "{}.{}.{}.{}",
-            fixed.dwFileVersionMS >> 16,
-            fixed.dwFileVersionMS & 0xffff,
-            fixed.dwFileVersionLS >> 16,
-            fixed.dwFileVersionLS & 0xffff
-        );
-        if actual == expected || actual.trim_end_matches(".0") == expected {
+        let actual = [
+            (fixed.dwFileVersionMS >> 16) as u16,
+            (fixed.dwFileVersionMS & 0xffff) as u16,
+            (fixed.dwFileVersionLS >> 16) as u16,
+            (fixed.dwFileVersionLS & 0xffff) as u16,
+        ];
+        if file_version_matches(actual, expected) {
             Ok(())
         } else {
             Err(RunnerError::FileVersionMismatch)
         }
     }
+}
+
+// Windows PE versions always have four u16 parts. The public three-part
+// release spelling is equivalent only to a zero fourth part, not to repeated
+// removal of trailing ".0" components (which incorrectly erased 1.0.0).
+fn file_version_matches(actual: [u16; 4], expected: &str) -> bool {
+    let parts: Vec<_> = expected.split('.').collect();
+    if !matches!(parts.len(), 3 | 4) {
+        return false;
+    }
+    let mut normalized = [0u16; 4];
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        let Ok(value) = part.parse::<u16>() else {
+            return false;
+        };
+        normalized[index] = value;
+    }
+    actual == normalized
 }
 
 #[cfg(windows)]
@@ -1040,6 +1067,39 @@ fn civil_date(days_since_epoch: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pe_file_versions_match_only_three_parts_plus_one_zero_or_exact_four_parts() {
+        for (actual, expected) in [
+            ([1, 0, 0, 0], "1.0.0"),
+            ([1, 0, 0, 0], "1.0.0.0"),
+            ([0, 1, 10, 0], "0.1.10"),
+            ([0, 1, 10, 0], "0.1.10.0"),
+            ([1, 2, 3, 4], "1.2.3.4"),
+        ] {
+            assert!(
+                super::file_version_matches(actual, expected),
+                "{actual:?} != {expected}"
+            );
+        }
+        for (actual, expected) in [
+            ([1, 0, 0, 0], "1"),
+            ([1, 0, 0, 0], "1.0"),
+            ([0, 1, 9, 0], "0.1.10"),
+            ([1, 2, 3, 4], "1.2.3"),
+            ([1, 2, 3, 0], "1.2.3.4"),
+            ([1, 2, 3, 4], "1.2.3.5"),
+            ([1, 0, 0, 0], "1.0.0.0.0"),
+            ([1, 0, 0, 0], "1..0"),
+            ([1, 0, 0, 0], "1.0.-0"),
+            ([1, 0, 0, 0], "1.0.65536"),
+            ([1, 0, 0, 0], "1.0.0 "),
+        ] {
+            assert!(
+                !super::file_version_matches(actual, expected),
+                "unexpected {actual:?} == {expected}"
+            );
+        }
+    }
     #[test]
     fn nsis_preserves_explicit_unicode_space_and_former_default_paths() {
         for directory in [

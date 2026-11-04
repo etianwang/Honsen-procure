@@ -1,0 +1,34 @@
+# Runner replacement installer slice — 2026-11-04
+
+Status: implementation and bounded local Windows file probes PASS; final candidate installation/public apply acceptance remains OPEN. This implements installer side A of the explicitly approved `RUNNER-REPLACEMENT-P1-PLAN-20261104.md`. No public contract, build-script or Tauri configuration changes. The main agent owns unified source SHA, commit/push and isolated installed acceptance.
+
+## Implementation
+
+`installer-template.nsi` includes the helper after VERSION definitions, invokes Begin before SetOutPath/main File, excludes the resource Runner, and extracts exactly one external Runner as private payload. Missing/duplicate external inputs fail compilation. Publish completes byte/PE-version verification before registration. `toolbox-hooks.nsh` retains public registration/manifest values, removes the obsolete Runner copy and runs Finish after registration. Uninstall only attempts verified paired private-image cleanup before its existing normal deletion flow.
+
+`runner-install.nsh` pins normal directory ancestors without SHARE_DELETE; rejects reparse directories and nonregular/multilink leaves; uses CREATE_NEW receipt, guarded FileRenameInfo (replace=false), fail-if-exists publication, and guarded complete-byte/length plus expected four-part PE-version comparison. A read guard on the published Runner persists through registration until Finish. File comparison is bounded to 1 GiB, 64 KiB chunks and a 120-second check between blocking reads; it is not cancellation of an individual blocked ReadFile.
+
+A same-directory UUID alias and exact five-line ASCII owner receipt are the only cleanup authority. Full receipt byte/length equality rejects extra/duplicate/trailing fields. Alias disposition uses the verified handle; after closing it, only actual FILE_NOT_FOUND/PATH_NOT_FOUND permits receipt disposition. In-use, unknown, missing-alias, reparse or multilink pairs remain. No wildcard deletion, recursive deletion, reboot task, rollback or directory migration. Rename failure removes only this operation's CREATE_NEW empty receipt; owner write/flush failure after rename can leave an invalid receipt/alias requiring explicit repair and must not be described as automatically recoverable.
+
+Private diagnostic log: `$TEMP\Honsen Program\RunnerInstall\<UUID>\installer.log`, UUID directory plus CREATE_NEW log, pinned ancestors, fixed phases/native error/bytes/elapsed/PID. It is separate from Rust adapter `installerLogPath`; DetailPrint is not claimed to enter that log. Logs remain after failure.
+
+## Actual targeted evidence
+
+All probes ran user-level on this Windows host with TEMP/TMP explicitly in H:/Honsen/Honsen-Procure/.cache/tmp. Compiler: existing `C:/Users/Administrator/AppData/Local/tauri/NSIS/Bin/makensis.exe`, Unicode NSIS pointer size 4. Only new isolated H: fixture paths were modified. No shared Sandbox or installed production application was touched.
+
+- `tests/windows/runner-install-lifecycle.nsi` compiled with explicit `/DFIXTURE_ROOT=<new H: cache directory> /DPAYLOAD_PATH=H:/Honsen/artifacts/windows/90f2804-010/effective-package-HonsenUpdateRunner.exe /DVERSIONWITHBUILD=0.1.10.0`. Fresh publication exit0, 3,793,920 bytes and SHA-256 `198093091d79159a62d01335b27dfe137bdd82b3f7e732faa34a27f065bff205` match the actual old010 test payload. This tests helper mechanics using an existing immutable payload, not a new011 package.
+- `.cache/nsis-lifecycle-994932d1-d1d4-4f77-94a6-7fa4d5c89179/result.txt`: WRITE and DELETE attempts between Publish return and Finish both fail handle=-1/error32. After Finish, WRITE open succeeds; exit0. The write probe opens/closes without modifying file contents.
+- `.cache/nsis-mapped-725cf66d-613e-4556-a357-82e20161f64b/mapped-result.json`: a synthetic Rust hold EXE was still running while its guarded image was renamed and the real010 payload published; exit0, private old alias and canonical receipt retained. Only the owned hold PID was stopped. `after-cleanup.json`: a later execution exit0 leaves only the fixed Runner, proving exact eligible pair cleanup. This is not the required actual registered019 public-apply upgrade.
+- `.cache/nsis-owner-69415b8d-1bc8-4a60-a44c-26d3a5122fc1/owner-result.json`: seven actual file cases pass: canonical unused pair removed; unknown field, duplicate key, trailing content, wrong UUID, missing alias and hardlinked alias preserved. Unknown filename preserved; the outside synthetic hardlink sentinel contents remain unchanged.
+- `.cache/nsis-owner-69415b8d-1bc8-4a60-a44c-26d3a5122fc1/reparse-leaf-result.json`: actual alias leaf symbolic link to an outside synthetic sentinel rejected as cleanup authority; alias, canonical receipt and outside bytes all preserved, exit0. This specifically tests the leaf boundary separately from directory junction rejection.
+- `.cache/nsis-reparse-37e2659f-6d8c-4232-9e36-f86bac5a3a4f/reparse-result.json`: junction installation leaf rejected exit58; outside sentinel unchanged and no Runner written outside.
+- `.cache/nsis-template-compile/compile.log`: complete prior generated010 installer with equivalent approved helper/staged-payload edits compiled exit0 (only existing unused Skip warning). This is a representative generated NSIS compile, not a fresh Tauri template render or final candidate package. Parent must verify the actual generated011 input/package.
+- Agent B separately owns `runner-file-compare.nsi` and its eight-case evidence. Its recorded unchanged function comparison permits reuse only for HR_Open/HR_Pin/HR_Unpin/HonsenRunnerCompare, not blanket transfer of the evolving helper's whole-file status.
+
+Early probe setup corrections are retained: NSIS built-in GetFullPathName returned empty for a missing directory, so EnsureDirectory now uses bounded GetFullPathNameW; rerun actual Init/fresh lifecycle passed. A first mapped harness invocation used a nonexistent hold filename and therefore did not test mapping; it is not counted. The corrected invocation above uses the existing rust-hold.exe and checks oldStillRunning=true.
+
+Helper SHA-256 at handoff: a56cbc7ced44537262c61534e2ae9c0a90c386982ab4a767dac9938466f778b3. Template SHA is recorded in `TEMPLATE-SOURCE.md`. No final unified tested-source SHA is claimed before parent integration.
+
+## Remaining acceptance
+
+OPEN: exact final candidate fresh install; running old registered019 public apply; new launch/apply parent chain; installer failure/result integration; installed expected Runner bytes and version; affected uninstall and same-version repair. Existing019→010 false success remains FAIL and cannot be replaced by these probes. No UI, live canonical stable asset, Toolbox scope3 caller, business data, COS access or production deployment was exercised here.

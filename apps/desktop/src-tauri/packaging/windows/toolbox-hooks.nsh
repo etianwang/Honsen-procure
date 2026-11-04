@@ -1,3 +1,5 @@
+!define HONSEN_RUNNER_HELPER "${__FILEDIR__}\runner-install.nsh"
+
 !macro HonsenWriteRegistry
   SetRegView 64
   WriteRegStr HKLM "Software\Honsen Program\Apps\honsen.procure" "AppId" "honsen.procure"
@@ -47,15 +49,15 @@
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  CopyFiles /SILENT "$INSTDIR\resources\HonsenUpdateRunner.exe" "$INSTDIR\HonsenUpdateRunner.exe"
   CopyFiles /SILENT "$INSTDIR\resources\honsen.app.json" "$INSTDIR\honsen.app.json"
-  Delete "$INSTDIR\resources\HonsenUpdateRunner.exe"
   Delete "$INSTDIR\resources\honsen.app.json"
   !insertmacro HonsenWriteRegistry
   !insertmacro HonsenWriteUninstallRegistry
+  Call HonsenRunnerFinish
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  Call un.HonsenRunnerCleanup
   SetRegView 64
   ReadRegStr $0 HKLM "Software\Honsen Program\Apps\honsen.procure" "AppId"
   StrCmp "$0" "honsen.procure" 0 +2

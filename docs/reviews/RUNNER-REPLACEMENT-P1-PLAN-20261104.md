@@ -1,6 +1,6 @@
 # Runner replacement P1 — 有限修复批准方案（2026-11-04）
 
-状态：**新P1已实证；仅方案，未改生产代码、NSIS或既有安装契约；待用户批准本文件边界。** 此项独立于已关闭的安装目录P1，也不等同于scope2字体/离线选择验收。
+状态：**用户已于2026-11-04明确批准本文件A＋B有限修复及隔离验收；实施进行中，未完成独立验收。** 此项独立于已关闭的安装目录P1，也不等同于scope2字体/离线选择验收。
 
 ## 已确认事实与证据
 
@@ -93,4 +93,6 @@ exactFileName=.honsen-runner-inuse-<UUID>.exe
 
 风险：mapped文件rename能力可能受权限/AV/额外共享句柄限制；必须fail-closed并保留实际错误。发布失败可能留下需要明确修复安装的部分状态，不承诺未获授权的自动回滚。旧私有映像可能暂占磁盘，清理必须安全且不得牺牲同步调用或用户数据。分块比较增加安装时间，必须有上限和真实测量。
 
-**请求用户仅批准本文件的A＋B成对修复和隔离验收。** 不批准scope3、目录迁移、自动回滚、生产安装、main修改、PR合并、正式Release或生产部署。批准前不实施以上代码/NSIS变更。
+**2026-11-04用户已明确批准本文件的A＋B成对修复和隔离验收，现按以上精确边界实施。** 此授权不包含scope3、目录迁移、自动回滚、生产安装、main修改、PR合并、正式Release或生产部署。
+
+实施日志细节：使用固定私有 $TEMP\\Honsen Program\\RunnerInstall\\<installerUUID>\\installer.log（CREATE_NEW、无reparse、最小schema/appId/UUID/PID/phase/nativeError/bytes/elapsed/outcome）。它与既有Rust adapter installerLogPath分开，不声称DetailPrint自动写入adapter日志，不新增公开参数/结果字段或Rust日志关联改动。主Agent已确认这是已批准helper原生错误记录的实现细节。
