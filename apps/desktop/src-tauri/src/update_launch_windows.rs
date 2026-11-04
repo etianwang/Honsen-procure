@@ -19,6 +19,7 @@ use windows_sys::Win32::{
 };
 
 const DWLP_USER: usize = 2 * std::mem::size_of::<isize>();
+const WM_SHOW_LAUNCH_DIALOG: u32 = WM_APP + 0x31;
 const MAX_METADATA: u64 = 1024 * 1024;
 const MAX_INSTALLER: u64 = 1024 * 1024 * 1024;
 fn error() -> RunnerError {
@@ -597,8 +598,24 @@ unsafe extern "system" fn dialog_proc(
             unsafe {
                 SetWindowLongPtrW(hwnd, DWLP_USER as i32, lparam);
                 SetFocus(GetDlgItem(hwnd, lparam as i32));
+                if PostMessageW(hwnd, WM_SHOW_LAUNCH_DIALOG, 0, 0) == 0 {
+                    EndDialog(hwnd, -1);
+                }
             }
             0
+        }
+        WM_SHOW_LAUNCH_DIALOG => {
+            // STARTUPINFO may impose SW_HIDE on the first ShowWindow call.
+            // Run after modal initialization and explicitly show again so a
+            // hidden Toolbox/CLI parent cannot leave an invisible decision.
+            unsafe {
+                ShowWindow(hwnd, SW_SHOWNORMAL);
+                ShowWindow(hwnd, SW_SHOWNORMAL);
+                SetForegroundWindow(hwnd);
+                let default = GetWindowLongPtrW(hwnd, DWLP_USER as i32);
+                SetFocus(GetDlgItem(hwnd, default as i32));
+            }
+            1
         }
         WM_COMMAND => {
             let id = (wparam & 0xffff) as i32;

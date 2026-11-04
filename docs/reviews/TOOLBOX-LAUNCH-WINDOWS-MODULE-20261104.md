@@ -61,3 +61,13 @@ The download entry also independently enforces the exact version-derived Setup n
 A further independent review identified a real initialization bug: constructing the file-deleting owner before pinning the new UUID directory meant a rejected junction could redirect failure cleanup to an outside `installer.exe`. A real H:-based synthetic junction regression first failed with the external sentinel absent (RED). The constructor now acquires the leaf directory guard successfully before constructing that owner. On guard failure, it removes only the UUID directory entry itself and never touches any nested file. No metadata-only recheck substitutes for the held guard.
 
 Drop now releases only its own leaf directory guard before removing its empty UUID directory; parent guards remain held until after that removal. The same synthetic-junction test passes after the repair and preserves the outside installer sentinel (GREEN). Combined module5/5 PASS with7 native probes ignored; bins check, Clippy bins/tests and Rustfmt PASS after the change. The test creates/deletes only synthetic `.cache`/TEMP fixtures, never real installers or user data.
+
+## Native hidden-parent failure and repair
+
+Independent real UI acceptance found the11bb test executable launched with hidden STARTUPINFO could remain running without any visible dialog. Launching that same binary visibly exposed the three buttons; closing the window correctly returned RemindLater. The hidden failure is retained as a failure and is not relabelled by the visible run.
+
+Microsoft ShowWindow documentation confirms the launching STARTUPINFO can override the first ShowWindow call. The dialog now posts a private message after initialization, explicitly shows normally again, requests foreground activation through supported USER32 APIs, and restores focus to the safe default button. Posting failure closes the dialog as an error. No public CLI, Manifest, cross-product caller or security policy changes.
+
+Fresh Windows module5/5 tests and bins compile check pass. Rebuilt test executable SHA256 E61284DC9D6AF906DECDE7AAC22507F27E3D9AB4B9792D2BCCF99740674CD1D0 is ready for the controller’s independent hidden-parent native probe. That actual GREEN interaction is still pending at this implementation checkpoint; prior11bb installed evidence does not include the repair.
+
+[Microsoft ShowWindow startup behavior](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow).
