@@ -959,7 +959,7 @@ pub(super) fn recover_rejected_reversals(
             continue;
         }
         let winners=tx.prepare("SELECT payload_json FROM local_sync_remote_entities WHERE entity_type='procurement_expenditure' AND operation='upsert' AND entity_id<>?1 AND json_extract(payload_json,'$.correctsExpenditureId')=?2").map_err(|_|AuthError::Database)?.query_map(params![local.id.to_string(),local.corrects_expenditure_id.map(|v|v.to_string())],|r|r.get::<_,String>(0)).map_err(|_|AuthError::Database)?.collect::<Result<Vec<_>,_>>().map_err(|_|AuthError::Database)?;
-        for winner in winners {
+        if let Some(winner) = winners.into_iter().next() {
             let winner: PaymentPayload =
                 serde_json::from_str(&winner).map_err(|_| AuthError::InvalidInput)?;
             validate_conflict(&local, &winner, local.id, 1, actor)?;
@@ -981,7 +981,6 @@ pub(super) fn recover_rejected_reversals(
                 Some(&json),
                 now,
             )?;
-            break;
         }
     }
     Ok(())

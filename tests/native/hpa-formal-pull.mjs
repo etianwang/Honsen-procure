@@ -627,7 +627,7 @@ try {
   phase = 'restart'
   await call(receiver, 'lock_session')
   await stop(receiver)
-  receiver = await launch(0, 9243)
+  receiver = await launch(0, 9241)
   assert.deepEqual(durable(profiles[0]), before)
   report.restartPreserved = true
   await login(
