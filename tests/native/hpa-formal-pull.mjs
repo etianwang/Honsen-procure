@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { createConnection } from 'node:net'
+import { setTimeout as delay } from 'node:timers/promises'
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -169,7 +171,23 @@ async function launch(index, port) {
   children.push(child)
   exePids.push(child.pid)
   await ready(`http://127.0.0.1:${port}/json/version`)
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`)
+  let browser
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {
+        timeout: 5000,
+      })
+      break
+    } catch (error) {
+      if (
+        attempt === 3 ||
+        child.exitCode !== null ||
+        !/ECONNRESET|ECONNREFUSED|socket hang up/u.test(String(error.message))
+      )
+        throw error
+      await delay(250)
+    }
+  }
   browsers.push(browser)
   await expect
     .poll(() => browser.contexts()[0]?.pages().length ?? 0)
@@ -186,15 +204,44 @@ async function launch(index, port) {
     await page.evaluate(() => typeof window.__TAURI_INTERNALS__?.invoke),
     'function',
   )
-  return { child, browser, page }
+  return { child, browser, page, port }
 }
 async function stop(app) {
   await app.browser.close()
-  if (app.child.exitCode === null && app.child.signalCode === null) {
+  if (app.child.exitCode === null) {
     const exited = once(app.child, 'exit')
     app.child.kill()
-    await exited
+    await Promise.race([
+      exited,
+      delay(10000).then(() => {
+        throw new Error('Native process did not exit before restart')
+      }),
+    ])
   }
+  // The WebView child can outlive the host briefly. Never connect the restarted
+  // profile to that previous instance's debugging endpoint.
+  await expect
+    .poll(
+      () =>
+        new Promise((resolve) => {
+          const socket = createConnection({ host: '127.0.0.1', port: app.port })
+          socket.setTimeout(1000)
+          socket.once('connect', () => {
+            socket.destroy()
+            resolve(false)
+          })
+          socket.once('error', (error) => {
+            socket.destroy()
+            resolve(error.code === 'ECONNREFUSED')
+          })
+          socket.once('timeout', () => {
+            socket.destroy()
+            resolve(false)
+          })
+        }),
+      { timeout: 15000 },
+    )
+    .toBe(true)
 }
 async function call(app, command, args) {
   const result = await app.page.evaluate(
