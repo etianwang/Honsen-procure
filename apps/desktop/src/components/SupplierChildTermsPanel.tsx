@@ -1,3 +1,4 @@
+import { FormalPrintPreview } from './FormalPrintPreview'
 import { Alert, Button, Card, Checkbox, Input, Space } from 'antd'
 import { useState } from 'react'
 import type {
@@ -101,6 +102,7 @@ export function SupplierChildTermsPanel({
 
   return (
     <Card className="card" title="供应商子单条款">
+      <FormalPrintPreview orderId={orderId} />
       <p className="muted">
         子单只使用一种币种；保存后的税、折扣、运费和金额会写入不可变审计。
       </p>

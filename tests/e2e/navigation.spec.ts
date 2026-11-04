@@ -2075,9 +2075,48 @@ test('authenticated desktop switches between cached authorization scopes', async
                       ],
                 nextCursor: null,
               })
+            if (command === 'get_formal_print_document')
+              return Promise.resolve({
+                formalDocumentNo: 'TEST-OPA-20261013-OPA-ABCDEFGH-1',
+                documentType: 'OPA',
+                languagePair: 'zh_fr',
+                projectId: '00000000-0000-4000-8000-000000000005',
+                site: '乙工地',
+                orderDate: '2026-10-13',
+                deliveryAddress: '乙工地',
+                expectedDeliveryDate: null,
+                notes: null,
+                currency: 'XOF',
+                subtotalMinor: '1200',
+                lineDiscountMinor: '0',
+                orderDiscountMinor: '0',
+                freightMinor: '0',
+                taxMinor: '0',
+                totalMinor: '1200',
+                taxRateBasisPoints: 0,
+                selfApproved: false,
+                supplier: null,
+                lines: [
+                  {
+                    nameZh: '测试电缆',
+                    nameFr: 'Câble électrique',
+                    model: 'FX-01',
+                    specification: '3×2.5',
+                    quantity: '1',
+                    unit: '米',
+                    currency: 'XOF',
+                    unitPriceMinor: '1200',
+                    lineTotalMinor: '1200',
+                  },
+                ],
+              })
             if (command === 'get_requisition_detail')
               return Promise.resolve({
                 id: '00000000-0000-4000-8000-000000000009',
+                formalDocumentNo:
+                  historicalStatus === 'formally_issued'
+                    ? 'TEST-OPA-20261013-OPA-ABCDEFGH-1'
+                    : null,
                 displayNo: 'REQ-HISTORY-1',
                 applicantId: '00000000-0000-4000-8000-000000000007',
                 projectName: '项目乙',
@@ -2185,6 +2224,11 @@ test('authenticated desktop switches between cached authorization scopes', async
       () => (window as Window & { issuedOrderId?: string }).issuedOrderId,
     ),
   ).resolves.toBe('00000000-0000-4000-8000-000000000009')
+  await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
+  await expect(page.getByText('Câble électrique')).toBeVisible()
+  await expect(page.locator('.formal-print-sheet')).not.toContainText(
+    'supplier',
+  )
   const originalDraftNo = await page.locator('.page-heading p').textContent()
   page.once('dialog', (dialog) => void dialog.dismiss())
   await page.getByRole('button', { name: '复制为新草稿' }).click()

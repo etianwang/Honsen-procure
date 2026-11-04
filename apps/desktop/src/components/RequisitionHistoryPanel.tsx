@@ -9,6 +9,7 @@ import type {
 } from '../lib/requisition-api'
 import type { WorkflowApi } from '../lib/workflow-api'
 import { OrderWorkflowPanel } from './OrderWorkflowPanel'
+import { FormalPrintPreview } from './FormalPrintPreview'
 
 type Props = {
   api: Pick<
@@ -240,6 +241,9 @@ export function RequisitionHistoryPanel({
       {detail ? (
         <section aria-label="请购详情">
           <h3>{detail.displayNo}</h3>
+          {detail.formalDocumentNo ? (
+            <FormalPrintPreview orderId={detail.id} />
+          ) : null}
           {detail.workflowStatus === 'pending_confirmation' &&
           detail.applicantId === applicantId ? (
             <Button onClick={() => void withdrawHistoricalOrder(detail.id)}>

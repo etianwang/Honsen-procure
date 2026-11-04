@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 mod attachments;
 mod expenditures;
+pub mod formal_print;
 pub use attachments::{AttachmentInput, AttachmentTarget, AttachmentView, ProcurementSyncReport};
 mod seed;
 pub mod update_runner;
@@ -7268,6 +7269,14 @@ pub mod commands {
         }
     }
 
+    #[tauri::command]
+    pub fn get_formal_print_document(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<serde_json::Value, CommandError> {
+        auth.get_formal_print_document(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
     #[tauri::command]
     pub fn get_requisition_detail(
         auth: State<'_, LocalAuthService>,
@@ -16264,6 +16273,9 @@ mod tests {
                     now,
                 )
                 .unwrap();
+            // Bilingual print is fail-closed; retain both names in the issued snapshot.
+            service.connection.lock().unwrap().execute("UPDATE local_purchase_order_items SET material_snapshot_json=json_set(material_snapshot_json,'$.nameFr','Matériau figé') WHERE order_id=?1", [child.to_string()]).unwrap();
+            assert!(service.get_formal_print_document(child, now).is_err());
             let parent = child;
             let foreign_team = Uuid::new_v4();
             service.connection.lock().unwrap().execute("INSERT INTO local_teams(id,department_id,business_code,name,is_active,version) VALUES(?1,?2,?1,'other scope',1,1)",params![foreign_team.to_string(),department]).unwrap();
@@ -16401,6 +16413,23 @@ mod tests {
                 .unwrap();
             let issued = service.send_supplier_order(parent, now).unwrap();
             assert_eq!(issued.document_type, "SPO");
+            let print = service.get_formal_print_document(child, now).unwrap();
+            assert_eq!(print["formalDocumentNo"], issued.formal_document_no);
+            assert_eq!(print["currency"], child_currency);
+            assert_eq!(print["lines"][0]["nameFr"], "Matériau figé");
+            assert_eq!(print["taxRateBasisPoints"], 500);
+            assert!(!print.to_string().contains("ownerSourceUnitPriceMinor"));
+            service
+                .connection
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE local_purchase_orders SET notes='tampered print' WHERE id=?1",
+                    [child.to_string()],
+                )
+                .unwrap();
+            assert!(service.get_formal_print_document(child, now).is_err());
+            service.connection.lock().unwrap().execute("UPDATE local_purchase_orders SET notes=(SELECT json_extract(formal_snapshot_json,'$.notes') FROM local_purchase_orders WHERE id=?1) WHERE id=?1", [child.to_string()]).unwrap();
 
             let after = state();
             let payload: serde_json::Value = serde_json::from_str(&after.0).unwrap();
@@ -16892,7 +16921,27 @@ mod tests {
             transaction.execute(restore, [target.to_string()]).unwrap();
             transaction.commit().unwrap();
         }
+        service.connection.lock().unwrap().execute("UPDATE local_purchase_order_items SET material_snapshot_json=json_set(material_snapshot_json,'$.nameFr','Câble figé') WHERE order_id=?1", [order_id.to_string()]).unwrap();
         let issued = service.issue_owner_formal_order(order_id, now).unwrap();
+        let print = service.get_formal_print_document(order_id, now).unwrap();
+        assert_eq!(print["supplier"], serde_json::Value::Null);
+        assert_eq!(print["lines"][0]["lineTotalMinor"], "1038");
+        assert_eq!(print["lines"][1]["lineTotalMinor"], "105");
+        assert_eq!(print["subtotalMinor"], "1143");
+        assert_eq!(print["totalMinor"], "1143");
+        let encoded = print.to_string();
+        for secret in [
+            "ownerSourceUnitPriceMinor",
+            "ownerMarkupJson",
+            "ownerManualReferenceReason",
+            "supplierSnapshotJson",
+            "lockedExchangeRateDecimal",
+        ] {
+            assert!(!encoded.contains(secret));
+        }
+        for line in print["lines"].as_array().unwrap() {
+            assert_eq!(line["currency"], print["currency"]);
+        }
         assert_eq!(issued.document_type, "OPA");
         assert!(issued.formal_document_no.contains("-OPA-"));
         let connection = service.connection.lock().unwrap();
