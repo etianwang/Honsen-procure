@@ -1,9 +1,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import {
+  canonicalUpdateUrl,
+  requireCanonicalUpdateUrl,
+} from './github-stable-release.mjs'
 
 const [outputDirectory] = process.argv.slice(2)
 const version = process.env.HONSEN_RELEASE_VERSION
-const updateManifestUrl = process.env.HONSEN_UPDATE_MANIFEST_URL
+const updateManifestUrl =
+  process.env.HONSEN_UPDATE_MANIFEST_URL ?? canonicalUpdateUrl
 
 if (!outputDirectory || !/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version ?? '')) {
   throw new Error(
@@ -11,19 +16,7 @@ if (!outputDirectory || !/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version ?? '')) {
   )
 }
 
-let updateUrl
-try {
-  updateUrl = new URL(updateManifestUrl)
-} catch {
-  throw new Error('HONSEN_UPDATE_MANIFEST_URL must be a trusted HTTPS URL')
-}
-if (
-  updateUrl.protocol !== 'https:' ||
-  updateUrl.username ||
-  updateUrl.password
-) {
-  throw new Error('HONSEN_UPDATE_MANIFEST_URL must be a trusted HTTPS URL')
-}
+requireCanonicalUpdateUrl(updateManifestUrl)
 
 mkdirSync(outputDirectory, { recursive: true })
 writeFileSync(
@@ -37,7 +30,7 @@ writeFileSync(
       executable: 'HonsenProcure.exe',
       updateRunner: 'HonsenUpdateRunner.exe',
       publisher: 'Honsen',
-      updateManifestUrl: updateUrl.href,
+      updateManifestUrl,
     },
     null,
     2,

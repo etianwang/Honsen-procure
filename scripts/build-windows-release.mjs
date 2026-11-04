@@ -12,12 +12,15 @@ import { execFileSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { selectNsisInstaller } from './select-nsis-installer.mjs'
+import {
+  canonicalUpdateUrl,
+  requireCanonicalUpdateUrl,
+} from './github-stable-release.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const version = process.env.HONSEN_RELEASE_VERSION
 const updateManifestUrl =
-  process.env.HONSEN_UPDATE_MANIFEST_URL ??
-  'https://github.com/etianwang/Honsen-procure/releases/latest/download/manifest.json'
+  process.env.HONSEN_UPDATE_MANIFEST_URL ?? canonicalUpdateUrl
 const targetDirectory = resolve(
   process.env.HONSEN_RELEASE_TARGET_DIR ?? 'E:/Honsen-build-cache/procure',
 )
@@ -32,11 +35,7 @@ if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version ?? '')) {
     'HONSEN_RELEASE_VERSION must be a release version (major.minor.patch[.build])',
   )
 }
-if (!updateManifestUrl) {
-  throw new Error(
-    'HONSEN_UPDATE_MANIFEST_URL is required; no formal update URL is embedded by default',
-  )
-}
+requireCanonicalUpdateUrl(updateManifestUrl)
 
 mkdirSync(releaseAssets, { recursive: true })
 execFileSync(

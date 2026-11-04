@@ -26,7 +26,7 @@
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\HonsenProcure" "NoRepair" 1
 !macroend
 
-!define HONSEN_UPDATE_MANIFEST_URL "https://github.com/etianwang/Honsen-procure/releases/latest/download/manifest.json"
+!define HONSEN_UPDATE_MANIFEST_URL "https://api.github.com/repos/etianwang/Honsen-procure/releases/latest"
 
 !include "FileFunc.nsh"
 

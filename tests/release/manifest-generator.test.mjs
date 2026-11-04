@@ -10,13 +10,13 @@ const script = fileURLToPath(
   new URL('../../scripts/generate-honsen-manifest.mjs', import.meta.url),
 )
 
-test('generates the fixed Toolbox manifest only for an HTTPS update source', () => {
+test('generates the fixed Toolbox manifest with canonical stable Release API', () => {
   const outputDirectory = mkdtempSync(join(tmpdir(), 'honsen-manifest-'))
   execFileSync(process.execPath, [script, outputDirectory], {
     env: {
       ...process.env,
       HONSEN_UPDATE_MANIFEST_URL:
-        'https://updates.example.test/honsen-procure/latest.json',
+        'https://api.github.com/repos/etianwang/Honsen-procure/releases/latest',
       HONSEN_RELEASE_VERSION: '1.2.3',
     },
   })
@@ -32,16 +32,18 @@ test('generates the fixed Toolbox manifest only for an HTTPS update source', () 
       updateRunner: 'HonsenUpdateRunner.exe',
       publisher: 'Honsen',
       updateManifestUrl:
-        'https://updates.example.test/honsen-procure/latest.json',
+        'https://api.github.com/repos/etianwang/Honsen-procure/releases/latest',
     },
   )
 })
 
-test('refuses a missing or non-HTTPS update source', () => {
+test('refuses empty, insecure, foreign and historical custom update sources', () => {
   const outputDirectory = mkdtempSync(join(tmpdir(), 'honsen-manifest-'))
   for (const updateManifestUrl of [
     '',
     'http://updates.example.test/latest.json',
+    'https://updates.example.test/latest.json',
+    'https://github.com/etianwang/Honsen-procure/releases/latest/download/manifest.json',
   ]) {
     assert.throws(
       () =>
@@ -53,7 +55,7 @@ test('refuses a missing or non-HTTPS update source', () => {
           },
           stdio: 'pipe',
         }),
-      /trusted HTTPS URL/,
+      /canonical GitHub stable Release API/,
     )
   }
 })
