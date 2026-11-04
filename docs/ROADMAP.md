@@ -254,3 +254,5 @@ Independent branch `codex/v1-release-candidate` integrates unified baseline d348
 2026-11-04 partial V1 progress: bounded installation-directory/NSIS-adapter P1 repaired and guest-tested, including cross-version update and synthetic retention. Original milestone checkboxes stay unchanged; dual-native business, complete exports/localization and Toolbox parent gates stay open. See docs/reviews/INSTALL-P1-RESULT-20261104.md and docs/V1交接进度表.md.
 
 2026-11-04 partial V1: SPO trusted formal issue implemented through existing send action; unit/PostgreSQL/DOM verification passed. Native SPO/complete printing/export/localization and all original parent gates remain open; no milestone checkbox changed.
+
+2026-11-04 partial V1: SPO issue implementation and same-source payment/COS/HPA native compatibility slice passed. CDP elevated-host boundary resolved via debug-only supported API. Print/PDF/Excel/full localization, native SPO and original release/security/backup/Toolbox gates remain open; no milestone closed.
