@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import {
   copyFileSync,
+  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -140,6 +141,23 @@ async function launch(index) {
     cwd: dirname(exePaths[index]),
     env: environment,
     windowsHide: true,
+  })
+  const diagnostic = { index, pid: child.pid, exitCode: null, signal: null }
+  ;(report.nativeProcesses ??= []).push(diagnostic)
+  const stdout = createWriteStream(
+    join(resultRoot, `native-${index}-stdout.log`),
+  )
+  const stderr = createWriteStream(
+    join(resultRoot, `native-${index}-stderr.log`),
+  )
+  child.stdout.pipe(stdout)
+  child.stderr.pipe(stderr)
+  child.once('error', (error) => {
+    diagnostic.spawnErrorCode = error.code
+  })
+  child.once('exit', (code, signal) => {
+    diagnostic.exitCode = code
+    diagnostic.signal = signal
   })
   children.push(child)
   exePids.push(child.pid)
