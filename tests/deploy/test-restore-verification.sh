@@ -22,9 +22,21 @@ CREATE TABLE sync_events (id integer);
 INSERT INTO schema_migrations VALUES ('fixture');
 INSERT INTO sync_entities VALUES (1), (2);
 INSERT INTO sync_events VALUES (1);
+CREATE TABLE business_history (id integer PRIMARY KEY, payload jsonb NOT NULL);
+INSERT INTO business_history VALUES
+ (1, '{"kind":"order","closed":true,"formalNo":"SPO-SYNTHETIC","snapshot":{"name":"合成 Échantillon","minorTotal":250}}'),
+ (2, '{"kind":"payment","orderId":1,"minorAmount":300}'),
+ (3, '{"kind":"reversal","orderId":1,"original":2,"minorAmount":-50}'),
+ (4, '{"kind":"attachmentReference","orderId":1,"key":"synthetic/not-a-real-object"}');
 SQL
 archive=$(bash deploy/linux/backup.sh "$TEST_BACKUP_DIR")
 bash deploy/linux/verify-restore.sh "$archive"
+# Identical counts cannot conceal changed business history.
+psql -X -v ON_ERROR_STOP=1 -c "UPDATE business_history SET payload = jsonb_set(payload, '{minorAmount}', '999'::jsonb) WHERE id = 2" >/dev/null
+if bash deploy/linux/verify-restore.sh "$archive"; then
+  echo 'equal-count changed business contents were accepted' >&2; exit 1
+fi
+psql -X -v ON_ERROR_STOP=1 -c "UPDATE business_history SET payload = jsonb_set(payload, '{minorAmount}', '300'::jsonb) WHERE id = 2" >/dev/null
 if RESTORE_SERVICE=honsen_source_test bash deploy/linux/verify-restore.sh "$archive"; then
   echo 'same-cluster restore was accepted' >&2; exit 1
 fi
