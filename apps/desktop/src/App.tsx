@@ -1,4 +1,4 @@
-import { useUiLocale } from './lib/ui-locale'
+import { shellText, useUiLocale, type ShellMessage } from './lib/ui-locale'
 import zhCN from 'antd/locale/zh_CN'
 import enUS from 'antd/locale/en_US'
 import frFR from 'antd/locale/fr_FR'
@@ -211,7 +211,7 @@ function App() {
   const [authorizationContexts, setAuthorizationContexts] = useState<
     AuthorizationContextOption[]
   >([])
-  const [contextError, setContextError] = useState('')
+  const [contextError, setContextError] = useState<ShellMessage | ''>('')
   const authorizationRefreshReady =
     session?.onlineAuthenticated &&
     (syncState.kind === 'pending' || syncState.kind === 'synced')
@@ -534,7 +534,7 @@ function App() {
             />
           ) : page === 'requisition' ? (
             <main className="empty-state" role="alert">
-              {contextError || '正在加载授权范围…'}
+              {shellText(locale, contextError || '正在加载授权范围…')}
             </main>
           ) : page === 'execution' ? (
             <ProcurementExecutionPage

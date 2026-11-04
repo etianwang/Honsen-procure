@@ -37,6 +37,18 @@ export function useUiLocale() {
 }
 
 const messages = {
+  '当前账户没有有效的离线授权范围，无法新建采购申请。': [
+    'This account has no valid offline authorization scope; a requisition cannot be created.',
+    'Ce compte ne dispose d’aucun périmètre hors ligne valide ; impossible de créer une demande.',
+  ],
+  '无法切换到所选授权范围。': [
+    'Cannot switch to the selected authorization scope.',
+    'Impossible de sélectionner ce périmètre d’autorisation.',
+  ],
+  '正在加载授权范围…': [
+    'Loading authorization scope…',
+    'Chargement du périmètre d’autorisation…',
+  ],
   主导航: ['Main navigation', 'Navigation principale'],
   采购工作台: ['Purchasing workspace', 'Espace achats'],
   首页: ['Home', 'Accueil'],
