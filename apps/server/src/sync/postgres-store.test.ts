@@ -3587,11 +3587,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       name: string
       country_id: string | null
       rate_basis_points: number
-      effective_at: Date
+      effective_at: string
       is_active: boolean
       version: string
     }>(
-      'SELECT business_code, name, country_id, rate_basis_points, effective_at, is_active, version FROM tax_templates WHERE id = $1',
+      'SELECT business_code, name, country_id, rate_basis_points, effective_at::text AS effective_at, is_active, version FROM tax_templates WHERE id = $1',
       [taxId],
     )
     expect(row.rows[0]).toMatchObject({
@@ -3602,9 +3602,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       is_active: true,
       version: '1',
     })
-    expect(row.rows[0]?.effective_at.toISOString().slice(0, 10)).toBe(
-      '2026-10-15',
-    )
+    expect(row.rows[0]?.effective_at).toBe('2026-10-15')
     const synced = await pool!.query<{
       payload_json: { name: string; country_id: null }
     }>(
@@ -3931,11 +3929,11 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       business_code: string
       name: string
       rate_basis_points: number
-      effective_at: Date
+      effective_at: string
       is_active: boolean
       version: string
     }>(
-      'SELECT business_code, name, rate_basis_points, effective_at, is_active, version FROM tax_templates WHERE id = $1',
+      'SELECT business_code, name, rate_basis_points, effective_at::text AS effective_at, is_active, version FROM tax_templates WHERE id = $1',
       [taxId],
     )
     expect(row.rows[0]).toMatchObject({
@@ -3945,9 +3943,7 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
       is_active: false,
       version: '2',
     })
-    expect(row.rows[0]?.effective_at.toISOString().slice(0, 10)).toBe(
-      '2026-10-16',
-    )
+    expect(row.rows[0]?.effective_at).toBe('2026-10-16')
   })
 
   it('rolls back a tax-template row when its audit write fails', async () => {
