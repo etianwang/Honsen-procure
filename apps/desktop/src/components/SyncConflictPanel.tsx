@@ -1,3 +1,8 @@
+import { useUiLocale } from '../lib/ui-locale'
+import {
+  governanceText,
+  type GovernanceMessage,
+} from '../lib/governance-messages'
 import { useEffect, useState } from 'react'
 import type { UiLocale } from '@honsen/shared'
 import type { SyncApi, SyncConflictView } from '../lib/sync-api'
@@ -5,16 +10,25 @@ import { paymentConflictMessages } from '../lib/payment-conflict-messages'
 
 export function SyncConflictPanel({
   api,
-  locale = 'zh-CN',
+  locale: explicitLocale,
 }: {
   api: SyncApi
   locale?: UiLocale
 }) {
+  const { locale: activeLocale } = useUiLocale()
+  const text = (key: GovernanceMessage) => governanceText(activeLocale, key)
   const [items, setItems] = useState<SyncConflictView[]>([])
   const [reason, setReason] = useState('')
   const [message, setMessage] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const locale =
+    explicitLocale ??
+    (activeLocale === 'zh'
+      ? 'zh-CN'
+      : activeLocale === 'fr'
+        ? 'fr-FR'
+        : 'en-US')
   const t = paymentConflictMessages[locale]
   useEffect(() => {
     let active = true
@@ -41,13 +55,13 @@ export function SyncConflictPanel({
             ]
           : localItems,
       )
-      if (payments.status === 'rejected') setMessage(t.unavailable)
+      if (payments.status === 'rejected') setMessage('unavailable')
     })
     return () => {
       active = false
       window.removeEventListener('honsen-procurement-synced', update)
     }
-  }, [api, refresh, t])
+  }, [api, refresh])
   async function resolve(
     item: SyncConflictView,
     resolution: 'keep_local' | 'use_server' | 'replace_draft',
@@ -105,9 +119,9 @@ export function SyncConflictPanel({
     }
   }
   return (
-    <section className="card" aria-label="同步冲突">
+    <section className="card" aria-label={text('同步冲突')}>
       <div className="card-header">
-        <h3>同步冲突</h3>
+        <h3>{text('同步冲突')}</h3>
       </div>
       <div className="workflow-comments">
         <button
@@ -118,26 +132,32 @@ export function SyncConflictPanel({
           {t.refresh}
         </button>
         <label>
-          处理原因
+          {text('处理原因')}
           <input
-            aria-label="处理原因"
+            aria-label={text('处理原因')}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
           />
         </label>
-        {message && <p role="status">{message}</p>}
+        {message && (
+          <p role="status">
+            {message === 'unavailable'
+              ? t.unavailable
+              : text(message as GovernanceMessage)}
+          </p>
+        )}
         {items.map((item) => (
           <article className="workflow-comment" key={item.id}>
             <div>
               <strong>{item.entityType}</strong>
               <p>
-                云端版本 {item.serverVersion} · {item.serverOperation}
+                {text('云端版本')} {item.serverVersion} · {item.serverOperation}
               </p>
               <details>
-                <summary>比较本地与云端内容</summary>
-                <p>本地</p>
+                <summary>{text('比较本地与云端内容')}</summary>
+                <p>{text('本地')}</p>
                 <pre>{item.localPayloadJson}</pre>
-                <p>云端</p>
+                <p>{text('云端')}</p>
                 <pre>{item.serverPayloadJson}</pre>
               </details>
               {item.entityType === 'procurement_expenditure' ? (
@@ -178,8 +198,8 @@ export function SyncConflictPanel({
                     onClick={() => void resolve(item, 'keep_local')}
                   >
                     {item.entityType === 'purchase_order'
-                      ? '创建替代草稿'
-                      : '保留本地'}
+                      ? text('创建替代草稿')
+                      : text('保留本地')}
                   </button>{' '}
                   <button
                     className="primary-button"
@@ -187,14 +207,14 @@ export function SyncConflictPanel({
                     disabled={busyId !== null}
                     onClick={() => void resolve(item, 'use_server')}
                   >
-                    采用云端
+                    {text('采用云端')}
                   </button>
                 </>
               )}
             </div>
           </article>
         ))}
-        {items.length === 0 && <p>没有待处理的同步冲突。</p>}
+        {items.length === 0 && <p>{text('没有待处理的同步冲突。')}</p>}
       </div>
     </section>
   )
