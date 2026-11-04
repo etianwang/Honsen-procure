@@ -1,5 +1,7 @@
 # TEST-RULES — Mandatory Quality Gates
 
+2026-11-04 latest source90f28043aecd74a90d3267952b922aea45845a88 (pushed): approved T15 launch scope2 implemented. Actual native choices/keyboard and installed010 readable Chinese, explicit offline Cancel/Continue plus six identity refusals PASS within recorded bounds. Exact-source Rust143 PASS/7ignored, CLI4 PASS, fmt/Clippy exit0 (warnings retained). Actual019→010 upgrade FAIL: result success but old Runner survived; separate reinstall is not upgrade acceptance. Precise RUNNER-REPLACEMENT-P1-PLAN-20261104.md awaits new approval; no NSIS repair made. Live qualified stable asset and scope3 actual Toolbox caller remain open, as do original full V1 gates. Owned guest stopped and fixtures restored. See reviews/TOOLBOX-LAUNCH-RESULT-20261104.md and WINDOWS-CANDIDATE-010-20261104.md; no parent checkbox closes.
+
 2026-11-04 affected acceptance update: source66c777e actual native two-line SPO Microsoft Print To PDF1A4page, repeat/Cancel cleanup PASS; previous100 four-page PDF remains RED evidence. This closes only the confirmed layout defect. Actual source66 local0.1.7 installed016→017 smoke PASS; debug native EXE and installedRelease EXE hashes remain distinct. Full long-document/all-language/physical printer, installed security, restored native/object consistency and Toolbox original final gates below remain unchecked. See reviews/PRINT-PAGINATION-20261104.md, WINDOWS-CANDIDATE-017-20261104.md and V1-CANDIDATE-66C777E-20261104.md.
 
 ## Test pyramid

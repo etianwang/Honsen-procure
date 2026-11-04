@@ -1,0 +1,108 @@
+{
+  "sourceSha": "90f28043aecd74a90d3267952b922aea45845a88",
+  "version": "0.1.10",
+  "runnerInputOrder": [
+    {
+      "bytes": 3793920,
+      "sha256": "89ef06281ad17e249ac007462e51fa2c93e74126b1c3b15f077c5ab0649e187d",
+      "path": "H:\\Honsen\\Honsen-Procure\\apps\\desktop\\src-tauri\\release-assets\\HonsenUpdateRunner.exe",
+      "sourceLastWriteUtc": "2026-11-04T10:15:51.5707475Z"
+    },
+    {
+      "bytes": 3793920,
+      "sha256": "198093091d79159a62d01335b27dfe137bdd82b3f7e732faa34a27f065bff205",
+      "path": "H:\\Honsen\\Honsen-Procure\\.cache\\cargo-target\\release\\HonsenUpdateRunner.exe",
+      "sourceLastWriteUtc": "2026-11-04T10:16:23.4896202Z"
+    }
+  ],
+  "rule": "last same-name File entry, not first resource capture",
+  "generatedNsisSha256": "6a1eb8d520342081eb69de5df662d6b636a3d3211782e301805fbc81846f7f75",
+  "effectiveRunnerSha256": "198093091d79159a62d01335b27dfe137bdd82b3f7e732faa34a27f065bff205",
+  "installerSha256": "4c69dbfaca53ea11e2da9d006b40fb126548358b05fd0b6c131a6c640d293890",
+  "installedVerification": "PARTIAL PASS: reinstall/current Runner + legible offline cancel/continue + six identity denials; public upgrade FAIL",
+  "actualInstalled": {
+    "sourceSha": "90f28043aecd74a90d3267952b922aea45845a88",
+    "chineseWarningReadable": true,
+    "version": "0.1.10",
+    "renderEvidence": "main controller actual sky interaction, no credential entered",
+    "directory": "C:\\Honsen Security Synthetic\\Honsen Procure",
+    "cancel": {
+      "clientCount": 0,
+      "source": "toolbox",
+      "exitCode": 0
+    },
+    "explicitContinue": {
+      "version": "0.1.10",
+      "exitCode": 0,
+      "path": "C:\\Honsen Security Synthetic\\Honsen Procure\\HonsenProcure.exe",
+      "runnerHash": "198093091D79159A62D01335B27DFE137BDD82B3F7E732FAA34A27F065BFF205",
+      "clientCount": 1,
+      "source": "app",
+      "screen": "actual installed EXE login page; no authentication input"
+    },
+    "identityDenials": [
+      {
+        "exitCode": 1,
+        "exitCodeEvidence": "main controller actual official CLI observation; raw case JSON contains client count",
+        "clientCount": 0,
+        "rawFile": "010-conflict-denied.json",
+        "case": "conflicting HKCU registration"
+      },
+      {
+        "exitCode": 1,
+        "exitCodeEvidence": "main controller actual official CLI observation; raw case JSON contains client count",
+        "clientCount": 0,
+        "rawFile": "010-launcher-denied.json",
+        "case": "wrong LauncherPath"
+      },
+      {
+        "exitCode": 1,
+        "exitCodeEvidence": "main controller actual official CLI observation; raw case JSON contains client count",
+        "clientCount": 0,
+        "rawFile": "010-old-url-denied.json",
+        "case": "noncanonical UpdateUrl"
+      },
+      {
+        "exitCode": 1,
+        "exitCodeEvidence": "main controller actual official CLI observation; raw case JSON contains client count",
+        "clientCount": 0,
+        "rawFile": "010-outside-runner-denied.json",
+        "case": "Runner outside installation"
+      },
+      {
+        "exitCode": 1,
+        "exitCodeEvidence": "main controller actual official CLI observation; raw case JSON contains client count",
+        "clientCount": 0,
+        "rawFile": "010-reparse-denied.json",
+        "case": "junction installation path"
+      },
+      {
+        "exitCode": 1,
+        "exitCodeEvidence": "main controller actual official CLI observation; raw case JSON contains client count",
+        "clientCount": 0,
+        "rawFile": "010-version-denied.json",
+        "case": "EXE version mismatch"
+      }
+    ],
+    "actualExeVersion": "0.1.10",
+    "sqlitePreserved": true,
+    "cleanup": "main controller stopped owned Sandbox using official CLI; wsb list empty",
+    "upgrade": {
+      "status": "FAIL",
+      "publicResult": "success incorrectly; new P1 pending approval",
+      "actualRunner": "1943cac8e7bd8726f2f5ed6e0ad419d289bc82b2f3e946bce523d2e806f87f40",
+      "expectedRunner": "198093091d79159a62d01335b27dfe137bdd82b3f7e732faa34a27f065bff205"
+    },
+    "markerPreserved": true,
+    "installedRunnerSha256": "198093091D79159A62D01335B27DFE137BDD82B3F7E732FAA34A27F065BFF205",
+    "finalState": {
+      "version": "0.1.10",
+      "manifestHash": "9F64C393E759C16AE7A5C893793F822C3F97017513FB849685F7920B0534EB79",
+      "canonical": true,
+      "hkcuAbsent": true,
+      "aliasAbsent": true,
+      "clientCount": 0,
+      "runnerHash": "198093091D79159A62D01335B27DFE137BDD82B3F7E732FAA34A27F065BFF205"
+    }
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "scope": "Native dialog return values plus bounded real HTTPS failure only; not integrated successful update",
+  "fixedHiddenStartSourceSha": "ab322af2f1e1d32bf72c9d0569c3db9f4dabe373",
+  "testBinary": {
+    "path": ".cache/scope2-native-ui-hidden-fix/scope2-native-probes.exe",
+    "sha256": "e61284dc9d6af906decde7aac22507f27e3d9ab4b9792d2bccf99740674cd1d0",
+    "kind": "cfg-test native probe binary, not installed Release Runner"
+  },
+  "nativeDialogCases": [
+    {
+      "test": "native_chinese_choice_probe",
+      "action": "Chinese window close X",
+      "expected": "RemindLater",
+      "result": "PASS",
+      "resultLog": ".cache/scope2-native-ui-hidden-fix/chinese-hidden.log",
+      "resultLogSha256": "e8e9fd229447521f6ba0c74847150afb9ee145e25e1e0e82b5e4fc2975adf3e5",
+      "actionEvidence": "Main-controller actual desktop observation; log independently confirms test return-value assertion"
+    },
+    {
+      "test": "native_english_choice_probe",
+      "action": "English Esc",
+      "expected": "RemindLater",
+      "result": "PASS",
+      "resultLog": ".cache/scope2-native-ui-hidden-fix/english-default.log",
+      "resultLogSha256": "e187121e845a70d1daef3cf37d9f6bda9fc72068022eab9a5f30d6e668183807",
+      "actionEvidence": "Main-controller actual desktop observation; log independently confirms test return-value assertion"
+    },
+    {
+      "test": "native_french_choice_probe",
+      "action": "French Skip this version",
+      "expected": "SkipVersion",
+      "result": "PASS",
+      "resultLog": ".cache/scope2-native-ui-hidden-fix/french-skip.log",
+      "resultLogSha256": "896d77b9682c54ed1f5c6b5481d4f3f3848eaf9caf53ca6bf5f3b6c14e08d80a",
+      "actionEvidence": "Main-controller actual desktop observation; log independently confirms test return-value assertion"
+    },
+    {
+      "test": "native_update_choice_probe",
+      "action": "Update now",
+      "expected": "UpdateNow (cfg-test return only; no download)",
+      "result": "PASS",
+      "resultLog": ".cache/scope2-native-ui-hidden-fix/update-now.log",
+      "resultLogSha256": "0e6743a34453621863a8cdfab07ec92854be506be23ba6a13f2687f3fad17ddc",
+      "actionEvidence": "Main-controller actual desktop observation; log independently confirms test return-value assertion"
+    },
+    {
+      "test": "native_failure_confirm_probe",
+      "action": "Failure warning Cancel",
+      "expected": "false; no continue",
+      "result": "PASS",
+      "resultLog": ".cache/scope2-native-ui-hidden-fix/failure-cancel.log",
+      "resultLogSha256": "84852e4e877162b3c10b31ffdac3fc713cde59cf3ff702adee77700010a61f69",
+      "actionEvidence": "Main-controller actual desktop observation; log independently confirms test return-value assertion"
+    },
+    {
+      "test": "native_failure_continue_probe",
+      "action": "Failure warning explicit Continue",
+      "expected": "true; confirmation only",
+      "result": "PASS",
+      "resultLog": ".cache/scope2-native-ui-hidden-fix/failure-continue.log",
+      "resultLogSha256": "60236227111a22b2e9b040a9151556ee2db575c1c8c3819db68352c311b12b08",
+      "actionEvidence": "Main-controller actual desktop observation; log independently confirms test return-value assertion"
+    },
+    {
+      "test": "native_english_choice_probe",
+      "action": "English Tab to visibly focused Remind later, then Enter",
+      "expected": "RemindLater",
+      "result": "PASS",
+      "resultLog": ".cache/scope2-native-ui-hidden-fix/english-keyboard.log",
+      "resultLogSha256": "5dbc7112b6690d6eefef90ccbe5a9e0c2e9e7f52ec844d824515b516ef1030fa",
+      "actionEvidence": "Main-controller actual desktop observation; log independently confirms test return-value assertion"
+    }
+  ],
+  "canonicalProbe": {
+    "test": "native_canonical_network_probe",
+    "result": "PASS for bounded completion assertion only",
+    "canonicalRequestSuccess": false,
+    "elapsedMs": 1817,
+    "exitCode": 0,
+    "evidenceKind": "Main-controller tool transcript only",
+    "rawLogFile": null,
+    "httpStatus": null,
+    "validatedStableFeed": false,
+    "downloadOrApply": false
+  },
+  "executionCount": {
+    "distinctPreviouslyIgnoredFunctions": 7,
+    "actualExecutions": 8,
+    "successfulAssertions": 8,
+    "explanation": "English choice function executed twice (Esc and Tab/Enter); canonical probe is the eighth execution"
+  },
+  "initialHiddenFailure": {
+    "sourceSha": "11bb10f42acfcbaffcb15710d9768c5bfcbc493b",
+    "binaryPath": ".cache/scope2-native-ui-11bb10f/scope2-native-probes.exe",
+    "binarySha256": "5954b5eac1b9bec70fbfd0a561df40dcd92751fb7b21fb11ba5fb7556104f971",
+    "result": "FAIL hidden visibility; owner-verified hung fixture terminated before a test result",
+    "log": ".cache/scope2-native-ui-11bb10f/chinese-close.log",
+    "visibleControlCase": {
+      "result": "PASS for old-source visible-start Chinese close only",
+      "log": ".cache/scope2-native-ui-11bb10f/chinese-close-visible.log"
+    }
+  },
+  "fontPatch": {
+    "sourceSha": "90f28043aecd74a90d3267952b922aea45845a88",
+    "changedBoundary": "Dialog now receives Locale; Chinese face Microsoft YaHei UI, English/French remain Segoe UI",
+    "reuse": "ab322af English/French return-state evidence applies only after explicit unchanged handler/data/font comparison; new Chinese visual/installed rendering is not accepted by those older probes",
+    "installedCandidate010": "Build PASS per separate C artifact record; actual019-to010 upgrade payload FAIL, fresh-font rendering not accepted"
+  },
+  "installed019": {
+    "sourceSha": "ab322af2f1e1d32bf72c9d0569c3db9f4dabe373",
+    "reference": "docs/reviews/WINDOWS-CANDIDATE-019-20261104.md",
+    "freshInstallAndThreeApplyNegatives": "PASS per separate actual installed report",
+    "offlineCancelExitCode": 0,
+    "clientCountAfterCancel": 0,
+    "networking": "disabled in guest; no HTTP404 conclusion",
+    "chineseLegibility": "FAIL tofu; not closed by functional Cancel",
+    "upgradeReplacement": "NOT_RUN"
+  },
+  "remaining": [
+    "Final-font-source Chinese host/installed rendering",
+    "High DPI and long-version native layout",
+    "Actual qualified stable metadata/asset download and hash/apply success",
+    "Skip preference persistence/restart from an actual update-choice launch",
+    "Explicit-continue registered client startup in installed environment",
+    "Actual Toolbox scope3 caller and complete installed security"
+  ],
+  "installedUpgrade019To010": {
+    "result": "FAIL",
+    "severity": "P1 new Runner payload replacement blocker",
+    "sourceSha": "90f28043aecd74a90d3267952b922aea45845a88",
+    "packageSha256": "4c69dbfaca53ea11e2da9d006b40fb126548358b05fd0b6c131a6c640d293890",
+    "rawAfter": ".cache/installed-security-019-existing/evidence/upgrade-after.json",
+    "rawOperationResult": ".cache/installed-security-019-existing/evidence/upgrade-result.json",
+    "operationReportedStatus": "success",
+    "installerExitCode": 0,
+    "manifestVersion": "0.1.10",
+    "registryVersion": "0.1.10",
+    "mainExeVersion": "0.1.10",
+    "sqlitePreserved": true,
+    "markerPreserved": true,
+    "directoryPreserved": true,
+    "actualRunnerSha256": "1943cac8e7bd8726f2f5ed6e0ad419d289bc82b2f3e946bce523d2e806f87f40",
+    "expectedEffectiveRunnerSha256": "198093091d79159a62d01335b27dfe137bdd82b3f7e732faa34a27f065bff205",
+    "conclusion": "Reported success and matching version/data fields do not override actual stale Runner bytes; not font-patch or successful upgrade acceptance",
+    "scope": "Read-only host evidence comparison; no guest operation"
+  }
+}

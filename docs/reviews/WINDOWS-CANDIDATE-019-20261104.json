@@ -1,0 +1,130 @@
+{
+  "freshInstall": {
+    "completedUtc": "2026-11-04T10:02:34.894806Z",
+    "version": "0.1.9",
+    "installerSha256": "E0B5332F14E9CD88D1E78AE39041BBFBE0BFF03B850678E7C17F82114D0C79A9",
+    "os": "Microsoft Windows NT 10.0.26100.0",
+    "cleanup": "Synthetic guest install retained until Sandbox closes; no host install or user data changed",
+    "scope": "installed Runner negative checks only, not full application security",
+    "remaining": "authentication/roles/projects/attachments/HTTPS/Toolbox joint caller not tested",
+    "sourceSha": "ab322af2f1e1d32bf72c9d0569c3db9f4dabe373",
+    "status": "PASS",
+    "installedFiles": {
+      "honsen.app.json": "2BA4983F7E1584EE5D2A3F8C6EC3C486C4666E7F51F53A4651AD97090570E0BC",
+      "HonsenProcure.exe": "5EF07E21FCAE1C28742E45B9456CD21F03335724FA3E4096C1CA8615B29211D4",
+      "HonsenUpdateRunner.exe": "1943CAC8E7BD8726F2F5ED6E0AD419D289BC82B2F3E946BCE523D2E806F87F40"
+    }
+  },
+  "negativeChecks": {
+    "version": "0.1.9",
+    "scope": "installed Runner negative checks only",
+    "completedUtc": "2026-11-04T10:02:34.8143789Z",
+    "results": [
+      {
+        "exitCode": 1,
+        "case": "hash",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "705f8318-52b5-403b-b4c5-6c641a1977ae",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.9",
+          "step": "hash-validation",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "installer checksum does not match",
+          "completedAtUtc": "2026-11-04T10:02:34Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      },
+      {
+        "exitCode": 1,
+        "case": "target",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "5b701a43-be70-4d66-b73b-4053c2551822",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.9",
+          "step": "identity-validation",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "registered target directory does not match",
+          "completedAtUtc": "2026-11-04T10:02:34Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      },
+      {
+        "exitCode": 1,
+        "case": "pid",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "63380544-342a-415d-a030-c373a357300c",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.9",
+          "step": "wait-process",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "the registered application did not exit",
+          "completedAtUtc": "2026-11-04T10:02:34Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      }
+    ],
+    "runResult": "PASS",
+    "installerSha256": "E0B5332F14E9CD88D1E78AE39041BBFBE0BFF03B850678E7C17F82114D0C79A9",
+    "failureMessage": null
+  },
+  "provenance": {
+    "generatedNsis": {
+      "sha256": "f1b947d381b4d060410ddfe24fcdf8a54917527fbe1bded7fb83a61084bc5fe5",
+      "firstRunnerEntryLine": 652,
+      "lastRunnerEntryLine": 656,
+      "sourceLastWriteUtc": "2026-11-04T09:59:47.2175581Z"
+    },
+    "sourceSha": "ab322af2f1e1d32bf72c9d0569c3db9f4dabe373",
+    "effectiveExternalRunner": {
+      "sha256": "1943cac8e7bd8726f2f5ed6e0ad419d289bc82b2f3e946bce523d2e806f87f40",
+      "sourceLastWriteUtc": "2026-11-04T09:59:15.0392492Z",
+      "bytes": 3793408
+    },
+    "freshInstalledRunnerSha256": "1943cac8e7bd8726f2f5ed6e0ad419d289bc82b2f3e946bce523d2e806f87f40",
+    "firstResourceRunnerSha256": "8d9c3d129b6afcbbb758f3596f5fac7cbcfefa7387340a13083a385e42480784",
+    "meaning": "first resource capture was not final effective payload; external same-name entry is later and matches actual fresh installed bytes"
+  },
+  "installedOfflineLaunch": {
+    "cancel": {
+      "clientCount": 0,
+      "runnerExit": 0,
+      "status": "PASS"
+    },
+    "overallLaunch": "FAIL/OPEN; future font fix requires new source and artifact",
+    "network": "disabled; source unavailable, not proven HTTP404",
+    "sourceSha": "ab322af2f1e1d32bf72c9d0569c3db9f4dabe373",
+    "chineseRendering": {
+      "symptom": "tofu boxes in Chinese dialog content",
+      "status": "FAIL",
+      "existingFontFiles": [
+        "Deng.ttf",
+        "Dengb.ttf",
+        "Dengl.ttf",
+        "mingliub.ttc",
+        "msyh.ttc",
+        "msyhbd.ttc",
+        "msyhl.ttc",
+        "simhei.ttf",
+        "simsun.ttc",
+        "simsunb.ttf",
+        "SimsunExtG.ttf"
+      ]
+    },
+    "observationBy": "main controller official wsb CLI ExistingLogin and sky"
+  }
+}
