@@ -1,5 +1,33 @@
 import { useUiLocale } from './ui-locale'
 const messages = {
+  每日公开汇率: ['Public daily rate', 'Taux public quotidien'],
+  无法读取本地基础资料: [
+    'Cannot read local master data',
+    'Impossible de lire les données locales',
+  ],
+  正在读取本地基础资料: [
+    'Reading local master data',
+    'Lecture des données locales',
+  ],
+  '手工汇率已归档；等待同步确认': [
+    'Manual rate archived; awaiting synchronization',
+    'Taux manuel archivé ; synchronisation en attente',
+  ],
+  '汇率保存失败，请检查权限、日期或汇率格式': [
+    'Rate save failed; check permissions, date and rate format',
+    'Échec du taux ; vérifiez les droits, la date et le format',
+  ],
+  汇率历史: ['Exchange rate history', 'Historique des taux de change'],
+  源币种: ['Source currency', 'Devise source'],
+  目标币种: ['Target currency', 'Devise cible'],
+  汇率小数字符串: ['Decimal exchange rate', 'Taux de change décimal'],
+  汇率生效日期: ['Rate effective date', 'Date d’effet du taux'],
+  手工汇率原因: ['Manual rate reason', 'Motif du taux manuel'],
+  新增手工汇率: ['Add manual rate', 'Ajouter un taux manuel'],
+  汇率: ['Exchange rate', 'Taux de change'],
+  来源: ['Source', 'Source'],
+  原因: ['Reason', 'Motif'],
+  手工录入: ['Manual entry', 'Saisie manuelle'],
   编辑项目币种: ['Edit project currency', 'Modifier la devise du projet'],
   编辑项目语言: [
     'Edit project document language',

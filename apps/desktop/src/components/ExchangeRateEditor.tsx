@@ -1,3 +1,4 @@
+import { useMasterText } from '../lib/master-data-messages'
 import { Alert, Button, Card, Input, Select, Space, Table } from 'antd'
 import { useState } from 'react'
 import type { ExchangeRateView, MasterDataApi } from '../lib/master-data-api'
@@ -14,6 +15,7 @@ export function ExchangeRateEditor({
   rates: ExchangeRateView[]
   canEdit: boolean
 }) {
+  const t = useMasterText()
   const [items, setItems] = useState(rates)
   const [fromCurrency, setFromCurrency] = useState<Currency | null>(null)
   const [toCurrency, setToCurrency] = useState<Currency | null>(null)
@@ -52,13 +54,13 @@ export function ExchangeRateEditor({
   }
 
   return (
-    <Card title="汇率历史" aria-label="汇率历史">
+    <Card title={t('汇率历史')} aria-label={t('汇率历史')}>
       <Space orientation="vertical" style={{ width: '100%' }}>
-        {message && <Alert type="info" title={message} showIcon />}
+        {message && <Alert type="info" title={t(message)} showIcon />}
         <Space wrap>
           <Select
-            aria-label="源币种"
-            placeholder="源币种"
+            aria-label={t('源币种')}
+            placeholder={t('源币种')}
             value={fromCurrency}
             onChange={setFromCurrency}
             disabled={!canEdit}
@@ -66,8 +68,8 @@ export function ExchangeRateEditor({
             style={{ minWidth: 110 }}
           />
           <Select
-            aria-label="目标币种"
-            placeholder="目标币种"
+            aria-label={t('目标币种')}
+            placeholder={t('目标币种')}
             value={toCurrency}
             onChange={setToCurrency}
             disabled={!canEdit}
@@ -75,26 +77,26 @@ export function ExchangeRateEditor({
             style={{ minWidth: 110 }}
           />
           <Input
-            aria-label="汇率小数字符串"
+            aria-label={t('汇率小数字符串')}
             value={rateDecimal}
             onChange={(event) => setRateDecimal(event.target.value)}
             disabled={!canEdit}
           />
           <Input
-            aria-label="汇率生效日期"
+            aria-label={t('汇率生效日期')}
             type="date"
             value={effectiveAt}
             onChange={(event) => setEffectiveAt(event.target.value)}
             disabled={!canEdit}
           />
           <Input
-            aria-label="手工汇率原因"
+            aria-label={t('手工汇率原因')}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             disabled={!canEdit}
           />
           <Button disabled={!canCreate} onClick={() => void save()}>
-            新增手工汇率
+            {t('新增手工汇率')}
           </Button>
         </Space>
         <Table
@@ -102,12 +104,16 @@ export function ExchangeRateEditor({
           dataSource={items}
           pagination={false}
           columns={[
-            { title: '源币种', dataIndex: 'fromCurrency' },
-            { title: '目标币种', dataIndex: 'toCurrency' },
-            { title: '汇率', dataIndex: 'rateDecimal' },
-            { title: '生效日期', dataIndex: 'effectiveAt' },
-            { title: '来源', dataIndex: 'source' },
-            { title: '原因', dataIndex: 'reason' },
+            { title: t('源币种'), dataIndex: 'fromCurrency' },
+            { title: t('目标币种'), dataIndex: 'toCurrency' },
+            { title: t('汇率'), dataIndex: 'rateDecimal' },
+            { title: t('生效日期'), dataIndex: 'effectiveAt' },
+            {
+              title: t('来源'),
+              render: (_: unknown, item: ExchangeRateView) =>
+                t(item.source === 'manual' ? '手工录入' : '每日公开汇率'),
+            },
+            { title: t('原因'), dataIndex: 'reason' },
           ]}
         />
       </Space>

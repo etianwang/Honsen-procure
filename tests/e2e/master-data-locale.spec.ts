@@ -16,6 +16,9 @@ test('master data and tax drafts survive persistent UI language switches', async
     const { TaxTemplateEditor } = await load(
       '/src/components/TaxTemplateEditor.tsx',
     )
+    const { ExchangeRateEditor } = await load(
+      '/src/components/ExchangeRateEditor.tsx',
+    )
     const { setUiLocale } = await load('/src/lib/ui-locale.ts')
     setUiLocale('zh')
     const node = document.createElement('div')
@@ -38,6 +41,7 @@ test('master data and tax drafts survive persistent UI language switches', async
           countries: [],
           canEdit: true,
         }),
+        createElement(ExchangeRateEditor, { api, rates: [], canEdit: true }),
       ),
     )
   })
@@ -47,6 +51,9 @@ test('master data and tax drafts survive persistent UI language switches', async
   await page
     .getByRole('textbox', { name: '税模板名称', exact: true })
     .fill('Unsaved tax')
+  await page
+    .getByRole('textbox', { name: '汇率小数字符串', exact: true })
+    .fill('1.25')
   for (const [locale, heading, countryCode, taxName] of [
     ['en', 'Administrative master data', 'country code', 'Tax template name'],
     [
@@ -69,6 +76,17 @@ test('master data and tax drafts survive persistent UI language switches', async
     await expect(
       page.getByRole('textbox', { name: taxName, exact: true }),
     ).toHaveValue('Unsaved tax')
+    await expect(
+      page.getByRole('textbox', {
+        name:
+          locale === 'en'
+            ? 'Decimal exchange rate'
+            : locale === 'fr'
+              ? 'Taux de change décimal'
+              : '汇率小数字符串',
+        exact: true,
+      }),
+    ).toHaveValue('1.25')
     expect(
       await page.evaluate(() =>
         localStorage.getItem('honsen.procure.ui-locale'),

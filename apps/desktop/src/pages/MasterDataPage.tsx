@@ -1,3 +1,4 @@
+import { useMasterText } from '../lib/master-data-messages'
 import { Alert } from 'antd'
 import { useEffect, useState } from 'react'
 import { ProjectDefaultsEditor } from '../components/ProjectDefaultsEditor'
@@ -14,6 +15,7 @@ import {
 import type { UserRole } from '../lib/permissions'
 
 export function MasterDataPage({ role }: { role: UserRole }) {
+  const t = useMasterText()
   const [projects, setProjects] = useState<ProjectDefaultsView[] | null>(null)
   const [referenceData, setReferenceData] = useState<
     ReferenceMasterDataView[] | null
@@ -42,9 +44,9 @@ export function MasterDataPage({ role }: { role: UserRole }) {
       .catch(() => setError('无法读取本地基础资料'))
   }, [])
 
-  if (error) return <Alert type="error" title={error} showIcon />
+  if (error) return <Alert type="error" title={t(error)} showIcon />
   if (!projects || !referenceData || !taxTemplates || !exchangeRates)
-    return <Alert type="info" title="正在读取本地基础资料" showIcon />
+    return <Alert type="info" title={t('正在读取本地基础资料')} showIcon />
   const canEdit = [
     'super_administrator',
     'administrator',
