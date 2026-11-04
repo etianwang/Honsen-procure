@@ -1,3 +1,9 @@
+import { useUiLocale } from '../lib/ui-locale'
+import {
+  executionText,
+  executionStatus,
+  type ExecutionMessage,
+} from '../lib/execution-messages'
 import { Alert, Button, Card, Empty, Space } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { AttachmentPanel } from '../components/AttachmentPanel'
@@ -31,10 +37,14 @@ export function ProcurementExecutionPage({
   rfqApi,
   receiverId,
 }: Props) {
+  const { locale } = useUiLocale()
+  const componentLocale =
+    locale === 'zh' ? 'zh-CN' : locale === 'en' ? 'en-US' : 'fr-FR'
+  const t = (key: ExecutionMessage) => executionText(locale, key)
   const [orders, setOrders] = useState<ProcurementExecutionOrder[]>([])
   const [suppliers, setSuppliers] = useState<SupplierView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<ExecutionMessage | null>(null)
   const selected = orders.find((order) => order.id === selectedId)
   const refresh = useCallback(
     () =>
@@ -76,12 +86,16 @@ export function ProcurementExecutionPage({
     <>
       <section className="page-heading">
         <div>
-          <h2>采购执行</h2>
-          <p>选择已批准的 Honsen 采购申请；市场直采无需 RFQ 或供应商子订单。</p>
+          <h2>{t('采购执行')}</h2>
+          <p>
+            {t(
+              '选择已批准的 Honsen 采购申请；市场直采无需 RFQ 或供应商子订单。',
+            )}
+          </p>
         </div>
       </section>
-      {message ? <Alert type="error" title={message} showIcon /> : null}
-      <Card className="card" title="已确认采购申请">
+      {message ? <Alert type="error" title={t(message)} showIcon /> : null}
+      <Card className="card" title={t('已确认采购申请')}>
         {orders.length ? (
           <Space wrap>
             {orders.map((order) => (
@@ -95,15 +109,19 @@ export function ProcurementExecutionPage({
             ))}
           </Space>
         ) : (
-          <Empty description="没有可执行的已确认采购申请" />
+          <Empty description={t('没有可执行的已确认采购申请')} />
         )}
       </Card>
       {selected ? (
-        <section aria-label="采购执行详情">
-          <Card className="card" title={`父单详情 · ${selected.displayNo}`}>
+        <section aria-label={t('采购执行详情')}>
+          <Card
+            className="card"
+            title={`${t('父单详情')} · ${selected.displayNo}`}
+          >
             <p className="muted">
-              状态：{selected.workflowStatus} · 主币种：
-              {selected.primaryCurrency} · {selected.lines.length} 条材料
+              {t('状态')}：{executionStatus(locale, selected.workflowStatus)} ·{' '}
+              {t('主币种')}：{selected.primaryCurrency} ·{' '}
+              {selected.lines.length} {t('条材料')}
             </p>
             <ul>
               {selected.lines.map((line) => (
@@ -133,7 +151,7 @@ export function ProcurementExecutionPage({
                   )
               }
             >
-              开始市场直采
+              {t('开始市场直采')}
             </Button>
           ) : null}
           {selected.procurementMode === 'honsen_self_purchase' &&
@@ -157,6 +175,7 @@ export function ProcurementExecutionPage({
           ) : null}
           {selected.children.length === 0 && selected.paymentSummary ? (
             <ProcurementExpenditurePanel
+              locale={componentLocale}
               key={`payment-${selected.id}`}
               api={tauriProcurementExpenditureApi}
               orderId={selected.id}
@@ -169,7 +188,7 @@ export function ProcurementExecutionPage({
             selected.children.map((child) => (
               <section
                 key={child.id}
-                aria-label={`供应商子订单 ${child.displayNo}`}
+                aria-label={`${t('供应商子订单')} ${child.displayNo}`}
               >
                 <SupplierChildTermsPanel
                   api={supplierOrderApi}
@@ -195,6 +214,7 @@ export function ProcurementExecutionPage({
                 />
                 {child.paymentSummary ? (
                   <ProcurementExpenditurePanel
+                    locale={componentLocale}
                     api={tauriProcurementExpenditureApi}
                     orderId={child.id}
                     currency={child.currency}
@@ -203,6 +223,7 @@ export function ProcurementExecutionPage({
                   />
                 ) : null}
                 <AttachmentPanel
+                  locale={componentLocale}
                   key={`attachments-${child.id}`}
                   orderId={child.id}
                 />
@@ -220,6 +241,7 @@ export function ProcurementExecutionPage({
             </>
           ) : null}
           <AttachmentPanel
+            locale={componentLocale}
             key={`attachments-${selected.id}`}
             orderId={selected.id}
           />
