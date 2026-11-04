@@ -1,0 +1,329 @@
+{
+  "crossVersion": {
+    "passed": true,
+    "scope": "synthetic guest only; no automatic rollback claim",
+    "exitCode": 0,
+    "completedUtc": "2026-11-04T01:09:39.425761Z",
+    "operationResult": {
+      "appId": "honsen.procure",
+      "operationId": "23d2d984-61ea-47d4-9b44-5f38ad08ff68",
+      "status": "success",
+      "source": "toolbox",
+      "fromVersion": "0.1.2",
+      "toVersion": "0.1.3",
+      "step": null,
+      "installerExitCode": 0,
+      "installerLogPath": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Temp\\honsen-procure-23d2d984-61ea-47d4-9b44-5f38ad08ff68.log",
+      "message": "更新完成",
+      "completedAtUtc": "2026-11-04T01:09:38Z",
+      "installLocation": "C:\\Honsen RC 测试 路径\\Honsen Procure",
+      "executablePath": "C:\\Honsen RC 测试 路径\\Honsen Procure\\HonsenProcure.exe"
+    },
+    "mode": "Upgrade",
+    "os": "Microsoft Windows NT 10.0.26100.0"
+  },
+  "setup013Sha256": "d72c77895eed9c957395b648249c6e291aa48f4f8f24f1bc75efa3c51e8a1964",
+  "source": "6697469",
+  "setup012Sha256": "653b6111b6435513768a2f40f2145897d5e35843f2207bcbbf7b165fd0ff5224",
+  "unicodeAdapter": {
+    "attempt": true,
+    "exitZero": true,
+    "text": "2026-11-04T01:07:04Z NSIS adapter (not engine log): attempt installer=\"C:\\\\Users\\\\WDAGUtilityAccount\\\\AppData\\\\Local\\\\Temp\\\\Honsen Program\\\\VerifiedInstallers\\\\895cabaf-246f-4cef-918f-6e859e67c77b\\\\Honsen-Procure-verified.exe\" parameters=\"/S /D=C:\\\\Honsen RC 测试 路径\\\\Honsen Procure\"\n2026-11-04T01:07:06Z NSIS adapter (not engine log): exit=0\n",
+    "nativeParameters": true
+  },
+  "limitations": [
+    "No Toolbox UI joint acceptance",
+    "No production access",
+    "No automatic rollback",
+    "Invalid registration only synthetic stale InstallLocation"
+  ],
+  "date": "2026-11-04 Asia/Shanghai",
+  "invalidRegistration": {
+    "exitCode": 1,
+    "result": {
+      "appId": "honsen.procure",
+      "operationId": "8b55b106-497f-4fd3-a3e9-e2f946852f8d",
+      "status": "failed",
+      "source": "toolbox",
+      "fromVersion": "unknown",
+      "toVersion": "0.1.2",
+      "step": "runner",
+      "installerExitCode": null,
+      "installerLogPath": null,
+      "message": "I/O error: 系统找不到指定的路径。 (os error 3)",
+      "completedAtUtc": "2026-11-04T01:07:06Z"
+    },
+    "notRestarted": true,
+    "installerUnchanged": true,
+    "passed": true
+  },
+  "os": "Windows 10.0.26100.0 Sandbox",
+  "crossVerification": {
+    "adapterLog": "2026-11-04T01:09:37Z NSIS adapter (not engine log): attempt installer=\"C:\\\\Users\\\\WDAGUtilityAccount\\\\AppData\\\\Local\\\\Temp\\\\Honsen Program\\\\VerifiedInstallers\\\\23d2d984-61ea-47d4-9b44-5f38ad08ff68\\\\Honsen-Procure-verified.exe\" parameters=\"/S /D=C:\\\\Honsen RC 测试 路径\\\\Honsen Procure\"\n2026-11-04T01:09:38Z NSIS adapter (not engine log): exit=0\n",
+    "exitZero": true,
+    "exeSha256": "141DDBF9C5B1A272C40E9C9BB6A84BA01B101ACC36B4E3F8667208926DD71E75",
+    "nativeParameters": true,
+    "exeVersion": "0.1.3",
+    "manifestVersion": "0.1.3"
+  },
+  "cases": [
+    {
+      "name": "unicode",
+      "uninstall": {
+        "passed": true,
+        "scope": "synthetic guest only; no automatic rollback claim",
+        "exitCode": 0,
+        "completedUtc": "2026-11-04T01:07:09.8151442Z",
+        "operationResult": null,
+        "mode": "Uninstall",
+        "os": "Microsoft Windows NT 10.0.26100.0"
+      },
+      "install": {
+        "startedUtc": "2026-11-04T01:07:01.9653165Z",
+        "registration": {
+          "AppId": "honsen.procure",
+          "Version": "0.1.2",
+          "InstallLocation": "C:\\Honsen RC 测试 路径\\Honsen Procure",
+          "ExecutablePath": "C:\\Honsen RC 测试 路径\\Honsen Procure\\HonsenProcure.exe",
+          "LauncherPath": "C:\\Honsen RC 测试 路径\\Honsen Procure\\HonsenUpdateRunner.exe",
+          "UpdateRunnerPath": "C:\\Honsen RC 测试 路径\\Honsen Procure\\HonsenUpdateRunner.exe"
+        },
+        "completedUtc": "2026-11-04T01:07:04.3033344Z",
+        "uninstall": {
+          "DisplayName": "Honsen Procure",
+          "DisplayVersion": "0.1.2",
+          "InstallLocation": "C:\\Honsen RC 测试 路径\\Honsen Procure",
+          "UninstallString": "\"C:\\Honsen RC 测试 路径\\Honsen Procure\\uninstall.exe\"",
+          "QuietUninstallString": "\"C:\\Honsen RC 测试 路径\\Honsen Procure\\uninstall.exe\" /S"
+        },
+        "directory": "C:\\Honsen RC 测试 路径\\Honsen Procure",
+        "os": "Microsoft Windows NT 10.0.26100.0",
+        "scope": "first-install directory consistency only; upgrade/uninstall NOT RUN",
+        "files": [
+          {
+            "exists": true,
+            "name": "HonsenProcure.exe"
+          },
+          {
+            "exists": true,
+            "name": "HonsenUpdateRunner.exe"
+          },
+          {
+            "exists": true,
+            "name": "honsen.app.json"
+          },
+          {
+            "exists": true,
+            "name": "uninstall.exe"
+          }
+        ],
+        "exitCode": 0,
+        "installerSha256": "653b6111b6435513768a2f40f2145897d5e35843f2207bcbbf7b165fd0ff5224",
+        "passed": true
+      },
+      "repair": {
+        "passed": true,
+        "scope": "synthetic guest only; no automatic rollback claim",
+        "exitCode": 0,
+        "completedUtc": "2026-11-04T01:07:06.5938716Z",
+        "operationResult": {
+          "appId": "honsen.procure",
+          "operationId": "895cabaf-246f-4cef-918f-6e859e67c77b",
+          "status": "success",
+          "source": "toolbox",
+          "fromVersion": "0.1.2",
+          "toVersion": "0.1.2",
+          "step": null,
+          "installerExitCode": 0,
+          "installerLogPath": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Temp\\honsen-procure-895cabaf-246f-4cef-918f-6e859e67c77b.log",
+          "message": "更新完成",
+          "completedAtUtc": "2026-11-04T01:07:06Z",
+          "installLocation": "C:\\Honsen RC 测试 路径\\Honsen Procure",
+          "executablePath": "C:\\Honsen RC 测试 路径\\Honsen Procure\\HonsenProcure.exe"
+        },
+        "mode": "Upgrade",
+        "os": "Microsoft Windows NT 10.0.26100.0"
+      }
+    },
+    {
+      "name": "default",
+      "uninstall": {
+        "passed": true,
+        "scope": "synthetic guest only; no automatic rollback claim",
+        "exitCode": 0,
+        "completedUtc": "2026-11-04T01:08:45.7425726Z",
+        "operationResult": null,
+        "mode": "Uninstall",
+        "os": "Microsoft Windows NT 10.0.26100.0"
+      },
+      "install": {
+        "startedUtc": "2026-11-04T01:08:10.2056189Z",
+        "registration": {
+          "AppId": "honsen.procure",
+          "Version": "0.1.2",
+          "InstallLocation": "C:\\Program Files\\Honsen Program\\Honsen Procure",
+          "ExecutablePath": "C:\\Program Files\\Honsen Program\\Honsen Procure\\HonsenProcure.exe",
+          "LauncherPath": "C:\\Program Files\\Honsen Program\\Honsen Procure\\HonsenUpdateRunner.exe",
+          "UpdateRunnerPath": "C:\\Program Files\\Honsen Program\\Honsen Procure\\HonsenUpdateRunner.exe"
+        },
+        "completedUtc": "2026-11-04T01:08:12.6878751Z",
+        "uninstall": {
+          "DisplayName": "Honsen Procure",
+          "DisplayVersion": "0.1.2",
+          "InstallLocation": "C:\\Program Files\\Honsen Program\\Honsen Procure",
+          "UninstallString": "\"C:\\Program Files\\Honsen Program\\Honsen Procure\\uninstall.exe\"",
+          "QuietUninstallString": "\"C:\\Program Files\\Honsen Program\\Honsen Procure\\uninstall.exe\" /S"
+        },
+        "directory": "C:\\Program Files\\Honsen Program\\Honsen Procure",
+        "os": "Microsoft Windows NT 10.0.26100.0",
+        "scope": "first-install directory consistency only; upgrade/uninstall NOT RUN",
+        "files": [
+          {
+            "exists": true,
+            "name": "HonsenProcure.exe"
+          },
+          {
+            "exists": true,
+            "name": "HonsenUpdateRunner.exe"
+          },
+          {
+            "exists": true,
+            "name": "honsen.app.json"
+          },
+          {
+            "exists": true,
+            "name": "uninstall.exe"
+          }
+        ],
+        "exitCode": 0,
+        "installerSha256": "653b6111b6435513768a2f40f2145897d5e35843f2207bcbbf7b165fd0ff5224",
+        "passed": true
+      },
+      "repair": {
+        "passed": true,
+        "scope": "synthetic guest only; no automatic rollback claim",
+        "exitCode": 0,
+        "completedUtc": "2026-11-04T01:08:16.0513579Z",
+        "operationResult": {
+          "appId": "honsen.procure",
+          "operationId": "0ed18678-02e4-465a-a276-ba7cbc637b55",
+          "status": "success",
+          "source": "toolbox",
+          "fromVersion": "0.1.2",
+          "toVersion": "0.1.2",
+          "step": null,
+          "installerExitCode": 0,
+          "installerLogPath": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Temp\\honsen-procure-0ed18678-02e4-465a-a276-ba7cbc637b55.log",
+          "message": "更新完成",
+          "completedAtUtc": "2026-11-04T01:08:15Z",
+          "installLocation": "C:\\Program Files\\Honsen Program\\Honsen Procure",
+          "executablePath": "C:\\Program Files\\Honsen Program\\Honsen Procure\\HonsenProcure.exe"
+        },
+        "mode": "Upgrade",
+        "os": "Microsoft Windows NT 10.0.26100.0"
+      }
+    },
+    {
+      "name": "former-default",
+      "uninstall": {
+        "passed": true,
+        "scope": "synthetic guest only; no automatic rollback claim",
+        "exitCode": 0,
+        "completedUtc": "2026-11-04T01:05:38.7100674Z",
+        "operationResult": null,
+        "mode": "Uninstall",
+        "os": "Microsoft Windows NT 10.0.26100.0"
+      },
+      "install": {
+        "startedUtc": "2026-11-04T01:05:32.9850991Z",
+        "registration": {
+          "AppId": "honsen.procure",
+          "Version": "0.1.2",
+          "InstallLocation": "C:\\Program Files\\Honsen Procure",
+          "ExecutablePath": "C:\\Program Files\\Honsen Procure\\HonsenProcure.exe",
+          "LauncherPath": "C:\\Program Files\\Honsen Procure\\HonsenUpdateRunner.exe",
+          "UpdateRunnerPath": "C:\\Program Files\\Honsen Procure\\HonsenUpdateRunner.exe"
+        },
+        "completedUtc": "2026-11-04T01:05:35.3869887Z",
+        "uninstall": {
+          "DisplayName": "Honsen Procure",
+          "DisplayVersion": "0.1.2",
+          "InstallLocation": "C:\\Program Files\\Honsen Procure",
+          "UninstallString": "\"C:\\Program Files\\Honsen Procure\\uninstall.exe\"",
+          "QuietUninstallString": "\"C:\\Program Files\\Honsen Procure\\uninstall.exe\" /S"
+        },
+        "directory": "C:\\Program Files\\Honsen Procure",
+        "os": "Microsoft Windows NT 10.0.26100.0",
+        "scope": "first-install directory consistency only; upgrade/uninstall NOT RUN",
+        "files": [
+          {
+            "exists": true,
+            "name": "HonsenProcure.exe"
+          },
+          {
+            "exists": true,
+            "name": "HonsenUpdateRunner.exe"
+          },
+          {
+            "exists": true,
+            "name": "honsen.app.json"
+          },
+          {
+            "exists": true,
+            "name": "uninstall.exe"
+          }
+        ],
+        "exitCode": 0,
+        "installerSha256": "653b6111b6435513768a2f40f2145897d5e35843f2207bcbbf7b165fd0ff5224",
+        "passed": true
+      },
+      "repair": {
+        "passed": true,
+        "scope": "synthetic guest only; no automatic rollback claim",
+        "exitCode": 0,
+        "completedUtc": "2026-11-04T01:05:37.6419918Z",
+        "operationResult": {
+          "appId": "honsen.procure",
+          "operationId": "92cfcadb-d7fe-4607-9de8-6cc094aba866",
+          "status": "success",
+          "source": "toolbox",
+          "fromVersion": "0.1.2",
+          "toVersion": "0.1.2",
+          "step": null,
+          "installerExitCode": 0,
+          "installerLogPath": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Temp\\honsen-procure-92cfcadb-d7fe-4607-9de8-6cc094aba866.log",
+          "message": "更新完成",
+          "completedAtUtc": "2026-11-04T01:05:36Z",
+          "installLocation": "C:\\Program Files\\Honsen Procure",
+          "executablePath": "C:\\Program Files\\Honsen Procure\\HonsenProcure.exe"
+        },
+        "mode": "Upgrade",
+        "os": "Microsoft Windows NT 10.0.26100.0"
+      }
+    }
+  ],
+  "crossUninstall": {
+    "passed": true,
+    "scope": "synthetic guest only; no automatic rollback claim",
+    "exitCode": 0,
+    "completedUtc": "2026-11-04T01:09:40.5903262Z",
+    "operationResult": null,
+    "mode": "Uninstall",
+    "os": "Microsoft Windows NT 10.0.26100.0"
+  },
+  "defaultAdapter": {
+    "attempt": true,
+    "exitZero": true,
+    "text": "2026-11-04T01:08:13Z NSIS adapter (not engine log): attempt installer=\"C:\\\\Users\\\\WDAGUtilityAccount\\\\AppData\\\\Local\\\\Temp\\\\Honsen Program\\\\VerifiedInstallers\\\\0ed18678-02e4-465a-a276-ba7cbc637b55\\\\Honsen-Procure-verified.exe\" parameters=\"/S /D=C:\\\\Program Files\\\\Honsen Program\\\\Honsen Procure\"\n2026-11-04T01:08:15Z NSIS adapter (not engine log): exit=0\n",
+    "nativeParameters": true
+  },
+  "embeddedExeVerification": {
+    "verifiedBy": "root orchestrator",
+    "matchesInstalledGuest": true,
+    "hostBinaryModified": false,
+    "rawHostSha256": "fbd085fc1819fdce5eabe727c926099d15f0a4d76eeae383d66c017c2b02a465",
+    "expectedEmbeddedSha256": "141ddbf9c5b1a272c40e9c9bb6a84ba01b101acc36b4e3f8667208926dd71e75",
+    "source": "https://github.com/tauri-apps/tauri/blob/5b23c82ea5ba6b9aec420dd71f60493edc486aa9/crates/tauri-bundler/src/bundle.rs",
+    "transformation": "in-memory __TAURI_BUNDLE_TYPE_VAR_UNK to NSS marker, matching pinned Tauri NSIS bundle behavior"
+  }
+}

@@ -23,3 +23,19 @@ Result: FAIL, exit 1, phase fixture. Profile seeding recorded zero errors, but t
 Evidence directory: .cache/native-20261104004618. Cleanup reported PASS, objects=0. No 3443/1420 listener or HonsenProcure process remained after runner cleanup. Shared disposable database was retained for the controller and next sequential test. No production installation or database operation occurred.
 
 BLOCKER: native application startup/CDP readiness requires diagnosis before dual-client business acceptance. Preserve this failed attempt as evidence.
+
+## Fresh-profile diagnosis and independent authorized COS evidence
+
+A second controlled startup used a fresh UUID-named WebView data directory. Dedicated PID 22116 remained alive; its WebView child processes all included the exact expected user-data path, but none included remote-debugging-port. Port 9251 remained closed. HKCU/HKLM Edge RemoteDebuggingAllowed was unset. This rules out simple stale-profile reuse and complete loss of environment inheritance; the specific debug-argument boundary remains unresolved. PID 27244 and the later dedicated PID were stopped. No security policy was modified.
+
+Independent COS connectivity test at HEAD 66974691b20a048faa618fcf51680db485db0468: existing cos-live.test.ts selected only the upload/inspect/download/hash/denial/cleanup test. Exit 0, 1 passed / 1 skipped (expired-URL scenario deliberately not selected). Scope was checked against the explicitly authorized eu-frankfurt / honsen-materials-1308426049 before loading credentials into process environment; environment variables were removed in finally.
+
+Owned key: honsen-procure-tests/7df7e445-0581-4896-9fd7-b3513698b182/1353c397-d94c-4eef-b4c9-eab64f228458.pdf. Synthetic PDF: 63 bytes. PUT 200, HEAD size 63, GET 200, SHA-256 match true, invalid signature denied 403, owned-object DELETE 204. Safe evidence .cache/cos-independent-20261104.json. No bucket listing or historical object operation was performed.
+
+COS connectivity PASS does not satisfy installed dual-client payment/COS business acceptance, which remains blocked by the CDP launch boundary. No release or production deployment occurred.
+
+## Final minimal CDP probe — stop repeated repairs
+
+Fresh unique userdata, only WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9251 (remote-debugging-address omitted); HONSEN_PROCURE_NATIVE_SMOKE explicitly removed. Dedicated PID 9608 alive, 6 WebView children, expected userdata present=true, debug argument present=false, port listening=false. The dedicated parent was stopped in finally. No policy/product code was changed to force CDP. Three controlled diagnostic variants now retain consistent evidence; stop repeated environment repair attempts. Root cause remains unproven beyond the missing WebView debug argument. Safe per-run summary exists under .cache/native-portonly-*/summary.json.
+
+Agent A completion: isolated Windows credential probe PASS; Rust payment conflict 3/3 and HPA 2/2 previously PASS; full Rust fixture repair subsequently yielded 123/123; independent authorized COS PUT/GET/hash/cleanup PASS. Actual dual-native attempt FAIL at fixture/CDP readiness, before online login or financial actions. Parent acceptance and release readiness remain open. Next safe action is a separately approved supported native harness/driver investigation or an isolated guest comparison, preserving these exact failures. No more repeated CDP retries in this task.

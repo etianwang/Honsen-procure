@@ -360,3 +360,5 @@ The four-quote material search result remains an overview. A separate bounded, c
 ## T15 RC integration checkpoint — 2026-10-24
 
 Independent branch `codex/v1-release-candidate` integrates unified baseline d348514, payment/COS98537d2 and release-toolbox f9145e1. [Exact source ledger, validation and open gates](planning/V1-RC-INTEGRATION.md). This is a bounded candidate-building slice, not T15/V1 parent acceptance. Original dependency table, task register and all final gates remain unchanged. No production deployment or stable Release is authorized.
+
+2026-11-04 approved bounded installer P1 slice accepted on real disposable Windows guest evidence (docs/reviews/INSTALL-P1-RESULT-20261104.md). This does not close T15, Toolbox joint launch/apply/update-source gates, native business/security gates or any parent checkbox. COS isolated connectivity passes; financial/HPA dual-native remains blocked before login at CDP. No migration or production mutation.

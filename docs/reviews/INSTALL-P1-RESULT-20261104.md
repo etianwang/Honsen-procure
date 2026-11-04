@@ -1,0 +1,21 @@
+# Installation P1 bounded guest evidence
+
+Actual execution 2026-11-04 (Asia/Shanghai), Windows Sandbox OS 10.0.26100.0. Safe structured evidence is adjacent JSON. Product source for the tested packages is `6697469`; subsequent test/document checkpoints do not imply new package contents. These are local test candidates, not published releases.
+
+Final 0.1.2 setup SHA-256: `653b6111b6435513768a2f40f2145897d5e35843f2207bcbbf7b165fd0ff5224`. Local 0.1.3 upgrade setup: `d72c77895eed9c957395b648249c6e291aa48f4f8f24f1bc75efa3c51e8a1964`.
+
+Fresh guests independently passed default `/S`, explicit Unicode/space, and explicit former-default directory installation. EXE, Runner, manifest, uninstaller and both registration locations agree. Each passed same-version Runner repair and uninstall preserving synthetic user data, shared parent and sibling file. Default and Unicode repair logs explicitly contain attempted native `/S /D=<original directory>` and exit 0. No same-version repair is called a cross-version upgrade.
+
+A further fresh Unicode installation passed actual Runner 0.1.2 → 0.1.3 upgrade, preserving the original directory. Result JSON reports success/fromVersion 0.1.2/toVersion 0.1.3; manifest and installed EXE version are 0.1.3. Adapter invocation and exit 0 were captured. Installed EXE SHA-256 is `141ddbf9c5b1a272c40e9c9bb6a84ba01b101acc36b4e3f8667208926dd71e75`. The raw host build-cache EXE differs because the pinned Tauri bundler temporarily replaces `__TAURI_BUNDLE_TYPE_VAR_UNK` with its NSIS `NSS` marker before embedding, then restores the raw binary. The orchestrator independently applied that exact replacement in memory to raw host SHA `fbd085fc1819fdce5eabe727c926099d15f0a4d76eeae383d66c017c2b02a465`; the expected embedded SHA is exactly `141ddbf9c5b1a272c40e9c9bb6a84ba01b101acc36b4e3f8667208926dd71e75`, matching the installed guest bytes. No host binary was modified. Source: [pinned Tauri bundle.rs](https://github.com/tauri-apps/tauri/blob/5b23c82ea5ba6b9aec420dd71f60493edc486aa9/crates/tauri-bundler/src/bundle.rs). Final uninstall passed the same synthetic-data retention checks.
+
+Synthetic stale InstallLocation produced Runner failure exit 1, step runner, no installer exit code, no application restart, and unchanged setup digest. It was restored only in the disposable test fixture, not by product automatic repair. Other negative cases retain their unit-test boundary unless independently executed.
+
+## Diagnostics retained
+
+The first host WindowsSandbox invocation reused an existing guest and did not establish requested mappings. Official installed `wsb.exe` CLI then provided explicit list/start/connect/share/exec/stop. Subsequent cases used new guest IDs, read-only whitelist staging, separate writable evidence, disabled network/clipboard, no repository/COS/credential mapping.
+
+An initial mislabeled 0.0.0 artifact (SHA `204efaecc0bda6708a06ed8d34a6d75743e13afac32020ebeb9e9412dd3af58f`) exited 0 but lacked Runner/manifest/registration. Investigation found the release script selected a stale setup via readdir.find. The bounded fix selects exactly one current product/version generated file and fails closed; stale/missing/ambiguous regression tests passed. That artifact is excluded from acceptance; historical files were preserved. Intermediate `a13642…` candidate observations also do not replace final 653b evidence.
+
+Initial observation serialized PowerShell registry provider metadata recursively and stalled; it now projects explicit safe fields. Windows PowerShell 5 also requires explicit UTF-8 when reading Rust result JSON; scripts were corrected. An earlier shared failure.json was overwritten during diagnosis, so it is not claimed as immutable raw evidence. Final cases use separate evidence directories and safe JSON summaries. Script execution used explicit process-local ExecutionPolicy Bypass, without changing host/guest policy.
+
+No production install, database, release, merge, Toolbox catalog, URL/Manifest protocol or automatic rollback change occurred. Toolbox joint E2E, the remaining launch/update-source/apply gaps, other security/business gates and production authorization remain open. This evidence accepts only the approved directory/adapter repair slice, not the parent release gate.

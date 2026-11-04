@@ -25,7 +25,7 @@ if ($Mode -eq 'Upgrade') {
   $resultPath = Join-Path $env:LOCALAPPDATA "Honsen Program\UpdateResults\honsen.procure\$operation.json"
   $arguments = "apply --source toolbox --app-id honsen.procure --wait-pid 0 --installer `"$Installer`" --sha256 $ExpectedSha256 --target-dir `"$InstallDirectory`" --expected-version $ExpectedVersion --restart false --operation-id $operation --result-path `"$resultPath`""
   $process = Start-Process -FilePath (Join-Path $InstallDirectory 'HonsenUpdateRunner.exe') -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
-  $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+  $result = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $after = Get-ItemProperty $registrationPath
   $passed = $process.ExitCode -eq 0 -and $result.status -eq 'success' -and $after.InstallLocation -eq $before.InstallLocation -and $after.Version -eq $ExpectedVersion -and (Test-Path -LiteralPath $result.installerLogPath)
   foreach ($name in @('HonsenProcure.exe','HonsenUpdateRunner.exe','honsen.app.json','uninstall.exe')) { $passed = $passed -and (Test-Path -LiteralPath (Join-Path $InstallDirectory $name)) }
