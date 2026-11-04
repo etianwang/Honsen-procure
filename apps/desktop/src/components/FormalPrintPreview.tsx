@@ -1,3 +1,5 @@
+import { useUiLocale } from '../lib/ui-locale'
+import { historyText } from '../lib/history-locale'
 import {
   documentSchema,
   formatPrintMoney,
@@ -7,6 +9,9 @@ import { useState } from 'react'
 import { Alert, Button } from 'antd'
 
 export function FormalPrintPreview({ orderId }: { orderId: string }) {
+  const { locale } = useUiLocale()
+  const t = (message: Parameters<typeof historyText>[1]) =>
+    historyText(locale, message)
   const [document, setDocument] = useState<FormalPrintDocument | null>(null)
   const [failed, setFailed] = useState(false)
   async function preview() {
@@ -31,12 +36,14 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
     }
   }
   return (
-    <section aria-label="正式单据打印预览">
-      <Button onClick={() => void preview()}>正式单据预览 / Aperçu</Button>
+    <section aria-label={t('正式单据打印预览')}>
+      <Button onClick={() => void preview()}>
+        {t('正式单据预览 / Aperçu')}
+      </Button>
       {failed && (
         <Alert
           type="error"
-          title="无法预览：请检查授权、正式签发状态及冻结中法翻译。"
+          title={t('无法预览：请检查授权、正式签发状态及冻结中法翻译。')}
         />
       )}
       {document && (
@@ -46,7 +53,7 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
             className="formal-print-action"
             onClick={() => window.print()}
           >
-            打印 / Imprimer · PDF
+            {t('打印 / Imprimer · PDF')}
           </Button>
           <h2>
             {document.documentType} · {document.formalDocumentNo}

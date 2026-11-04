@@ -26,8 +26,18 @@ Audit is **not clean**. `.cache/excel-dependency-audit.json` records 12 producti
 
 Actual safe synthetic normal-route download:
 
-`test-results/navigation-authenticated-d-35587-cached-authorization-scopes-chromium/normal-history-formal.xlsx`
+` .cache/excel-evidence-20261104/206c3ab7-e2ee-417a-bcad-dd0bee4c43e2/normal-history-formal.xlsx`
 
-The browser downloaded and ExcelJS reopened that ZIP-based XLSX. Microsoft Excel desktop visual opening, printed pagination/long-name layout, and installed EXE export have not been verified. No physical printer result is claimed. The first supplemental test failed because React's Vite module exposed `createElement` under default; its fixture import was corrected. The first normal-route extension timed out after successful export because applying the filter legitimately cleared the prior detail; reopening the existing detail restored the original copy assertions. Neither failure changed product acceptance expectations.
+The browser downloaded and ExcelJS reopened that ZIP-based XLSX. The original test-results artifact was removed by a later parallel Playwright run before desktop inspection, so it did not establish visual acceptance. The normal-route test now saves each download and screenshot into a new random-UUID directory under the ignored .cache/excel-evidence-20261104, outside shared Playwright cleanup. The target was rerun PASS1/1 with isolated output .cache/excel-playwright-isolated; the retained workbook and normal-history-export.png exist at the path above. Microsoft Excel desktop visual opening, printed pagination/long-name layout, and installed EXE export have not been verified. No physical printer result is claimed. The first supplemental test failed because React's Vite module exposed `createElement` under default; its fixture import was corrected. The first normal-route extension timed out after successful export because applying the filter legitimately cleared the prior detail; reopening the existing detail restored the original copy assertions. Neither failure changed product acceptance expectations.
 
 No production data, COS object, main branch, PR merge, Release or deployment was touched. Controller owns checkpoint and Push. Remaining BLOCKER for full T12: installed native export and visual workbook acceptance, complete approved document-language/localization scope and original parent gates. This bounded XLSX implementation does not close them.
+
+## Retained stress workbook
+
+An ignored local generator loaded the production `buildHistoryWorkbook` module through Vite in a real Chromium browser, then wrote and reopened a second synthetic workbook. It has85 long Chinese/French lines, exact large cent values stored as text, BigInt-consistent line/subtotal/freight/tax/total fixture values,2026 audit timestamps and formula-shaped comment text. Readback checks85lines, exact raw total and actual2026 date PASS. It is not an installed native export or desktop visual PASS.
+
+File: `.cache/excel-evidence-20261104/stress-fef518c8-59b7-4a9c-9c4f-53bac772b040/synthetic-stress-85-lines.xlsx`.
+
+SHA-256: `d23d0d5153cfa46ab5a299aa5314dfa2fbb93b09de05104a7756d8272a7f0d15`.
+
+Generation HEAD: `7edc434ea199ee2d172ea441ef596604ff42734f`; comparison against candidate2812631 showed no changes to `history-excel.ts` or `formal-print-api.ts`. The ignored `generate.mts` and `evidence.json` alongside the workbook preserve reproduction and exact hash. Generator initially encountered Node/CJS top-level-await and ExcelJS Node dynamic-export incompatibilities; generation was moved to the supported production browser runtime, with a test-only esbuild naming helper supplied to its evaluated fixture. No production code or dependency was changed. The controller owns actual WPS opening/pagination/long-name visual verification. The owned Vite5189 process was stopped afterward.

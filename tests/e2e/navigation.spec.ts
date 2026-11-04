@@ -1,3 +1,6 @@
+import { mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { Workbook } from 'exceljs'
 import { expect, test } from '@playwright/test'
 
@@ -1420,6 +1423,17 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await page.getByLabel('询价单编号').fill('CI-FIXTURE-20261012-RFQ-0001')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByLabel('RFQ number')).toHaveValue(
+    'CI-FIXTURE-20261012-RFQ-0001',
+  )
+  await expect(page.getByRole('button', { name: 'Create RFQ' })).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.getByLabel('Numéro RFQ')).toHaveValue(
+    'CI-FIXTURE-20261012-RFQ-0001',
+  )
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+
   await page.getByRole('button', { name: '创建询价单' }).click()
   await expect(page.getByText(/已创建，包含 1 条无价格明细/)).toBeVisible()
   await page.getByRole('button', { name: '发送询价单' }).click()
@@ -1437,6 +1451,24 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await expect(page.getByText('状态：已关闭')).toBeVisible()
   await page.getByRole('button', { name: '保存子单条款' }).click()
   await expect(page.getByText('子单条款已保存，含税总额 2950。')).toBeVisible()
+  await page.getByLabel('子单税率').fill('537')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByLabel('Child tax rate')).toHaveValue('537')
+  await expect(
+    page.getByText('Child terms saved; total including tax 2950.'),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.getByLabel('Taux de taxe de la sous-commande')).toHaveValue(
+    '537',
+  )
+  await expect(
+    page.getByRole('button', { name: 'Envoyer au fournisseur' }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Conditions enregistrées ; total TTC 2950.'),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+
   await page
     .getByRole('button', { name: 'CI-FIXTURE-20261012-INT-0002' })
     .click()
@@ -2206,20 +2238,53 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(page.getByRole('list', { name: '请购历史' })).toContainText(
     'REQ-HISTORY-1',
   )
+  await page.getByLabel('搜索单号、项目或工地').fill('REQ-HISTORY-1')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByLabel('Search number, project or site')).toHaveValue(
+    'REQ-HISTORY-1',
+  )
+  await expect(
+    page.getByRole('button', { name: 'Export Excel', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('list', { name: 'Requisition history' }),
+  ).toContainText('Pending confirmation')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(
+    page.getByLabel('Rechercher numéro, projet ou chantier'),
+  ).toHaveValue('REQ-HISTORY-1')
+  await expect(
+    page.getByRole('button', { name: 'Exporter Excel', exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
   await page.getByRole('button', { name: '查看详情：REQ-HISTORY-1' }).click()
+  await expect(page.getByText('审批已确认', { exact: true })).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(
+    page.getByText('Approval recorded', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Requisition details' }),
+  ).not.toContainText('confirmed')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(
+    page.getByText('Approbation enregistrée', { exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     '测试电缆',
   )
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
-    'pending_confirmation',
+    '待确认',
   )
   await page.getByRole('button', { name: '确认订单' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
-    'confirmed',
+    '已批准',
   )
   await page.getByRole('button', { name: '正式下达业主申请' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
-    'formally_issued',
+    '已发单',
   )
   await expect(
     page.evaluate(
@@ -2236,6 +2301,18 @@ test('authenticated desktop switches between cached authorization scopes', async
   const excelDownloadEvent = page.waitForEvent('download')
   await page.getByRole('button', { name: '导出Excel', exact: true }).click()
   const excelDownload = await excelDownloadEvent
+  const retainedExcelDir = resolve(
+    '.cache/excel-evidence-20261104',
+    randomUUID(),
+  )
+  mkdirSync(retainedExcelDir, { recursive: true })
+  await excelDownload.saveAs(
+    resolve(retainedExcelDir, 'normal-history-formal.xlsx'),
+  )
+  await page.screenshot({
+    path: resolve(retainedExcelDir, 'normal-history-export.png'),
+    fullPage: true,
+  })
   await excelDownload.saveAs(
     test.info().outputPath('normal-history-formal.xlsx'),
   )

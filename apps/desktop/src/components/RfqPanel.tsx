@@ -1,3 +1,9 @@
+import { useUiLocale } from '../lib/ui-locale'
+import {
+  supplierText,
+  type SupplierMessage,
+  type SupplierNotice,
+} from '../lib/supplier-workflow-messages'
 import { Alert, Button, Card, Input, Select } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import type { RfqApi, RfqView } from '../lib/rfq-api'
@@ -16,10 +22,12 @@ export function RfqPanel({
   suppliers,
   canCreate = true,
 }: RfqPanelProps) {
+  const { locale } = useUiLocale()
+  const t = (key: SupplierMessage) => supplierText(locale, key)
   const [supplierId, setSupplierId] = useState('')
   const [currency, setCurrency] = useState<'XOF' | 'CNY' | 'USD' | 'EUR'>('XOF')
   const [displayNo, setDisplayNo] = useState('')
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<SupplierNotice | null>(null)
   const [rfqs, setRfqs] = useState<RfqView[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
   const refresh = useCallback(
@@ -28,12 +36,12 @@ export function RfqPanel({
   )
 
   useEffect(() => {
-    void refresh().catch(() => setMessage('无法读取询价单，请重试。'))
+    void refresh().catch(() => setMessage({ key: '无法读取询价单，请重试。' }))
   }, [refresh])
 
   async function create() {
     if (!supplierId || !displayNo.trim()) {
-      setMessage('请选择供应商并填写询价单编号。')
+      setMessage({ key: '请选择供应商并填写询价单编号。' })
       return
     }
     try {
@@ -44,14 +52,15 @@ export function RfqPanel({
         displayNo: displayNo.trim(),
         currency,
       })
-      setMessage(
-        `询价单 ${rfq.displayNo} 已创建，包含 ${rfq.itemCount} 条无价格明细。`,
-      )
+      setMessage({
+        key: 'created',
+        values: { number: rfq.displayNo, count: rfq.itemCount },
+      })
       void refresh().catch(() =>
-        setMessage('询价单已创建，但列表刷新失败，请重试。'),
+        setMessage({ key: '询价单已创建，但列表刷新失败，请重试。' }),
       )
     } catch {
-      setMessage('创建失败：请确认内部请购单已确认且该币种有材料。')
+      setMessage({ key: '创建失败：请确认内部请购单已确认且该币种有材料。' })
     }
   }
 
@@ -61,15 +70,17 @@ export function RfqPanel({
       if (rfq.status === 'draft') await api.sendRfq(rfq.id)
       else if (rfq.status === 'sent') await api.closeRfq(rfq.id)
     } catch {
-      setMessage('询价单状态更新失败；原状态已保留，请重试。')
+      setMessage({ key: '询价单状态更新失败；原状态已保留，请重试。' })
       setBusyId(null)
       return
     }
     try {
       await refresh()
-      setMessage(rfq.status === 'draft' ? '询价单已发送。' : '询价单已关闭。')
+      setMessage({
+        key: rfq.status === 'draft' ? '询价单已发送。' : '询价单已关闭。',
+      })
     } catch {
-      setMessage('询价单状态已保存，但列表刷新失败，请重试。')
+      setMessage({ key: '询价单状态已保存，但列表刷新失败，请重试。' })
     } finally {
       setBusyId(null)
     }
@@ -78,19 +89,25 @@ export function RfqPanel({
   if (!canCreate && rfqs.length === 0 && message === null) return null
 
   return (
-    <Card className="card" title="询价单（RFQ）">
+    <Card className="card" title={t('询价单（RFQ）')}>
       <p className="muted">
-        询价单只复制材料、规格、数量和单位，不包含采购价格。
+        {t('询价单只复制材料、规格、数量和单位，不包含采购价格。')}
       </p>
-      {message ? <Alert title={message} type="info" showIcon /> : null}
+      {message ? (
+        <Alert
+          title={supplierText(locale, message.key, message.values)}
+          type="info"
+          showIcon
+        />
+      ) : null}
       {canCreate ? (
         <div className="requisition-fields">
           <label>
-            供应商
+            {t('供应商')}
             <Select
-              aria-label="RFQ 供应商"
+              aria-label={t('RFQ 供应商')}
               value={supplierId || undefined}
-              placeholder="选择供应商"
+              placeholder={t('选择供应商')}
               options={suppliers.map((supplier) => ({
                 value: supplier.id,
                 label: supplier.name,
@@ -99,18 +116,18 @@ export function RfqPanel({
             />
           </label>
           <label>
-            询价币种
+            {t('询价币种')}
             <Select
-              aria-label="RFQ 币种"
+              aria-label={t('RFQ 币种')}
               value={currency}
               options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({ value }))}
               onChange={(value) => setCurrency(value)}
             />
           </label>
           <label>
-            询价单编号
+            {t('询价单编号')}
             <Input
-              aria-label="询价单编号"
+              aria-label={t('询价单编号')}
               value={displayNo}
               onChange={(event) => setDisplayNo(event.target.value)}
             />
@@ -119,28 +136,28 @@ export function RfqPanel({
       ) : null}
       {canCreate ? (
         <Button type="primary" onClick={() => void create()}>
-          创建询价单
+          {t('创建询价单')}
         </Button>
       ) : null}
       {rfqs.length ? (
-        <ul aria-label="已有询价单">
+        <ul aria-label={t('已有询价单')}>
           {rfqs.map((rfq) => (
             <li key={rfq.id}>
-              {rfq.displayNo} · {rfq.currency} · {rfq.itemCount} 条材料 ·{' '}
+              {rfq.displayNo} · {rfq.currency} · {rfq.itemCount} {t('条材料')} ·{' '}
               <span>
-                状态：
+                {t('状态：')}
                 {rfq.status === 'draft'
-                  ? '草稿'
+                  ? t('草稿')
                   : rfq.status === 'sent'
-                    ? '已发送'
-                    : '已关闭'}
+                    ? t('已发送')
+                    : t('已关闭')}
               </span>{' '}
               {rfq.status !== 'closed' ? (
                 <Button
                   disabled={busyId !== null}
                   onClick={() => void transition(rfq)}
                 >
-                  {rfq.status === 'draft' ? '发送询价单' : '关闭询价单'}
+                  {rfq.status === 'draft' ? t('发送询价单') : t('关闭询价单')}
                 </Button>
               ) : null}
             </li>

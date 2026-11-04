@@ -1,3 +1,5 @@
+import { useUiLocale } from '../lib/ui-locale'
+import { historyText, historyAuditText } from '../lib/history-locale'
 import { Alert, Button, Card, Input, Select } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type {
@@ -39,6 +41,25 @@ export function RequisitionHistoryPanel({
   workflowApi,
   canApprove,
 }: Props) {
+  const { locale } = useUiLocale()
+  const t = (message: Parameters<typeof historyText>[1]) =>
+    historyText(locale, message)
+  const statusText = (state: string) => {
+    const keys: Record<string, Parameters<typeof historyText>[1]> = {
+      draft: '草稿',
+      pending_confirmation: '待确认',
+      rejected: '已驳回',
+      confirmed: '已批准',
+      approved: '已批准',
+      formally_issued: '已发单',
+      executing: '采购执行中',
+      receiving: '收货中',
+      completed: '已完成',
+      completed_with_conditions: '附条件完成',
+      cancelled: '已取消',
+    }
+    return t(keys[state] ?? '未知状态')
+  }
   const [records, setRecords] = useState<RequisitionHistoryPage['records']>([])
   const [cursor, setCursor] = useState<RequisitionHistoryCursor | null>(null)
   const [loading, setLoading] = useState(true)
@@ -55,9 +76,9 @@ export function RequisitionHistoryPanel({
   const [issueError, setIssueError] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(false)
-  const [exportLocale, setExportLocale] = useState<'zh-CN' | 'fr-FR' | 'en-US'>(
-    'zh-CN',
-  )
+  const [exportLocale, setExportLocale] = useState<
+    'zh-CN' | 'fr-FR' | 'en-US' | null
+  >(null)
   async function exportExcel() {
     setExporting(true)
     setExportError(false)
@@ -82,7 +103,8 @@ export function RequisitionHistoryPanel({
           },
         },
         filter,
-        exportLocale,
+        exportLocale ??
+          (locale === 'en' ? 'en-US' : locale === 'fr' ? 'fr-FR' : 'zh-CN'),
       )
       const url = URL.createObjectURL(
         new Blob([new Uint8Array(bytes)], {
@@ -178,13 +200,18 @@ export function RequisitionHistoryPanel({
   }
 
   return (
-    <Card className="card" title="请购历史">
+    <Card className="card" title={t('请购历史')}>
       <p>
-        导出当前筛选范围的全部授权记录，包含内部评论与审计；此文件用于内部核对。
+        {t(
+          '导出当前筛选范围的全部授权记录，包含内部评论与审计；此文件用于内部核对。',
+        )}
       </p>
       <Select
-        aria-label="Excel导出语言"
-        value={exportLocale}
+        aria-label={t('Excel导出语言')}
+        value={
+          exportLocale ??
+          (locale === 'en' ? 'en-US' : locale === 'fr' ? 'fr-FR' : 'zh-CN')
+        }
         onChange={setExportLocale}
         options={[
           { value: 'zh-CN', label: '中文' },
@@ -197,12 +224,12 @@ export function RequisitionHistoryPanel({
         disabled={exporting}
         onClick={() => void exportExcel()}
       >
-        导出Excel
+        {t('导出Excel')}
       </Button>
       {exportError && (
         <Alert
           type="error"
-          title="导出失败，未下载部分结果；请刷新列表后重试。"
+          title={t('导出失败，未下载部分结果；请刷新列表后重试。')}
         />
       )}
       <form
@@ -222,7 +249,7 @@ export function RequisitionHistoryPanel({
         }}
       >
         <label>
-          搜索单号、项目或工地
+          {t('搜索单号、项目或工地')}
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -230,23 +257,23 @@ export function RequisitionHistoryPanel({
           />
         </label>
         <label>
-          请购状态
+          {t('请购状态')}
           <select
             value={workflowStatus}
             onChange={(event) => setWorkflowStatus(event.target.value)}
           >
-            <option value="">全部状态</option>
-            <option value="draft">草稿</option>
-            <option value="pending_confirmation">待确认</option>
-            <option value="rejected">已驳回</option>
-            <option value="confirmed">已批准</option>
-            <option value="approved">已批准（新状态）</option>
-            <option value="formally_issued">已发单</option>
-            <option value="executing">采购执行中</option>
-            <option value="receiving">收货中</option>
-            <option value="completed">已完成</option>
-            <option value="completed_with_conditions">附条件完成</option>
-            <option value="cancelled">已取消</option>
+            <option value="">{t('全部状态')}</option>
+            <option value="draft">{t('草稿')}</option>
+            <option value="pending_confirmation">{t('待确认')}</option>
+            <option value="rejected">{t('已驳回')}</option>
+            <option value="confirmed">{t('已批准')}</option>
+            <option value="approved">{t('已批准（新状态）')}</option>
+            <option value="formally_issued">{t('已发单')}</option>
+            <option value="executing">{t('采购执行中')}</option>
+            <option value="receiving">{t('收货中')}</option>
+            <option value="completed">{t('已完成')}</option>
+            <option value="completed_with_conditions">{t('附条件完成')}</option>
+            <option value="cancelled">{t('已取消')}</option>
           </select>
         </label>
         <label>
@@ -255,16 +282,16 @@ export function RequisitionHistoryPanel({
             checked={currentProjectOnly}
             onChange={(event) => setCurrentProjectOnly(event.target.checked)}
           />
-          仅当前项目
+          {t('仅当前项目')}
         </label>
-        <Button htmlType="submit" aria-label="筛选">
-          筛选
+        <Button htmlType="submit" aria-label={t('筛选')}>
+          {t('筛选')}
         </Button>
       </form>
       {error ? (
         <Alert
           type="error"
-          title="历史加载失败。"
+          title={t('历史加载失败。')}
           action={
             <Button
               onClick={() => {
@@ -273,23 +300,24 @@ export function RequisitionHistoryPanel({
                 setRetry((value) => value + 1)
               }}
             >
-              重试
+              {t('重试')}
             </Button>
           }
         />
       ) : null}
       {!loading && records.length === 0 && !error ? (
-        <p>暂无请购记录。</p>
+        <p>{t('暂无请购记录。')}</p>
       ) : null}
       {records.length > 0 ? (
-        <ul aria-label="请购历史">
+        <ul aria-label={t('请购历史')}>
           {records.map((record) => (
             <li key={record.id}>
               {record.displayNo} · {record.projectName} · {record.site} ·{' '}
-              {record.workflowStatus} · {record.totalMinor}{' '}
+              {statusText(record.workflowStatus)} · {record.totalMinor}{' '}
               {record.primaryCurrency}{' '}
               <Button onClick={() => void openDetail(record.id)}>
-                查看详情：{record.displayNo}
+                {t('查看详情：')}
+                {record.displayNo}
               </Button>
             </li>
           ))}
@@ -297,24 +325,24 @@ export function RequisitionHistoryPanel({
       ) : null}
       {cursor ? (
         <Button loading={loading} onClick={() => void loadMore()}>
-          加载更多
+          {t('加载更多')}
         </Button>
       ) : null}
       {detailError ? (
-        <Alert type="error" title="详情读取失败或无权查看。" />
+        <Alert type="error" title={t('详情读取失败或无权查看。')} />
       ) : null}
       {withdrawError ? (
-        <Alert type="error" title="撤回失败：当前状态或授权不允许撤回。" />
+        <Alert type="error" title={t('撤回失败：当前状态或授权不允许撤回。')} />
       ) : null}
       {issueError ? (
         <Alert
           type="error"
-          title="正式下达失败：请检查审批状态、授权和冻结报价。"
+          title={t('正式下达失败：请检查审批状态、授权和冻结报价。')}
         />
       ) : null}
-      {detailLoading ? <p role="status">正在读取详情…</p> : null}
+      {detailLoading ? <p role="status">{t('正在读取详情…')}</p> : null}
       {detail ? (
-        <section aria-label="请购详情">
+        <section aria-label={t('请购详情')}>
           <h3>{detail.displayNo}</h3>
           {detail.formalDocumentNo ? (
             <FormalPrintPreview orderId={detail.id} />
@@ -322,7 +350,7 @@ export function RequisitionHistoryPanel({
           {detail.workflowStatus === 'pending_confirmation' &&
           detail.applicantId === applicantId ? (
             <Button onClick={() => void withdrawHistoricalOrder(detail.id)}>
-              撤回历史申请
+              {t('撤回历史申请')}
             </Button>
           ) : null}
           {canApprove &&
@@ -334,32 +362,50 @@ export function RequisitionHistoryPanel({
               onClick={() => void issueOrder(detail.id, detail.procurementMode)}
             >
               {detail.procurementMode === 'owner_self_purchase'
-                ? '正式下达业主申请'
-                : '正式签发 HPA'}
+                ? t('正式下达业主申请')
+                : t('正式签发 HPA')}
             </Button>
           ) : null}
           {detail.projectId === projectId &&
           detail.procurementMode &&
           detail.lines.length > 0 ? (
-            <Button onClick={() => onCopy(detail)}>复制为新草稿</Button>
+            <Button onClick={() => onCopy(detail)}>{t('复制为新草稿')}</Button>
           ) : (
-            <p>仅当前项目中已记录采购模式且包含材料的请购可复制。</p>
+            <p>{t('仅当前项目中已记录采购模式且包含材料的请购可复制。')}</p>
           )}
           <p>
-            {detail.projectName} · {detail.site} · {detail.workflowStatus} ·{' '}
-            {detail.procurementMode ?? '历史模式未记录'}
+            {detail.projectName} · {detail.site} ·{' '}
+            {statusText(detail.workflowStatus)} ·{' '}
+            {detail.procurementMode === 'owner_self_purchase'
+              ? t('业主自购')
+              : detail.procurementMode === 'honsen_self_purchase'
+                ? t('Honsen自购')
+                : t('历史模式未记录')}
           </p>
           {detail.formalDocumentNo ? (
-            <p>正式编号：{detail.formalDocumentNo}</p>
+            <p>
+              {t('正式编号：')}
+              {detail.formalDocumentNo}
+            </p>
           ) : null}
           <p>
-            申请日期：{detail.orderDate} · 交货地址：{detail.deliveryAddress}
+            {t('申请日期：')}
+            {detail.orderDate} · {t('交货地址：')}
+            {detail.deliveryAddress}
           </p>
           {detail.expectedDeliveryDate ? (
-            <p>预计到货：{detail.expectedDeliveryDate}</p>
+            <p>
+              {t('预计到货：')}
+              {detail.expectedDeliveryDate}
+            </p>
           ) : null}
-          {detail.notes ? <p>备注：{detail.notes}</p> : null}
-          <ul aria-label="请购明细">
+          {detail.notes ? (
+            <p>
+              {t('备注：')}
+              {detail.notes}
+            </p>
+          ) : null}
+          <ul aria-label={t('请购明细')}>
             {detail.lines.map((line, index) => (
               <li key={`${detail.id}-${index}`}>
                 {line.materialName} · {line.model} · {line.specification} ·{' '}
@@ -370,9 +416,10 @@ export function RequisitionHistoryPanel({
             ))}
           </ul>
           <p>
-            总额：{detail.totalMinor} {detail.primaryCurrency}
+            {t('总额：')}
+            {detail.totalMinor} {detail.primaryCurrency}
           </p>
-          <h4>附件</h4>
+          <h4>{t('附件')}</h4>
           {detail.attachments.length ? (
             <ul>
               {detail.attachments.map((attachment) => (
@@ -382,20 +429,20 @@ export function RequisitionHistoryPanel({
               ))}
             </ul>
           ) : (
-            <p>无附件</p>
+            <p>{t('无附件')}</p>
           )}
-          <h4>审计记录</h4>
+          <h4>{t('审计记录')}</h4>
           {detail.audits.length ? (
             <ul>
               {detail.audits.map((audit) => (
                 <li key={audit.id}>
-                  {audit.action}
+                  {historyAuditText(locale, audit.action)}
                   {audit.reason ? ` · ${audit.reason}` : ''}
                 </li>
               ))}
             </ul>
           ) : (
-            <p>无审计记录</p>
+            <p>{t('无审计记录')}</p>
           )}
           {workflowApi ? (
             <OrderWorkflowPanel
