@@ -11,6 +11,16 @@ fn allowed_port(value: &str) -> Result<u16, &'static str> {
     }
 }
 
+fn validate_profile(is_test_profile: bool, database_path: &Path) -> Result<(), &'static str> {
+    if !is_test_profile
+        || !database_path.is_absolute()
+        || !database_path.to_string_lossy().ends_with(".test.sqlite")
+    {
+        return Err("native WebView test requires an isolated test profile");
+    }
+    Ok(())
+}
+
 pub fn configure<R: tauri::Runtime>(
     context: &mut tauri::Context<R>,
     is_test_profile: bool,
@@ -21,12 +31,7 @@ pub fn configure<R: tauri::Runtime>(
         Err(env::VarError::NotPresent) => return Ok(()),
         Err(_) => return Err("invalid native WebView test mode"),
     };
-    if !is_test_profile
-        || !database_path.is_absolute()
-        || !database_path.to_string_lossy().ends_with(".test.sqlite")
-    {
-        return Err("native WebView test requires an isolated test profile");
-    }
+    validate_profile(is_test_profile, database_path)?;
     if mode != "diagnose" && mode != "config" {
         return Err("invalid native WebView test mode");
     }
@@ -72,7 +77,20 @@ pub fn configure<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use super::allowed_port;
+    use super::{allowed_port, validate_profile};
+    use std::path::Path;
+
+    #[test]
+    fn rejects_non_test_relative_and_business_database_profiles() {
+        let isolated = std::env::temp_dir().join("native-scope.test.sqlite");
+        assert!(validate_profile(true, &isolated).is_ok());
+        assert!(validate_profile(false, &isolated).is_err());
+        assert!(validate_profile(true, Path::new("relative.test.sqlite")).is_err());
+        assert!(validate_profile(true, &isolated.with_file_name("business.sqlite")).is_err());
+        assert!(
+            validate_profile(true, &isolated.with_file_name("native.test.sqlite.backup")).is_err()
+        );
+    }
     #[test]
     fn accepts_only_the_four_native_test_ports() {
         for port in ["9241", "9242", "9251", "9252"] {
