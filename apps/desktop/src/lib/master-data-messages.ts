@@ -1,5 +1,61 @@
 import { useUiLocale } from './ui-locale'
 const messages = {
+  '无法读取本地分类冲突。': [
+    'Cannot read local category conflicts.',
+    'Impossible de lire les conflits de catégories locaux.',
+  ],
+  '云端隔离列表不可用，请联网后重试。': [
+    'Cloud quarantine list unavailable; reconnect and retry.',
+    'Liste de quarantaine indisponible ; reconnectez-vous et réessayez.',
+  ],
+  '无法读取待确认的修复请求。': [
+    'Cannot read pending repair requests.',
+    'Impossible de lire les réparations en attente.',
+  ],
+  '云端修复已确认，桌面同步已完成。': [
+    'Cloud repair acknowledged; desktop synchronization completed.',
+    'Réparation cloud confirmée ; synchronisation du bureau terminée.',
+  ],
+  '修复仍待确认；请检查权限或网络后重试。': [
+    'Repair still awaiting acknowledgement; check permissions and connection, then retry.',
+    'Réparation en attente ; vérifiez les droits et la connexion, puis réessayez.',
+  ],
+  '请填写合法的新编码和修复原因。': [
+    'Enter a valid new code and repair reason.',
+    'Saisissez un nouveau code valide et un motif.',
+  ],
+  '已保留原事件并生成新的待同步事件。': [
+    'Original event retained; a new event awaits synchronization.',
+    'Événement original conservé ; nouvel événement en attente de synchronisation.',
+  ],
+  '云端修复已记录，桌面同步已完成。': [
+    'Cloud repair recorded; desktop synchronization completed.',
+    'Réparation cloud enregistrée ; synchronisation du bureau terminée.',
+  ],
+  '修复未完成；原记录仍保留，请检查权限、网络和编码。': [
+    'Repair incomplete; original record retained. Check permissions, connection and code.',
+    'Réparation incomplète ; original conservé. Vérifiez les droits, la connexion et le code.',
+  ],
+  分类编码冲突: ['Category code conflicts', 'Conflits de codes de catégories'],
+  分类新编码: ['New category code', 'Nouveau code de catégorie'],
+  分类修复原因: ['Category repair reason', 'Motif de réparation de catégorie'],
+  冲突分类: ['Conflicting category', 'Catégorie en conflit'],
+  修复本地分类: ['Repair local category', 'Réparer la catégorie locale'],
+  云端隔离分类: [
+    'Quarantined cloud category',
+    'Catégorie cloud en quarantaine',
+  ],
+  版本: ['Version', 'Version'],
+  修复云端分类: ['Repair cloud category', 'Réparer la catégorie cloud'],
+  待确认的云端修复: ['Pending cloud repair', 'Réparation cloud en attente'],
+  重试待确认修复: [
+    'Retry pending repair',
+    'Réessayer la réparation en attente',
+  ],
+  '没有已发现的分类编码冲突。': [
+    'No category code conflicts detected.',
+    'Aucun conflit de code de catégorie détecté.',
+  ],
   每日公开汇率: ['Public daily rate', 'Taux public quotidien'],
   无法读取本地基础资料: [
     'Cannot read local master data',

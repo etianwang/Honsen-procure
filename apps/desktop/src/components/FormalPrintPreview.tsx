@@ -198,7 +198,7 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
         {failed && (
           <Alert
             type="error"
-            title={t('无法预览：请检查授权、正式签发状态及冻结中法翻译。')}
+            title={t('无法预览：请检查授权、正式签发状态及冻结文档翻译。')}
           />
         )}
         {document && (

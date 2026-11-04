@@ -88,9 +88,9 @@ const messages = {
     'Preview formal document',
     'Aperçu du document officiel',
   ],
-  '无法预览：请检查授权、正式签发状态及冻结中法翻译。': [
-    'Preview unavailable; check authorization, formal issue and frozen Chinese/French translations.',
-    'Aperçu indisponible ; vérifiez autorisation, émission et traductions chinoises/françaises figées.',
+  '无法预览：请检查授权、正式签发状态及冻结文档翻译。': [
+    'Preview unavailable; check authorization, formal issue and frozen document translations.',
+    'Aperçu indisponible ; vérifiez autorisation, émission et traductions documentaires figées.',
   ],
 } as const
 export const historyMessageKeys = Object.keys(

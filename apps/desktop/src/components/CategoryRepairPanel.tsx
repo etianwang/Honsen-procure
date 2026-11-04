@@ -1,3 +1,4 @@
+import { useMasterText } from '../lib/master-data-messages'
 import { useEffect, useState } from 'react'
 import type {
   CategoryRepairApi,
@@ -7,6 +8,7 @@ import type {
 } from '../lib/category-repair-api'
 
 export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
+  const t = useMasterText()
   const [local, setLocal] = useState<LocalCategoryConflict[]>([])
   const [remote, setRemote] = useState<RemoteCategoryConflict[]>([])
   const [pending, setPending] = useState<PendingCategoryRepair[]>([])
@@ -85,33 +87,35 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
     }
   }
   return (
-    <section className="card" aria-label="分类编码冲突">
+    <section className="card" aria-label={t('分类编码冲突')}>
       <div className="card-header">
-        <h3>分类编码冲突</h3>
+        <h3>{t('分类编码冲突')}</h3>
       </div>
       <div className="workflow-comments">
         <label>
-          分类新编码
+          {t('分类新编码')}
           <input
-            aria-label="分类新编码"
+            aria-label={t('分类新编码')}
             value={code}
             maxLength={64}
             onChange={(event) => setCode(event.target.value)}
           />
         </label>
         <label>
-          分类修复原因
+          {t('分类修复原因')}
           <input
-            aria-label="分类修复原因"
+            aria-label={t('分类修复原因')}
             value={reason}
             maxLength={1000}
             onChange={(event) => setReason(event.target.value)}
           />
         </label>
-        {message && <p role="status">{message}</p>}
+        {message && <p role="status">{t(message)}</p>}
         {local.map((item) => (
           <article className="workflow-comment" key={item.eventId}>
-            <p>冲突分类 {item.businessCode}</p>
+            <p>
+              {t('冲突分类')} {item.businessCode}
+            </p>
             <p>
               {item.name} · {item.categoryId}
             </p>
@@ -120,42 +124,46 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
               disabled={busy}
               onClick={() => void repair(item)}
             >
-              修复本地分类
+              {t('修复本地分类')}
             </button>
           </article>
         ))}
         {remote.map((item) => (
           <article className="workflow-comment" key={item.categoryId}>
-            <p>云端隔离分类 {item.businessCode}</p>
             <p>
-              {item.name} · {item.categoryId} · 版本 {item.version}
+              {t('云端隔离分类')} {item.businessCode}
+            </p>
+            <p>
+              {item.name} · {item.categoryId} · {t('版本')} {item.version}
             </p>
             <button
               type="button"
               disabled={busy}
               onClick={() => void repair(item)}
             >
-              修复云端分类
+              {t('修复云端分类')}
             </button>
           </article>
         ))}
         {pending.map((item) => (
           <article className="workflow-comment" key={item.categoryId}>
             <p>
-              待确认的云端修复 {item.categoryId} · {item.newBusinessCode}
+              {t('待确认的云端修复')} {item.categoryId} · {item.newBusinessCode}
             </p>
-            <p>原因：{item.reason}</p>
+            <p>
+              {t('原因')}: {item.reason}
+            </p>
             <button
               type="button"
               disabled={busy}
               onClick={() => void retryPending(item)}
             >
-              重试待确认修复
+              {t('重试待确认修复')}
             </button>
           </article>
         ))}
         {local.length === 0 && remote.length === 0 && pending.length === 0 && (
-          <p>没有已发现的分类编码冲突。</p>
+          <p>{t('没有已发现的分类编码冲突。')}</p>
         )}
       </div>
     </section>

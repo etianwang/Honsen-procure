@@ -16,6 +16,9 @@ test('master data and tax drafts survive persistent UI language switches', async
     const { TaxTemplateEditor } = await load(
       '/src/components/TaxTemplateEditor.tsx',
     )
+    const { CategoryRepairPanel } = await load(
+      '/src/components/CategoryRepairPanel.tsx',
+    )
     const { ExchangeRateEditor } = await load(
       '/src/components/ExchangeRateEditor.tsx',
     )
@@ -42,6 +45,13 @@ test('master data and tax drafts survive persistent UI language switches', async
           canEdit: true,
         }),
         createElement(ExchangeRateEditor, { api, rates: [], canEdit: true }),
+        createElement(CategoryRepairPanel, {
+          api: {
+            listLocal: async () => [],
+            listRemote: async () => [],
+            listPending: async () => [],
+          },
+        }),
       ),
     )
   })
@@ -54,6 +64,9 @@ test('master data and tax drafts survive persistent UI language switches', async
   await page
     .getByRole('textbox', { name: '汇率小数字符串', exact: true })
     .fill('1.25')
+  await page
+    .getByRole('textbox', { name: '分类新编码', exact: true })
+    .fill('REPAIR_TEST')
   for (const [locale, heading, countryCode, taxName] of [
     ['en', 'Administrative master data', 'country code', 'Tax template name'],
     [
@@ -70,6 +83,17 @@ test('master data and tax drafts survive persistent UI language switches', async
       setUiLocale(locale)
     }, locale)
     await expect(page.getByText(heading, { exact: true })).toBeVisible()
+    await expect(
+      page.getByRole('textbox', {
+        name:
+          locale === 'en'
+            ? 'New category code'
+            : locale === 'fr'
+              ? 'Nouveau code de catégorie'
+              : '分类新编码',
+        exact: true,
+      }),
+    ).toHaveValue('REPAIR_TEST')
     await expect(
       page.getByRole('textbox', { name: countryCode, exact: true }),
     ).toHaveValue('SYNTH')
