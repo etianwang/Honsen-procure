@@ -142,7 +142,7 @@ test('purchaser issues HPA from approved history and can retry a rejected issue 
     'HC-HP-20261025-HPA-ABCDEFGH-1',
   )
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
-    'executing',
+    '执行中',
   )
   await expect(page.getByRole('button', { name: '正式签发 HPA' })).toHaveCount(
     0,
