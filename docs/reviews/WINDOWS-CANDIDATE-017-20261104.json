@@ -1,0 +1,40 @@
+{
+  "summary": {
+    "sourceSha": "66c777e11fabeb446ed728200331eecea4cfd891",
+    "version": "0.1.7",
+    "installerSha256": "844AE19A906BE07139C5B911FEA2B4100FE057CB01DDFEB054EF71FE6975A4F3",
+    "installedFiles": {
+      "honsen.app.json": "051ED0565769C434F4ABFB779CF57C88114EECDA273FEBEBE8629BED08CAB2F3",
+      "HonsenProcure.exe": "FFA3C123B7ECE6DCE75E454B4BBF8A8EC446244E130F7D0ACC2C3D173E79E851",
+      "HonsenUpdateRunner.exe": "FCF339ACBC51640D32AED384D88AA8B523A39FB60955FBF45A17049555E9DD9A"
+    },
+    "sqliteHash": "920641BD096D5F14E710B3B2F35F3A68E36270E3FBFBC78EB99E889D2C194526",
+    "markerHash": "DC75FE2F8AF26630844E041D39FC8E013D461148567EFC53F4B331BC1A869AF3",
+    "completedUtc": "2026-11-04T08:53:15.8056018Z",
+    "markerPreserved": true,
+    "status": "PASS",
+    "os": "Microsoft Windows NT 10.0.26100.0",
+    "previousVersion": "0.1.6",
+    "sqlitePreserved": true,
+    "scope": "real Runner apply single-directory upgrade and synthetic-file preservation/canonical check, no authenticated business/Toolbox caller acceptance",
+    "installDirectoryPreserved": true,
+    "previousInstallerSha256": "C0B5D756A76656BBF393CC6301EFE147873DFECAAA996FD4F03E362491AED639"
+  },
+  "bootstrapSha256": "8cc88cfd93e94c7bc94c25f5534f6725a5188d3d1af26cadacbfa4ebdd23f23e",
+  "apply": {
+    "appId": "honsen.procure",
+    "operationId": "b826bbdf-8611-4df3-ac9c-e890103555e4",
+    "status": "success",
+    "source": "toolbox",
+    "fromVersion": "0.1.6",
+    "toVersion": "0.1.7",
+    "step": null,
+    "installerExitCode": 0,
+    "installerLogPath": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Temp\\honsen-procure-b826bbdf-8611-4df3-ac9c-e890103555e4.log",
+    "message": "更新完成",
+    "completedAtUtc": "2026-11-04T08:53:15Z",
+    "installLocation": "C:\\Honsen Upgrade Synthetic\\Honsen Procure",
+    "executablePath": "C:\\Honsen Upgrade Synthetic\\Honsen Procure\\HonsenProcure.exe"
+  },
+  "negativeTests": "Not rerun: unchanged owning-source comparison to actual100011d/0.1.6 evidence"
+}

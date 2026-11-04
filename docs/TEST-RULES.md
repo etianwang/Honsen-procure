@@ -1,5 +1,7 @@
 # TEST-RULES — Mandatory Quality Gates
 
+2026-11-04 affected acceptance update: source66c777e actual native two-line SPO Microsoft Print To PDF1A4page, repeat/Cancel cleanup PASS; previous100 four-page PDF remains RED evidence. This closes only the confirmed layout defect. Actual source66 local0.1.7 installed016→017 smoke PASS; debug native EXE and installedRelease EXE hashes remain distinct. Full long-document/all-language/physical printer, installed security, restored native/object consistency and Toolbox original final gates below remain unchecked. See reviews/PRINT-PAGINATION-20261104.md, WINDOWS-CANDIDATE-017-20261104.md and V1-CANDIDATE-66C777E-20261104.md.
+
 ## Test pyramid
 
 - Unit: pricing, quantity rounding, order totals, validation, search normalization, sync state machine.

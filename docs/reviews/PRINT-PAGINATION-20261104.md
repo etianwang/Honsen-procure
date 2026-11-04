@@ -1,6 +1,6 @@
 # Formal print pagination repair — 2026-11-04
 
-Status: **BUILDER PASS; fixed-source native print acceptance NOT RUN**. Confirmed defect is mapped to original T12/T14; it is not an optimization or new document feature.
+Status: **PASS for the bounded native two-line A4 virtual-print defect repair** at `66c777e11fabeb446ed728200331eecea4cfd891`. Long native documents, physical printers, installed-package print and complete T12/T14 gates remain OPEN. Confirmed defect is mapped to original T12/T14; it is not an optimization or new document feature.
 
 ## Actual native RED
 
@@ -31,3 +31,15 @@ Required product/security/test documents and Toolbox sources were reread; the fi
 The supplemental headless PDF path/hash is in adjacent JSON. Its page count is useful regression evidence, **not actual repaired native-print acceptance**. The first direct regression exposed a16.59px title margin collapse; resetting only the print title margin fixed it without relaxing the y0 expectation. A new committed application source and frontend must be built and exercised through the actual native print entry before RED closes. Old100 runtime, its saved RED PDF, and its earlier business results cannot be relabeled as repaired-source acceptance. Complete long-document/bilingual/native PDF and physical-printer gates remain open.
 
 The test-only offline runner's explicit HoldForPrint option creates a new synthetic profile, pauses after its ordinary native preview for at most20minutes, and communicates via derived run-ID ready/release files. It does not press print or infer print success; root independently operates/observes the existing system dialog. No credentials are saved in ready files, old profiles are not modified, and no PostgreSQL/COS service is used for this fixture. Controller owns implementation Commit/Push and final candidate coordination.
+
+## Actual repaired native GREEN
+
+Clean implementation source `66c777e11fabeb446ed728200331eecea4cfd891` was rebuilt and independently captured before any later installer build could overwrite dist. Native debug EXE remains `fde98259b5b31c2ffab97b40a104ffa6f3ef24490a172a80973feb956221d190` because Rust did not change; the repaired compiled frontend tree hash is **`24f679d73eed74a24ee23ac868ed84ac8730785cb30811aeddf3389cd83fd716`**, distinct from RED. Runtime `.cache/native-print-66c-54c705f2-55e1-4b04-a204-966e3d61d8e6` retains the exact EXE/helper/frontend manifest. New synthetic preparation run `native-smoke-20261104084850` used this fixed runtime, normal offline login and existing child preview; it did not modify old profiles or contact PostgreSQL/COS.
+
+Root operated the real native application's existing print button and WebView2/system Microsoft Print To PDF dialog. The repaired two-line SPO preview showed **one A4 page**; root saved `.cache/native-print-66c777e-GREEN.pdf`, SHA256 **`c982f25119960fd4fa919b818c303f798469b02f59e09ad177de3f1ccd0045de`**. Root's pdfinfo and independent PDF page-object count agree on one page. Actual saved PDF was rendered/opened with Poppler as `.cache/native-print-66c777e-GREEN-page1.png`: heading starts at the top, both Chinese/French material names, model/specification, quantities,100+100=200XOF, terms and signatures are visible without clipping. This is actual native virtual-print evidence, not the supplemental headless PDF.
+
+Root then printed again: real preview still one page, Cancel returned the normal print control. Subsequent read-only CDP inspection found printing body class false, direct body print portal count0, retained screen preview count1 and visible normal print control. `.honsen-native-qa/native-smoke-20261104084850-afterprint-readback.test.json` records that independent cleanup observation; it did not click or print anything. Ready/run identities, formal number, rendered-image hash and exact PDF metadata are in adjacent JSON.
+
+Root released the hold; preparation raw `.honsen-native-qa/native-smoke-20261104084850-offline.test.json` records source/harness66c777e, hold handed back and fixture PASS with its explicitly non-PDF scope. The owned preview server/EXE exited via normal finally; final1420/9241 listener check returned none. Synthetic profiles, RED/GREEN PDF/renderings and runtime manifests remain retained. The actual PDF PASS comes from root's separate system-print observation and saved artifact, not the fixture result flag.
+
+This closes the confirmed hidden-shell/absolute-layout defect for the actual tested two-line native document. It does not grant long-document header repetition, all language pairs, physical printer or installed Release-package acceptance. The old100 RED four-page PDF remains unchanged; a later evidence-only SHA is not substituted for repaired source66c777e.
