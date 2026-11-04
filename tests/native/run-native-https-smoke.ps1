@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('hpa-formal-pull', 'g2-formal-pull', 'g1-conflict-origin', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [ValidateSet('spo-formal-pull', 'hpa-formal-pull', 'g2-formal-pull', 'g1-conflict-origin', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security',
   [ValidateSet('before-commit', 'after-commit')]
   [string]$TerminationBoundary = 'before-commit',
@@ -113,7 +113,7 @@ try {
   $env:HONSEN_PROCURE_TEST_RUN_ID = $runId
   $env:HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX = if ($Mode -eq 'g1-conflict-origin') { Join-Path $qaRoot "$runId-auth.test" } else { '' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
-  $env:HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE = if ($Mode -in @('g2-formal-pull', 'hpa-formal-pull')) { '1' } else { '0' }
+  $env:HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE = if ($Mode -in @('g2-formal-pull', 'hpa-formal-pull', 'spo-formal-pull')) { '1' } else { '0' }
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
   for ($launch = 0; $launch -lt 3; $launch++) {
@@ -154,10 +154,10 @@ try {
     $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD = $env:HONSEN_TEST_ENGINEER_B_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD = $env:HONSEN_TEST_PURCHASER_PASSWORD
     $env:RUST_BACKTRACE = '1'
-    if ($Mode -eq 'hpa-formal-pull') {
+    if ($Mode -in @('hpa-formal-pull', 'spo-formal-pull')) {
       Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
-      node (Join-Path $repo 'tests/native/hpa-formal-pull.mjs') *> $nativeLog
+      node (Join-Path $repo "tests/native/$Mode.mjs") *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native HPA driver failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'g2-formal-pull') {
       Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
@@ -280,10 +280,11 @@ try {
   } finally {
     Pop-Location
   }
-  if ($Mode -eq 'hpa-formal-pull') {
+  if ($Mode -in @('hpa-formal-pull', 'spo-formal-pull')) {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
-    if ($smoke.mode -ne 'hpa-formal-pull' -or $smoke.result -ne 'PASS' -or !$smoke.restartPreserved -or !$smoke.replayPreserved -or $smoke.fieldsMatched -ne 12 -or @($smoke.exePids).Count -ne 3 -or $smoke.installations[0] -eq $smoke.installations[1]) { throw "native HPA result invalid: $result" }
-    Write-Output "PASS native HPA issue/Push/Pull/restart/replay: $result"
+    if ($smoke.mode -ne $Mode -or $smoke.result -ne 'PASS' -or !$smoke.restartPreserved -or !$smoke.replayPreserved -or $smoke.fieldsMatched -ne 12 -or @($smoke.exePids).Count -ne 3 -or $smoke.installations[0] -eq $smoke.installations[1]) { throw "native HPA result invalid: $result" }
+    if ($Mode -eq 'spo-formal-pull' -and (!$smoke.spoConverged -or !$smoke.draftUnissued -or !$smoke.spoFrozenAfterCatalogAndRestart)) { throw "native SPO proof incomplete: $result" }
+    Write-Output "PASS native $Mode issue/Push/Pull/restart/replay: $result"
   } elseif ($Mode -eq 'g2-formal-pull') {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
     if ($smoke.mode -ne 'g2-formal-pull' -or $smoke.result -ne 'PASS' -or $smoke.fieldsMatched -ne 16 -or !$smoke.restartPreserved -or !$smoke.replayPreserved -or @($smoke.exePids).Count -ne 3 -or $smoke.installations[0] -eq $smoke.installations[1] -or $smoke.exePaths[0] -eq $smoke.exePaths[1]) {
