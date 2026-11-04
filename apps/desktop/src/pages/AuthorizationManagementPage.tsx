@@ -1,3 +1,5 @@
+import { useUiLocale } from '../lib/ui-locale'
+import { authText, type AuthMessage } from '../lib/auth-messages'
 import { useState } from 'react'
 
 type Binding = {
@@ -18,6 +20,8 @@ const isUuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
 
 export function AuthorizationManagementPage() {
+  const { locale } = useUiLocale()
+  const t = (key: AuthMessage) => authText(locale, key)
   const [accountId, setAccountId] = useState('')
   const [bindings, setBindings] = useState<Binding[]>([])
   const [projectId, setProjectId] = useState('')
@@ -25,6 +29,7 @@ export function AuthorizationManagementPage() {
   const [teamId, setTeamId] = useState('')
   const [editing, setEditing] = useState<Binding | null>(null)
   const [busy, setBusy] = useState(false)
+  const [scopeCount, setScopeCount] = useState(0)
   const [message, setMessage] = useState('')
 
   const load = async () => {
@@ -39,7 +44,8 @@ export function AuthorizationManagementPage() {
         accountId,
       })
       setBindings(result)
-      setMessage(`已读取 ${result.length} 个云端授权范围。`)
+      setScopeCount(result.length)
+      setMessage('已读取 {count} 个云端授权范围。')
     } catch {
       setMessage('查询失败。请检查在线连接、登录状态与管理权限。')
     } finally {
@@ -118,10 +124,10 @@ export function AuthorizationManagementPage() {
       className="auth-management"
       aria-labelledby="auth-management-title"
     >
-      <h2 id="auth-management-title">在线授权管理</h2>
-      <p>仅管理员在线操作；离线缓存不能分配或撤销权限。</p>
+      <h2 id="auth-management-title">{t('在线授权管理')}</h2>
+      <p>{t('仅管理员在线操作；离线缓存不能分配或撤销权限。')}</p>
       <div className="auth-management-form">
-        <label htmlFor="managed-account-id">账户 UUID</label>
+        <label htmlFor="managed-account-id">{t('账户 UUID')}</label>
         <input
           id="managed-account-id"
           value={accountId}
@@ -133,10 +139,10 @@ export function AuthorizationManagementPage() {
           disabled={busy || !isUuid(accountId)}
           onClick={() => void load()}
         >
-          查询云端授权
+          {t('查询云端授权')}
         </button>
       </div>
-      <ul aria-label="已授权范围">
+      <ul aria-label={t('已授权范围')}>
         {bindings.map((binding) => (
           <li
             key={`${binding.projectId}:${binding.departmentId}:${binding.teamId}`}
@@ -155,40 +161,40 @@ export function AuthorizationManagementPage() {
                 setTeamId(binding.teamId)
               }}
             >
-              修改
+              {t('修改')}
             </button>
             <button
               type="button"
               disabled={busy}
               onClick={() => void change(binding, true)}
             >
-              撤销
+              {t('撤销')}
             </button>
           </li>
         ))}
       </ul>
       <fieldset className="auth-management-form">
-        <legend>{editing ? '修改授权范围' : '分配授权范围'}</legend>
-        <label htmlFor="managed-project-id">项目 UUID</label>
+        <legend>{editing ? t('修改授权范围') : t('分配授权范围')}</legend>
+        <label htmlFor="managed-project-id">{t('项目 UUID')}</label>
         <input
           id="managed-project-id"
           value={projectId}
           onChange={(event) => setProjectId(event.target.value.trim())}
         />
-        <label htmlFor="managed-department-id">部门 UUID</label>
+        <label htmlFor="managed-department-id">{t('部门 UUID')}</label>
         <input
           id="managed-department-id"
           value={departmentId}
           onChange={(event) => setDepartmentId(event.target.value.trim())}
         />
-        <label htmlFor="managed-team-id">班组 UUID</label>
+        <label htmlFor="managed-team-id">{t('班组 UUID')}</label>
         <input
           id="managed-team-id"
           value={teamId}
           onChange={(event) => setTeamId(event.target.value.trim())}
         />
         <button type="button" disabled={!canSave} onClick={() => void save()}>
-          {editing ? '保存修改' : '分配授权'}
+          {editing ? t('保存修改') : t('分配授权')}
         </button>
         {editing && (
           <button
@@ -196,12 +202,14 @@ export function AuthorizationManagementPage() {
             disabled={busy}
             onClick={() => setEditing(null)}
           >
-            取消修改
+            {t('取消修改')}
           </button>
         )}
       </fieldset>
       <p role="status" aria-live="polite">
-        {message}
+        {message
+          ? t(message as AuthMessage).replace('{count}', String(scopeCount))
+          : ''}
       </p>
     </section>
   )

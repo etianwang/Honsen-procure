@@ -1,3 +1,5 @@
+import { useUiLocale, type UiLocale } from '../lib/ui-locale'
+import { authText, type AuthMessage } from '../lib/auth-messages'
 import { useState } from 'react'
 import { Alert, Button, Card, Input } from 'antd'
 import { LockKeyhole, UserRound } from 'lucide-react'
@@ -27,6 +29,8 @@ function invoke(): TauriInvoke | undefined {
 }
 
 export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
+  const { locale, setLocale } = useUiLocale()
+  const t = (key: AuthMessage) => authText(locale, key)
   const desktopInvoke = invoke()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -65,16 +69,25 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
     return (
       <main className="login-page">
         <Card className="login-card">
+          <select
+            aria-label="界面语言 / UI language / Langue"
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as UiLocale)}
+          >
+            <option value="zh">中文</option>
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+          </select>
           <div className="login-brand" aria-hidden="true">
             H
           </div>
-          <h1>登录 HONSEN Procure</h1>
-          <p>浏览器预览不连接本地凭据；桌面程序使用真实离线登录。</p>
+          <h1>{t('登录 HONSEN Procure')}</h1>
+          <p>{t('浏览器预览不连接本地凭据；桌面程序使用真实离线登录。')}</p>
           <Alert
             className="login-alert"
             type="info"
             showIcon
-            title="开发预览：不接受账号、密码或验证码"
+            title={t('开发预览：不接受账号、密码或验证码')}
           />
           <Button
             className="preview-button"
@@ -82,7 +95,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
             block
             onClick={onPreview}
           >
-            打开界面预览
+            {t('打开界面预览')}
           </Button>
         </Card>
       </main>
@@ -92,20 +105,29 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
   return (
     <main className="login-page">
       <Card className="login-card">
+        <select
+          aria-label="界面语言 / UI language / Langue"
+          value={locale}
+          onChange={(event) => setLocale(event.target.value as UiLocale)}
+        >
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="fr">Français</option>
+        </select>
         <div className="login-brand" aria-hidden="true">
           H
         </div>
-        <h1>登录 HONSEN Procure</h1>
-        <p>离线登录仅接受已缓存、启用且仍在 24 小时窗口内的账户。</p>
+        <h1>{t('登录 HONSEN Procure')}</h1>
+        <p>{t('离线登录仅接受已缓存、启用且仍在 24 小时窗口内的账户。')}</p>
         {message && (
           <Alert
             className="login-alert"
             type="error"
             showIcon
-            title={message}
+            title={t(message as AuthMessage)}
           />
         )}
-        <label htmlFor="account">账号</label>
+        <label htmlFor="account">{t('账号')}</label>
         <Input
           id="account"
           value={username}
@@ -113,7 +135,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
           prefix={<UserRound size={16} aria-hidden="true" />}
           autoComplete="username"
         />
-        <label htmlFor="password">密码</label>
+        <label htmlFor="password">{t('密码')}</label>
         <Input.Password
           id="password"
           value={password}
@@ -122,7 +144,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
           autoComplete="current-password"
         />
         <label htmlFor="captcha">
-          本地验证码：{captcha?.question ?? '请先获取'}
+          {t('本地验证码')}：{captcha?.question ?? t('请先获取')}
         </label>
         <Input
           id="captcha"
@@ -131,12 +153,12 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
           onChange={(event) => setAnswer(event.target.value)}
         />
         <Button type="link" onClick={() => void refreshCaptcha()}>
-          {captcha ? '换一个验证码' : '获取验证码'}
+          {captcha ? t('换一个验证码') : t('获取验证码')}
         </Button>
         {cloudCaptcha && (
           <>
             <label htmlFor="cloud-captcha">
-              云端验证码：{cloudCaptcha.question}
+              {t('云端验证码')}：{cloudCaptcha.question}
             </label>
             <Input
               id="cloud-captcha"
@@ -172,7 +194,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
               .finally(() => setSubmitting(false))
           }}
         >
-          离线登录
+          {t('离线登录')}
         </Button>
         <Button
           block
@@ -200,7 +222,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
               .finally(() => setSubmitting(false))
           }}
         >
-          在线登录
+          {t('在线登录')}
         </Button>
       </Card>
     </main>
