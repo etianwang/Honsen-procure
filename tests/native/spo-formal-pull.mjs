@@ -530,6 +530,28 @@ try {
       childId,
     )[0]
   assert.equal(childState(profiles[1]).formal_document_no, null)
+  const deniedUnready = await issuer.page.evaluate(async (orderId) => {
+    try {
+      await window.__TAURI__.core.invoke('send_supplier_order', { orderId })
+      return false
+    } catch {
+      return true
+    }
+  }, childId)
+  assert.equal(deniedUnready, true)
+  assert.equal(childState(profiles[1]).formal_document_no, null)
+  report.unreadySendNoPartialIssue = true
+  await call(receiver, 'pull_sync')
+  const deniedRole = await receiver.page.evaluate(async (orderId) => {
+    try {
+      await window.__TAURI__.core.invoke('send_supplier_order', { orderId })
+      return false
+    } catch {
+      return true
+    }
+  }, childId)
+  assert.equal(deniedRole, true)
+  report.unauthorizedSendDenied = true
   const childLines = readDb(
     profiles[1],
     'SELECT id FROM local_purchase_order_items WHERE order_id=?',
@@ -608,6 +630,45 @@ try {
     1,
   )
   phase = 'spo-send'
+  await call(issuer, 'lock_session')
+  await issuer.page.getByLabel('账号', { exact: true }).fill('purchaser')
+  await issuer.page
+    .getByLabel('密码', { exact: true })
+    .fill(process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  await issuer.page
+    .getByRole('button', { name: '获取验证码', exact: true })
+    .click()
+  for (const field of ['captcha', 'cloud-captcha']) {
+    const question = (
+      await issuer.page.locator('label[for="' + field + '"]').innerText()
+    )
+      .split('：')
+      .at(-1)
+    await issuer.page.locator('#' + field).fill(String(answer(question)))
+  }
+  await issuer.page
+    .getByRole('button', { name: '在线登录', exact: true })
+    .click()
+  await issuer.page
+    .getByRole('button', { name: '采购执行', exact: true })
+    .click()
+  await issuer.page
+    .getByRole('button', { name: 'G2-' + runId, exact: true })
+    .click()
+  await issuer.page
+    .getByRole('button', { name: '保存子单条款', exact: true })
+    .click()
+  await expect(issuer.page.getByText(/子单条款已保存/)).toBeVisible()
+  await issuer.page
+    .getByRole('button', { name: '发送供应商', exact: true })
+    .click()
+  await expect(issuer.page.getByText(/供应商子单已签发/)).toBeVisible()
+  report.nativeUiSend = true
+  const issuedRow = childState(profiles[1])
+  const spo = {
+    documentType: issuedRow.document_type,
+    formalDocumentNo: issuedRow.formal_document_no,
+  }
   const sends = await issuer.page.evaluate(
     async (childId) =>
       Promise.allSettled([
@@ -620,17 +681,18 @@ try {
       ]),
     childId,
   )
-  assert.equal(sends.filter((value) => value.status === 'fulfilled').length, 1)
-  assert.equal(sends.filter((value) => value.status === 'rejected').length, 1)
-  report.concurrentSend = sends
-  const spo = sends.find((value) => value.status === 'fulfilled').value
+  assert.equal(sends.filter((value) => value.status === 'rejected').length, 2)
+  report.concurrentRetryRejected = true
   report.spoIssue = spo
   assert.equal(spo.documentType, 'SPO')
   const frozenChild = childState(profiles[1])
   assert.equal(frozenChild.workflow_status, 'sent')
   assert.equal(frozenChild.formal_document_no, spo.formalDocumentNo)
   assert.ok(frozenChild.formal_snapshot_json)
-  await push(issuer)
+  const spoPush = await call(issuer, 'push_pending_sync')
+  assert.equal(spoPush.pendingCount, 0)
+  assert.ok(spoPush.acceptedCount >= 1)
+  report.spoPush = spoPush
   await call(receiver, 'pull_sync')
   const remoteChild = childState(profiles[0])
   for (const key of [
@@ -673,29 +735,6 @@ try {
       notes: material.notes,
       isActive: material.is_active === 1,
       version: material.version,
-    },
-  })
-  await push(issuer)
-  phase = 'publish-supplier'
-  await call(issuer, 'save_supplier', {
-    supplier: {
-      id: ids[6],
-      businessCode: 'TEST-SUPPLIER',
-      name: 'Synthetic catalog supplier',
-      countryId: ids[1],
-      contactName: null,
-      address: null,
-      city: null,
-      country: null,
-      phone: null,
-      whatsapp: null,
-      email: null,
-      paymentTerms: null,
-      deliveryLeadTime: null,
-      isPreferred: true,
-      isBlacklisted: false,
-      isActive: true,
-      version: 1,
     },
   })
   await push(issuer)
