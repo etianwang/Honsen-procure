@@ -47,9 +47,11 @@ const ids = Array.from(
   { length: 14 },
   (_, n) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
 )
-let orderId = randomUUID(),
-  catalogLine = randomUUID(),
-  manualLine = randomUUID()
+const lineCount = Number(process.env.HONSEN_PROCURE_NATIVE_PRINT_LINES ?? '2')
+assert.ok(Number.isInteger(lineCount) && lineCount >= 2 && lineCount <= 100)
+const lineIds = Array.from({ length: lineCount }, () => randomUUID())
+const expectedTotal = String(lineCount * 100)
+let orderId = randomUUID()
 const exePaths = ['device-a', 'device-b'].map((device) =>
   join(root, `${runId}-${device}`, 'HonsenProcure.exe'),
 )
@@ -347,7 +349,7 @@ function matchWire(profile, wire) {
   assert.ok(actual.header)
   for (const [key, value] of Object.entries(actual.header))
     assert.deepEqual(value, wire[key], key)
-  assert.equal(actual.lines.length, 2)
+  assert.equal(actual.lines.length, lineCount)
   for (const line of actual.lines) {
     const expected = wire.lines.find((item) => item.id === line.id)
     assert.ok(expected)
@@ -423,7 +425,7 @@ try {
         orderDiscount: zero,
         orderFreight: zero,
         taxRateBasisPoints: 0,
-        lines: [catalogLine, manualLine].map((id, index) => ({
+        lines: lineIds.map((id, index) => ({
           id,
           materialId: ids[5],
           materialSnapshot: {
@@ -492,7 +494,7 @@ try {
     })
     const allocated = await call(issuer, 'allocate_supplier_child_orders', {
       parentOrderId: orderId,
-      allocations: [catalogLine, manualLine].map((parentItemId) => ({
+      allocations: lineIds.map((parentItemId) => ({
         parentItemId,
         supplierId: ids[6],
         currency: 'XOF',
@@ -539,8 +541,8 @@ try {
     })
     assert.equal(printDocument.formalDocumentNo, issue.formalDocumentNo)
     assert.equal(printDocument.documentType, 'SPO')
-    assert.equal(printDocument.totalMinor, '200')
-    assert.equal(printDocument.lines.length, 2)
+    assert.equal(printDocument.totalMinor, expectedTotal)
+    assert.equal(printDocument.lines.length, lineCount)
     assert.ok(printDocument.lines.every((line) => line.nameZh && line.nameFr))
     const before = readDb(
       profiles[index],
@@ -597,7 +599,7 @@ try {
     const preview = childUi.locator('.formal-print-sheet')
     await expect(preview).toContainText(issue.formalDocumentNo)
     await expect(preview).toContainText(printDocument.lines[0].nameFr)
-    await expect(preview).toContainText('200 XOF')
+    await expect(preview).toContainText(`${expectedTotal} XOF`)
     await issuer.page.screenshot({
       path: resultPath + '-device-' + index + '-preview.png',
       fullPage: true,
