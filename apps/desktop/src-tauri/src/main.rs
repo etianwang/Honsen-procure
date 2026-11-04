@@ -1,4 +1,7 @@
 #[cfg(debug_assertions)]
+mod native_webview_test;
+
+#[cfg(debug_assertions)]
 use honsen_materials_desktop_core::test_profile_sync_credential_service;
 use honsen_materials_desktop_core::{
     AdjustmentInput, AuthError, AuthenticatedSession, LocalAuthService, MaterialSnapshotInput,
@@ -133,6 +136,15 @@ fn main() {
         return;
     }
 
+    let context = tauri::generate_context!();
+    #[cfg(debug_assertions)]
+    let context = {
+        let mut context = context;
+        native_webview_test::configure(&mut context, is_test_profile, &database_path)
+            .expect("configure isolated native WebView test");
+        context
+    };
+
     tauri::Builder::default()
         .manage(auth)
         .setup(move |app| {
@@ -223,7 +235,7 @@ fn main() {
             commands::save_exchange_rate,
             commands::list_exchange_rates
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("run Honsen Procure desktop");
 }
 
