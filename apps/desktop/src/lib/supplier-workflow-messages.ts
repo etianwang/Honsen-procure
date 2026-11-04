@@ -118,6 +118,36 @@ const messages = {
     'RFQ {number} created with {count} unpriced lines.',
     'Demande {number} créée avec {count} lignes sans prix.',
   ],
+  供应商拆单: ['Supplier allocation', 'Répartition par fournisseur'],
+  '每条材料必须选择供应商，并填写子单编号和锁定汇率。': [
+    'Each material requires a supplier, child order number and locked exchange rate.',
+    'Chaque matériau exige un fournisseur, un numéro de sous-commande et un taux de change figé.',
+  ],
+  '已创建 {count} 张供应商子单，父单明细分配已锁定。': [
+    'Created {count} supplier child orders; parent allocations are locked.',
+    '{count} sous-commandes créées ; répartition de la commande principale verrouillée.',
+  ],
+  '拆单失败：目录报价只能分配给对应供应商，且币种、单价与报价必须一致。请检查报价仍有效、父单已批准且每行仅分配一次；原分配内容已保留。':
+    [
+      'Allocation failed: catalog quotes require the corresponding supplier, currency and price. Verify valid quotes, parent approval and one allocation per line; original allocations retained.',
+      'Échec : les devis exigent le fournisseur, la devise et le prix correspondants. Vérifiez leur validité, l’approbation et une répartition par ligne ; données initiales conservées.',
+    ],
+  '已确认的内部请购单必须一次性分配全部材料。子单固定为一个供应商和一种币种；税、折扣与运费在子单内补充。':
+    [
+      'Allocate all approved requisition lines together. Each child has one supplier and currency; add tax, discounts and freight in its terms.',
+      'Répartissez ensemble toutes les lignes approuvées. Chaque sous-commande a un fournisseur et une devise ; complétez taxes, remises et transport dans ses conditions.',
+    ],
+  待分配材料: ['Materials to allocate', 'Matériaux à répartir'],
+  子单币种: ['Child currency', 'Devise de la sous-commande'],
+  子单编号: ['Child order number', 'Numéro de sous-commande'],
+  锁定汇率: ['Locked exchange rate', 'Taux de change figé'],
+  创建供应商子单: [
+    'Create supplier child orders',
+    'Créer les sous-commandes fournisseurs',
+  ],
+  已创建子单: ['Created child orders', 'Sous-commandes créées'],
+  主币种合计: ['Primary currency total', 'Total en devise principale'],
+  行: ['Line', 'Ligne'],
 } as const
 export type SupplierMessage = keyof typeof messages
 const zhDynamic = {

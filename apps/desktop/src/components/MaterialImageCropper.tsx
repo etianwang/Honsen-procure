@@ -1,3 +1,5 @@
+import { useUiLocale } from '../lib/ui-locale'
+import { catalogText, type CatalogMessage } from '../lib/catalog-messages'
 import { Alert, Input } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 
@@ -16,6 +18,8 @@ const PREVIEW_SIZE = 240
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024
 
 export function MaterialImageCropper({ onChange }: MaterialImageCropperProps) {
+  const { locale } = useUiLocale()
+  const t = (key: CatalogMessage) => catalogText(locale, key)
   const canvas = useRef<HTMLCanvasElement>(null)
   const [image, setImage] = useState<HTMLImageElement | null>(null)
   const [sourceFileName, setSourceFileName] = useState<string | null>(null)
@@ -86,28 +90,30 @@ export function MaterialImageCropper({ onChange }: MaterialImageCropperProps) {
   }
 
   return (
-    <section aria-label="材料图片裁剪">
+    <section aria-label={t('材料图片裁剪')}>
       <Input
-        aria-label="选择材料图片"
+        aria-label={t('选择材料图片')}
         type="file"
         // shortcut: use browser-decodable formats; add a native HEIC decoder if material-photo HEIC crop becomes required.
         accept="image/png,image/jpeg,image/webp"
         onChange={(event) => void selectFile(event.target.files?.[0])}
       />
-      {error && <Alert type="error" title={error} showIcon />}
+      {error && (
+        <Alert type="error" title={t(error as CatalogMessage)} showIcon />
+      )}
       {image && (
         <div className="image-cropper">
           <canvas
-            aria-label="方形裁剪预览"
+            aria-label={t('方形裁剪预览')}
             className="material-crop-preview"
             height={PREVIEW_SIZE}
             ref={canvas}
             width={PREVIEW_SIZE}
           />
           <label>
-            裁剪缩放
+            {t('裁剪缩放')}
             <input
-              aria-label="裁剪缩放"
+              aria-label={t('裁剪缩放')}
               type="range"
               min="1"
               max="3"
@@ -117,9 +123,9 @@ export function MaterialImageCropper({ onChange }: MaterialImageCropperProps) {
             />
           </label>
           <label>
-            裁剪水平位置
+            {t('裁剪水平位置')}
             <input
-              aria-label="裁剪水平位置"
+              aria-label={t('裁剪水平位置')}
               type="range"
               min="0"
               max="100"
@@ -128,9 +134,9 @@ export function MaterialImageCropper({ onChange }: MaterialImageCropperProps) {
             />
           </label>
           <label>
-            裁剪垂直位置
+            {t('裁剪垂直位置')}
             <input
-              aria-label="裁剪垂直位置"
+              aria-label={t('裁剪垂直位置')}
               type="range"
               min="0"
               max="100"

@@ -1,3 +1,8 @@
+import { useUiLocale } from '../lib/ui-locale'
+import {
+  supplierText,
+  type SupplierMessage,
+} from '../lib/supplier-workflow-messages'
 import { Alert, Button, Card, Input, Select, Space } from 'antd'
 import { useState } from 'react'
 import type {
@@ -45,6 +50,8 @@ export function SupplierAllocationPanel({
   suppliers,
   onCreated,
 }: SupplierAllocationPanelProps) {
+  const { locale } = useUiLocale()
+  const t = (key: SupplierMessage) => supplierText(locale, key)
   const [allocations, setAllocations] = useState<
     Record<string, AllocationDraft>
   >(() =>
@@ -53,6 +60,7 @@ export function SupplierAllocationPanel({
     ),
   )
   const [children, setChildren] = useState<SupplierChildOrderView[]>([])
+  const [savedCount, setSavedCount] = useState(0)
   const [message, setMessage] = useState<string | null>(null)
 
   function updateLine(id: string, update: Partial<AllocationDraft>) {
@@ -85,7 +93,8 @@ export function SupplierAllocationPanel({
       )
       setChildren(saved)
       onCreated?.()
-      setMessage(`已创建 ${saved.length} 张供应商子单，父单明细分配已锁定。`)
+      setSavedCount(saved.length)
+      setMessage('已创建 {count} 张供应商子单，父单明细分配已锁定。')
     } catch {
       setMessage(
         '拆单失败：目录报价只能分配给对应供应商，且币种、单价与报价必须一致。请检查报价仍有效、父单已批准且每行仅分配一次；原分配内容已保留。',
@@ -94,19 +103,32 @@ export function SupplierAllocationPanel({
   }
 
   return (
-    <Card className="card" title="供应商拆单">
+    <Card className="card" title={t('供应商拆单')}>
       <p className="muted">
-        已确认的内部请购单必须一次性分配全部材料。子单固定为一个供应商和一种币种；税、折扣与运费在子单内补充。
+        {t(
+          '已确认的内部请购单必须一次性分配全部材料。子单固定为一个供应商和一种币种；税、折扣与运费在子单内补充。',
+        )}
       </p>
-      {message ? <Alert title={message} type="info" showIcon /> : null}
-      <div className="requisition-lines" aria-label="待分配材料">
+      {message ? (
+        <Alert
+          title={t(message as SupplierMessage).replace(
+            '{count}',
+            String(savedCount),
+          )}
+          type="info"
+          showIcon
+        />
+      ) : null}
+      <div className="requisition-lines" aria-label={t('待分配材料')}>
         {lines.map((line, index) => {
           const allocation = allocations[line.id]
           return (
             <article className="requisition-line" key={line.id}>
               <div className="requisition-line-heading">
                 <strong>
-                  第 {index + 1} 行 · {line.materialName}
+                  {locale === 'zh' ? '第 ' : `${t('行')} `}
+                  {index + 1}
+                  {locale === 'zh' ? ' 行' : ''} · {line.materialName}
                 </strong>
                 <span>
                   {line.quantity} {line.unit} · {line.currency}
@@ -114,11 +136,11 @@ export function SupplierAllocationPanel({
               </div>
               <div className="requisition-fields">
                 <label>
-                  供应商
+                  {t('供应商')}
                   <Select
-                    aria-label={`${line.materialName} 供应商`}
+                    aria-label={`${line.materialName} ${t('供应商')}`}
                     value={allocation.supplierId || undefined}
-                    placeholder="选择供应商"
+                    placeholder={t('选择供应商')}
                     options={suppliers.map((supplier) => ({
                       value: supplier.id,
                       label: supplier.name,
@@ -129,9 +151,9 @@ export function SupplierAllocationPanel({
                   />
                 </label>
                 <label>
-                  子单币种
+                  {t('子单币种')}
                   <Select
-                    aria-label={`${line.materialName} 子单币种`}
+                    aria-label={`${line.materialName} ${t('子单币种')}`}
                     value={allocation.currency}
                     options={['XOF', 'CNY', 'USD', 'EUR'].map((currency) => ({
                       value: currency,
@@ -144,9 +166,9 @@ export function SupplierAllocationPanel({
                   />
                 </label>
                 <label>
-                  子单编号
+                  {t('子单编号')}
                   <Input
-                    aria-label={`${line.materialName} 子单编号`}
+                    aria-label={`${line.materialName} ${t('子单编号')}`}
                     value={allocation.childDisplayNo}
                     onChange={(event) =>
                       updateLine(line.id, {
@@ -156,9 +178,9 @@ export function SupplierAllocationPanel({
                   />
                 </label>
                 <label>
-                  锁定汇率
+                  {t('锁定汇率')}
                   <Input
-                    aria-label={`${line.materialName} 锁定汇率`}
+                    aria-label={`${line.materialName} ${t('锁定汇率')}`}
                     inputMode="decimal"
                     value={allocation.lockedExchangeRateDecimal}
                     onChange={(event) =>
@@ -175,17 +197,17 @@ export function SupplierAllocationPanel({
       </div>
       <Space className="requisition-actions" wrap>
         <Button type="primary" onClick={() => void allocate()}>
-          创建供应商子单
+          {t('创建供应商子单')}
         </Button>
       </Space>
       {children.length ? (
-        <section aria-label="已创建子单">
-          <h3>已创建子单</h3>
+        <section aria-label={t('已创建子单')}>
+          <h3>{t('已创建子单')}</h3>
           <ul>
             {children.map((child) => (
               <li key={child.childOrderId}>
-                {child.currency} · {child.sourceTotalMinor} · 锁定汇率{' '}
-                {child.lockedExchangeRateDecimal} · 主币种合计{' '}
+                {child.currency} · {child.sourceTotalMinor} · {t('锁定汇率')}{' '}
+                {child.lockedExchangeRateDecimal} · {t('主币种合计')}{' '}
                 {child.primaryTotalMinor}
               </li>
             ))}

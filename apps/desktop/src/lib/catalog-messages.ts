@@ -158,6 +158,27 @@ const messages = {
   ],
   暂无有效报价: ['No active quotes', 'Aucun devis actif'],
   查看全部报价: ['View all quotes', 'Voir tous les devis'],
+  '请选择不超过 100MB 的图片文件': [
+    'Select an image up to 100 MB',
+    'Sélectionnez une image de 100 Mo maximum',
+  ],
+  无法读取图片文件: [
+    'Unable to read image file',
+    'Impossible de lire le fichier image',
+  ],
+  无法读取图片数据: [
+    'Unable to read image data',
+    'Impossible de lire les données image',
+  ],
+  材料图片裁剪: ['Material image crop', 'Recadrage de l’image du matériau'],
+  选择材料图片: ['Choose material image', 'Choisir une image du matériau'],
+  方形裁剪预览: ['Square crop preview', 'Aperçu du recadrage carré'],
+  裁剪缩放: ['Crop zoom', 'Zoom du recadrage'],
+  裁剪水平位置: [
+    'Crop horizontal position',
+    'Position horizontale du recadrage',
+  ],
+  裁剪垂直位置: ['Crop vertical position', 'Position verticale du recadrage'],
 } as const
 export type CatalogMessage = keyof typeof messages
 export function catalogText(locale: UiLocale, key: CatalogMessage): string {
