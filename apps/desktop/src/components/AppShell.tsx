@@ -1,3 +1,4 @@
+import { useUiLocale, shellText, type ShellMessage } from '../lib/ui-locale'
 import type { PropsWithChildren } from 'react'
 import {
   ClipboardPlus,
@@ -29,7 +30,7 @@ export type AuthorizationContextOption = {
 
 type AppShellProps = PropsWithChildren<{
   page: AppPage
-  pageTitle: string
+  pageTitle: ShellMessage
   role: UserRole
   onNavigate: (page: AppPage) => void
   onLock?: () => void
@@ -39,7 +40,7 @@ type AppShellProps = PropsWithChildren<{
   onSelectAuthorizationContext?: (value: string) => void
 }>
 
-const roleLabel: Record<UserRole, string> = {
+const roleLabel: Record<UserRole, ShellMessage> = {
   engineer: '工程师',
   purchaser: '采购员',
   administrator: '管理员',
@@ -59,22 +60,24 @@ export function AppShell({
   selectedAuthorizationContext,
   onSelectAuthorizationContext,
 }: AppShellProps) {
+  const { locale, setLocale } = useUiLocale()
+  const t = (message: ShellMessage) => shellText(locale, message)
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="主导航">
+      <aside className="sidebar" aria-label={t('主导航')}>
         <div className="brand">
           <span className="brand-mark">H</span>
           <span>HONSEN</span>
         </div>
         <nav>
-          <p className="nav-label">采购工作台</p>
+          <p className="nav-label">{t('采购工作台')}</p>
           <button
             className={`nav-button ${page === 'home' ? 'active' : ''}`}
             type="button"
             onClick={() => onNavigate('home')}
           >
             <LayoutDashboard size={17} aria-hidden="true" />
-            首页
+            {t('首页')}
           </button>
           <button
             className={`nav-button ${page === 'materials' ? 'active' : ''}`}
@@ -82,7 +85,7 @@ export function AppShell({
             onClick={() => onNavigate('materials')}
           >
             <LibraryBig size={17} aria-hidden="true" />
-            材料库
+            {t('材料库')}
           </button>
           <button
             className={`nav-button ${page === 'requisition' ? 'active' : ''}`}
@@ -90,7 +93,7 @@ export function AppShell({
             onClick={() => onNavigate('requisition')}
           >
             <ClipboardPlus size={17} aria-hidden="true" />
-            采购申请单
+            {t('采购申请单')}
           </button>
           <button
             className={`nav-button ${page === 'execution' ? 'active' : ''}`}
@@ -98,7 +101,7 @@ export function AppShell({
             onClick={() => onNavigate('execution')}
           >
             <ClipboardPlus size={17} aria-hidden="true" />
-            采购执行
+            {t('采购执行')}
           </button>
           <button
             className={`nav-button ${page === 'master-data' ? 'active' : ''}`}
@@ -106,7 +109,7 @@ export function AppShell({
             onClick={() => onNavigate('master-data')}
           >
             <Settings size={17} aria-hidden="true" />
-            基础资料管理
+            {t('基础资料管理')}
           </button>
           {(role === 'administrator' || role === 'super_administrator') && (
             <button
@@ -115,7 +118,7 @@ export function AppShell({
               onClick={() => onNavigate('conflicts')}
             >
               <Settings size={17} aria-hidden="true" />
-              同步冲突
+              {t('同步冲突')}
             </button>
           )}
           {(role === 'administrator' || role === 'super_administrator') && (
@@ -125,27 +128,47 @@ export function AppShell({
               onClick={() => onNavigate('authorization')}
             >
               <Settings size={17} aria-hidden="true" />
-              在线授权管理
+              {t('在线授权管理')}
             </button>
           )}
-          <p className="nav-label">即将接入</p>
+          <p className="nav-label">{t('即将接入')}</p>
           <button className="nav-button" type="button" disabled>
-            供应商与价格
+            {t('供应商与价格')}
           </button>
         </nav>
       </aside>
       <main className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">HONSEN Procure · 中文</p>
-            <h1>{pageTitle}</h1>
+            <p className="eyebrow">
+              HONSEN Procure ·{' '}
+              {locale === 'zh'
+                ? '中文'
+                : locale === 'en'
+                  ? 'English'
+                  : 'Français'}
+            </p>
+            <h1>{shellText(locale, pageTitle) ?? pageTitle}</h1>
           </div>
           <div className="identity">
+            <select
+              aria-label="界面语言 / UI language / Langue"
+              value={locale}
+              onChange={(event) => {
+                const value = event.target.value
+                if (value === 'zh' || value === 'en' || value === 'fr')
+                  setLocale(value)
+              }}
+            >
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+            </select>
             {authorizationContexts && authorizationContexts.length > 0 && (
               <label>
-                <span className="sr-only">当前授权范围</span>
+                <span className="sr-only">{t('当前授权范围')}</span>
                 <select
-                  aria-label="当前授权范围"
+                  aria-label={t('当前授权范围')}
                   value={selectedAuthorizationContext}
                   onChange={(event) =>
                     onSelectAuthorizationContext?.(event.target.value)
@@ -167,42 +190,42 @@ export function AppShell({
                 </select>
               </label>
             )}
-            <span role="status" aria-label="同步状态">
+            <span role="status" aria-label={t('同步状态')}>
               {syncState?.kind === 'syncing'
-                ? '同步中'
+                ? t('同步中')
                 : syncState?.kind === 'synced'
-                  ? '上次同步成功；新操作可能待同步'
+                  ? t('上次同步成功；新操作可能待同步')
                   : syncState?.kind === 'pending'
-                    ? `待同步 ${syncState.pendingCount ?? '未知'}`
+                    ? `${t('待同步')} ${syncState.pendingCount ?? t('未知')}`
                     : syncState?.kind === 'retrying'
-                      ? '连接失败，等待重试；本地数据待同步'
+                      ? t('连接失败，等待重试；本地数据待同步')
                       : syncState?.kind === 'auth-required'
-                        ? '登录已失效，请重新在线登录'
+                        ? t('登录已失效，请重新在线登录')
                         : syncState?.kind === 'account-boundary'
-                          ? '多账号拉取已暂停，需先完成账号隔离恢复'
-                          : '离线本地数据'}
+                          ? t('多账号拉取已暂停，需先完成账号隔离恢复')
+                          : t('离线本地数据')}
               {syncState?.kind !== 'pending' &&
               syncState?.pendingCount !== undefined
-                ? ` · 待同步 ${syncState.pendingCount}`
+                ? ` · ${t('待同步')} ${syncState.pendingCount}`
                 : ''}
               {syncState?.conflictCount
-                ? ` · 未解决冲突 ${syncState.conflictCount}`
+                ? ` · ${t('未解决冲突')} ${syncState.conflictCount}`
                 : ''}
               {syncState?.quoteRejectedCount
-                ? ` · ${syncState.quoteRejectedCount} 项报价失效，请撤回采购单并重新选价`
+                ? ` · ${syncState.quoteRejectedCount} ${t('项报价失效，请撤回采购单并重新选价')}`
                 : ''}
               {syncState?.quarantinedCount
-                ? ` · 待归属旧事件 ${syncState.quarantinedCount}`
+                ? ` · ${t('待归属旧事件')} ${syncState.quarantinedCount}`
                 : ''}
               {syncState?.lastSuccessAt != null
-                ? ` · 上次拉取成功 ${new Date(syncState.lastSuccessAt * 1000).toLocaleString()}`
+                ? ` · ${t('上次拉取成功')} ${new Date(syncState.lastSuccessAt * 1000).toLocaleString(locale === 'zh' ? 'zh-CN' : locale === 'en' ? 'en-US' : 'fr-FR')}`
                 : ''}
             </span>
             <span className="avatar">张</span>
-            <span>{roleLabel[role]}</span>
+            <span>{t(roleLabel[role])}</span>
             {onLock && (
               <button type="button" onClick={onLock}>
-                锁定
+                {t('锁定')}
               </button>
             )}
           </div>

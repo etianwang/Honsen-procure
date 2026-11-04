@@ -1,3 +1,7 @@
+import { useUiLocale } from './lib/ui-locale'
+import zhCN from 'antd/locale/zh_CN'
+import enUS from 'antd/locale/en_US'
+import frFR from 'antd/locale/fr_FR'
 import { useEffect, useState } from 'react'
 import {
   readSyncStatus,
@@ -166,6 +170,7 @@ const previewWorkflowApi: WorkflowApi = {
 }
 
 function App() {
+  const { locale } = useUiLocale()
   // shortcut: test-only query route, remove when the app has an authenticated test fixture.
   const isMoneyPreview =
     new URLSearchParams(window.location.search).get('test') === 'money'
@@ -369,6 +374,7 @@ function App() {
 
   return (
     <ConfigProvider
+      locale={locale === 'zh' ? zhCN : locale === 'en' ? enUS : frFR}
       theme={{
         token: {
           colorPrimary: '#176045',
