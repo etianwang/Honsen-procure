@@ -1650,7 +1650,7 @@ export class PostgresSyncStore implements SyncStore {
         return current ?? { version: '0', payload_json: {}, is_deleted: false }
       return null
     }
-    if (formal.documentType === 'HPA') {
+    if (formal.documentType === 'HPA' || formal.documentType === 'SPO') {
       const issuer = await client.query(
         `SELECT 1 FROM users u JOIN user_roles r ON r.user_id = u.id
          WHERE u.id = $1 AND u.is_enabled AND u.deleted_at IS NULL
@@ -1667,39 +1667,112 @@ export class PostgresSyncStore implements SyncStore {
     )
       return current ?? 'validation_error'
     const issuedStatus =
-      formal.documentType === 'OPA' ? 'formally_issued' : 'executing'
+      formal.documentType === 'OPA'
+        ? 'formally_issued'
+        : formal.documentType === 'SPO'
+          ? 'sent'
+          : 'executing'
     if (input.event.payload.workflowStatus !== issuedStatus)
       return 'validation_error'
     if (!isDeepStrictEqual(current.payload_json, formal.snapshot))
       return current
-    if (
-      !['approved', 'confirmed'].includes(
-        String(current.payload_json.workflowStatus),
-      ) ||
-      current.payload_json.confirmedBy === current.payload_json.applicantId ||
-      current.payload_json.selfApproved !== false ||
-      !Number.isSafeInteger(current.payload_json.confirmedAt) ||
-      Number(current.payload_json.confirmedAt) <= 0 ||
-      !isDeepStrictEqual(input.event.payload, {
-        ...formal.snapshot,
-        workflowStatus: issuedStatus,
-        documentType: formal.documentType,
-        formalDocumentNo: formal.documentNo,
-        formalInstallationId: formal.installationId,
-        formalSequence: formal.sequence,
-        formallyIssuedAt: input.event.payload.formallyIssuedAt,
-        formalSnapshotJson: input.event.payload.formalSnapshotJson,
-      })
-    )
-      return 'validation_error'
-    if (
-      !(await hasApprovalProvenance(
-        client,
-        input.event.entityId,
-        current.payload_json,
-      ))
-    )
-      return 'validation_error'
+    if (formal.documentType === 'SPO') {
+      if (
+        current.payload_json.workflowStatus !== 'draft' ||
+        !isDeepStrictEqual(input.event.payload, {
+          ...formal.snapshot,
+          workflowStatus: issuedStatus,
+          documentType: formal.documentType,
+          formalDocumentNo: formal.documentNo,
+          formalInstallationId: formal.installationId,
+          formalSequence: formal.sequence,
+          formallyIssuedAt: input.event.payload.formallyIssuedAt,
+          formalSnapshotJson: input.event.payload.formalSnapshotJson,
+        })
+      )
+        return 'validation_error'
+      const parentRows = await client.query<{
+        payload_json: Record<string, unknown>
+        is_deleted: boolean
+      }>(
+        "SELECT payload_json, is_deleted FROM sync_entities WHERE entity_type='purchase_order' AND entity_id=$1 FOR UPDATE",
+        [current.payload_json.parentOrderId],
+      )
+      const parent = parentRows.rows[0]
+      if (
+        !parent ||
+        parent.is_deleted ||
+        parent.payload_json.parentOrderId != null ||
+        parent.payload_json.procurementMode !== 'honsen_self_purchase' ||
+        !['approved', 'confirmed', 'executing'].includes(
+          String(parent.payload_json.workflowStatus),
+        )
+      )
+        return 'validation_error'
+      let approval = parent.payload_json
+      if (approval.workflowStatus === 'executing') {
+        const parsed = parseFormalIssue(approval)
+        if (!parsed || parsed === 'invalid' || parsed.documentType !== 'HPA')
+          return 'validation_error'
+        const registered = await client.query(
+          "SELECT 1 FROM formal_issue_registry WHERE order_id=$1 AND document_type='HPA' AND formal_snapshot_json=$2::jsonb",
+          [current.payload_json.parentOrderId, parsed.snapshot],
+        )
+        if (registered.rowCount !== 1) return 'validation_error'
+        approval = parsed.snapshot
+      }
+      if (
+        ![
+          'countryId',
+          'projectId',
+          'departmentId',
+          'teamId',
+          'applicantId',
+        ].every(
+          (key) => parent.payload_json[key] === current.payload_json[key],
+        ) ||
+        typeof approval.confirmedBy !== 'string' ||
+        approval.confirmedBy === approval.applicantId ||
+        approval.selfApproved !== false ||
+        !Number.isSafeInteger(approval.confirmedAt) ||
+        Number(approval.confirmedAt) <= 0 ||
+        !(await hasApprovalProvenance(
+          client,
+          String(current.payload_json.parentOrderId),
+          approval,
+        ))
+      )
+        return 'validation_error'
+    } else {
+      if (
+        !['approved', 'confirmed'].includes(
+          String(current.payload_json.workflowStatus),
+        ) ||
+        current.payload_json.confirmedBy === current.payload_json.applicantId ||
+        current.payload_json.selfApproved !== false ||
+        !Number.isSafeInteger(current.payload_json.confirmedAt) ||
+        Number(current.payload_json.confirmedAt) <= 0 ||
+        !isDeepStrictEqual(input.event.payload, {
+          ...formal.snapshot,
+          workflowStatus: issuedStatus,
+          documentType: formal.documentType,
+          formalDocumentNo: formal.documentNo,
+          formalInstallationId: formal.installationId,
+          formalSequence: formal.sequence,
+          formallyIssuedAt: input.event.payload.formallyIssuedAt,
+          formalSnapshotJson: input.event.payload.formalSnapshotJson,
+        })
+      )
+        return 'validation_error'
+      if (
+        !(await hasApprovalProvenance(
+          client,
+          input.event.entityId,
+          current.payload_json,
+        ))
+      )
+        return 'validation_error'
+    }
     const codes = await client.query<{
       country_code: string
       project_code: string
@@ -2745,7 +2818,11 @@ async function validParentWithExistingRfqs(
 }
 
 function validFormalTransition(before: unknown, after: unknown): boolean {
-  if (before === 'formally_issued' || before === 'executing')
+  if (
+    before === 'formally_issued' ||
+    before === 'executing' ||
+    before === 'sent'
+  )
     return after === 'receiving'
   if (before === 'receiving')
     return [

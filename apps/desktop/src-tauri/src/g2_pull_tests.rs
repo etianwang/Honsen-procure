@@ -164,6 +164,70 @@ fn hpa_pull_freezes_the_complete_honsen_snapshot_and_advances_to_receiving() {
     assert_eq!(service.pull_cursor_for_account(id(1)).unwrap(), "3");
 }
 
+#[test]
+fn spo_pull_freezes_supplier_terms_and_preserves_restart_replay_and_conflicts() {
+    let (service, path, now) = service();
+    dependencies(&service, true);
+    let mut payload = approved();
+    payload["procurementMode"] = Value::Null;
+    payload["workflowStatus"] = json!("draft");
+    payload["parentOrderId"] = json!(id(20));
+    payload["supplierId"] = json!(id(7));
+    payload["supplierSnapshotJson"] =
+        json!(r#"{"id":"10000000-0000-4000-8000-000000000007","name":"frozen supplier"}"#);
+    payload["supplierTermsCompletedAt"] = json!(1);
+    let mut parent_page = page(approved(), 1, 1);
+    parent_page.changes[0].entity_id = id(20);
+    for (index, line) in parent_page.changes[0].payload["lines"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        line["id"] = json!(id(30 + index as u128));
+    }
+    service.apply_sync_pull_page(parent_page, now).unwrap();
+    for line in payload["lines"].as_array_mut().unwrap() {
+        line["currency"] = json!("XOF");
+        for field in LINE_FIELDS {
+            line[field] = Value::Null;
+        }
+    }
+    service
+        .apply_sync_pull_page(page(payload.clone(), 2, 1), now)
+        .unwrap();
+    payload["formalSnapshotJson"] = json!(payload.to_string());
+    payload["workflowStatus"] = json!("sent");
+    payload["documentType"] = json!("SPO");
+    payload["formalDocumentNo"] = json!("G2C-G2P-20261019-SPO-00000001-7");
+    payload["formalInstallationId"] = json!("00000000-0000-4000-8000-000000000001");
+    payload["formalSequence"] = json!("7");
+    payload["formallyIssuedAt"] = json!(1);
+    service
+        .apply_sync_pull_page(page(payload.clone(), 3, 2), now)
+        .unwrap();
+    assert_eq!(stored(&service), payload);
+    payload["workflowStatus"] = json!("receiving");
+    service
+        .apply_sync_pull_page(page(payload.clone(), 4, 3), now)
+        .unwrap();
+    assert_eq!(stored(&service), payload);
+    drop(service);
+    let service = LocalAuthService::open_file_for_test(path.to_str().unwrap()).unwrap();
+    service
+        .activate_online_session(id(1), &"x".repeat(32), now)
+        .unwrap();
+    service
+        .apply_sync_pull_page(page(payload.clone(), 4, 3), now)
+        .unwrap();
+    assert_eq!(stored(&service), payload);
+    let mut bad = payload.clone();
+    bad["lines"][0]["unitPriceMinor"] = json!("101");
+    assert!(service.apply_sync_pull_page(page(bad, 5, 4), now).is_err());
+    assert_eq!(stored(&service), payload);
+    assert_eq!(service.pull_cursor_for_account(id(1)).unwrap(), "4");
+}
+
 fn page(payload: Value, cursor: i64, version: i64) -> SyncPullPageInput {
     SyncPullPageInput {
         changes: vec![SyncPullChangeInput {

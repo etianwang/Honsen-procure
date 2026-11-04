@@ -1700,7 +1700,7 @@ test('purchaser completes supplier-child terms before sending the order', async 
   await expect(page.getByText('子单条款已保存，含税总额 3511。')).toBeVisible()
   await page.getByRole('button', { name: '发送供应商' }).click()
   await expect(
-    page.getByText('供应商子单已发送，可开始登记收货。'),
+    page.getByText('供应商子单已签发 SPO 并发送，可开始登记收货。'),
   ).toBeVisible()
   await expect(
     page.evaluate(

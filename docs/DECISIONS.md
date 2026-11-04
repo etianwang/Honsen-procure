@@ -40,3 +40,7 @@
 ## Deferred
 
 Supplier API integration, inventory, approvals, accounting, OCR, AI, mobile, external supplier login.
+
+## 2026-11-04 SPO issuance boundary
+
+User selected reuse of the existing supplier-order send action: completed child terms under an approved Honsen parent issue SPO and transition draft to sent in one trusted transaction. No independent child approval is added and historical sent children are not backfilled. The implementation accepts approved/confirmed parents or executing parents with verifiable frozen HPA approval; cancelled/completed parents are excluded. Existing one-supplier/one-currency terms, ordinary integer pricing, snapshots and authorization remain enforced.

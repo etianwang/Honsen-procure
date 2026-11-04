@@ -9,7 +9,7 @@ import {
 } from '@honsen/shared'
 
 export type FormalIssue = {
-  documentType: 'OPA' | 'HPA'
+  documentType: 'OPA' | 'HPA' | 'SPO'
   documentNo: string
   installationId: string
   sequence: string
@@ -46,13 +46,18 @@ export function parseFormalIssue(
   const parsedCountryId = uuidSchema.safeParse(countryId)
   const parsedProjectId = uuidSchema.safeParse(projectId)
   const parsedPrimaryCurrency = currencySchema.safeParse(primaryCurrency)
+  const supplierChild = documentType === 'SPO'
   const owner = documentType === 'OPA'
   const mode = owner ? 'owner_self_purchase' : 'honsen_self_purchase'
   if (
-    (documentType !== 'OPA' && documentType !== 'HPA') ||
-    payload.procurementMode !== mode ||
+    (documentType !== 'OPA' &&
+      documentType !== 'HPA' &&
+      documentType !== 'SPO') ||
+    (supplierChild
+      ? payload.procurementMode != null && payload.procurementMode !== mode
+      : payload.procurementMode !== mode) ||
     ![
-      owner ? 'formally_issued' : 'executing',
+      owner ? 'formally_issued' : supplierChild ? 'sent' : 'executing',
       'receiving',
       'completed',
       'completed_with_conditions',
@@ -70,7 +75,9 @@ export function parseFormalIssue(
     !parsedCountryId.success ||
     !parsedProjectId.success ||
     !uuidSchema.safeParse(payload.applicantId).success ||
-    payload.parentOrderId != null ||
+    (supplierChild
+      ? !uuidSchema.safeParse(payload.parentOrderId).success
+      : payload.parentOrderId != null) ||
     typeof orderDate !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}$/.test(orderDate) ||
     !parsedPrimaryCurrency.success ||
@@ -88,8 +95,12 @@ export function parseFormalIssue(
   }
   if (!isRecord(snapshot)) return 'invalid'
   if (
-    snapshot.procurementMode !== mode ||
-    !['approved', 'confirmed'].includes(String(snapshot.workflowStatus)) ||
+    (supplierChild
+      ? snapshot.procurementMode != null && snapshot.procurementMode !== mode
+      : snapshot.procurementMode !== mode) ||
+    !(supplierChild ? ['draft'] : ['approved', 'confirmed']).includes(
+      String(snapshot.workflowStatus),
+    ) ||
     snapshot.countryId !== countryId ||
     snapshot.projectId !== projectId ||
     snapshot.primaryCurrency !== primaryCurrency ||
@@ -98,6 +109,21 @@ export function parseFormalIssue(
   )
     return 'invalid'
 
+  if (
+    supplierChild &&
+    (!uuidSchema.safeParse(payload.supplierId).success ||
+      !currencySchema.safeParse(payload.currency).success ||
+      typeof payload.supplierSnapshotJson !== 'string' ||
+      typeof payload.supplierTermsCompletedAt !== 'number' ||
+      !Number.isSafeInteger(payload.supplierTermsCompletedAt) ||
+      payload.supplierTermsCompletedAt <= 0 ||
+      snapshot.parentOrderId !== payload.parentOrderId ||
+      snapshot.supplierId !== payload.supplierId ||
+      snapshot.currency !== payload.currency ||
+      snapshot.supplierSnapshotJson !== payload.supplierSnapshotJson ||
+      snapshot.supplierTermsCompletedAt !== payload.supplierTermsCompletedAt)
+  )
+    return 'invalid'
   const hpaLineIds = new Set<string>()
   for (const line of lines) {
     if (!isRecord(line)) return 'invalid'
@@ -106,6 +132,7 @@ export function parseFormalIssue(
         !uuidSchema.safeParse(line.id).success ||
         hpaLineIds.has(String(line.id)) ||
         !currencySchema.safeParse(line.currency).success ||
+        (supplierChild && line.currency !== payload.currency) ||
         !positiveQuantitySchema.safeParse(line.quantity).success ||
         typeof line.unit !== 'string' ||
         !line.unit.trim() ||

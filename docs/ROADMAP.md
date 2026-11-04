@@ -252,3 +252,5 @@ T05/T06/T08 have a bounded quote-list correctness repair under independent revie
 Independent branch `codex/v1-release-candidate` integrates unified baseline d348514, payment/COS98537d2 and release-toolbox f9145e1. [Exact source ledger, validation and open gates](planning/V1-RC-INTEGRATION.md). This is a bounded candidate-building slice, not T15/V1 parent acceptance. Original dependency table, task register and all final gates remain unchanged. No production deployment or stable Release is authorized.
 
 2026-11-04 partial V1 progress: bounded installation-directory/NSIS-adapter P1 repaired and guest-tested, including cross-version update and synthetic retention. Original milestone checkboxes stay unchanged; dual-native business, complete exports/localization and Toolbox parent gates stay open. See docs/reviews/INSTALL-P1-RESULT-20261104.md and docs/V1交接进度表.md.
+
+2026-11-04 partial V1: SPO trusted formal issue implemented through existing send action; unit/PostgreSQL/DOM verification passed. Native SPO/complete printing/export/localization and all original parent gates remain open; no milestone checkbox changed.

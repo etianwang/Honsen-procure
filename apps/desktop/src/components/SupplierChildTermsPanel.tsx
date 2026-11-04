@@ -84,10 +84,18 @@ export function SupplierChildTermsPanel({
       return
     }
     try {
-      await api.sendSupplierOrder(orderId)
-      setMessage('供应商子单已发送，可开始登记收货。')
+      const issued = await api.sendSupplierOrder(orderId)
+      if (issued) {
+        setMessage(
+          `供应商子单已签发 ${issued.formalDocumentNo} 并发送，可开始登记收货。`,
+        )
+        return
+      }
+      setMessage('供应商子单已签发 SPO 并发送，可开始登记收货。')
     } catch {
-      setMessage('发送失败：请确认子单条款已保存且订单尚未发送。')
+      setMessage(
+        '发送失败：请确认父单已批准、子单条款已保存且订单尚未签发；原条款已保留。',
+      )
     }
   }
 
