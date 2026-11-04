@@ -496,6 +496,32 @@ try {
     ).rows[0].count,
     1,
   )
+  phase = 'publish-material'
+  // The profile seed is local-only; publish its real catalog dependency before
+  // the later quote. Server-side reference validation must remain enabled.
+  const material = readDb(
+    profiles[1],
+    'SELECT * FROM local_materials WHERE id=?',
+    ids[5],
+  )[0]
+  await call(issuer, 'save_material', {
+    material: {
+      id: material.id,
+      sku: material.sku,
+      categoryId: material.category_id,
+      nameZh: material.name_zh,
+      nameFr: material.name_fr,
+      aliases: JSON.parse(material.aliases_json),
+      brand: material.brand,
+      model: material.model,
+      specification: material.specification,
+      unit: material.unit,
+      notes: material.notes,
+      isActive: material.is_active === 1,
+      version: material.version,
+    },
+  })
+  await push(issuer)
   phase = 'publish-supplier'
   await call(issuer, 'save_supplier', {
     supplier: {
