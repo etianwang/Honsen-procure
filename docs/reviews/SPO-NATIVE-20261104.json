@@ -1,0 +1,128 @@
+{
+  "testedApplicationSha": "100011d41383bac4a7533c388572b4ac65bb97ee",
+  "sourceDirty": "",
+  "result": "PASS",
+  "mode": "spo-formal-pull",
+  "runId": "native-smoke-20261104080217",
+  "exeHashes": [
+    "fde98259b5b31c2ffab97b40a104ffa6f3ef24490a172a80973feb956221d190",
+    "fde98259b5b31c2ffab97b40a104ffa6f3ef24490a172a80973feb956221d190"
+  ],
+  "profileHelperSha256": "a5914e95983b7bea9be5ce9c287d86805b7a074909fc612415c1dd1ad2e9ccd6",
+  "installations": [
+    "6bd8c3fe-6486-4db9-8bb9-40ee8d87d8ad",
+    "607f773d-df8b-495e-b80a-2d2cedd3fedf"
+  ],
+  "orderId": "3ee0276f-1c9a-4d44-8c05-5a10bf3d0293",
+  "childId": "ac5dd056-b5df-4cbc-aa13-1904e842e061",
+  "draftUnissued": true,
+  "unreadySendNoPartialIssue": true,
+  "unauthorizedSendDenied": true,
+  "nativeUiSend": true,
+  "spoIssue": {
+    "documentType": "SPO",
+    "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-5KPX7ZPZ-2"
+  },
+  "concurrentRetryRejected": true,
+  "concurrentInitialSend": {
+    "childId": "ab121a2b-d01e-4fa8-971a-423603a16395",
+    "results": [
+      {
+        "status": "fulfilled",
+        "value": {
+          "documentType": "SPO",
+          "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-5KPX7ZPZ-3",
+          "formalInstallationId": "607f773d-df8b-495e-b80a-2d2cedd3fedf",
+          "formalSequence": 3
+        }
+      },
+      {
+        "status": "rejected",
+        "reason": {
+          "code": "forbidden"
+        }
+      }
+    ]
+  },
+  "serverFailureRetainedPending": {
+    "result": {
+      "ok": false,
+      "error": {
+        "code": "sync_transport_error"
+      }
+    },
+    "pending": 2
+  },
+  "spoPush": {
+    "acceptedCount": 3,
+    "pendingCount": 0
+  },
+  "spoConverged": true,
+  "spoFrozenAfterCatalogAndRestart": true,
+  "parentHpaRestartPreserved": true,
+  "parentHpaReplayPreserved": true,
+  "consoleErrors": [],
+  "independentReadback": {
+    "ac5dd056-b5df-4cbc-aa13-1904e842e061": {
+      "registryCount": 1,
+      "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-5KPX7ZPZ-2",
+      "status": "sent",
+      "bothClientsMatchCloud": true
+    },
+    "ab121a2b-d01e-4fa8-971a-423603a16395": {
+      "registryCount": 1,
+      "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-5KPX7ZPZ-3",
+      "status": "sent",
+      "bothClientsMatchCloud": true
+    }
+  },
+  "postgresVersion": {
+    "server_version": "16.15"
+  },
+  "localSchema": {
+    "migrationCount": 53,
+    "last": {
+      "version": "0059_payment_conflict_decisions",
+      "checksum": "9687bf221362a5df82841aae654e93b3ebf63efe12121e440471c1f8f7fae0d1",
+      "applied_at": 1793779345
+    }
+  },
+  "postgresMigrationNames": [
+    "001_auth_and_master_data.sql",
+    "002_project_defaults_and_master_data.sql",
+    "003_sync.sql",
+    "004_authorization_scopes.sql",
+    "005_nullable_project_default_contact.sql",
+    "005_procurement_expenditures.sql",
+    "005_sync_event_origin.sql",
+    "006_attachments.sql",
+    "006_formal_issue_registry.sql",
+    "007_category_code_conflict.sql",
+    "008_category_code_quarantine.sql",
+    "009_category_code_repairs.sql",
+    "010_catalog_sync_quarantine.sql",
+    "011_attachment_derivation.sql",
+    "012_payment_sync_compatibility.sql",
+    "013_payment_conflict_resolutions.sql"
+  ],
+  "rawEvidence": ".honsen-native-qa/native-smoke-20261104080217.test.json",
+  "limitation": "Two debug-test-profile Windows processes on one host; not installed release package, physical multi-host or complete security/PDF acceptance",
+  "readOnlyRecheck": {
+    "result": "PASS",
+    "archivedServer503Count": 1,
+    "archivedPullAgainstCurrentRetainedSQLite": [
+      {
+        "childId": "ac5dd056-b5df-4cbc-aa13-1904e842e061",
+        "actualArchivedServerPullMatchesBothSQLite": true,
+        "snapshotSha256": "93c6416431727cc7842b28c4838e8810b1f3293dc3c55c1b4f3ed713dbc8c93e"
+      },
+      {
+        "childId": "ab121a2b-d01e-4fa8-971a-423603a16395",
+        "actualArchivedServerPullMatchesBothSQLite": true,
+        "snapshotSha256": "7994978dccd5ce7eba34b212c325d377ec8757764ba20e413ae6f634390d609c"
+      }
+    ],
+    "exactCopiedExeHashesRecomputed": true,
+    "scope": "Read-only evidence/artifact recheck; no native rerun and no live PG connection"
+  }
+}
