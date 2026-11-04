@@ -5,6 +5,19 @@ import {
 } from './sync.js'
 
 describe('sync contracts', () => {
+  it('rejects an oversized invalid push batch before accumulating element issues', () => {
+    const result = syncPushRequestSchema.safeParse({
+      deviceId: '00000000-0000-4000-8000-000000000001',
+      events: Array.from({ length: 10_000 }, () => null),
+    })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('Oversized push must fail')
+    expect(result.error.issues).toHaveLength(1)
+    expect(result.error.issues[0]).toMatchObject({
+      code: 'too_big',
+      path: ['events'],
+    })
+  })
   it('accepts only a reasoned use-server payment decision without forged provenance', () => {
     const request = {
       id: '00000000-0000-4000-8000-000000000001',
