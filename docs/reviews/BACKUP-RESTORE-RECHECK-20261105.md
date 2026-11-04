@@ -23,3 +23,14 @@ No current-candidate backup/restore PASS is claimed. No COS credentials or objec
 Ignored orchestration drafts are in `.cache/agent-evidence/`: `debian-retention-controller.sh`, `business-restore-controller.sh`, `business-model.sql`. Review before execution; these are not delivered test results.
 
 BLOCKER: fresh full retention/restore evidence requires the compatible disposable runtime. Installed security, native restored history/object consistency and original Toolbox qualified live launch/apply/worker, UAC cancellation and actual caller gates remain open. Previously passed installation P1 was not rerun.
+
+## Successful environment repair and fresh results
+
+The initial failures above remain historical evidence. A subsequent permitted disposable-container dependency installation (`apk add --no-cache coreutils`, GNU9.11-r0) supplied the actual GNU tools; no commands or assertions were mocked, and no host WSL/Docker installation changed.
+
+- Existing `test-backup-retention.sh`: exit0 PASS — same-second unique backups, newest10 retention, failed dump/list preservation, unmanaged/symlink safety, lock refusal and no-clobber collision.
+- Existing `test-business-restore.sh`: exit0 PASS — current checkout migrations, parser-valid synthetic formal history, distinct PostgreSQL16 cluster identities, all public content equality, historical relationships and immutable guards.
+- Both test runs used task-owned containers, no host port bindings, no persistent data volumes and read-only repository mounts. The business restore source installed coreutils on bridge then disconnected before target creation and actual restore; the target shared only the source network namespace on internal5433. No native54329 access occurred. EXIT traps removed all owned containers.
+- Source business/schema boundary remains `f5631ea39aa59414c6b4194b502a4a46f2c82ecb`; the intervening `83fd7b3` changes only this report. The synthetic SQL was generated from that current checkout, not a historical release package.
+
+The compatible-runtime blocker is resolved for these two tests. The earlier BLOCKER sentence applies only to the pre-repair attempt. Authenticated restored API readback, HTTPS/native installed historical/object recovery and Toolbox final gates remain open. These successful script tests do not substitute for those gates. No production deployment, Release or merge occurred.
