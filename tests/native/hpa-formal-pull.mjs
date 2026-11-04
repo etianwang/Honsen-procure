@@ -61,6 +61,7 @@ const report = {
   exePaths,
   exePids,
   calls,
+  launches: [],
   consoleErrors,
 }
 let phase = 'fixture'
@@ -138,6 +139,29 @@ async function launch(index, port) {
     cwd: dirname(exePaths[index]),
     windowsHide: true,
     env: environment,
+  })
+  const diagnostic = {
+    index,
+    port,
+    pid: child.pid,
+    stdout: '',
+    stderr: '',
+    exitCode: null,
+    signal: null,
+  }
+  report.launches.push(diagnostic)
+  child.stdout.on('data', (chunk) => {
+    diagnostic.stdout = (diagnostic.stdout + chunk.toString()).slice(-12000)
+  })
+  child.stderr.on('data', (chunk) => {
+    diagnostic.stderr = (diagnostic.stderr + chunk.toString()).slice(-12000)
+  })
+  child.on('error', (error) => {
+    diagnostic.spawnError = String(error)
+  })
+  child.on('exit', (code, signal) => {
+    diagnostic.exitCode = code
+    diagnostic.signal = signal
   })
   children.push(child)
   exePids.push(child.pid)
@@ -562,7 +586,6 @@ try {
   report.error = String(error.stack ?? error)
   throw error
 } finally {
-  writeFileSync(resultPath, JSON.stringify(report, null, 2))
   for (const browser of browsers) await browser.close().catch(() => {})
   for (const child of children.reverse()) {
     if (child.exitCode === null && child.signalCode === null) {
@@ -572,4 +595,5 @@ try {
     }
   }
   await pool.end()
+  writeFileSync(resultPath, JSON.stringify(report, null, 2))
 }
