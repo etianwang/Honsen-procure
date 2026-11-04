@@ -813,3 +813,7 @@ Build shared contracts and exact money/quantity helpers only:
 ## 2026-11-04 V1恢复执行检查点
 
 用户解除冻结，授权Commit+Push，不授权merge/release/生产。当前codex/v1-resume-20261104基于f4756af；三真实Agent完成凭据及Linux静态校验和HPA基线核对。状态入口docs/V1交接进度表.md保留原要求并追加鲜测证据。BLOCKER：统一RC缺HPA实现，需审查集成a2b73ae9及a869a526；安装P1有限合同修复待批准。DEFERRED：真实双端付款/COS/HPA、完整三语/导出、生产恢复。WARNING：凭据探针不替代在线登录业务验收，Linux静态3/3不替代恢复。无schema/迁移/业务修改，无生产连接。只新增记录；检查点见本分支最新commit，提交后无选定任务脏文件。跳过HPA native因RC缺trusted命令，直接影响该原生验收；付款链因本轮仅验证最小凭据边界未执行。不得标父任务完成。
+
+## 2026-11-04 统一候选集成与门禁
+
+当前codex/v1-resume-20261104：39b3d65引入唯一未集成HPA提交，付款/COS/outbox/SQLite0059/PG013经A审查已完全包含，不重复导入。主控保留双方文档解决cherry-pick冲突，无业务冲突。新增测试fixture修复（旧mig-order改实际seed UUID且assert插入1行），修前FK787重现，修后focused1与Rust123全过。JS共享25/桌面16、PG HPA/formal/migration18、付款冲突16、DOM2、release7、lint/typecheck/build及定向格式通过；仅既有lint/chunk WARNING。隔离honsen-v1-integration-20261104容器与网络已down --volumes清除，无生产访问。新checkpoint包含修复与证据，准确SHA用git log本分支核对，全部授权push。BLOCKER：原生付款/冲销/COS缺明确授权CosEnvFile及同SHA EXE，HPA原生缺可执行场景；四项NOT RUN，未以DOM/Rust替代。BLOCKER：安装目录P1有限方案待批准，未改合同。DEFERRED：真实双端撤权/重启/同步、SPO/PDF/Excel/全三语/备份恢复及原父门禁。WARNING：完整Rust初次失败是fixture，修复不改业务/schema，无数据迁移。所有进度父项保持未完成，不merge/main/release/生产部署。
