@@ -545,6 +545,20 @@ try {
     },
   })
   await login(a, 'purchaser-b')
+  // This account is not part of the local profile seed. Obtain its cloud-authorized
+  // scope through the real IPC/HTTPS boundary before attempting an offline write.
+  await call(a, 'refresh_authorization')
+  assert.ok(
+    readDb(
+      0,
+      'SELECT 1 FROM local_authorization_snapshots WHERE account_id=? AND project_id=? AND department_id=? AND team_id=?',
+      ids[14],
+      ids[2],
+      ids[3],
+      ids[4],
+    ).length === 1,
+    'the switched purchaser must have its own cloud-verified order scope',
+  )
   for (const [index, id] of paymentIds.entries())
     await call(a, 'record_procurement_expenditure', {
       input: {
