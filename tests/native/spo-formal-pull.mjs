@@ -463,6 +463,8 @@ try {
           specification: 'Synthetic snapshot',
         },
         supplierId: null,
+        priceSource: 'manual',
+        catalogPriceId: null,
         currency: 'XOF',
         quantity: '1',
         unit: '米',
