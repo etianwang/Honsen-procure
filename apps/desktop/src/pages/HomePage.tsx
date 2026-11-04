@@ -1,3 +1,5 @@
+import { useUiLocale } from '../lib/ui-locale'
+import { homeText, homeMoney, type HomeMessage } from '../lib/home-messages'
 import { Alert, Button, Card } from 'antd'
 import { Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -12,7 +14,7 @@ type HomePageProps = {
   onOpenExecution: () => void
 }
 
-const statusLabels: Record<string, string> = {
+const statusLabels: Record<string, HomeMessage> = {
   draft: '草稿',
   pending_confirmation: '待审批',
   rejected: '已驳回',
@@ -30,6 +32,8 @@ export function HomePage({
   onNewRequisition,
   onOpenExecution,
 }: HomePageProps) {
+  const { locale } = useUiLocale()
+  const t = (key: HomeMessage) => homeText(locale, key)
   const [result, setResult] = useState<{
     key: string
     data: Awaited<ReturnType<typeof loadWorkbench>> | null
@@ -56,34 +60,34 @@ export function HomePage({
     <>
       <section className="page-heading">
         <div>
-          <h2>今日概览</h2>
-          <p>当前授权范围内已保存的采购申请；统计按父单计算。</p>
+          <h2>{t('今日概览')}</h2>
+          <p>{t('当前授权范围内已保存的采购申请；统计按父单计算。')}</p>
         </div>
         <Button
           type="primary"
           icon={<Plus size={16} />}
           onClick={onNewRequisition}
         >
-          新建采购申请
+          {t('新建采购申请')}
         </Button>
         <Button
           onClick={() => setRefresh((value) => value + 1)}
           loading={!data && !failed}
         >
-          刷新待办
+          {t('刷新待办')}
         </Button>
       </section>
       {failed ? (
         <Alert
           type="error"
           showIcon
-          title="无法读取已保存订单，请刷新重试或重新登录。"
+          title={t('无法读取已保存订单，请刷新重试或重新登录。')}
         />
       ) : !data ? (
-        <p role="status">正在读取已保存订单…</p>
+        <p role="status">{t('正在读取已保存订单…')}</p>
       ) : (
         <>
-          <section className="metric-grid" aria-label="采购统计">
+          <section className="metric-grid" aria-label={t('采购统计')}>
             {(
               [
                 ['待审批', data.counts.pending_confirmation],
@@ -91,18 +95,26 @@ export function HomePage({
                 ['待收货', data.counts.receiving],
               ] as const
             ).map(([label, count]) => (
-              <article className="metric" key={label}>
-                <div className="metric-label">{label}</div>
-                <div className="metric-value">{count}</div>
+              <article className="metric" key={t(label)}>
+                <div className="metric-label">{t(label)}</div>
+                <div className="metric-value">
+                  {count.toLocaleString(
+                    locale === 'zh'
+                      ? 'zh-CN'
+                      : locale === 'en'
+                        ? 'en-US'
+                        : 'fr-FR',
+                  )}
+                </div>
               </article>
             ))}
           </section>
           <Card
             className="card"
-            title="待处理订单"
+            title={t('待处理订单')}
             extra={
               <Button type="link" onClick={onNewRequisition}>
-                打开请购历史
+                {t('打开请购历史')}
               </Button>
             }
           >
@@ -110,10 +122,10 @@ export function HomePage({
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th scope="col">单据编号</th>
-                    <th scope="col">项目</th>
-                    <th scope="col">工地</th>
-                    <th scope="col">状态</th>
+                    <th scope="col">{t('单据编号')}</th>
+                    <th scope="col">{t('项目')}</th>
+                    <th scope="col">{t('工地')}</th>
+                    <th scope="col">{t('状态')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -123,37 +135,33 @@ export function HomePage({
                       <td>{order.projectName}</td>
                       <td>{order.site}</td>
                       <td>
-                        {statusLabels[order.workflowStatus] ??
-                          order.workflowStatus}
+                        {t(statusLabels[order.workflowStatus] ?? '未知状态')}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : (
-              <p>当前授权范围内没有待处理订单。</p>
+              <p>{t('当前授权范围内没有待处理订单。')}</p>
             )}
           </Card>
-          <Card
-            className="card"
-            title="已保存申请金额（不含取消，整数最小货币单位）"
-          >
+          <Card className="card" title={t('已保存申请金额（不含取消）')}>
             {data.amounts.length ? (
               <ul>
                 {data.amounts.map((amount) => (
                   <li key={amount.currency}>
-                    {amount.minor} {amount.currency}
+                    {homeMoney(amount.minor, amount.currency, locale)}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p>暂无已保存金额。</p>
+              <p>{t('暂无已保存金额。')}</p>
             )}
           </Card>
         </>
       )}
-      <Button onClick={onOpenExecution}>打开采购执行与收货</Button>{' '}
-      <Button onClick={onOpenMaterials}>打开材料库</Button>
+      <Button onClick={onOpenExecution}>{t('打开采购执行与收货')}</Button>{' '}
+      <Button onClick={onOpenMaterials}>{t('打开材料库')}</Button>
     </>
   )
 }
