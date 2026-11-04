@@ -1,0 +1,74 @@
+{
+  "applicationSource": "854186c3d22540d81ee39c2af49c3128e20c10f6",
+  "owningSourceComparison": "git diff --quiet 854186c -- apps packages exit0",
+  "exeSha256": "74774bfe641c851a5762fc7b6f39f8b7f6771f88b9b040e5a1d8c9d99c160769",
+  "helperSha256": "d1f2ec90096c8a5db26758ad5f7288519959430f36370ee438bf906231a267a1",
+  "frontend": {
+    "files": [
+      {
+        "name": "assets/exceljs.min-Cf70n0VU.js",
+        "sha256": "faa6f0710b7b1102f5a0f942a8838d534c3a754488031d4c0c8433d1df6d40d4"
+      },
+      {
+        "name": "assets/index-TSK8dCqa.js",
+        "sha256": "feb9e259ea04b7a065c28e35b52a445a5c1e98a7b52c58a8d94f5e8f6ac9f679"
+      },
+      {
+        "name": "assets/index-u5jv6GD-.css",
+        "sha256": "fc32e06d521fb0045a8b066baa36d1ffb01dd1c7d38718be0bc9141223290155"
+      },
+      {
+        "name": "favicon.svg",
+        "sha256": "61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66"
+      },
+      {
+        "name": "icons.svg",
+        "sha256": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a"
+      },
+      {
+        "name": "index.html",
+        "sha256": "ca157c65f3bcccb80af66d507fe79fec0ce2feaedff62ee09c56664aa557b81e"
+      }
+    ],
+    "sha256": "f6f01887167a7679c30f5ecdc327c552b2a444555233a74b99a05a68b1e5c41f"
+  },
+  "paymentReversalCos": {
+    "cleanup": "PASS objects4",
+    "evidence": ".cache/native-20261104190746/evidence.test.json",
+    "result": "PASS"
+  },
+  "hpa": {
+    "run": "native-smoke-20261104190924",
+    "result": "PASS"
+  },
+  "spo": {
+    "run": "native-smoke-20261104191027",
+    "result": "PASS"
+  },
+  "opaFr": {
+    "run": "native-smoke-20261104191911",
+    "pdfSha256": "994896839c0e6e4b7167afd18acb285f422e7ee934ca1190780b83748e9f1e04",
+    "result": "PASS local native PDF"
+  },
+  "opaEn": {
+    "run": "native-smoke-20261104192130",
+    "pdfSha256": "588079de0f4ee3b4cf3102ddafc4fbb1ce199723bb85f9e777cada75b1c45b38",
+    "result": "PASS local native PDF"
+  },
+  "abSecurity": {
+    "run": "native-smoke-20261104191117",
+    "reason": "Pull applied_count expected1 actual2, authorization replay plus normal page; exact conflict preservation passed",
+    "result": "FAIL"
+  },
+  "g1": {
+    "run": "native-smoke-20261104192613",
+    "reason": "stale Push pendingCount expected1 actual0; revoked-session assertions not reached",
+    "result": "FAIL"
+  },
+  "cleanup": "controller down --volumes confirmed; holder interrupted; no owned1420/3443/54329/9241/9242 listeners",
+  "harness": {
+    "g1Sha256": "885f9a328ba2809812eb0c1e7385a076db93fdec58db088c97cf069b5a129603",
+    "scope": "external test compatibility/OPA fixture only; no apps/packages changes",
+    "offlineSha256": "0f1554892262a04e6dea9ee1ac10dbcf69119592ecbebfa6068d3ea7155d5e89"
+  }
+}

@@ -73,12 +73,14 @@ async function launch(profile, port) {
   const environment = {
     ...globalThis.process.env,
     HONSEN_PROCURE_TEST_DB_PATH: profile,
+    HONSEN_NATIVE_WEBVIEW_TEST_PORT: String(port),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1`,
     WEBVIEW2_USER_DATA_FOLDER: `${profile}.webview`,
   }
   delete environment.HONSEN_PROCURE_NATIVE_SMOKE
   const process = spawn(
-    join(repo, 'apps/desktop/src-tauri/target/debug/HonsenProcure.exe'),
+    globalThis.process.env.HONSEN_PROCURE_NATIVE_EXE ??
+      join(repo, 'apps/desktop/src-tauri/target/debug/HonsenProcure.exe'),
     [],
     {
       cwd: repo,
@@ -100,7 +102,7 @@ async function launch(profile, port) {
   })
   try {
     await expect(
-      page.getByRole('heading', { name: '登录 HONSEN Procure' }),
+      page.getByRole('button', { name: '在线登录', exact: true }),
     ).toBeVisible({ timeout: 30_000 })
   } catch (error) {
     await page.screenshot({ path: `${resultPath}-startup.png` })
@@ -163,7 +165,7 @@ async function login(page, username, password, pending = 0) {
     .fill(String(answer((await cloud.innerText()).split('：')[1])))
   await page.getByRole('button', { name: '在线登录', exact: true }).click()
   await expect(
-    page.getByRole('heading', { name: '登录 HONSEN Procure' }),
+    page.getByRole('button', { name: '在线登录', exact: true }),
   ).toHaveCount(0)
   await expect
     .poll(async () => (await call(page, 'sync_status')).pendingCount)
@@ -172,7 +174,7 @@ async function login(page, username, password, pending = 0) {
 async function lock(page) {
   await page.getByRole('button', { name: /锁定/u }).click()
   await expect(
-    page.getByRole('heading', { name: '登录 HONSEN Procure' }),
+    page.getByRole('button', { name: '在线登录', exact: true }),
   ).toBeVisible()
 }
 async function loginCore(page, username, password) {
@@ -229,7 +231,7 @@ try {
   )
   children.push(vite)
   await ready('http://127.0.0.1:1420')
-  const producer = await launch(profileB, 9235)
+  const producer = await launch(profileB, 9241)
   await loginCore(
     producer,
     'engineer-b',
@@ -238,7 +240,7 @@ try {
   await call(producer, 'save_material', { material })
   assert.equal((await call(producer, 'push_pending_sync')).acceptedCount, 1)
   await call(producer, 'lock_session')
-  const page = await launch(profileA, 9236)
+  const page = await launch(profileA, 9242)
   // Keep the renderer logged out during setup so automatic Pull cannot replace the deliberate stale baseline.
   await loginCore(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
   await call(page, 'save_material', {

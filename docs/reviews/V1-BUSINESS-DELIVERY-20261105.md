@@ -1,3 +1,5 @@
+> 2026-11-05 current environment correction: historical WSL HCS BLOCKED_ENV is resolved. WSL2, normal-user Docker and PostgreSQL16 are freshly working. Business results are evaluated separately at854186c; see [restored acceptance](V1-RESTORED-ACCEPTANCE-20261105.md). The historical source-bound failures below remain preserved.
+
 # V1 business delivery — 2026-11-05
 
 Application source: `c08ac9ddc0cfe3eeabe7ed464d0c10c034172360`, branch `codex/v1-resume-20261104`. Earlier installation/update work is preserved. User authorized development, tests, commits and pushes, but not main changes, merge, Release or production deployment.

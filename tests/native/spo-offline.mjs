@@ -429,6 +429,18 @@ try {
           version: 1,
         },
       })
+      await call(receiver, 'save_exchange_rate', {
+        rate: {
+          id: randomUUID(),
+          fromCurrency: 'USD',
+          toCurrency: 'EUR',
+          rateDecimal: '0.5',
+          effectiveAt: '2026-10-01',
+          source: 'manual',
+          reason: 'Synthetic fixture only',
+          version: 1,
+        },
+      })
       await call(receiver, 'lock_session')
     }
     await login(

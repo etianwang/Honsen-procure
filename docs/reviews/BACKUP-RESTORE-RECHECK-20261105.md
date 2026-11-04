@@ -34,3 +34,25 @@ The initial failures above remain historical evidence. A subsequent permitted di
 - Source business/schema boundary remains `f5631ea39aa59414c6b4194b502a4a46f2c82ecb`; the intervening `83fd7b3` changes only this report. The synthetic SQL was generated from that current checkout, not a historical release package.
 
 The compatible-runtime blocker is resolved for these two tests. The earlier BLOCKER sentence applies only to the pre-repair attempt. Authenticated restored API readback, HTTPS/native installed historical/object recovery and Toolbox final gates remain open. These successful script tests do not substitute for those gates. No production deployment, Release or merge occurred.
+
+## Final frozen-source authenticated restore — PASS
+
+Exact application source: `187d42b9ad62bedb3fde4d47670a04bc4a92f1a1`. Fresh Node24.18.0 Bookworm disposable runtime copied only current server/shared source, migrations, test drivers and committed dependency manifests. Linux `npm ci --ignore-scripts`, explicit `npm rebuild argon2`, shared build and server build all passed. No historical runtime package was used. Two npm advisories (low/moderate) remain warnings; no dependency rewrite occurred.
+
+After build, the Node container disconnected from bridge. Two new PG16 clusters shared that isolated network namespace on internal5432/5433; no host binding or persistent volume. Existing hardened authenticated driver checked distinct expected cluster identities before fixture creation, then generated synthetic account/history, dumped/restored the archive, started the actual built API and authenticated through password/arithmetic CAPTCHA. Login200 and scoped Pull200 passed. Exact SPO formal number/frozen snapshot, original300XOF payment,50XOF reversal/net250 and attachment metadata/reference all survived. Object bytes, HTTPS and Windows native were not tested by this driver.
+
+Controller exit0. All three owned containers were removed by EXIT cleanup. Runtime manifest has125 files; independent byte SHA-256 comparison against the frozen checkout found zero mismatches. Safe proof: `AUTHENTICATED-RESTORE-20261105.json`; manifest: `AUTHENTICATED-RESTORE-20261105.sha256`, SHA-256 `4676d514e16c55108c90234bb08433aa36d52ee48b490b2a196138e8d260f31c`.
+
+An earlier dirty-tree authenticated run also reached business PASS but had no source manifest and a final Windows docker-cp fchmodat2 permission failure. It is not used as frozen-SHA evidence. The final run exported via docker-exec/cat and captured actual source hashes, resolving the artifact step without changing tests.
+
+## Installed security prerequisite — actual check
+
+Read-only checks on this host: `C:/Windows/System32/WindowsSandbox.exe` does not exist; `Get-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM` reports `Disabled`. Existing `sandbox-runner-security.ps1` needs a fresh same-source NSIS package and a disposable Sandbox; its guest and installed security scripts explicitly require `WDAGUtilityAccount` and guest HKLM registration. Therefore that installed Runner negative suite was not executed on the host, and debug-native results are not substituted. No Windows feature, host HKLM registration or user data was modified. This does not automatically close or retest installation P1, installed business security, restored native/object consistency or Toolbox final joint gates.
+
+## Final OPA-repair source independent rerun — PASS
+
+After the independently identified OPA first-Push defect was repaired, a new runtime was built from frozen source `854186c3d22540d81ee39c2af49c3128e20c10f6`. The187d42 run and its original result/manifest above remain preserved; they were not relabeled.
+
+Fresh Linux npm ci, Argon2 rebuild, shared/server production builds and the full independent-cluster authenticated restore driver all passed exit0. Real password/CAPTCHA login200, scoped Pull200, exact SPO formal snapshot/number, payment300/reversal50/net250 and attachment-reference preservation passed again. No object bytes, TLS or installed native acceptance is claimed. All three owned containers were removed; native54329 was not used.
+
+The new actual runtime source manifest contains125 files, independently compared byte-for-byte to the frozen checkout with zero SHA-256 mismatches. Manifest SHA-256: `40251ae17aff82aad7ae2fcd84a469d345196a7b5000c855492a1692e0ef9b01`. Safe result and manifest: `AUTHENTICATED-RESTORE-854186C-20261105.json` and `AUTHENTICATED-RESTORE-854186C-20261105.sha256`.

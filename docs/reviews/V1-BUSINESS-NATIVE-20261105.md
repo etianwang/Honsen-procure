@@ -1,3 +1,5 @@
+> 2026-11-05 current environment correction: historical WSL HCS BLOCKED_ENV is resolved. WSL2, normal-user Docker and PostgreSQL16 are freshly working. Business results are evaluated separately at854186c; see [restored acceptance](V1-RESTORED-ACCEPTANCE-20261105.md). The historical source-bound failures below remain preserved.
+
 # V1 business native verification — 2026-11-05
 
 Tested clean frozen application source: `c08ac9ddc0cfe3eeabe7ed464d0c10c034172360`. The containing evidence commit is not the tested source. Exact EXE/helper hashes and the six-file frontend manifest are in the adjacent JSON and raw `.honsen-native-qa/native-smoke-20261104162423-offline.test.json`.
