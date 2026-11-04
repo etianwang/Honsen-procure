@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Input } from 'antd'
+import { Alert, Button, Card, Input, Select } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import type {
   RequisitionApi,
@@ -7,6 +7,8 @@ import type {
   RequisitionHistoryFilter,
   RequisitionHistoryPage,
 } from '../lib/requisition-api'
+import { buildHistoryWorkbook } from '../lib/history-excel'
+import { tauriWorkflowApi } from '../lib/workflow-api'
 import type { WorkflowApi } from '../lib/workflow-api'
 import { OrderWorkflowPanel } from './OrderWorkflowPanel'
 import { FormalPrintPreview } from './FormalPrintPreview'
@@ -51,6 +53,53 @@ export function RequisitionHistoryPanel({
   const [detailLoading, setDetailLoading] = useState(false)
   const [withdrawError, setWithdrawError] = useState(false)
   const [issueError, setIssueError] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState(false)
+  const [exportLocale, setExportLocale] = useState<'zh-CN' | 'fr-FR' | 'en-US'>(
+    'zh-CN',
+  )
+  async function exportExcel() {
+    setExporting(true)
+    setExportError(false)
+    try {
+      const bytes = await buildHistoryWorkbook(
+        {
+          ...api,
+          listOrderComments: (workflowApi ?? tauriWorkflowApi)
+            .listOrderComments,
+          getFormalPrintDocument: async (orderId) => {
+            const invoke = (
+              window as Window & {
+                __TAURI__?: {
+                  core?: {
+                    invoke?: (name: string, args: object) => Promise<unknown>
+                  }
+                }
+              }
+            ).__TAURI__?.core?.invoke
+            if (!invoke) throw Error('Desktop unavailable')
+            return invoke('get_formal_print_document', { orderId })
+          },
+        },
+        filter,
+        exportLocale,
+      )
+      const url = URL.createObjectURL(
+        new Blob([new Uint8Array(bytes)], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+      )
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'Honsen-Procure-history.xlsx'
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      setExportError(true)
+    } finally {
+      setExporting(false)
+    }
+  }
   const detailRequest = useRef(0)
 
   useEffect(() => {
@@ -130,6 +179,32 @@ export function RequisitionHistoryPanel({
 
   return (
     <Card className="card" title="请购历史">
+      <p>
+        导出当前筛选范围的全部授权记录，包含内部评论与审计；此文件用于内部核对。
+      </p>
+      <Select
+        aria-label="Excel导出语言"
+        value={exportLocale}
+        onChange={setExportLocale}
+        options={[
+          { value: 'zh-CN', label: '中文' },
+          { value: 'fr-FR', label: 'Français' },
+          { value: 'en-US', label: 'English' },
+        ]}
+      />
+      <Button
+        loading={exporting}
+        disabled={exporting}
+        onClick={() => void exportExcel()}
+      >
+        导出Excel
+      </Button>
+      {exportError && (
+        <Alert
+          type="error"
+          title="导出失败，未下载部分结果；请刷新列表后重试。"
+        />
+      )}
       <form
         onSubmit={(event) => {
           event.preventDefault()

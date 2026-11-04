@@ -1,3 +1,4 @@
+import { Workbook } from 'exceljs'
 import { expect, test } from '@playwright/test'
 
 test('development sign-in placeholder opens the workbench and navigates accessibly', async ({
@@ -2055,6 +2056,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                 ) ?? contexts[0]
               return Promise.resolve()
             }
+            if (command === 'list_order_comments') return Promise.resolve([])
             if (command === 'list_requisition_history')
               return Promise.resolve({
                 records:
@@ -2229,6 +2231,26 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(page.locator('.formal-print-sheet')).not.toContainText(
     'supplier',
   )
+  await page.getByLabel('搜索单号、项目或工地').fill('REQ-HISTORY-1')
+  await page.getByRole('button', { name: '筛选', exact: true }).click()
+  const excelDownloadEvent = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出Excel', exact: true }).click()
+  const excelDownload = await excelDownloadEvent
+  await excelDownload.saveAs(
+    test.info().outputPath('normal-history-formal.xlsx'),
+  )
+  const excelBook = new Workbook()
+  await excelBook.xlsx.readFile((await excelDownload.path())!)
+  expect(excelBook.getWorksheet('订单')?.getCell('B2').value).toBe(
+    'TEST-OPA-20261013-OPA-ABCDEFGH-1',
+  )
+  expect(excelBook.getWorksheet('订单')?.getCell('G2').value).toBe('1200 XOF')
+  expect(excelBook.getWorksheet('明细')?.getCell('D2').value).toBe(
+    'Câble électrique',
+  )
+  await page
+    .getByRole('button', { name: '查看详情：REQ-HISTORY-1', exact: true })
+    .click()
   const originalDraftNo = await page.locator('.page-heading p').textContent()
   page.once('dialog', (dialog) => void dialog.dismiss())
   await page.getByRole('button', { name: '复制为新草稿' }).click()
