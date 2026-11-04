@@ -25,6 +25,9 @@ mod expenditures;
 pub mod formal_print;
 pub use attachments::{AttachmentInput, AttachmentTarget, AttachmentView, ProcurementSyncReport};
 mod seed;
+mod update_launch;
+#[cfg(windows)]
+mod update_launch_windows;
 pub mod update_runner;
 pub use seed::SeedImportReport;
 

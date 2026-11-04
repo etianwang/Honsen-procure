@@ -1,6 +1,6 @@
 # Toolbox launch scope2 精确实施方案 — 2026-11-04
 
-状态：**待用户批准，未修改 production 代码**。本方案只批准 Procure 自身 Runner launch；scope3 Toolbox 跨仓库 caller 不在本次范围。
+状态：**用户已于2026-11-04明确批准该有限scope2及失败处理政策，实施中，尚未验收**。授权回复为“批准该有限 scope2 及失败处理政策”。本方案只批准 Procure 自身 Runner launch；scope3 Toolbox 跨仓库 caller 不在本次范围。下文“待批准”措辞保留原方案历史，现已由本次明确授权满足。
 
 ## 已确认差距
 

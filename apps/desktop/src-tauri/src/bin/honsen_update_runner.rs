@@ -9,6 +9,10 @@ fn main() -> ExitCode {
     match run(env::args().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            #[cfg(windows)]
+            if env::args().nth(1).as_deref() == Some("launch") {
+                honsen_materials_desktop_core::update_runner::show_launch_error();
+            }
             eprintln!("HonsenUpdateRunner: {error}");
             ExitCode::from(1)
         }

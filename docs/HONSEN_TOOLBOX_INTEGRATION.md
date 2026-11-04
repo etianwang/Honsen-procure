@@ -2,6 +2,10 @@
 
 # Honsen Toolbox Integration
 
+## Current approved launch scope2 — 2026-11-04
+
+User explicitly approved reviews/TOOLBOX-LAUNCH-IMPLEMENTATION-20261104.md and its offline/404/failure policy after candidate66c777e. Re-read upstream README, Windows standard, desktop update protocol, integration contract and schema in that order before implementation. Current gaps remain: incomplete launch identity validation, no native stable-update selection or skipped-version preference; actual Toolbox scope3 caller and qualified stable assets remain separate. The first three gaps are now authorized only within that exact proposal. No Manifest/public argument/result/data/installation boundary change is approved. New private launch identity validation must not silently alter existing apply validation behavior. Implementation/test evidence is pending; approval is not PASS or automatic catalog eligibility.
+
 ## Status
 
 **RC integration in progress; installed Toolbox acceptance is not complete.** The product is internally distributed rather than publicly released, but automatic update still uses the fixed Toolbox/Runner contract. This document records the approved identity and the remaining implementation gaps; it does not authorize an installer, Runner, manifest, registry entry, catalog mutation or release.

@@ -216,28 +216,409 @@ pub fn read_manifest(install_location: &Path) -> Result<Manifest, RunnerError> {
         .map_err(|_| RunnerError::ManifestMismatch)
 }
 
-pub fn launch(_source: Source) -> Result<(), RunnerError> {
-    let registration = read_registration()?;
-    let manifest = read_manifest(&registration.install_location)?;
-    if manifest.app_id != APP_ID
+// Launch has stricter identity requirements than the existing apply protocol.
+// Keep its registry reader separate so this change cannot alter apply behavior.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LaunchRegistration {
+    registration: Registration,
+    launcher_path: PathBuf,
+    update_manifest_url: String,
+    update_url: String,
+    publisher: String,
+    display_name: String,
+    install_scope: String,
+}
+
+fn validate_launch_fields(
+    record: &LaunchRegistration,
+    manifest: &Manifest,
+) -> Result<(), RunnerError> {
+    use crate::update_launch::CANONICAL_UPDATE_URL;
+    let r = &record.registration;
+    if r.app_id != APP_ID || manifest.app_id != APP_ID {
+        return Err(RunnerError::AppIdMismatch);
+    }
+    if manifest.schema_version != 1
+        || manifest.publisher != "Honsen"
+        || record.publisher != "Honsen"
         || manifest.executable != MAIN_EXECUTABLE
         || manifest.update_runner != RUNNER_EXECUTABLE
-        || !is_child_path(
-            &registration.executable_path,
-            &registration.install_location,
-            MAIN_EXECUTABLE,
-        )
+        || manifest.display_name != "Honsen Procure"
+        || record.display_name != manifest.display_name
+        || !matches!(record.install_scope.as_str(), "machine" | "user")
+        || manifest.update_manifest_url != CANONICAL_UPDATE_URL
+        || record.update_manifest_url != CANONICAL_UPDATE_URL
+        || record.update_url != CANONICAL_UPDATE_URL
     {
+        return Err(RunnerError::ManifestContractMismatch);
+    }
+    if !is_version(&r.version) || !is_version(&manifest.version) || r.version != manifest.version {
+        return Err(RunnerError::VersionContractMismatch);
+    }
+    crate::update_launch::compare_versions(&r.version, &manifest.version)?;
+    if !is_absolute_windows_path(&normalize_windows_path(&r.install_location))
+        || !is_child_path(&r.executable_path, &r.install_location, MAIN_EXECUTABLE)
+        || !is_child_path(&r.runner_path, &r.install_location, RUNNER_EXECUTABLE)
+        || !same_windows_path(&record.launcher_path, &r.runner_path)
+    {
+        return Err(RunnerError::TargetDirectoryMismatch);
+    }
+    Ok(())
+}
+
+fn same_launch_registration(a: &LaunchRegistration, b: &LaunchRegistration) -> bool {
+    a.registration.app_id == b.registration.app_id
+        && a.registration.version == b.registration.version
+        && same_windows_path(
+            &a.registration.install_location,
+            &b.registration.install_location,
+        )
+        && same_windows_path(
+            &a.registration.executable_path,
+            &b.registration.executable_path,
+        )
+        && same_windows_path(&a.registration.runner_path, &b.registration.runner_path)
+        && same_windows_path(&a.launcher_path, &b.launcher_path)
+        && a.update_manifest_url == b.update_manifest_url
+        && a.update_url == b.update_url
+        && a.publisher == b.publisher
+        && a.display_name == b.display_name
+        && a.install_scope == b.install_scope
+}
+
+fn unique_launch_registration(
+    records: Vec<LaunchRegistration>,
+) -> Result<LaunchRegistration, RunnerError> {
+    let mut records = records.into_iter();
+    let selected = records.next().ok_or(RunnerError::RegistrationMissing)?;
+    if records.any(|r| !same_launch_registration(&selected, &r)) {
+        return Err(RunnerError::Io(
+            "conflicting application registrations".into(),
+        ));
+    }
+    Ok(selected)
+}
+
+fn parse_launch_manifest(bytes: &[u8]) -> Result<Manifest, RunnerError> {
+    if bytes.len() > 1024 * 1024 {
         return Err(RunnerError::ManifestMismatch);
     }
+    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
+    serde_json::from_slice(bytes).map_err(|_| RunnerError::ManifestMismatch)
+}
+
+#[cfg(windows)]
+fn read_launch_registration() -> Result<LaunchRegistration, RunnerError> {
+    use winreg::{
+        RegKey,
+        enums::{
+            HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
+        },
+    };
+    let mut records = Vec::new();
+    for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        for view in [KEY_WOW64_64KEY, KEY_WOW64_32KEY] {
+            let key = match RegKey::predef(hive).open_subkey_with_flags(
+                format!("Software\\Honsen Program\\Apps\\{APP_ID}"),
+                KEY_READ | view,
+            ) {
+                Ok(key) => key,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(_) => return Err(RunnerError::RegistrationMissing),
+            };
+            let read = |name| {
+                key.get_value::<String, _>(name)
+                    .map_err(|_| RunnerError::RegistrationMissing)
+            };
+            records.push(LaunchRegistration {
+                registration: Registration {
+                    app_id: read("AppId")?,
+                    version: read("Version")?,
+                    install_location: read("InstallLocation")?.into(),
+                    executable_path: read("ExecutablePath")?.into(),
+                    runner_path: read("UpdateRunnerPath")?.into(),
+                },
+                launcher_path: read("LauncherPath")?.into(),
+                update_manifest_url: read("UpdateManifestUrl")?,
+                update_url: read("UpdateUrl")?,
+                publisher: read("Publisher")?,
+                display_name: read("DisplayName")?,
+                install_scope: read("InstallScope")?,
+            });
+        }
+    }
+    unique_launch_registration(records)
+}
+
+#[cfg(windows)]
+fn reject_reparse_components(path: &Path) -> Result<(), RunnerError> {
+    use std::os::windows::fs::MetadataExt;
+    if !path.is_absolute() {
+        return Err(RunnerError::TargetDirectoryMismatch);
+    }
+    for ancestor in path.ancestors() {
+        let metadata =
+            fs::symlink_metadata(ancestor).map_err(|_| RunnerError::TargetDirectoryMismatch)?;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(RunnerError::TargetDirectoryMismatch);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn verify_launch_installation() -> Result<LaunchRegistration, RunnerError> {
+    let record = read_launch_registration()?;
+    let r = &record.registration;
+    reject_reparse_components(&r.install_location)?;
+    let parent =
+        fs::canonicalize(&r.install_location).map_err(|_| RunnerError::TargetDirectoryMismatch)?;
+    for (path, name) in [
+        (&r.executable_path, MAIN_EXECUTABLE),
+        (&r.runner_path, RUNNER_EXECUTABLE),
+        (&record.launcher_path, RUNNER_EXECUTABLE),
+        (
+            &r.install_location.join("honsen.app.json"),
+            "honsen.app.json",
+        ),
+    ] {
+        reject_reparse_components(path)?;
+        let real = fs::canonicalize(path).map_err(|_| RunnerError::TargetDirectoryMismatch)?;
+        if !path.is_file() || !same_windows_path(&real, &parent.join(name)) {
+            return Err(RunnerError::TargetDirectoryMismatch);
+        }
+    }
+    let manifest_path = r.install_location.join("honsen.app.json");
+    let mut bytes = Vec::new();
+    fs::File::open(manifest_path)?
+        .take(1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    let manifest = parse_launch_manifest(&bytes)?;
+    validate_launch_fields(&record, &manifest)?;
+    verify_file_version(&r.executable_path, &r.version)?;
+    let own = std::env::current_exe()?;
+    reject_reparse_components(&own)?;
+    if !same_windows_path(&fs::canonicalize(own)?, &fs::canonicalize(&r.runner_path)?) {
+        return Err(RunnerError::TargetDirectoryMismatch);
+    }
+    Ok(record)
+}
+
+trait LaunchEnvironment {
+    fn validate(&mut self) -> Result<LaunchRegistration, RunnerError>;
+    fn skipped(&mut self) -> Result<Option<String>, RunnerError>;
+    fn stable(&mut self) -> Result<crate::update_launch::StableAsset, RunnerError>;
+    fn confirm_failure(&mut self) -> Result<bool, RunnerError>;
+    fn warn(&mut self) -> Result<(), RunnerError>;
+    fn choice(
+        &mut self,
+        installed: &str,
+        new: &str,
+    ) -> Result<crate::update_launch::UpdateChoice, RunnerError>;
+    fn save_skip(&mut self, version: &str) -> Result<(), RunnerError>;
+    fn spawn(&mut self, verified: &LaunchRegistration) -> Result<(), RunnerError>;
+    fn install(
+        &mut self,
+        verified: &LaunchRegistration,
+        asset: &crate::update_launch::StableAsset,
+    ) -> Result<(), RunnerError>;
+}
+
+fn launch_local(
+    host: &mut impl LaunchEnvironment,
+    expected: &LaunchRegistration,
+) -> Result<(), RunnerError> {
+    let verified = host.validate()?;
+    if !same_launch_registration(&verified, expected) {
+        return Err(RunnerError::ManifestMismatch);
+    }
+    host.spawn(&verified)
+}
+
+fn orchestrate_launch(host: &mut impl LaunchEnvironment) -> Result<(), RunnerError> {
+    use crate::update_launch::{UpdateChoice, compare_versions};
+    let installed = host.validate()?; // Never query the network for an invalid local identity.
+    let skipped = match host.skipped() {
+        Ok(value) => value,
+        Err(_) => {
+            host.warn()?;
+            None
+        }
+    };
+    let asset = match host.stable() {
+        Ok(asset) => asset,
+        Err(_) => {
+            return if host.confirm_failure()? {
+                launch_local(host, &installed)
+            } else {
+                Ok(())
+            };
+        }
+    };
+    if compare_versions(&asset.version, &installed.registration.version)?
+        != std::cmp::Ordering::Greater
+        || skipped.as_deref() == Some(asset.version.as_str())
+    {
+        return launch_local(host, &installed);
+    }
+    match host.choice(&installed.registration.version, &asset.version)? {
+        UpdateChoice::RemindLater => launch_local(host, &installed),
+        UpdateChoice::SkipVersion => {
+            if host.save_skip(&asset.version).is_err() {
+                host.warn()?;
+            }
+            launch_local(host, &installed)
+        }
+        UpdateChoice::UpdateNow => host.install(&installed, &asset), // Apply failures never fall back to spawn.
+    }
+}
+
+#[cfg(windows)]
+struct WindowsLaunchEnvironment {
+    source: Source,
+}
+
+#[cfg(windows)]
+impl LaunchEnvironment for WindowsLaunchEnvironment {
+    fn validate(&mut self) -> Result<LaunchRegistration, RunnerError> {
+        verify_launch_installation()
+    }
+    fn skipped(&mut self) -> Result<Option<String>, RunnerError> {
+        crate::update_launch::read_skipped_version()
+    }
+    fn stable(&mut self) -> Result<crate::update_launch::StableAsset, RunnerError> {
+        crate::update_launch::parse_stable_release(
+            &crate::update_launch_windows::fetch_release_metadata()?,
+        )
+    }
+    fn confirm_failure(&mut self) -> Result<bool, RunnerError> {
+        crate::update_launch_windows::confirm_local_after_failure()
+    }
+    fn warn(&mut self) -> Result<(), RunnerError> {
+        crate::update_launch_windows::show_preferences_warning()
+    }
+    fn choice(
+        &mut self,
+        installed: &str,
+        new: &str,
+    ) -> Result<crate::update_launch::UpdateChoice, RunnerError> {
+        crate::update_launch_windows::choose_update(installed, new)
+    }
+    fn save_skip(&mut self, version: &str) -> Result<(), RunnerError> {
+        crate::update_launch::save_skipped_version(version)
+    }
+    fn spawn(&mut self, verified: &LaunchRegistration) -> Result<(), RunnerError> {
+        std::process::Command::new(&verified.registration.executable_path).spawn()?;
+        Ok(())
+    }
+    fn install(
+        &mut self,
+        verified: &LaunchRegistration,
+        asset: &crate::update_launch::StableAsset,
+    ) -> Result<(), RunnerError> {
+        let download = match crate::update_launch_windows::download_installer(asset) {
+            Ok(download) => download,
+            Err(_) => {
+                return if self.confirm_failure()? {
+                    launch_local(self, verified)
+                } else {
+                    Ok(())
+                };
+            }
+        };
+        if verify_installer_sha256(download.path(), &asset.sha256).is_err() {
+            return if self.confirm_failure()? {
+                launch_local(self, verified)
+            } else {
+                Ok(())
+            };
+        }
+        let current = verify_launch_installation()?;
+        if !same_launch_registration(&current, verified) {
+            return Err(RunnerError::ManifestMismatch);
+        }
+        let operation_id = Uuid::new_v4().to_string();
+        let results =
+            PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or(RunnerError::ResultPathMismatch)?)
+                .join("Honsen Program")
+                .join("UpdateResults")
+                .join(APP_ID);
+        // Check existing ancestors before creating our private result directory.
+        for ancestor in results.ancestors() {
+            if ancestor.exists() {
+                reject_reparse_components(ancestor)?;
+                break;
+            }
+        }
+        fs::create_dir_all(&results)?;
+        reject_reparse_components(&results)?;
+        let result_path = results.join(format!("{operation_id}.json"));
+        let source = match self.source {
+            Source::App => "app",
+            Source::Toolbox => "toolbox",
+        };
+        let status = std::process::Command::new(&current.registration.runner_path)
+            .arg("apply")
+            .args([
+                "--source",
+                source,
+                "--app-id",
+                APP_ID,
+                "--wait-pid",
+                "0",
+                "--installer",
+            ])
+            .arg(download.path())
+            .args(["--sha256", &asset.sha256, "--target-dir"])
+            .arg(&current.registration.install_location)
+            .args([
+                "--expected-version",
+                &asset.version,
+                "--restart",
+                "true",
+                "--operation-id",
+                &operation_id,
+                "--result-path",
+            ])
+            .arg(&result_path)
+            .status()?;
+        let result: OperationResult = serde_json::from_slice(&fs::read(&result_path)?)
+            .map_err(|_| RunnerError::ManifestMismatch)?;
+        if !status.success()
+            || result.status != "success"
+            || result.operation_id != operation_id
+            || result.app_id != APP_ID
+            || result.source != self.source
+            || result.to_version != asset.version
+            || result.from_version != current.registration.version
+            || result.install_location.as_ref().is_none_or(|path| {
+                !same_windows_path(Path::new(path), &current.registration.install_location)
+            })
+            || result.executable_path.as_ref().is_none_or(|path| {
+                !same_windows_path(Path::new(path), &current.registration.executable_path)
+            })
+        {
+            return Err(RunnerError::Io(
+                "update failed; inspect operation result and installer log".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+pub fn show_launch_error() {
+    crate::update_launch_windows::show_launch_error();
+}
+
+pub fn launch(source: Source) -> Result<(), RunnerError> {
     #[cfg(windows)]
     {
-        std::process::Command::new(&registration.executable_path).spawn()?;
-        Ok(())
+        orchestrate_launch(&mut WindowsLaunchEnvironment { source })
     }
     #[cfg(not(windows))]
     {
-        let _ = registration;
+        let _ = source;
         Err(RunnerError::UnsupportedPlatform)
     }
 }
@@ -731,6 +1112,17 @@ mod tests {
             update_manifest_url: "https://updates.example.invalid/releases/latest".into(),
         }
     }
+    #[test]
+    fn launch_manifest_accepts_utf8_bom_and_rejects_bad_or_oversized_json() {
+        let original = manifest();
+        let bytes = serde_json::to_vec(&original).unwrap();
+        assert_eq!(parse_launch_manifest(&bytes).unwrap(), original);
+        let mut bom = vec![0xef, 0xbb, 0xbf];
+        bom.extend_from_slice(&bytes);
+        assert_eq!(parse_launch_manifest(&bom).unwrap(), original);
+        assert!(parse_launch_manifest(b"{broken").is_err());
+        assert!(parse_launch_manifest(&vec![b' '; 1024 * 1024 + 1]).is_err());
+    }
     fn request() -> ApplyRequest {
         ApplyRequest {
             source: Source::Toolbox,
@@ -866,5 +1258,266 @@ mod tests {
             "the helper process never acquired the global lock"
         );
         assert!(child.wait().unwrap().success());
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+    use crate::update_launch::{CANONICAL_UPDATE_URL, StableAsset, UpdateChoice};
+    fn record() -> LaunchRegistration {
+        LaunchRegistration {
+            registration: Registration {
+                app_id: APP_ID.into(),
+                version: "1.2.3".into(),
+                install_location: r"C:\Honsen Program\Honsen Procure".into(),
+                executable_path: r"C:\Honsen Program\Honsen Procure\HonsenProcure.exe".into(),
+                runner_path: r"C:\Honsen Program\Honsen Procure\HonsenUpdateRunner.exe".into(),
+            },
+            launcher_path: r"C:\Honsen Program\Honsen Procure\HonsenUpdateRunner.exe".into(),
+            update_manifest_url: CANONICAL_UPDATE_URL.into(),
+            update_url: CANONICAL_UPDATE_URL.into(),
+            publisher: "Honsen".into(),
+            display_name: "Honsen Procure".into(),
+            install_scope: "machine".into(),
+        }
+    }
+    fn manifest() -> Manifest {
+        Manifest {
+            schema_version: 1,
+            app_id: APP_ID.into(),
+            display_name: "Honsen Procure".into(),
+            version: "1.2.3".into(),
+            executable: MAIN_EXECUTABLE.into(),
+            update_runner: RUNNER_EXECUTABLE.into(),
+            publisher: "Honsen".into(),
+            update_manifest_url: CANONICAL_UPDATE_URL.into(),
+        }
+    }
+    #[test]
+    fn launch_identity_fields_reject_foreign_old_and_conflicting_records() {
+        let good = record();
+        let m = manifest();
+        assert!(validate_launch_fields(&good, &m).is_ok());
+        for field in 0..8 {
+            let mut r = good.clone();
+            let mut m = m.clone();
+            match field {
+                0 => r.launcher_path = r"C:\outside\HonsenUpdateRunner.exe".into(),
+                1 => r.update_url = "https://example.invalid/old".into(),
+                2 => r.update_manifest_url = "https://example.invalid/old".into(),
+                3 => m.version = "1.2.4".into(),
+                4 => m.schema_version = 2,
+                5 => m.publisher = "foreign".into(),
+                6 => r.registration.executable_path = r"C:\outside\HonsenProcure.exe".into(),
+                _ => m.update_manifest_url = "https://example.invalid/old".into(),
+            }
+            assert!(validate_launch_fields(&r, &m).is_err(), "field {field}");
+        }
+        assert!(unique_launch_registration(vec![good.clone(), good.clone()]).is_ok());
+        let mut foreign = good.clone();
+        foreign.registration.version = "1.2.4".into();
+        assert!(unique_launch_registration(vec![good, foreign]).is_err());
+        assert!(unique_launch_registration(vec![]).is_err());
+    }
+    struct Fake {
+        calls: Vec<&'static str>,
+        valid: bool,
+        revalidate: bool,
+        changed_identity: bool,
+        network: bool,
+        confirm: bool,
+        choice: UpdateChoice,
+        skip: Option<String>,
+        read_skip_ok: bool,
+        warn_ok: bool,
+        new_version: String,
+        save_ok: bool,
+        install_ok: bool,
+    }
+    impl Fake {
+        fn new() -> Self {
+            Self {
+                calls: vec![],
+                valid: true,
+                revalidate: true,
+                changed_identity: false,
+                network: true,
+                confirm: false,
+                choice: UpdateChoice::RemindLater,
+                skip: None,
+                read_skip_ok: true,
+                warn_ok: true,
+                new_version: "2.0.0".into(),
+                save_ok: true,
+                install_ok: true,
+            }
+        }
+    }
+    impl LaunchEnvironment for Fake {
+        fn validate(&mut self) -> Result<LaunchRegistration, RunnerError> {
+            let repeated = self.calls.contains(&"validate");
+            self.calls.push("validate");
+            if self.valid && (!repeated || self.revalidate) {
+                let mut value = record();
+                if repeated && self.changed_identity {
+                    value.registration.version = "1.2.4".into();
+                }
+                Ok(value)
+            } else {
+                Err(RunnerError::ManifestMismatch)
+            }
+        }
+        fn skipped(&mut self) -> Result<Option<String>, RunnerError> {
+            self.calls.push("read_skip");
+            if self.read_skip_ok {
+                Ok(self.skip.clone())
+            } else {
+                Err(RunnerError::Io("preference unavailable".into()))
+            }
+        }
+        fn stable(&mut self) -> Result<StableAsset, RunnerError> {
+            self.calls.push("network");
+            if self.network {
+                Ok(StableAsset {
+                    version: self.new_version.clone(),
+                    name: format!("Honsen-Procure-{}-Setup.exe", self.new_version),
+                    url: format!(
+                        "https://github.com/etianwang/Honsen-procure/releases/download/v{0}/Honsen-Procure-{0}-Setup.exe",
+                        self.new_version
+                    ),
+                    sha256: "a".repeat(64),
+                    size: 10,
+                })
+            } else {
+                Err(RunnerError::Io("source unavailable".into()))
+            }
+        }
+        fn confirm_failure(&mut self) -> Result<bool, RunnerError> {
+            self.calls.push("confirm");
+            Ok(self.confirm)
+        }
+        fn warn(&mut self) -> Result<(), RunnerError> {
+            self.calls.push("warn");
+            if self.warn_ok {
+                Ok(())
+            } else {
+                Err(RunnerError::Io("dialog unavailable".into()))
+            }
+        }
+        fn choice(&mut self, _: &str, _: &str) -> Result<UpdateChoice, RunnerError> {
+            self.calls.push("choice");
+            Ok(std::mem::replace(
+                &mut self.choice,
+                UpdateChoice::RemindLater,
+            ))
+        }
+        fn save_skip(&mut self, _: &str) -> Result<(), RunnerError> {
+            self.calls.push("save_skip");
+            if self.save_ok {
+                Ok(())
+            } else {
+                Err(RunnerError::Io("preference failed".into()))
+            }
+        }
+        fn spawn(&mut self, _: &LaunchRegistration) -> Result<(), RunnerError> {
+            self.calls.push("spawn");
+            Ok(())
+        }
+        fn install(&mut self, _: &LaunchRegistration, _: &StableAsset) -> Result<(), RunnerError> {
+            self.calls.push("install");
+            if self.install_ok {
+                Ok(())
+            } else {
+                Err(RunnerError::InstallerExit(1))
+            }
+        }
+    }
+    #[test]
+    fn launch_policy_never_networks_invalid_identity_and_revalidates_local_spawn() {
+        let mut f = Fake::new();
+        f.valid = false;
+        assert!(orchestrate_launch(&mut f).is_err());
+        assert_eq!(f.calls, vec!["validate"]);
+        let mut f = Fake::new();
+        f.revalidate = false;
+        assert!(orchestrate_launch(&mut f).is_err());
+        assert!(!f.calls.contains(&"spawn"));
+        let mut f = Fake::new();
+        f.changed_identity = true;
+        assert!(orchestrate_launch(&mut f).is_err());
+        assert!(!f.calls.contains(&"spawn"));
+        let mut f = Fake::new();
+        orchestrate_launch(&mut f).unwrap();
+        assert_eq!(f.calls.last(), Some(&"spawn"));
+        assert_eq!(f.calls.iter().filter(|x| **x == "validate").count(), 2);
+    }
+    #[test]
+    fn launch_source_failure_requires_explicit_confirm_and_fresh_identity() {
+        let mut f = Fake::new();
+        f.network = false;
+        orchestrate_launch(&mut f).unwrap();
+        assert!(f.calls.contains(&"confirm"));
+        assert!(!f.calls.contains(&"spawn"));
+        let mut f = Fake::new();
+        f.network = false;
+        f.confirm = true;
+        orchestrate_launch(&mut f).unwrap();
+        assert_eq!(f.calls.last(), Some(&"spawn"));
+        let mut f = Fake::new();
+        f.network = false;
+        f.confirm = true;
+        f.revalidate = false;
+        assert!(orchestrate_launch(&mut f).is_err());
+        assert!(!f.calls.contains(&"spawn"));
+    }
+    #[test]
+    fn launch_skip_and_apply_failure_do_not_silently_change_policy() {
+        let mut f = Fake::new();
+        f.skip = Some("2.0.0".into());
+        orchestrate_launch(&mut f).unwrap();
+        assert!(!f.calls.contains(&"choice"));
+        assert!(f.calls.contains(&"spawn"));
+        let mut f = Fake::new();
+        f.choice = UpdateChoice::SkipVersion;
+        f.save_ok = false;
+        orchestrate_launch(&mut f).unwrap();
+        assert!(f.calls.contains(&"warn"));
+        assert!(f.calls.contains(&"spawn"));
+        let mut f = Fake::new();
+        f.choice = UpdateChoice::UpdateNow;
+        f.install_ok = false;
+        assert!(orchestrate_launch(&mut f).is_err());
+        assert!(!f.calls.contains(&"spawn"));
+        assert!(!f.calls.contains(&"confirm"));
+    }
+
+    #[test]
+    fn launch_no_update_or_older_skip_and_broken_preferences_preserve_safe_behavior() {
+        for version in ["1.2.3", "1.2.2"] {
+            let mut f = Fake::new();
+            f.new_version = version.into();
+            orchestrate_launch(&mut f).unwrap();
+            assert!(f.calls.contains(&"spawn"));
+            assert!(!f.calls.contains(&"choice"));
+            assert!(!f.calls.contains(&"install"));
+        }
+        let mut f = Fake::new();
+        f.skip = Some("1.9.0".into());
+        orchestrate_launch(&mut f).unwrap();
+        assert!(f.calls.contains(&"choice"));
+        let mut f = Fake::new();
+        f.read_skip_ok = false;
+        orchestrate_launch(&mut f).unwrap();
+        assert!(f.calls.contains(&"warn"));
+        assert!(f.calls.contains(&"network"));
+        assert!(f.calls.contains(&"choice"));
+        assert!(!f.calls.contains(&"save_skip"));
+        let mut f = Fake::new();
+        f.read_skip_ok = false;
+        f.warn_ok = false;
+        assert!(orchestrate_launch(&mut f).is_err());
+        assert!(!f.calls.contains(&"network"));
+        assert!(!f.calls.contains(&"spawn"));
     }
 }
