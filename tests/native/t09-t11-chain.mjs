@@ -844,7 +844,11 @@ try {
   report.files = []
   for (const fixture of fixtures) {
     const id = randomUUID()
-    await call(a, 'import_attachment', {
+    // Receipt attachments originate on the device that owns the actual receipt.
+    // A remote receipt event alone is not a local receipt projection.
+    const importer = fixture.ownerType === 'receipt' ? b : a
+    const consumer = fixture.ownerType === 'receipt' ? a : b
+    await call(importer, 'import_attachment', {
       input: {
         id,
         orderId,
@@ -855,10 +859,10 @@ try {
         dataBase64: fixture.bytes.toString('base64'),
       },
     })
-    await call(a, 'sync_attachments')
-    await call(b, 'pull_sync')
-    const local = await call(a, 'read_attachment', { id }),
-      remote = await call(b, 'read_attachment', { id })
+    await call(importer, 'sync_attachments')
+    await call(consumer, 'pull_sync')
+    const local = await call(importer, 'read_attachment', { id }),
+      remote = await call(consumer, 'read_attachment', { id })
     assert.equal(remote, local)
     const bytes = Buffer.from(remote.split(',')[1], 'base64')
     report.files.push({
@@ -870,11 +874,11 @@ try {
     })
     if (fixture.type === 'image/heic') {
       assert.ok(remote.startsWith('data:image/jpeg;base64,'))
-      const view = (await call(b, 'list_attachments', { orderId })).find(
+      const view = (await call(consumer, 'list_attachments', { orderId })).find(
         (file) => file.id === id,
       )
       assert.ok(view.sourceAttachmentId)
-      const original = await call(b, 'read_attachment', {
+      const original = await call(consumer, 'read_attachment', {
         id: view.sourceAttachmentId,
       })
       assert.deepEqual(
