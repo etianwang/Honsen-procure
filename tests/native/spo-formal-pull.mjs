@@ -517,22 +517,45 @@ try {
     },
   })
   await push(issuer)
+  const secondSupplierId = randomUUID()
+  await call(issuer, 'save_supplier', {
+    supplier: {
+      id: secondSupplierId,
+      businessCode: 'TEST-SPO-SECOND',
+      name: 'Synthetic second SPO supplier',
+      countryId: ids[1],
+      contactName: null,
+      address: null,
+      city: null,
+      country: null,
+      phone: null,
+      whatsapp: null,
+      email: null,
+      paymentTerms: null,
+      deliveryLeadTime: null,
+      isPreferred: true,
+      isBlacklisted: false,
+      isActive: true,
+      version: 1,
+    },
+  })
+  await push(issuer)
   const childrenSpo = await call(issuer, 'allocate_supplier_child_orders', {
     parentOrderId: orderId,
     allocations: [catalogLine, manualLine].map((parentItemId, index) => ({
       parentItemId,
-      supplierId: ids[6],
-      currency: index === 0 ? 'XOF' : 'CNY',
+      supplierId: index === 0 ? ids[6] : secondSupplierId,
+      currency: 'XOF',
       childDisplayNo: 'SPO-' + runId + '-' + index,
       lockedExchangeRateDecimal: '1',
     })),
   })
   assert.equal(childrenSpo.length, 2)
   const childId = childrenSpo.find(
-    (child) => child.currency === 'XOF',
+    (child) => child.supplierId === ids[6],
   ).childOrderId
   const concurrentChildId = childrenSpo.find(
-    (child) => child.currency === 'CNY',
+    (child) => child.supplierId === secondSupplierId,
   ).childOrderId
   report.childId = childId
   const childState = (profile) =>
