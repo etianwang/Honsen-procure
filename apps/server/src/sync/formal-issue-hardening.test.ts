@@ -1,3 +1,4 @@
+import { calculateOwnerPrintTotals } from './owner-print-totals.js'
 import { randomUUID } from 'node:crypto'
 import { Pool } from 'pg'
 import { beforeAll, afterAll, describe, expect, it } from 'vitest'
@@ -91,7 +92,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
     await pool!.end()
   })
 
-  function fixture(sequence: number) {
+  function fixture(sequence: number, ownerAmounts = false) {
     const orderId = randomUUID()
     const line = {
       id: randomUUID(),
@@ -106,8 +107,35 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       ownerConvertedReferenceUnitMinor: '100',
       ownerMarkupJson: '{"kind":"fixed_minor","minor":"20"}',
       ownerFinalUnitPriceMinor: '120',
+      ...(ownerAmounts
+        ? {
+            quantity: '2.5',
+            lineDiscountJson: JSON.stringify({
+              kind: 'fixed_minor',
+              minor: '10',
+            }),
+            lineFreightJson: JSON.stringify({
+              kind: 'percent_basis_points',
+              basisPoints: 1000,
+            }),
+            freightIncluded: false,
+          }
+        : {}),
     }
     const approved = {
+      ...(ownerAmounts
+        ? {
+            orderDiscountJson: JSON.stringify({
+              kind: 'percent_basis_points',
+              basisPoints: 1000,
+            }),
+            orderFreightJson: JSON.stringify({
+              kind: 'fixed_minor',
+              minor: '5',
+            }),
+            taxRateBasisPoints: 500,
+          }
+        : {}),
       countryId,
       projectId,
       applicantId: engineerId,
@@ -126,7 +154,20 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       lines: [line],
     }
     const documentNo = `${countryCode}-${projectCode}-20261015-OPA-${shortCode}-${sequence}`
+    const snapshot = ownerAmounts
+      ? {
+          ...approved,
+          ownerPrintTotalsJson: JSON.stringify(
+            calculateOwnerPrintTotals(
+              approved,
+              JSON.parse(approved.orderDiscountJson!),
+              JSON.parse(approved.orderFreightJson!),
+            ),
+          ),
+        }
+      : approved
     const issued = {
+      ...snapshot,
       ...approved,
       workflowStatus: 'formally_issued',
       documentType: 'OPA',
@@ -134,7 +175,7 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       formalInstallationId: installationId,
       formalSequence: String(sequence),
       formallyIssuedAt: 1792022400,
-      formalSnapshotJson: JSON.stringify(approved),
+      formalSnapshotJson: JSON.stringify(snapshot),
     }
     const pending = {
       ...approved,
@@ -175,6 +216,40 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
       ).status,
     ).toBe('accepted')
   }
+
+  it('registers new owner derived amounts on first issue while preserving approved facts and replay', async () => {
+    const f = fixture(501, true)
+    await seedApproved(f)
+    const event = f.event(f.issued, 2)
+    const input = { event, installationId, actorId }
+    expect((await store.pushEvent(input)).status).toBe('accepted')
+    expect((await store.pushEvent(input)).status).toBe('accepted')
+    const stored = await pool!.query(
+      'SELECT payload_json FROM sync_entities WHERE entity_id=$1',
+      [f.orderId],
+    )
+    expect(stored.rows[0].payload_json.ownerPrintTotalsJson).toBe(
+      JSON.parse(f.issued.formalSnapshotJson).ownerPrintTotalsJson,
+    )
+    const altered = { ...f.issued, notes: 'unauthorized change' }
+    expect(
+      (
+        await store.pushEvent({
+          event: f.event(altered, 3),
+          installationId,
+          actorId,
+        })
+      ).status,
+    ).toBe('conflict')
+    expect(
+      (
+        await pool!.query(
+          'SELECT payload_json FROM sync_entities WHERE entity_id=$1',
+          [f.orderId],
+        )
+      ).rows[0].payload_json,
+    ).toEqual(stored.rows[0].payload_json)
+  })
 
   it('rejects applicant self-approval lies while accepting a distinct approver', async () => {
     const own = fixture(106)

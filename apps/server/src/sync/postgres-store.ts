@@ -1674,7 +1674,20 @@ export class PostgresSyncStore implements SyncStore {
           : 'executing'
     if (input.event.payload.workflowStatus !== issuedStatus)
       return 'validation_error'
-    if (!isDeepStrictEqual(current.payload_json, formal.snapshot))
+    // parseFormalIssue independently verifies the new owner total snapshot.
+    // It is generated at issue, so only this derived field is absent from the
+    // previously approved server record; every original fact must still match.
+    const approvedSnapshot = { ...formal.snapshot }
+    if (
+      formal.documentType === 'OPA' &&
+      formal.snapshot.ownerPrintTotalsJson != null
+    ) {
+      if (current.payload_json.ownerPrintTotalsJson != null) return current
+      delete approvedSnapshot.ownerPrintTotalsJson
+      const currentApproved = { ...current.payload_json }
+      delete currentApproved.ownerPrintTotalsJson
+      if (!isDeepStrictEqual(currentApproved, approvedSnapshot)) return current
+    } else if (!isDeepStrictEqual(current.payload_json, formal.snapshot))
       return current
     if (formal.documentType === 'SPO') {
       if (

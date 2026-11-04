@@ -620,10 +620,34 @@ fn run_native_ab_sync_security_smoke(
         .map_err(|error| error.to_string())?;
     let conflict_push = tauri::async_runtime::block_on(account_b.push_pending_https(now))
         .map_err(|error| error.to_string())?;
-    if conflict_push.accepted_count != 0 || conflict_push.pending_count != 1 {
+    if conflict_push.accepted_count != 0 || conflict_push.pending_count != 0 {
         return Err(format!(
             "stale account B Push was not retained for conflict projection: {conflict_push:?}"
         ));
+    }
+    // Authoritative conflict payloads now project during Push. The original
+    // event must remain unacknowledged, with both versions retained exactly.
+    let observer = rusqlite::Connection::open_with_flags(
+        &account_b_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|error| error.to_string())?;
+    let retained: (i64, String, String) = observer.query_row(
+        "SELECT COUNT(*), c.local_payload_json, c.server_payload_json FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id=c.event_id WHERE c.entity_id=?1 AND o.entity_id=c.entity_id AND o.owner_account_id=?2 AND o.acknowledged_at IS NULL AND o.superseded_at IS NOT NULL AND c.resolved_at IS NULL AND c.base_version=0 AND c.server_version=1 AND o.payload_json=c.local_payload_json",
+        rusqlite::params![order_id.to_string(), purchaser_session.user_id.to_string()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|error| error.to_string())?;
+    if retained.0 != 1 {
+        return Err("Push conflict did not retain exactly one owned original event".into());
+    }
+    for payload in [&retained.1, &retained.2] {
+        let value: serde_json::Value =
+            serde_json::from_str(payload).map_err(|error| error.to_string())?;
+        if value["applicantId"] != account_a_session.user_id.to_string() {
+            return Err(
+                "Push conflict lost either original local or authoritative server identity".into(),
+            );
+        }
     }
     let conflict_pull = tauri::async_runtime::block_on(account_b.pull_sync_https(now))
         .map_err(|error| error.to_string())?;
