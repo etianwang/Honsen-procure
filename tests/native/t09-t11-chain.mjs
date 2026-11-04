@@ -912,8 +912,16 @@ try {
     b.page.getByRole('heading', { name: '采购执行', exact: true, level: 2 }),
   ).toBeVisible()
   await expect(
-    b.page.getByText('Synthetic market payee', { exact: true }).first(),
+    b.page
+      .getByRole('listitem')
+      .filter({ hasText: 'Synthetic market payee' })
+      .first(),
   ).toBeVisible()
+  await expect(
+    b.page
+      .getByRole('region', { name: '采购执行详情', exact: true })
+      .locator('p[aria-live="polite"]'),
+  ).toContainText('累计实付 250')
   await b.page.screenshot({
     path: join(resultRoot, 'native-device-b.png'),
     fullPage: true,
