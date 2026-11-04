@@ -1,29 +1,36 @@
 # HPA native independent acceptance — 2026-11-04
 
-Status: BLOCKED (baseline prerequisite); no native PASS claimed.
+Status: HARNESS READY; native execution PENDING. Source base: 28b32c6, with controller to commit a unified candidate before building and executing.
 
-## Read-only baseline evidence
+## Scope
 
-The controller authorized only a native HPA test extension on `codex/v1-resume-20261104`, with no business implementation port. At inspection this branch points to `f4756afdb01ebac7b17ae9016d9ad56ab450fea5`.
+HPA implementation is now integrated. This slice adds tests/native/hpa-formal-pull.mjs and the hpa-formal-pull mode in tests/native/run-native-https-smoke.ps1. It reuses existing native HTTPS server, synthetic scope/account bootstrap and real Tauri IPC. No business code, schema, migration, dependency, installer contract or production data changes are made. Toolbox contract preflight is not applicable to this test-only change.
 
-`rg -n 'issue_honsen_formal_order|hpa_issue_is|hpa_' apps/desktop/src-tauri/src apps/server/src/sync` returned no matches. `git merge-base --is-ancestor a2b73ae9 HEAD` returned exit 1. Therefore the selected RC does not contain the HPA issuer required by the proposed test.
+The new driver launches two copies of the actual EXE with distinct profile paths, installation IDs and WebView folders. An engineer creates/submits a Honsen draft; a distinct purchaser confirms and signs HPA. The driver checks pending outbox before acknowledgement, production Push and empty repeated Push, real serialized HTTPS Pull response, full frozen approved snapshot bytes, ordinary integer price fields and absence of owner markup. It changes the current catalog price, then checks frozen order preservation; receiver restart and repeat Pull must preserve rows, cursor, outbox/conflicts and formal number. SQLite is opened read-only for evidence. No formal business events or HTTP response pages are fabricated. Synthetic scope/code alignment writes are restricted to the disposable test PostgreSQL fixture.
 
-The handover business branch `origin/codex/v1-business-flow` at `a2b73ae9ee348fb6540b64a797b3274a9cb71450` contains the HPA implementation and builder evidence. Controller freshly verified PR20 quality run 40195470167 as success; the historical quote CI failure is superseded and requires no duplicate repair.
+Report captures actual Git HEAD/dirty status, EXE SHA256 hashes, distinct installation IDs, process IDs, command outcomes, actual consumer response and restart/replay assertions. This remains a same-Windows-host two-installation test; it does not establish physical two-Windows-machine acceptance or a disconnected transport test.
 
-## Proposed bounded test after prerequisite integration
+## Execution handoff
 
-Add `tests/native/hpa-formal-pull.mjs` and one dispatch mode in `tests/native/run-native-https-smoke.ps1`. Use real EXE IPC, account CAPTCHA/password login, two different test SQLite profiles and installation identities, loopback disposable PostgreSQL/HTTPS, and generated run-specific credentials. Create and approve a Honsen parent through trusted commands, issue HPA offline, Push to acknowledgement, Pull on the second installation, and compare formal number, installation sequence, frozen snapshot bytes and ordinary prices/tax/totals. Restart and repeat Pull to verify preservation and idempotency. Read SQLite only for evidence; never manufacture formal order events.
+After controller commits the unified candidate and builds it once, run:
 
-Existing `g2-formal-pull.mjs` covers OPA owner-pricing fields and reports a hardcoded historical SHA, so it cannot be relabelled as HPA proof. Any new HPA report must capture the actual tested source and executable hash.
+```powershell
+pwsh -NoProfile -File tests/native/run-native-https-smoke.ps1 -Mode hpa-formal-pull -SkipBuild -NativeExe <absolute-candidate-HonsenProcure.exe> -NativeProfileExe <absolute-candidate-honsen-procure-test-profile.exe> -ExistingDatabase
+```
 
-## Changes and checks
+Use repository-local .env.test containing only disposable test credentials. Runner creates per-run profiles and artifacts below .honsen-native-qa, logs below test-results, isolated Compose PostgreSQL, temporary localhost HTTPS certificate and generated passwords. Existing cleanup removes its Compose project/volumes and temporary private certificate material. Native EXE paths are explicit so controller's .cache/cargo-target outputs can be used without rebuilding or assuming an old E drive.
 
-Only this review record was added. No test runner, application code, schema, migration, dependency, installer, release, Toolbox contract, production data or credentials were changed. Toolbox preflight is not applicable to this documentation-only blocker record.
+## Verification and limitations
 
-Native execution and focused HPA tests were skipped because the selected RC lacks their required command and tests. This blocks HPA native acceptance; historical builder/DOM/CI success cannot replace it. No repair attempt was made against the missing business prerequisite.
+- Node syntax check: PASS.
+- PowerShell AST parse: PASS.
+- Targeted JavaScript Prettier: PASS.
+- git diff --check: PASS.
+- No Cargo or native test run by this agent; controller owns final SHA build and execution.
+- Read-only WSL inspection found Ubuntu-24.04 default root and no rootroot or honsen-dev passwd entry. Runner requires an explicit normal WSL user only when it owns Compose. ExistingDatabase skips WSL startup/cleanup entirely and requires the controller-owned test service at 127.0.0.1:54329. No account/default-user/group setting was modified.
 
-## Remaining issues
+Remaining issues:
 
-- BLOCKER: controller must explicitly select/integrate the HPA implementation baseline before the authorized test-only slice can proceed. No business port is authorized for this agent.
-- DEFERRED: HPA native two-installation acceptance, OPA regression execution, formal printing/export and other original release gates remain open.
-- WARNING: this document records source inspection only, not a runtime environment or business acceptance result.
+- BLOCKER for native acceptance: execute final committed candidate binaries with controller-owned disposable PostgreSQL via ExistingDatabase; until then this harness is not runtime proof.
+- DEFERRED: physical two-Windows HPA/OPA, SPO implementation/acceptance, PDF/Excel, full language coverage and original release/security gates. Those are excluded from this single slice.
+- WARNING: the earlier baseline-missing-HPA blocker was resolved by integration; the older PR20 CI failure was already superseded by successful CI. Neither warrants repeat implementation.

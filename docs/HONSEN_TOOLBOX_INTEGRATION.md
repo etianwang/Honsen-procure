@@ -109,3 +109,11 @@ No install/update/uninstall/repair case has passed on this candidate. The prior
 credential-store error is historical; this round has not rerun the dual-native
 chain without an authorized test COS configuration. Building a new installer
 does not replace those gates or qualify financial/file workflows for production.
+
+## Approved bounded installation P1 repair — 2026-11-04
+
+The user approved only INSTALL-P1-PLAN-20261104.md's paired private NSIS adapter and early default-directory repair. Five upstream sources were reread in AGENTS order before implementation. Runner now builds native `/S` with final unquoted `/D=<validated original InstallLocation>` and writes timestamped adapter attempt/exit/error records to the existing log path (not an NSIS engine log). Public parameters/result fields and all validation/restart gates remain unchanged.
+
+The late PREINSTALL directory mutation is removed. The custom template pins official tauri-cli-v2.12.2 commit `5b23c82ea5ba6b9aec420dd71f60493edc486aa9`, upstream blob `f66b011e6b8acdd3e8e4f463c185e5c347b8f18c`; license and source record are adjacent to the template. Only four per-machine architecture default paths add Honsen Program; explicit /D and previous-install restore remain upstream.
+
+URL/manifest values, public Runner protocol, identity, registry and uninstall/data boundaries remain unchanged. Split/stale old registration is not automatically migrated or repaired. No automatic rollback is introduced. Candidate build, real install/update/uninstall and synthetic-data retention are NOT RUN at this writing; unit/static checks cannot substitute. Exact new SHA/hash/OS evidence must be appended after actual execution; historical f4756af RED remains valid only for its frozen artifact.

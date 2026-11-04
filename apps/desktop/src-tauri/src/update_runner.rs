@@ -395,12 +395,56 @@ fn copy_verified_installer(request: &ApplyRequest) -> Result<PathBuf, RunnerErro
     Ok(copy)
 }
 
+fn nsis_parameters(install_location: &Path) -> Result<String, RunnerError> {
+    let directory = install_location
+        .to_str()
+        .ok_or(RunnerError::TargetDirectoryMismatch)?;
+    if !is_absolute_windows_path(directory)
+        || directory
+            .chars()
+            .any(|c| matches!(c, '\0' | '\r' | '\n' | '"'))
+    {
+        return Err(RunnerError::TargetDirectoryMismatch);
+    }
+    // NSIS consumes the unquoted remainder after its final /D= option.
+    Ok(format!("/S /D={directory}"))
+}
+
+fn append_adapter_log(log_path: &Path, event: &str) -> Result<(), RunnerError> {
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)?;
+    writeln!(
+        file,
+        "{} NSIS adapter (not engine log): {event}",
+        utc_timestamp()
+    )?;
+    Ok(())
+}
+
 #[cfg(windows)]
 fn run_elevated_installer(
     installer: &Path,
     install_location: &Path,
     log_path: &Path,
 ) -> Result<i32, RunnerError> {
+    let parameters = nsis_parameters(install_location)?;
+    append_adapter_log(
+        log_path,
+        &format!("attempt installer={installer:?} parameters={parameters:?}"),
+    )?;
+    let result = run_elevated_nsis(installer, &parameters);
+    match &result {
+        Ok(exit) => append_adapter_log(log_path, &format!("exit={exit}"))?,
+        Err(error) => append_adapter_log(log_path, &format!("error={error}"))?,
+    }
+    result
+}
+
+#[cfg(windows)]
+fn run_elevated_nsis(installer: &Path, arguments: &str) -> Result<i32, RunnerError> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::{
         Foundation::{CloseHandle, ERROR_CANCELLED, GetLastError, WAIT_OBJECT_0},
@@ -413,14 +457,7 @@ fn run_elevated_installer(
         .chain(std::iter::once(0))
         .collect();
     let verb: Vec<u16> = "runas\0".encode_utf16().collect();
-    let parameters: Vec<u16> = format!(
-        "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR=\"{}\" /LOG=\"{}\"",
-        install_location.display(),
-        log_path.display()
-    )
-    .encode_utf16()
-    .chain(std::iter::once(0))
-    .collect();
+    let parameters: Vec<u16> = arguments.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         let mut execute = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -622,6 +659,51 @@ fn civil_date(days_since_epoch: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nsis_preserves_explicit_unicode_space_and_former_default_paths() {
+        for directory in [
+            r"C:\Honsen RC 测试 路径\Honsen Procure",
+            r"C:\Program Files\Honsen Procure",
+        ] {
+            assert_eq!(
+                super::nsis_parameters(std::path::Path::new(directory)).unwrap(),
+                format!("/S /D={directory}")
+            );
+        }
+        for directory in [
+            "relative",
+            "C:\\bad\npath",
+            "C:\\bad\rpath",
+            "C:\\bad\0path",
+            "C:\\bad\"path",
+        ] {
+            assert!(super::nsis_parameters(std::path::Path::new(directory)).is_err());
+        }
+    }
+
+    #[test]
+    fn adapter_log_records_attempt_exit_and_error_as_adapter_events() {
+        let path =
+            std::env::temp_dir().join(format!("honsen-adapter-{}.log", uuid::Uuid::new_v4()));
+        for event in [
+            "attempt parameters=/S /D=C:\\测试 path",
+            "exit=7",
+            "error=the UAC approval was cancelled",
+            "error=the installer did not finish before the update timeout",
+        ] {
+            super::append_adapter_log(&path, event).unwrap();
+        }
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(log.lines().count(), 4);
+        assert!(
+            log.lines()
+                .all(|line| line.contains("NSIS adapter (not engine log):"))
+        );
+        assert!(log.contains("exit=7"));
+        assert!(log.contains("cancelled"));
+        assert!(log.contains("timeout"));
+        std::fs::remove_file(path).unwrap();
+    }
     use super::*;
     use std::{fs, path::PathBuf};
     fn registration() -> Registration {

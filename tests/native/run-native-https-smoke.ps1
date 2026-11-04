@@ -1,14 +1,21 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('g2-formal-pull', 'g1-conflict-origin', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
+  [ValidateSet('hpa-formal-pull', 'g2-formal-pull', 'g1-conflict-origin', 'ab-sync-security', 'pull-recovery', 'pull-page-recovery', 'cursor-write-recovery', 'push-termination-recovery', 'offline-push-recovery', 'push-partial-batch')]
   [string]$Mode = 'ab-sync-security',
   [ValidateSet('before-commit', 'after-commit')]
   [string]$TerminationBoundary = 'before-commit',
   [ValidatePattern('^native-smoke-[0-9]{14}$')]
-  [string]$RunId
+  [string]$RunId,
+  [switch]$SkipBuild,
+  [switch]$ExistingDatabase,
+  [string]$NativeExe,
+  [string]$NativeProfileExe,
+  [string]$WslDistribution = 'Ubuntu-24.04',
+  [string]$WslUser
 )
 
 $ErrorActionPreference = 'Stop'
+if (!$ExistingDatabase -and (!$WslUser -or $WslUser -eq 'root')) { throw 'Native testing requires an explicitly selected normal WSL development user' }
 if (!(Test-Path 'Cert:\CurrentUser\My')) { throw 'CurrentUser certificate store is unavailable for native HTTPS test trust' }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $runId = if ($RunId) { $RunId } else { "native-smoke-$((Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))" }
@@ -62,10 +69,14 @@ try {
     if (!(Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue)) { throw "$name is required by .env.test" }
   }
 
-  $wslRepo = (& wsl.exe -- wslpath -a $repo.Replace('\', '/')).Trim()
+  if ($ExistingDatabase) {
+    if ($env:POSTGRES_TEST_PORT -ne '54329' -or $env:POSTGRES_TEST_DATABASE -notmatch 'test') { throw 'ExistingDatabase requires test-only database on 127.0.0.1:54329' }
+    if (!(Test-NetConnection -ComputerName 127.0.0.1 -Port 54329 -InformationLevel Quiet)) { throw 'controller-owned test database is unavailable' }
+  } else {
+  $wslRepo = (& wsl.exe -d $WslDistribution -u $WslUser -- wslpath -a $repo.Replace('\', '/')).Trim()
   if (!$wslRepo) { throw 'WSL is required for the disposable PostgreSQL test service' }
   $composeCommand = "cd '$wslRepo' && docker compose --project-name $composeProject --env-file .env.test -f compose.test.yaml up -d --wait && exec tail -f /dev/null"
-  $wslHolder = Start-Process -FilePath wsl.exe -ArgumentList @('--', 'bash', '-lc', $composeCommand) -PassThru -RedirectStandardOutput $composeLog -RedirectStandardError $composeErrorLog -WindowStyle Hidden
+  $wslHolder = Start-Process -FilePath wsl.exe -ArgumentList @('-d', $WslDistribution, '-u', $WslUser, '--', 'bash', '-lc', $composeCommand) -PassThru -RedirectStandardOutput $composeLog -RedirectStandardError $composeErrorLog -WindowStyle Hidden
   for ($attempt = 0; $attempt -lt 30; $attempt++) {
     if ((Test-NetConnection -ComputerName localhost -Port $env:POSTGRES_TEST_PORT -InformationLevel Quiet)) { break }
     if ($wslHolder.HasExited) { throw "WSL Compose holder exited; inspect $composeLog" }
@@ -73,6 +84,8 @@ try {
   }
   if ($wslHolder.HasExited) { throw 'WSL Compose holder exited before the isolated PostgreSQL service became available' }
   if (!(Test-NetConnection -ComputerName localhost -Port $env:POSTGRES_TEST_PORT -InformationLevel Quiet)) { throw "isolated PostgreSQL service did not listen; inspect $composeLog" }
+
+  }
 
   $certificate = New-SelfSignedCertificate -DnsName 'localhost', '127.0.0.1' -CertStoreLocation 'Cert:\CurrentUser\My' -Type SSLServerAuthentication -KeyExportPolicy Exportable -NotAfter (Get-Date).AddDays(1)
   $pfxPassword = [Guid]::NewGuid().ToString('N')
@@ -100,7 +113,7 @@ try {
   $env:HONSEN_PROCURE_TEST_RUN_ID = $runId
   $env:HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX = if ($Mode -eq 'g1-conflict-origin') { Join-Path $qaRoot "$runId-auth.test" } else { '' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
-  $env:HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE = if ($Mode -eq 'g2-formal-pull') { '1' } else { '0' }
+  $env:HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE = if ($Mode -in @('g2-formal-pull', 'hpa-formal-pull')) { '1' } else { '0' }
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
   for ($launch = 0; $launch -lt 3; $launch++) {
@@ -117,13 +130,20 @@ try {
   if (!(Test-NetConnection -ComputerName localhost -Port 3443 -InformationLevel Quiet)) { throw "native HTTPS server did not listen; inspect $serverLog" }
 
   $desktop = Join-Path $repo 'apps\desktop\src-tauri'
+  if (!$NativeExe) { $NativeExe = Join-Path $desktop 'target\debug\HonsenProcure.exe' }
+  if (!$NativeProfileExe) { $NativeProfileExe = Join-Path $desktop 'target\debug\honsen-procure-test-profile.exe' }
+  if ($SkipBuild -and (!(Test-Path -LiteralPath $NativeExe) -or !(Test-Path -LiteralPath $NativeProfileExe))) { throw 'SkipBuild requires existing explicit native EXE and profile EXE' }
+  $env:HONSEN_PROCURE_NATIVE_EXE = $NativeExe
   Push-Location $desktop
   try {
-    cargo build --bin honsen-procure-test-profile --bin HonsenProcure
+    if (!$SkipBuild) {
+      cargo build --bin honsen-procure-test-profile --bin HonsenProcure
+      if ($LASTEXITCODE -ne 0) { throw 'native build failed' }
+    }
     $env:HONSEN_PROCURE_TEST_DB_PATH = $profileA
-    & (Join-Path $desktop 'target\debug\honsen-procure-test-profile.exe') seed
+    & $NativeProfileExe seed
     $env:HONSEN_PROCURE_TEST_DB_PATH = $profileB
-    & (Join-Path $desktop 'target\debug\honsen-procure-test-profile.exe') seed
+    & $NativeProfileExe seed
     $env:HONSEN_PROCURE_TEST_DB_PATH = $profileA
     $env:HONSEN_PROCURE_PROFILE = 'test'
     $env:HONSEN_PROCURE_TEST_TLS_CA_PEM = $pem
@@ -134,7 +154,12 @@ try {
     $env:HONSEN_PROCURE_NATIVE_AB_ENGINEER_B_PASSWORD = $env:HONSEN_TEST_ENGINEER_B_PASSWORD
     $env:HONSEN_PROCURE_NATIVE_AB_PURCHASER_PASSWORD = $env:HONSEN_TEST_PURCHASER_PASSWORD
     $env:RUST_BACKTRACE = '1'
-    if ($Mode -eq 'g2-formal-pull') {
+    if ($Mode -eq 'hpa-formal-pull') {
+      Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
+      $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
+      node (Join-Path $repo 'tests/native/hpa-formal-pull.mjs') *> $nativeLog
+      if ($LASTEXITCODE -ne 0) { throw "native HPA driver failed; inspect $nativeLog" }
+    } elseif ($Mode -eq 'g2-formal-pull') {
       Remove-Item Env:HONSEN_PROCURE_NATIVE_SMOKE
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
       node (Join-Path $repo 'tests/native/g2-formal-pull.mjs') *> $nativeLog
@@ -146,57 +171,57 @@ try {
       if ($LASTEXITCODE -ne 0) { throw "native G1 command/UI driver failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'ab-sync-security') {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $result
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      & $NativeExe *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native HonsenProcure.exe smoke failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'push-partial-batch') {
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $partialBatchResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      & $NativeExe *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native partial Push batch smoke failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'pull-recovery') {
       $env:HONSEN_PROCURE_NATIVE_PULL_RECOVERY_PHASE = 'interrupted'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $interruptedResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      & $NativeExe *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native interrupted Pull smoke failed; inspect $nativeLog" }
       $interrupted = Get-Content -Raw $interruptedResult | ConvertFrom-Json
       $env:HONSEN_PROCURE_NATIVE_PULL_RECOVERY_PHASE = 'recovered'
       $env:HONSEN_PROCURE_NATIVE_PULL_RECOVERY_ENTITY_ID = $interrupted.entityId
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $recoveredResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      & $NativeExe *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native recovered Pull smoke failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'pull-page-recovery') {
       $env:HONSEN_PROCURE_TEST_DB_PATH = $profileB
       $env:HONSEN_PROCURE_NATIVE_PULL_PAGE_RECOVERY_PHASE = 'producer'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $pageProducerResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      & $NativeExe *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native paged Pull producer smoke failed; inspect $nativeLog" }
       $env:HONSEN_PROCURE_TEST_DB_PATH = $profileA
       $env:HONSEN_PROCURE_NATIVE_PULL_PAGE_RECOVERY_PHASE = 'interrupted'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $pageInterruptedResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      & $NativeExe *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native interrupted paged Pull smoke failed; inspect $nativeLog" }
       $env:HONSEN_PROCURE_NATIVE_PULL_PAGE_RECOVERY_PHASE = 'recovered'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $pageRecoveredResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      & $NativeExe *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native recovered paged Pull smoke failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'cursor-write-recovery') {
       $env:HONSEN_PROCURE_TEST_DB_PATH = $profileB
       $env:HONSEN_PROCURE_NATIVE_CURSOR_WRITE_RECOVERY_PHASE = 'producer'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $cursorWriteProducerResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *> $nativeLog
+      & $NativeExe *> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native Cursor write producer smoke failed; inspect $nativeLog" }
       $env:HONSEN_PROCURE_TEST_DB_PATH = $profileA
       $env:HONSEN_PROCURE_NATIVE_CURSOR_WRITE_RECOVERY_PHASE = 'fault'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $cursorWriteFaultResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      & $NativeExe *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native Cursor write fault smoke failed; inspect $nativeLog" }
       $env:HONSEN_PROCURE_NATIVE_CURSOR_WRITE_RECOVERY_PHASE = 'recovered'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $cursorWriteRecoveredResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      & $NativeExe *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native Cursor write recovery smoke failed; inspect $nativeLog" }
     } elseif ($Mode -eq 'push-termination-recovery') {
       $env:HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_PHASE = 'inflight'
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $terminationInflightResult
-      $terminationProcess = Start-Process -FilePath (Join-Path $desktop 'target\debug\HonsenProcure.exe') -PassThru -RedirectStandardOutput $nativeLog -RedirectStandardError $nativeErrorLog -WindowStyle Hidden
+      $terminationProcess = Start-Process -FilePath $NativeExe -PassThru -RedirectStandardOutput $nativeLog -RedirectStandardError $nativeErrorLog -WindowStyle Hidden
       $terminationPid = $terminationProcess.Id
       Set-Content -LiteralPath $terminationPidPath -Value $terminationPid -NoNewline
       for ($attempt = 0; $attempt -lt 120; $attempt++) {
@@ -212,14 +237,14 @@ try {
       $env:HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_PHASE = 'recovered'
       $env:HONSEN_PROCURE_NATIVE_PUSH_TERMINATION_EVENT_ID = $inflight.eventId
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $terminationRecoveredResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      & $NativeExe *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native termination recovery smoke failed; inspect $nativeLog / $nativeErrorLog" }
     } else {
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_PUSH_PHASE = 'offline'
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_READY_PATH = $offlineReady
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_CONTINUE_PATH = $offlineContinue
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $offlineResult
-      $offlineProcess = Start-Process -FilePath (Join-Path $desktop 'target\debug\HonsenProcure.exe') -PassThru -RedirectStandardOutput $nativeLog -RedirectStandardError $nativeErrorLog -WindowStyle Hidden
+      $offlineProcess = Start-Process -FilePath $NativeExe -PassThru -RedirectStandardOutput $nativeLog -RedirectStandardError $nativeErrorLog -WindowStyle Hidden
       for ($attempt = 0; $attempt -lt 60; $attempt++) {
         if (Test-Path $offlineReady) { break }
         if ($offlineProcess.HasExited) { throw "native online-baseline EXE exited before offline handoff; inspect $nativeLog / $nativeErrorLog" }
@@ -249,13 +274,17 @@ try {
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_ENTITY_ID = $offline.entityId
       $env:HONSEN_PROCURE_NATIVE_OFFLINE_EVENT_ID = $offline.eventId
       $env:HONSEN_PROCURE_NATIVE_SMOKE_RESULT_PATH = $offlineRecoveredResult
-      & (Join-Path $desktop 'target\debug\HonsenProcure.exe') *>> $nativeLog
+      & $NativeExe *>> $nativeLog
       if ($LASTEXITCODE -ne 0) { throw "native recovered offline Push smoke failed; inspect $nativeLog / $nativeErrorLog" }
     }
   } finally {
     Pop-Location
   }
-  if ($Mode -eq 'g2-formal-pull') {
+  if ($Mode -eq 'hpa-formal-pull') {
+    $smoke = Get-Content -Raw $result | ConvertFrom-Json
+    if ($smoke.mode -ne 'hpa-formal-pull' -or $smoke.result -ne 'PASS' -or !$smoke.restartPreserved -or !$smoke.replayPreserved -or $smoke.fieldsMatched -ne 12 -or @($smoke.exePids).Count -ne 3 -or $smoke.installations[0] -eq $smoke.installations[1]) { throw "native HPA result invalid: $result" }
+    Write-Output "PASS native HPA issue/Push/Pull/restart/replay: $result"
+  } elseif ($Mode -eq 'g2-formal-pull') {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
     if ($smoke.mode -ne 'g2-formal-pull' -or $smoke.result -ne 'PASS' -or $smoke.fieldsMatched -ne 16 -or !$smoke.restartPreserved -or !$smoke.replayPreserved -or @($smoke.exePids).Count -ne 3 -or $smoke.installations[0] -eq $smoke.installations[1] -or $smoke.exePaths[0] -eq $smoke.exePaths[1]) {
       throw "native G2 field/restart/replay result is invalid: $result"
@@ -343,8 +372,8 @@ try {
     $server.WaitForExit()
   }
   if ($wslHolder -and !$wslHolder.HasExited) {
-    $wslRepo = (& wsl.exe -- wslpath -a $repo.Replace('\', '/')).Trim()
-    & wsl.exe -- bash -lc "cd '$wslRepo' && docker compose --project-name $composeProject --env-file .env.test -f compose.test.yaml down --volumes" | Out-Null
+    $wslRepo = (& wsl.exe -d $WslDistribution -u $WslUser -- wslpath -a $repo.Replace('\', '/')).Trim()
+    & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd '$wslRepo' && docker compose --project-name $composeProject --env-file .env.test -f compose.test.yaml down --volumes" | Out-Null
     $wslHolder.Refresh()
     if (!$wslHolder.HasExited) { Stop-Process -Id $wslHolder.Id -Force }
   }

@@ -8,7 +8,9 @@ param(
   [switch]$ExistingDatabase,
   [string]$SandboxId,
   [string]$TestHost = '127.0.0.1',
-  [string]$NativeExe
+  [string]$NativeExe,
+  [string]$WslDistribution = 'Ubuntu',
+  [string]$WslUser = 'honsen-dev'
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -35,13 +37,23 @@ try {
     if ($line -match '^(POSTGRES_TEST_[A-Z_]+)=(.*)$') { Set-Item ('Env:' + $Matches[1]) $Matches[2] }
   }
   # Only explicitly authorized COS keys enter this controlled process; deployment DB settings never do.
-  foreach ($line in Get-Content $CosEnvFile) {
-    if ($line -match '^(COS_REGION|COS_BUCKET|COS_SECRET_ID|COS_SECRET_KEY)=(.*)$') { Set-Item ('Env:' + $Matches[1]) $Matches[2].Trim().Trim('"').Trim("'") }
+  $cosFields = @{}
+  foreach ($line in [IO.File]::ReadAllLines((Resolve-Path -LiteralPath $CosEnvFile).Path)) {
+    if ($line -match '^\s*(COS_REGION|COS_BUCKET|COS_SECRET_ID|COS_SECRET_KEY)\s*=\s*(.*?)\s*$') {
+      $key = $Matches[1]
+      if ($cosFields.ContainsKey($key)) { throw 'Duplicate COS test configuration field' }
+      $cosFields[$key] = $Matches[2].Trim('"').Trim("'")
+    }
   }
+  foreach ($key in 'COS_REGION','COS_BUCKET','COS_SECRET_ID','COS_SECRET_KEY') {
+    if (!$cosFields.ContainsKey($key) -or [string]::IsNullOrWhiteSpace($cosFields[$key])) { throw 'Incomplete COS test configuration' }
+    Set-Item ('Env:' + $key) $cosFields[$key]
+  }
+  $cosFields.Clear()
   if (!$ExistingDatabase) {
-  $wslRepo = (& wsl.exe -d Ubuntu -u honsen-dev -- wslpath -a $repo.Replace('\','/')).Trim()
+  $wslRepo = (& wsl.exe -d $WslDistribution -u $WslUser -- wslpath -a $repo.Replace('\','/')).Trim()
   $command = "cd '$wslRepo' && docker compose --project-name $project --env-file .env.test -f compose.test.yaml up -d --wait && exec tail -f /dev/null"
-  $holder = Start-Process wsl.exe -ArgumentList @('-d','Ubuntu','-u','honsen-dev','--','bash','-lc',('"' + $command + '"')) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root 'compose.log') -RedirectStandardError (Join-Path $root 'compose-error.log')
+  $holder = Start-Process wsl.exe -ArgumentList @('-d',$WslDistribution,'-u',$WslUser,'--','bash','-lc',('"' + $command + '"')) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root 'compose.log') -RedirectStandardError (Join-Path $root 'compose-error.log')
   for ($i=0; $i -lt 60; $i++) {
     if ($holder.HasExited) { throw 'Compose keepalive exited' }
     $tcp = New-Object Net.Sockets.TcpClient
@@ -126,7 +138,7 @@ try {
     & node (Join-Path $repo 'node_modules/tsx/dist/cli.mjs') (Join-Path $repo 'apps/server/src/scripts/native-t09-t11-server.ts') --cleanup *> (Join-Path $root 'cleanup.log')
     $cleanupFailed = $LASTEXITCODE -ne 0
   }
-  if ($wslRepo -and !$KeepDatabase) { & wsl.exe -d Ubuntu -u honsen-dev -- bash -lc "cd '$wslRepo' && docker compose --project-name $project --env-file .env.test -f compose.test.yaml down --volumes" *> (Join-Path $root 'compose-down.log') }
+  if ($wslRepo -and !$KeepDatabase) { & wsl.exe -d $WslDistribution -u $WslUser -- bash -lc "cd '$wslRepo' && docker compose --project-name $project --env-file .env.test -f compose.test.yaml down --volumes" *> (Join-Path $root 'compose-down.log') }
   if ($holder -and !$holder.HasExited) { Stop-Process -Id $holder.Id }
   if ($certificate) { $certificate.Dispose() }
   if ($rsa) { $rsa.Dispose() }

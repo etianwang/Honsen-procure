@@ -30,14 +30,6 @@
 
 !include "FileFunc.nsh"
 
-!macro HonsenUseSharedProgramDirectory
-  ; Tauri's per-machine default omits the shared Honsen Program parent.
-  ; Keep an explicit Toolbox /D target unchanged.
-  ${GetOptions} $CMDLINE "/D=" $0
-  StrCmp $0 "" 0 +2
-    StrCpy $INSTDIR "$PROGRAMFILES64\Honsen Program\Honsen Procure"
-!macroend
-
 !macro HonsenRejectOtherInstall key view
   SetRegView ${view}
   ReadRegStr $0 ${key} "Software\Honsen Program\Apps\honsen.procure" "ExecutablePath"
@@ -48,7 +40,6 @@
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
-  !insertmacro HonsenUseSharedProgramDirectory
   !insertmacro HonsenRejectOtherInstall HKLM 64
   !insertmacro HonsenRejectOtherInstall HKLM 32
   !insertmacro HonsenRejectOtherInstall HKCU 64
