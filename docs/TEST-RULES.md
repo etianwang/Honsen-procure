@@ -82,6 +82,10 @@
 
 ## Release checklist
 
+Follow-up: user cleared Steam54329 and firewall prerequisites. Full current-candidate native acceptance is pending, not pre-granted. db2ad11 offline SPO/native preview, real-table restore and backup-retention slices have separate scoped evidence. All incomplete global release items remain unchecked.
+
+2026-11-04 candidate note: source2812631, local0.1.4 setup SHA25670671eb69e832b0e8dba5cb536fae1004557572996c461fcc9e685becf634e1b has actual installed canonical-registration/version and Runner bad-hash/target/PID rejection evidence only. Frozen preview/XLSX and partial locale checks do not satisfy complete PDF/native printing/localization. Fresh database/native regressions are blocked by54329 occupancy; restore service/client/object and full Toolbox/security gates remain open. Keep every incomplete global item below unchecked; see reviews/INSTALLED-RUNNER-SECURITY-20261104.md and current memory for exact scopes.
+
 [ ] All critical tests pass
 [ ] Offline create/edit/order/print verified
 [ ] Sync idempotency and conflicts verified

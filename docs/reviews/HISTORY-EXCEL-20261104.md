@@ -1,5 +1,13 @@
 # Authorized history XLSX export — 2026-11-04
 
+## Controller desktop observation
+
+User subsequently confirmed manually cancelling the firewall prompt; the controller observed it gone. Further desktop printing is now eligible, but no PDF or pagination PASS is added until actually performed.
+
+The retained normal workbook was actually opened in local WPS Office12.1.0.29161. The controller observed five sheets, a wrapped formal number, localized status,1200 XOF order total, Chinese material name, French `Câble électrique`, model/specification, and exact unit/total raw minor text1200. No save or cloud-sharing operation was performed. File SHA-256: `118725311f4603e4ed5f6d289b28a3a9618428b13000b941c98d85e648ce80e0`. This is WPS compatibility evidence, not Microsoft Excel or installed Procure export acceptance.
+
+Ctrl+P opened the local print dialog with Microsoft Print to PDF selected, but a Windows Node.js firewall authorization prompt blocked further UI automation. The controller did not act on that security prompt; user handling is pending. No PDF was saved, no physical print was sent, and stress-workbook pagination/long-name desktop inspection remains unaccepted. The obsolete test-results path initially failed after another test cleared it; the retained UUID artifact was then successfully opened. Desktop observation is in the computer-use tool transcript; the safe workbook is the reproducible artifact.
+
 Status: IMPLEMENTED; builder checks and normal-route DOM PASS. Native installed-client and Microsoft Excel visual acceptance remain open. Source is this report's containing implementation checkpoint; no earlier native SHA is substituted.
 
 ## Scope and boundaries

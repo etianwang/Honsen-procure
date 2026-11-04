@@ -1,0 +1,162 @@
+{
+  "scope": "Offline native IPC/independent SQLite only; no HTTPS PostgreSQL or cross-client convergence acceptance",
+  "testedApplicationSha": "db2ad11988050583ae70b76c834b7eb8cbb1985d",
+  "result": "PASS",
+  "exeHashes": [
+    "fde98259b5b31c2ffab97b40a104ffa6f3ef24490a172a80973feb956221d190",
+    "fde98259b5b31c2ffab97b40a104ffa6f3ef24490a172a80973feb956221d190"
+  ],
+  "installations": [
+    "36305de3-011b-4cb8-8ce1-94f173aa2fa5",
+    "a1bc41c1-d004-42d5-80e5-ee7045dcef31"
+  ],
+  "devices": [
+    {
+      "index": 0,
+      "orderId": "723e64f2-11c0-4306-b3fb-c18a6df02335",
+      "childId": "a4d15632-09bb-4d28-80f8-4848ba5a44ae",
+      "issue": {
+        "documentType": "SPO",
+        "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-Y5STMBX5-1",
+        "formalInstallationId": "36305de3-011b-4cb8-8ce1-94f173aa2fa5",
+        "formalSequence": 1
+      },
+      "pending": 9,
+      "failedPush": {
+        "ok": false,
+        "error": {
+          "code": "reauthentication_required"
+        }
+      },
+      "printDocument": {
+        "currency": "XOF",
+        "deliveryAddress": "Synthetic HPA delivery",
+        "documentType": "SPO",
+        "expectedDeliveryDate": null,
+        "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-Y5STMBX5-1",
+        "freightMinor": "0",
+        "languagePair": "zh_fr",
+        "lineDiscountMinor": "0",
+        "lines": [
+          {
+            "currency": "XOF",
+            "lineTotalMinor": "100",
+            "model": "TEST-3X2.5",
+            "nameFr": "Câble synthétique",
+            "nameZh": "合成测试电缆",
+            "quantity": "1",
+            "specification": "3 × 2.5 mm²",
+            "unit": "米",
+            "unitPriceMinor": "100"
+          },
+          {
+            "currency": "XOF",
+            "lineTotalMinor": "100",
+            "model": "TEST-3X2.5",
+            "nameFr": "Câble synthétique",
+            "nameZh": "合成测试电缆",
+            "quantity": "1",
+            "specification": "3 × 2.5 mm²",
+            "unit": "米",
+            "unitPriceMinor": "100"
+          }
+        ],
+        "notes": "HPA independent acceptance only",
+        "orderDate": "2026-10-19",
+        "orderDiscountMinor": "0",
+        "projectId": "10000000-0000-4000-8000-000000000002",
+        "selfApproved": false,
+        "site": "Test site",
+        "subtotalMinor": "200",
+        "supplier": {
+          "address": null,
+          "contactName": null,
+          "email": null,
+          "name": "Synthetic offline supplier",
+          "phone": null
+        },
+        "taxMinor": "0",
+        "taxRateBasisPoints": 0,
+        "totalMinor": "200"
+      },
+      "ordinaryNativePreview": true,
+      "previewScreenshot": "H:\\Honsen\\Honsen-Procure\\.honsen-native-qa\\native-smoke-20261104073332-offline.test.json-device-0-preview.png",
+      "snapshotHash": "7b0eb1fa20cda1b6c34d0446c0dacb531e5475d3c50d16890d6adff66fd7e0ac"
+    },
+    {
+      "index": 1,
+      "orderId": "e9d265c1-6de7-4590-8a30-1203dd3e3cb6",
+      "childId": "0b4cd571-90fa-4b44-87d8-48aa1b6f72ab",
+      "issue": {
+        "documentType": "SPO",
+        "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-E12XSVSH-1",
+        "formalInstallationId": "a1bc41c1-d004-42d5-80e5-ee7045dcef31",
+        "formalSequence": 1
+      },
+      "pending": 9,
+      "failedPush": {
+        "ok": false,
+        "error": {
+          "code": "reauthentication_required"
+        }
+      },
+      "printDocument": {
+        "currency": "XOF",
+        "deliveryAddress": "Synthetic HPA delivery",
+        "documentType": "SPO",
+        "expectedDeliveryDate": null,
+        "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-E12XSVSH-1",
+        "freightMinor": "0",
+        "languagePair": "zh_fr",
+        "lineDiscountMinor": "0",
+        "lines": [
+          {
+            "currency": "XOF",
+            "lineTotalMinor": "100",
+            "model": "TEST-3X2.5",
+            "nameFr": "Câble synthétique",
+            "nameZh": "合成测试电缆",
+            "quantity": "1",
+            "specification": "3 × 2.5 mm²",
+            "unit": "米",
+            "unitPriceMinor": "100"
+          },
+          {
+            "currency": "XOF",
+            "lineTotalMinor": "100",
+            "model": "TEST-3X2.5",
+            "nameFr": "Câble synthétique",
+            "nameZh": "合成测试电缆",
+            "quantity": "1",
+            "specification": "3 × 2.5 mm²",
+            "unit": "米",
+            "unitPriceMinor": "100"
+          }
+        ],
+        "notes": "HPA independent acceptance only",
+        "orderDate": "2026-10-19",
+        "orderDiscountMinor": "0",
+        "projectId": "10000000-0000-4000-8000-000000000002",
+        "selfApproved": false,
+        "site": "Test site",
+        "subtotalMinor": "200",
+        "supplier": {
+          "address": null,
+          "contactName": null,
+          "email": null,
+          "name": "Synthetic offline supplier",
+          "phone": null
+        },
+        "taxMinor": "0",
+        "taxRateBasisPoints": 0,
+        "totalMinor": "200"
+      },
+      "ordinaryNativePreview": true,
+      "previewScreenshot": "H:\\Honsen\\Honsen-Procure\\.honsen-native-qa\\native-smoke-20261104073332-offline.test.json-device-1-preview.png",
+      "snapshotHash": "166ac55d5c877ea2d48e818796a3a8fc27dae1a568540441d8d03b7cd56fb838"
+    }
+  ],
+  "rawResult": ".honsen-native-qa/native-smoke-20261104073332-offline.test.json",
+  "frontendSnapshot": "H:\\Honsen\\Honsen-Procure\\.cache\\offline-spo-f91d5f9b-89a2-430c-8424-476c96c9faa4\\frontend",
+  "limitation": "Push reauthentication_required before network; no HTTPS/PG/convergence/PDF claim"
+}

@@ -1,5 +1,9 @@
 # Build Tasks: Zero to Production
 
+2026-11-04 user follow-up: Steam authorization and manual firewall handling cleared the earlier54329/UI prerequisite; fresh inspection confirms no port occupant. Full frozen-candidate native SPO is pending execution, not yet PASS. Separate offline db2ad11 SPO/ordinary native preview passed without authenticated network access. Real-table restore4f3704e and backup no-overwrite/newest10 repair00e4886 passed bounded tests; authenticated client/object recovery remains open. More locale slices are recorded in review reports; none closes T13.
+
+2026-11-04 continued V1 delivery: T12 frozen zh/fr preview1562f03 and internal filtered XLSX3a0108b are implemented with scoped Rust/DOM/workbook evidence, not full PDF/native-print acceptance. Independent owner-source-total defect corrected; nonzero owner adjustments/zh_en remain fail-closed and OPEN. T13 shell06c679a/homecd7a7c8 localization is partial, and Zod2812631 fixes a confirmed bounded-collection security defect (server73 PASS99 SKIP without PG). T15 installed source2812631/0.1.4 canonical registration and three exact Runner rejection cases passed real Sandbox; full security/Toolbox/successful update remain OPEN. SPO native is BLOCKED_ENV by user-owned Steam occupying54329. See current review reports and memory; original acceptance/dependencies and all incomplete parent checkboxes are preserved.
+
 2026-10-25 main controller T15 integration: A `ca44150`, B `5915335` and C
 `e23de5b` are integrated with source-specific independent static review and fresh
 combined Rust/DOM/workspace checks. Candidate `0.1.2` remains RELEASE_BLOCKED;

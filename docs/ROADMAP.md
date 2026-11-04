@@ -1,5 +1,9 @@
 # Roadmap and Development Tasks
 
+2026-11-04 follow-up: earlier Steam54329/firewall prerequisites are cleared after explicit user handling and fresh inspection. Full same-source native convergence is still pending; separate offline db2ad11 SPO issue/native preview now has actual scoped PASS. Real-schema restore and verified-backup retention fixes are implemented; full client/object recovery and all original parent gates remain open.
+
+2026-11-04 continued delivery checkpoints: frozen bilingual preview1562f03, internal XLSX3a0108b, partial shell/home localization06c679a/cd7a7c8, and confirmed Zod security patch2812631. Installed2812631 candidate0.1.4 passed canonical registration/version and Runner hash/target/PID rejection only. Native SPO is blocked before launch by Steam's54329 binding; actual PDF/print, complete languages, full installed security, API/client/object recovery and Toolbox joint gates remain open. These partial contributions do not close T12/T13/T14/T15 or any milestone; exact evidence is under docs/reviews.
+
 The 2026-10-25 Agent C correction keeps optional COS disabled in the deployment template until configured. Release regressions passed 4/4; independent recheck and original M4/T14/T15 live gates remain open. Pending legacy `www` service/manual changes are excluded; RC protected controller remains authoritative. See `memory.md` for source and preserved dirty paths.
 
 The authoritative execution order and mandatory per-task DOM testing gate are in [BUILD-TASKS.md](BUILD-TASKS.md). This file remains a compact milestone index.
