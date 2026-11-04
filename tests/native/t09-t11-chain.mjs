@@ -909,7 +909,7 @@ try {
   await uiLogin(b, 'purchaser')
   await b.page.getByRole('button', { name: '采购执行', exact: true }).click()
   await expect(
-    b.page.getByRole('heading', { name: '采购执行', exact: true }),
+    b.page.getByRole('heading', { name: '采购执行', exact: true, level: 2 }),
   ).toBeVisible()
   await expect(
     b.page.getByText('Synthetic market payee', { exact: true }).first(),
