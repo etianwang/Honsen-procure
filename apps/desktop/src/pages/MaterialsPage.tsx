@@ -1,3 +1,5 @@
+import { useUiLocale } from '../lib/ui-locale'
+import { catalogText, type CatalogMessage } from '../lib/catalog-messages'
 import {
   Alert,
   Button,
@@ -79,6 +81,8 @@ export function MaterialsPage({
   projectId,
   api = tauriCatalogApi,
 }: MaterialsPageProps) {
+  const { locale } = useUiLocale()
+  const t = (key: CatalogMessage) => catalogText(locale, key)
   const canEdit = canEditMaterials(role)
   const [query, setQuery] = useState('')
   const [materials, setMaterials] = useState<CatalogMaterialView[] | null>(null)
@@ -366,8 +370,10 @@ export function MaterialsPage({
     <>
       <section className="page-heading">
         <div>
-          <h2>材料库总览</h2>
-          <p>每种材料最多展示四家有效供应商报价；同币种才可在订单内比较。</p>
+          <h2>{t('材料库总览')}</h2>
+          <p>
+            {t('每种材料最多展示四家有效供应商报价；同币种才可在订单内比较。')}
+          </p>
         </div>
         {canEdit && (
           <Button
@@ -375,40 +381,46 @@ export function MaterialsPage({
             icon={<Plus size={16} />}
             onClick={() => openEditor()}
           >
-            新增材料
+            {t('新增材料')}
           </Button>
         )}
       </section>
-      <section className="toolbar" aria-label="材料筛选">
+      <section className="toolbar" aria-label={t('材料筛选')}>
         <Input
           className="search"
           type="search"
-          placeholder="搜索材料名称、型号、规格或供应商"
-          aria-label="搜索材料"
+          placeholder={t('搜索材料名称、型号、规格或供应商')}
+          aria-label={t('搜索材料')}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           prefix={<Search size={16} aria-hidden="true" />}
         />
         <Button disabled icon={<SlidersHorizontal size={16} />}>
-          筛选
+          {t('筛选')}
         </Button>
-        {canEdit && <Button onClick={openSupplierManager}>供应商管理</Button>}
+        {canEdit && (
+          <Button onClick={openSupplierManager}>{t('供应商管理')}</Button>
+        )}
       </section>
       {notice && (
         <Alert
           type="success"
-          title={notice}
+          title={t(notice as CatalogMessage)}
           showIcon
           closable
           onClose={() => setNotice(null)}
         />
       )}
       {!projectId ? (
-        <Alert type="error" title="请选择有效的授权项目以查看报价" showIcon />
+        <Alert
+          type="error"
+          title={t('请选择有效的授权项目以查看报价')}
+          showIcon
+        />
       ) : error ? (
-        <Alert type="error" title={error} showIcon />
+        <Alert type="error" title={t(error as CatalogMessage)} showIcon />
       ) : materials === null || loadedProject !== projectId ? (
-        <Spin aria-label="正在搜索材料" />
+        <Spin aria-label={t('正在搜索材料')} />
       ) : (
         <CatalogTable
           materials={materials}
@@ -426,11 +438,11 @@ export function MaterialsPage({
       )}
       <p className="access-note">
         {canEdit
-          ? '采购员和管理员可新增、修改、停用材料及维护供应商价格。'
-          : '工程师与查看者仅可搜索和查看材料及供应商价格。'}
+          ? t('采购员和管理员可新增、修改、停用材料及维护供应商价格。')
+          : t('工程师与查看者仅可搜索和查看材料及供应商价格。')}
       </p>
       <Modal
-        title="材料报价详情"
+        title={t('材料报价详情')}
         open={detailMaterial !== null}
         onCancel={() => {
           detailRequest.current++
@@ -440,11 +452,12 @@ export function MaterialsPage({
       >
         {detailPrices.map((price) => (
           <p key={price.priceId}>
-            {price.supplierName} · {price.isPreferredSupplier ? '首选 · ' : ''}
-            {price.isBlacklisted ? '黑名单 · ' : ''}
+            {price.supplierName} ·{' '}
+            {price.isPreferredSupplier ? t('首选 · ') : ''}
+            {price.isBlacklisted ? t('黑名单 · ') : ''}
             {formatMoney(
               { currency: price.currency, minor: price.unitPriceMinor },
-              'zh-CN',
+              locale === 'zh' ? 'zh-CN' : locale === 'fr' ? 'fr-FR' : 'en-US',
             )}{' '}
             · {price.unit} · {price.effectiveAt} ·{' '}
             {price.deliveryLeadTime ?? '—'} · {price.paymentTerms ?? '—'} ·{' '}
@@ -462,7 +475,7 @@ export function MaterialsPage({
             )
           }
         >
-          上一页
+          {t('上一页')}
         </Button>
         <Button
           disabled={detailBusy || !detailMore}
@@ -478,38 +491,38 @@ export function MaterialsPage({
             })()
           }
         >
-          下一页
+          {t('下一页')}
         </Button>
       </Modal>
       <Modal
-        title={editor === 'new' ? '新增材料' : '编辑材料'}
+        title={editor === 'new' ? t('新增材料') : t('编辑材料')}
         open={editor !== null}
         onCancel={() => setEditor(null)}
         onOk={() => form.submit()}
-        okText="保存材料"
-        cancelText="取消"
+        okText={t('保存材料')}
+        cancelText={t('取消')}
         confirmLoading={saving}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={saveMaterial}>
           <Form.Item
-            label="材料名称"
+            label={t('材料名称')}
             name="nameZh"
-            rules={[{ required: true, message: '请填写材料名称' }]}
+            rules={[{ required: true, message: t('请填写材料名称') }]}
           >
             <Input autoFocus maxLength={255} />
           </Form.Item>
           <Form.Item
-            label="型号"
+            label={t('型号')}
             name="model"
-            rules={[{ required: true, message: '请填写型号' }]}
+            rules={[{ required: true, message: t('请填写型号') }]}
           >
             <Input maxLength={255} />
           </Form.Item>
           <Form.Item
-            label="规格"
+            label={t('规格')}
             name="specification"
-            rules={[{ required: true, message: '请填写规格' }]}
+            rules={[{ required: true, message: t('请填写规格') }]}
           >
             <Input.TextArea
               maxLength={2000}
@@ -517,68 +530,72 @@ export function MaterialsPage({
             />
           </Form.Item>
           <Form.Item
-            label="单位"
+            label={t('单位')}
             name="unit"
-            rules={[{ required: true, message: '请填写单位' }]}
+            rules={[{ required: true, message: t('请填写单位') }]}
           >
             <Input maxLength={64} />
           </Form.Item>
-          <Form.Item label="材料编码 / SKU" name="sku">
+          <Form.Item label={t('材料编码 / SKU')} name="sku">
             <Input maxLength={128} />
           </Form.Item>
-          <Form.Item label="法语名称" name="nameFr">
+          <Form.Item label={t('法语名称')} name="nameFr">
             <Input maxLength={255} />
           </Form.Item>
-          <Form.Item label="别名（以逗号分隔）" name="aliases">
+          <Form.Item label={t('别名（以逗号分隔）')} name="aliases">
             <Input maxLength={1000} />
           </Form.Item>
-          <Form.Item label="品牌" name="brand">
+          <Form.Item label={t('品牌')} name="brand">
             <Input maxLength={1000} />
           </Form.Item>
-          <Form.Item label="备注" name="notes">
+          <Form.Item label={t('备注')} name="notes">
             <Input.TextArea
               maxLength={1000}
               autoSize={{ minRows: 2, maxRows: 4 }}
             />
           </Form.Item>
-          <Form.Item label="材料图片（保存前裁剪为正方形）">
+          <Form.Item label={t('材料图片（保存前裁剪为正方形）')}>
             <MaterialImageCropper onChange={onImageChange} />
           </Form.Item>
-          <Form.Item label="启用状态" name="isActive" valuePropName="checked">
-            <Switch checkedChildren="启用" unCheckedChildren="停用" />
+          <Form.Item
+            label={t('启用状态')}
+            name="isActive"
+            valuePropName="checked"
+          >
+            <Switch checkedChildren={t('启用')} unCheckedChildren={t('停用')} />
           </Form.Item>
         </Form>
       </Modal>
       <Modal
-        title="供应商管理"
+        title={t('供应商管理')}
         open={supplierManagerOpen}
         onCancel={() => setSupplierManagerOpen(false)}
         footer={
           <>
             <Button
-              aria-label="关闭供应商管理"
+              aria-label={t('关闭供应商管理')}
               onClick={() => setSupplierManagerOpen(false)}
             >
-              关闭
+              {t('关闭')}
             </Button>
             <Button type="primary" onClick={() => openSupplierEditor()}>
-              新增供应商
+              {t('新增供应商')}
             </Button>
           </>
         }
         width={820}
       >
         {suppliers.length === 0 ? (
-          <p role="status">暂无供应商</p>
+          <p role="status">{t('暂无供应商')}</p>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
-                <th>编码</th>
-                <th>供应商</th>
-                <th>联系人</th>
-                <th>状态</th>
-                <th>操作</th>
+                <th>{t('编码')}</th>
+                <th>{t('供应商')}</th>
+                <th>{t('联系人')}</th>
+                <th>{t('状态')}</th>
+                <th>{t('操作')}</th>
               </tr>
             </thead>
             <tbody>
@@ -589,17 +606,17 @@ export function MaterialsPage({
                   <td>{supplier.contactName ?? '—'}</td>
                   <td>
                     {supplier.isBlacklisted
-                      ? '黑名单'
+                      ? t('黑名单')
                       : supplier.isActive
-                        ? '启用'
-                        : '停用'}
+                        ? t('启用')
+                        : t('停用')}
                   </td>
                   <td>
                     <Button
                       type="link"
                       onClick={() => openSupplierEditor(supplier)}
                     >
-                      编辑供应商
+                      {t('编辑供应商')}
                     </Button>
                   </td>
                 </tr>
@@ -609,101 +626,109 @@ export function MaterialsPage({
         )}
       </Modal>
       <Modal
-        title={supplierEditor === 'new' ? '新增供应商' : '编辑供应商'}
+        title={supplierEditor === 'new' ? t('新增供应商') : t('编辑供应商')}
         open={supplierEditor !== null}
         onCancel={() => setSupplierEditor(null)}
         onOk={() => supplierForm.submit()}
-        okText="保存供应商"
-        cancelText="取消"
+        okText={t('保存供应商')}
+        cancelText={t('取消')}
         confirmLoading={saving}
         destroyOnHidden
       >
         <Form form={supplierForm} layout="vertical" onFinish={saveSupplier}>
           <Form.Item
-            label="供应商编码"
+            label={t('供应商编码')}
             name="businessCode"
-            rules={[{ required: true, message: '请填写供应商编码' }]}
+            rules={[{ required: true, message: t('请填写供应商编码') }]}
           >
             <Input disabled={supplierEditor !== 'new'} maxLength={64} />
           </Form.Item>
           <Form.Item
-            label="供应商名称"
+            label={t('供应商名称')}
             name="name"
-            rules={[{ required: true, message: '请填写供应商名称' }]}
+            rules={[{ required: true, message: t('请填写供应商名称') }]}
           >
             <Input maxLength={255} />
           </Form.Item>
-          <Form.Item label="联系人" name="contactName">
+          <Form.Item label={t('联系人')} name="contactName">
             <Input maxLength={255} />
           </Form.Item>
-          <Form.Item label="地址" name="address">
+          <Form.Item label={t('地址')} name="address">
             <Input.TextArea
               maxLength={1000}
               autoSize={{ minRows: 2, maxRows: 4 }}
             />
           </Form.Item>
-          <Form.Item label="城市" name="city">
+          <Form.Item label={t('城市')} name="city">
             <Input maxLength={255} />
           </Form.Item>
-          <Form.Item label="国家" name="country">
+          <Form.Item label={t('国家')} name="country">
             <Input maxLength={255} />
           </Form.Item>
-          <Form.Item label="电话" name="phone">
+          <Form.Item label={t('电话')} name="phone">
             <Input maxLength={255} />
           </Form.Item>
           <Form.Item label="WhatsApp" name="whatsapp">
             <Input maxLength={255} />
           </Form.Item>
           <Form.Item
-            label="邮箱"
+            label={t('邮箱')}
             name="email"
-            rules={[{ type: 'email', message: '请填写有效邮箱' }]}
+            rules={[{ type: 'email', message: t('请填写有效邮箱') }]}
           >
             <Input maxLength={255} />
           </Form.Item>
-          <Form.Item label="付款条件" name="paymentTerms">
+          <Form.Item label={t('付款条件')} name="paymentTerms">
             <Input maxLength={1000} />
           </Form.Item>
-          <Form.Item label="交货期" name="deliveryLeadTime">
+          <Form.Item label={t('交货期')} name="deliveryLeadTime">
             <Input maxLength={1000} />
           </Form.Item>
           <Form.Item
-            label="首选供应商"
+            label={t('首选供应商')}
             name="isPreferred"
             valuePropName="checked"
           >
             <Switch />
           </Form.Item>
           <Form.Item
-            label="黑名单"
+            label={t('黑名单')}
             name="isBlacklisted"
             valuePropName="checked"
           >
             <Switch />
           </Form.Item>
-          <Form.Item label="启用状态" name="isActive" valuePropName="checked">
-            <Switch checkedChildren="启用" unCheckedChildren="停用" />
+          <Form.Item
+            label={t('启用状态')}
+            name="isActive"
+            valuePropName="checked"
+          >
+            <Switch checkedChildren={t('启用')} unCheckedChildren={t('停用')} />
           </Form.Item>
         </Form>
       </Modal>
       <Modal
-        title={quoteMaterial ? `维护报价：${quoteMaterial.nameZh}` : '维护报价'}
+        title={
+          quoteMaterial
+            ? `${t('维护报价')}：${quoteMaterial.nameZh}`
+            : t('维护报价')
+        }
         open={quoteMaterial !== null}
         onCancel={() => setQuoteMaterial(null)}
         onOk={() => priceForm.submit()}
-        okText="保存报价"
-        cancelText="取消"
+        okText={t('保存报价')}
+        cancelText={t('取消')}
         confirmLoading={saving}
         destroyOnHidden
       >
         <Form form={priceForm} layout="vertical" onFinish={savePrice}>
           <Form.Item
-            label="供应商"
+            label={t('供应商')}
             name="supplierId"
-            rules={[{ required: true, message: '请选择供应商' }]}
+            rules={[{ required: true, message: t('请选择供应商') }]}
           >
             <Select
-              placeholder="选择启用且非黑名单供应商"
+              placeholder={t('选择启用且非黑名单供应商')}
               options={suppliers
                 .filter(
                   (supplier) => supplier.isActive && !supplier.isBlacklisted,
@@ -714,39 +739,43 @@ export function MaterialsPage({
                 }))}
             />
           </Form.Item>
-          <Form.Item label="货币" name="currency" rules={[{ required: true }]}>
+          <Form.Item
+            label={t('货币')}
+            name="currency"
+            rules={[{ required: true }]}
+          >
             <Select
               options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({ value }))}
             />
           </Form.Item>
           <Form.Item
-            label="单价（最小货币单位）"
+            label={t('单价（最小货币单位）')}
             name="unitPriceMinor"
             rules={[
               {
                 required: true,
                 pattern: /^\d+$/,
-                message: '请输入非负整数，不可使用小数',
+                message: t('请输入非负整数，不可使用小数'),
               },
             ]}
           >
             <Input inputMode="numeric" />
           </Form.Item>
           <Form.Item
-            label="单位"
+            label={t('单位')}
             name="unit"
-            rules={[{ required: true, message: '请填写单位' }]}
+            rules={[{ required: true, message: t('请填写单位') }]}
           >
             <Input maxLength={64} />
           </Form.Item>
           <Form.Item
-            label="生效日期"
+            label={t('生效日期')}
             name="effectiveAt"
-            rules={[{ required: true, message: '请选择生效日期' }]}
+            rules={[{ required: true, message: t('请选择生效日期') }]}
           >
             <Input type="date" />
           </Form.Item>
-          <Form.Item label="来源备注" name="sourceNote">
+          <Form.Item label={t('来源备注')} name="sourceNote">
             <Input.TextArea
               maxLength={1000}
               autoSize={{ minRows: 2, maxRows: 4 }}
@@ -773,28 +802,32 @@ function CatalogTable({
   onAddPrice: (material: CatalogMaterialView) => void
   onDetails: (material: CatalogMaterialView) => void
 }) {
+  const { locale } = useUiLocale()
+  const t = (key: CatalogMessage) => catalogText(locale, key)
   return (
     <Card
       className="card"
       title={
         <>
-          <span>全部材料</span>{' '}
-          <span className="muted">· {materials.length} 项</span>
+          <span>{t('全部材料')}</span>{' '}
+          <span className="muted">
+            · {materials.length} {t('项')}
+          </span>
         </>
       }
-      extra={<span className="muted">数据来自本地 SQLite</span>}
+      extra={<span className="muted">{t('数据来自本地 SQLite')}</span>}
     >
       {materials.length === 0 ? (
-        <p role="status">未找到匹配材料</p>
+        <p role="status">{t('未找到匹配材料')}</p>
       ) : (
         <table className="data-table">
           <thead>
             <tr>
-              <th>材料</th>
-              <th>型号 / 规格</th>
-              <th>单位</th>
-              <th>供应商报价（最多 4 家）</th>
-              <th>操作</th>
+              <th>{t('材料')}</th>
+              <th>{t('型号 / 规格')}</th>
+              <th>{t('单位')}</th>
+              <th>{t('供应商报价（最多 4 家）')}</th>
+              <th>{t('操作')}</th>
             </tr>
           </thead>
           <tbody>
@@ -819,7 +852,7 @@ function CatalogTable({
                       >
                         <strong>
                           {price.supplierName}
-                          {price.isPreferredSupplier ? ' · 首选' : ''}
+                          {price.isPreferredSupplier ? t(' · 首选') : ''}
                         </strong>
                         <span>
                           {formatMoney(
@@ -827,27 +860,31 @@ function CatalogTable({
                               currency: price.currency,
                               minor: price.unitPriceMinor,
                             },
-                            'zh-CN',
+                            locale === 'zh'
+                              ? 'zh-CN'
+                              : locale === 'fr'
+                                ? 'fr-FR'
+                                : 'en-US',
                           )}
                         </span>
                       </div>
                     ))}
                     {material.prices.length === 0 && (
-                      <span className="muted">暂无有效报价</span>
+                      <span className="muted">{t('暂无有效报价')}</span>
                     )}
                   </div>
                 </td>
                 <td>
                   <Button type="link" onClick={() => onDetails(material)}>
-                    查看全部报价
+                    {t('查看全部报价')}
                   </Button>
                   {canEdit && (
                     <>
                       <Button type="link" onClick={() => onEdit(material)}>
-                        编辑材料
+                        {t('编辑材料')}
                       </Button>
                       <Button type="link" onClick={() => onAddPrice(material)}>
-                        维护报价
+                        {t('维护报价')}
                       </Button>
                     </>
                   )}
@@ -868,6 +905,8 @@ function MaterialThumbnail({
   api: CatalogApi
   materialId: string
 }) {
+  const { locale } = useUiLocale()
+  const t = (key: CatalogMessage) => catalogText(locale, key)
   const [source, setSource] = useState<string | null>(null)
 
   useEffect(() => {
@@ -885,7 +924,7 @@ function MaterialThumbnail({
     <img
       className="material-image material-thumbnail"
       src={source}
-      alt="材料图片"
+      alt={t('材料图片')}
     />
   ) : (
     <span className="material-image" aria-hidden="true">
