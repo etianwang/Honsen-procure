@@ -134,6 +134,9 @@ async function launch(index) {
   const environment = nativeEnvironment({
     HONSEN_PROCURE_PROFILE: 'test',
     HONSEN_PROCURE_TEST_DB_PATH: profiles[index],
+    ...(process.env.HONSEN_NATIVE_WEBVIEW_TEST
+      ? { HONSEN_NATIVE_WEBVIEW_TEST_PORT: String(port) }
+      : {}),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1`,
     WEBVIEW2_USER_DATA_FOLDER: `${profiles[index]}.webview`,
   })
