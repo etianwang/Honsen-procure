@@ -45,7 +45,7 @@ test('shell language persists while preserving the current route and unsaved dra
     page.getByRole('button', { name: 'Enregistrer le brouillon', exact: true }),
   ).toBeVisible()
   await page.reload()
-  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: 'Ouvrir l’aperçu' }).click()
   await expect(page.getByLabel('界面语言 / UI language / Langue')).toHaveValue(
     'fr',
   )

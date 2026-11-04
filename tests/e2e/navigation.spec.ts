@@ -638,7 +638,7 @@ test('administrator can create, rename and disable a tax template offline', asyn
   await page.getByLabel('税率（基点）', { exact: true }).fill('1800')
   await page.getByLabel('税模板生效日期').fill('2026-10-15')
   await page.getByRole('button', { name: '新增税模板' }).click()
-  await expect(page.getByLabel('编辑税模板名称-fixture-tax')).toHaveValue(
+  await expect(page.getByLabel('税模板名称-fixture-tax')).toHaveValue(
     'Fixture tax',
   )
   await page.getByRole('combobox', { name: '默认税模板' }).click()
@@ -648,17 +648,15 @@ test('administrator can create, rename and disable a tax template offline', asyn
       .getByText('Fixture tax', { exact: true }),
   ).toBeVisible()
   await page.keyboard.press('Escape')
-  await page.getByLabel('编辑税模板名称-fixture-tax').fill('Revised tax')
-  await page.getByLabel('编辑税率（基点）-fixture-tax').fill('1900')
-  await page.getByLabel('编辑税模板生效日期-fixture-tax').fill('2026-11-01')
+  await page.getByLabel('税模板名称-fixture-tax').fill('Revised tax')
+  await page.getByLabel('税率（基点）-fixture-tax').fill('1900')
+  await page.getByLabel('税模板生效日期-fixture-tax').fill('2026-11-01')
   await page.getByRole('button', { name: '保存修改' }).click()
-  await expect(page.getByLabel('编辑税模板名称-fixture-tax')).toHaveValue(
+  await expect(page.getByLabel('税模板名称-fixture-tax')).toHaveValue(
     'Revised tax',
   )
-  await expect(page.getByLabel('编辑税率（基点）-fixture-tax')).toHaveValue(
-    '1900',
-  )
-  await expect(page.getByLabel('编辑税模板生效日期-fixture-tax')).toHaveValue(
+  await expect(page.getByLabel('税率（基点）-fixture-tax')).toHaveValue('1900')
+  await expect(page.getByLabel('税模板生效日期-fixture-tax')).toHaveValue(
     '2026-11-01',
   )
   await page
@@ -2547,7 +2545,7 @@ test('catalog details and Honsen draft can reach later quote pages', async ({
   await expect(page.getByText(/Vendor 25 ·/)).toBeVisible()
   await page.getByRole('button', { name: '上一页' }).click()
   await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
-  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
   await page.getByRole('button', { name: '采购申请单' }).click()
   await page.getByLabel('材料').click()
   await page.getByText('分页材料 · PAGE', { exact: true }).click()
