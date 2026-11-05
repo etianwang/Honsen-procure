@@ -43,6 +43,17 @@ unset POSTGRES_URL
 
 首次 admin 密码由操作员运行时提供，不写在 ZIP 中；首次登录仅建议改密。Seed 重复执行不会重置密码。当前 Seed 包含 2 国家、3 项目、14 单位、0 新站点。按用户于 2026-11-06 确认的业务配置，CI 税率为 18%，CM 税率为 19.25%；印花税由订单人工填写，以订单币种的整数最小单位保存，不自动为每单征收固定金额。用户确认配置不代表本软件提供法定税率认定。最终验收状态以对应源码 SHA 的独立验收报告为准。
 
+首次空库 Bootstrap 同时创建两国税模板和三个项目默认税配置，并写入同步发布记录。已运行旧版 V1 Bootstrap 的部署可在备份、停止活动 API 后，用维护角色运行受控的补充配置入口：
+
+```sh
+read -rsp '维护角色 PostgreSQL 连接串: ' POSTGRES_URL; echo
+export POSTGRES_URL
+node apps/server/dist/scripts/apply-v1-tax-config.js
+unset POSTGRES_URL
+```
+
+该入口不读取或重置 admin 密码，不覆盖用户已保存的税配置；重复运行不会重复发布相同记录。新部署无须另跑此补充入口。部署时须检查返回状态和实际税模板、项目默认值；已有配置保留不等于自动改成新的税率。税费和人工印花税均需随正式单据冻结，后续配置变化不得重写已签发历史。
+
 ## 单活动路径
 
 在宝塔现有域名 HTTP 站点添加以下 location；Cloudflare Flexible 回源 HTTP，源站不要强制跳转 HTTPS，否则会形成循环。公网域名仅发布 Cloudflare HTTPS，源站访问限制沿用已批准安全配置。

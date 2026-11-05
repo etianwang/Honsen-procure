@@ -31,6 +31,11 @@ const manifest = {
   seed: {
     entry: 'apps/server/dist/scripts/bootstrap-v1.js',
     sha256: digest('apps/server/dist/scripts/bootstrap-v1.js'),
+    existingBootstrapTaxEntry:
+      'apps/server/dist/scripts/apply-v1-tax-config.js',
+    existingBootstrapTaxEntrySha256: digest(
+      'apps/server/dist/scripts/apply-v1-tax-config.js',
+    ),
     taxAuthority: 'USER_APPROVED_CONFIGURATION_2026-11-06',
     taxPolicy: {
       CI: { percentage: '18' },
