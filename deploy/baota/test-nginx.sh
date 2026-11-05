@@ -39,7 +39,8 @@ test "$(curl -s -o "$work/rejected.json" -w '%{http_code}' -X POST http://127.0.
 grep -q client_upgrade_required "$work/rejected.json"
 test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18081/api/sync/push)" = 410
 # Simulate future single activity by changing the route only, reloading same proxy.
-sed -i 's@/v1@/v2@g' "$work/nginx.conf"
+sed 's@/v1@/v2@g' "$work/nginx.conf" > "$work/nginx.next"
+cat "$work/nginx.next" > "$work/nginx.conf"
 docker exec "$name" nginx -s reload
 sleep 1
 test "$(curl -s -o "$work/old.json" -w '%{http_code}' -X POST http://127.0.0.1:18081/v1/api/sync/push)" = 410
