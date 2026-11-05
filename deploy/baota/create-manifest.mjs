@@ -31,7 +31,6 @@ const manifest = {
   seed: {
     entry: 'apps/server/dist/scripts/bootstrap-v1.js',
     sha256: digest('apps/server/dist/scripts/bootstrap-v1.js'),
-    referenceDataSha256: digest('seed/master-data.json'),
     taxAuthority: 'UNVERIFIED_NOT_SEEDED',
   },
   acceptance: 'NOT_YET_VERIFIED',
