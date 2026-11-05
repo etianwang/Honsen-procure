@@ -74,6 +74,6 @@ location / {
 }
 ```
 
-未来切换前备份配置与数据库并验证恢复，停止 V1 后才启动 V2。将活动 location 改为 `/v2/`，旧 `/v1` 必须进入 410 拒绝，绝不能转发 V2。保留旧目录和原始 ZIP。回退必须先验证旧 API 对当前 migration schema 的兼容性；不兼容需经授权通过已验证宝塔备份恢复。仅复制文件不能回退数据库。
+未来切换前备份配置与数据库并验证恢复，停止 V1 后才启动 V2。将活动 location 改为 `/v2/`，旧 `/v1` 必须进入 410 拒绝，绝不能转发 V2。保留旧目录和原始 ZIP。回退必须先验证旧 API 对当前 migration schema 和业务 JSON／正式快照契约（包括人工印花税）的兼容性；同一 SQL 迁移版本不代表旧 API 能安全处理新快照。不兼容需经授权通过已验证宝塔备份恢复。仅复制文件不能回退数据库。
 
 软件版本见 package.json，活动 API 版本为 v1，源码 SHA 见 build-manifest.json；数据库版本以 schema_migrations 实际记录为准。SHA256SUMS 校验包内文件，ZIP 外侧 `.sha256` 校验完整 ZIP。
