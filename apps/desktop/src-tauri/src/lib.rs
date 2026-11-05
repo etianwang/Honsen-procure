@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod fresh_conflict_tests;
+#[cfg(test)]
 mod g2_pull_tests;
 #[cfg(test)]
 mod manual_stamp_tests;
@@ -6096,7 +6098,10 @@ impl LocalAuthService {
                     "validation_error" => {
                         transaction.execute("UPDATE local_sync_outbox SET superseded_at = ?2, last_error = ?3 WHERE event_id = ?1", params![acknowledgement.event_id.to_string(), unix_seconds(now), acknowledgement.error_code.unwrap_or_else(|| "VALIDATION_ERROR".into())]).map_err(|_| AuthError::Database)?;
                     }
-                    "conflict" if acknowledgement.server_version.unwrap_or(-1) >= 1 => {
+                    // Version zero means this new target was refused before any
+                    // server entity existed. Retain its structured conflict;
+                    // it is not an acknowledgement or a retryable transport error.
+                    "conflict" if acknowledgement.server_version.unwrap_or(-1) >= 0 => {
                         let Some(payload) = acknowledgement
                             .server_payload
                             .filter(serde_json::Value::is_object)
