@@ -1,4 +1,19 @@
-# V1 final QA status — 2026-11-05
+# V1 final QA status — 2026-11-06
+
+Current decision: **V1_FINAL_RELEASE_BLOCKED**. Exact current identities and classified limits are in [the final closure ledger](V1-FINAL-GATE-CLOSURE.md). Historical records below retain their original failures and sources; they are not reused as new candidate acceptance.
+
+| Gate                    | Current decision                                                                                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SERVER_V1_READY         | Bounded new332 actual ZIP/P0/independent acceptance PASS; ZIP SHA276bf757f48719ed85b0107f01831f11dfd4b29af67a90801eaa88a031aaec7a                  |
+| WINDOWS_NATIVE_QA_READY | PARTIAL/BLOCKED: new043 debug restore/bytes/native-close/roles/G1 PASS; installed security/full matrix/authenticated installed upgrade remain open |
+| TOOLBOX_RELEASE_READY   | BLOCKED: caller conflict, stable404, pending repair/test-channel approval and unavailable real UAC evidence                                        |
+| V1_FINAL_RELEASE_READY  | BLOCKED; no stable release or deployment                                                                                                           |
+
+Final product source0434990 includes OPA paging, conflict0 retention and market lifecycle repairs. Server/shared/baota match actual ZIP332 unchanged. Windows016 source0434990, Setup88ddbfdc999304350d6132dd7a78e9e3d1bf84d06fc5bfc6a73e999d87c773d5, BUILT_NOT_INSTALLED; native debug7e236a98a7e7d058eadc7187ee85ac90b7a48bf7053e2c76de6699223a0d5721 is distinct. Final Rust159PASS/7ignored; PostgreSQL216PASS/3opt-in COS SKIP plus three separately actual external COS PASS. Fresh ZIP migration/24Seed/runtime/password/business/guard/Nginx/restart/revocation PASS. Final two-client raw733d restores original/derived bytes, exact formal/history/payment2rows/net0, new native-created market conditional-close8acks and scoped viewer/unbound engineer refusals. G1 raw134500 corePASS includes38denials, real401 and strong per-account evidence retention; prior134000 EADDRINUSE before security assertions stays infrastructureFAIL.
+
+Independent QA reviewed source, raw and artifact hashes. HOST_NATIVE does not establish clean installed acceptance. Preserved HTTP-generated formal SPO null/omitted wire-shape close conflict remains a real interoperability limitation; separate native market-close PASS cannot erase it. Sandbox policy rejection was not retried or bypassed, wizard cancellation does not count as UAC, and no unqualified stable asset was published to conceal404. Original parent/security/Formal gates remain unchanged.
+
+## Historical checkpoint — 2026-11-05
 
 Overall: **PARTIAL — independent final QA conditions NOT met**. This checkpoint integrates three parallel evidence slices; no security/Formal parent is automatically closed. Exact containing checkpoint is the Git commit containing this report. Start checkpoint f1420cb; application source remains unchanged throughout these evidence commits.
 
