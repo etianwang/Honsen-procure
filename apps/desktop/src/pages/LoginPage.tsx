@@ -1,8 +1,8 @@
 import { useUiLocale, type UiLocale } from '../lib/ui-locale'
 import { authText, type AuthMessage } from '../lib/auth-messages'
 import { useState } from 'react'
-import { Alert, Button, Card, Input } from 'antd'
-import { LockKeyhole, UserRound } from 'lucide-react'
+import { Alert, Button, Card, Dropdown, Input } from 'antd'
+import { ChevronDown, Globe, LockKeyhole, UserRound } from 'lucide-react'
 
 type Session = {
   user_id: string
@@ -28,8 +28,42 @@ function invoke(): TauriInvoke | undefined {
     : undefined
 }
 
-export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
+function LoginLanguagePicker() {
   const { locale, setLocale } = useUiLocale()
+  const languages: { key: UiLocale; label: string }[] = [
+    { key: 'zh', label: '中文' },
+    { key: 'en', label: 'English' },
+    { key: 'fr', label: 'Français' },
+  ]
+  return (
+    <div className="login-language-row">
+      <Dropdown
+        trigger={['click']}
+        placement="bottomRight"
+        menu={{
+          items: languages,
+          selectable: true,
+          selectedKeys: [locale],
+          onClick: ({ key }) => setLocale(key as UiLocale),
+        }}
+      >
+        <Button
+          className="login-language-picker"
+          aria-label="界面语言 / UI language / Langue"
+        >
+          <Globe size={16} aria-hidden="true" />
+          <span>
+            {languages.find((language) => language.key === locale)?.label}
+          </span>
+          <ChevronDown size={14} aria-hidden="true" />
+        </Button>
+      </Dropdown>
+    </div>
+  )
+}
+
+export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
+  const { locale } = useUiLocale()
   const t = (key: AuthMessage) => authText(locale, key)
   const desktopInvoke = invoke()
   const [username, setUsername] = useState('')
@@ -69,15 +103,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
     return (
       <main className="login-page">
         <Card className="login-card">
-          <select
-            aria-label="界面语言 / UI language / Langue"
-            value={locale}
-            onChange={(event) => setLocale(event.target.value as UiLocale)}
-          >
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-            <option value="fr">Français</option>
-          </select>
+          <LoginLanguagePicker />
           <div className="login-brand" aria-hidden="true">
             H
           </div>
@@ -105,15 +131,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
   return (
     <main className="login-page">
       <Card className="login-card">
-        <select
-          aria-label="界面语言 / UI language / Langue"
-          value={locale}
-          onChange={(event) => setLocale(event.target.value as UiLocale)}
-        >
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-          <option value="fr">Français</option>
-        </select>
+        <LoginLanguagePicker />
         <div className="login-brand" aria-hidden="true">
           H
         </div>

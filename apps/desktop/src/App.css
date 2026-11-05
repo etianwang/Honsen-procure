@@ -630,3 +630,18 @@
     display: none;
   }
 }
+
+.login-language-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.login-language-picker.ant-btn {
+  height: 38px;
+  gap: 8px;
+  padding-inline: 12px;
+  border-radius: 10px;
+  border-color: #d9e5de;
+  color: #315747;
+  box-shadow: none;
+}
