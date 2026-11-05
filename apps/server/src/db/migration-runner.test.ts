@@ -15,6 +15,49 @@ describe.skipIf(!pool)('PostgreSQL migrations', () => {
     await pool!.end()
   })
 
+  it('upgrades prior currency checks without rewriting saved rows', async () => {
+    const client = await pool!.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('CREATE SCHEMA currency_upgrade_test')
+      await client.query(
+        'SET LOCAL search_path TO currency_upgrade_test, public',
+      )
+      await client.query(
+        "CREATE TABLE projects(id TEXT PRIMARY KEY, default_currency CHAR(3) CHECK(default_currency IN ('XOF','CNY','USD','EUR'))); CREATE TABLE project_print_defaults(project_id TEXT PRIMARY KEY,default_currency CHAR(3) CHECK(default_currency IN ('XOF','CNY','USD','EUR'))); CREATE TABLE exchange_rates(id TEXT PRIMARY KEY,from_currency CHAR(3) CHECK(from_currency IN ('XOF','CNY','USD','EUR')),to_currency CHAR(3) CHECK(to_currency IN ('XOF','CNY','USD','EUR')))",
+      )
+      await client.query(
+        "INSERT INTO projects VALUES('saved','XOF'); INSERT INTO project_print_defaults VALUES('saved','XOF'); INSERT INTO exchange_rates VALUES('saved','USD','XOF')",
+      )
+      const before = await client.query(
+        'SELECT row_to_json(p) AS value FROM projects p',
+      )
+      await client.query(
+        await readFile(
+          new URL(
+            '../../migrations/014_master_data_currencies.sql',
+            import.meta.url,
+          ),
+          'utf8',
+        ),
+      )
+      expect(
+        (await client.query('SELECT row_to_json(p) AS value FROM projects p'))
+          .rows,
+      ).toEqual(before.rows)
+      await client.query(
+        "INSERT INTO projects VALUES('cm','XAF');INSERT INTO project_print_defaults VALUES('cm','XAF');INSERT INTO exchange_rates VALUES('cm','USD','XAF')",
+      )
+      await client.query('SAVEPOINT invalid_currency')
+      await expect(
+        client.query("INSERT INTO projects VALUES('bad','ZZZ')"),
+      ).rejects.toMatchObject({ code: '23514' })
+      await client.query('ROLLBACK TO SAVEPOINT invalid_currency')
+    } finally {
+      await client.query('ROLLBACK')
+      client.release()
+    }
+  })
   it('creates the account, master-data and sync foundation', async () => {
     await runMigrations(pool!)
     const result = await pool!.query<{ table_name: string }>(

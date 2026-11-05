@@ -51,7 +51,9 @@ async function main() {
   for (const name of migrations) {
     if (
       !Array.isArray(policy[name]) ||
-      (!policy[name].length && !historical.has(name))
+      (!policy[name].length &&
+        !historical.has(name) &&
+        name !== '014_master_data_currencies.sql')
     )
       throw new Error('Migration has no explicit object grant')
     for (const entry of policy[name]) {

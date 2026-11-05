@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import Fastify from 'fastify'
 import argon2 from 'argon2'
 import { randomUUID } from 'node:crypto'
@@ -11,6 +12,8 @@ import { registerPasswordChange } from './password-change.js'
 const url = process.env.TEST_DATABASE_URL
 const pool = url ? new Pool({ connectionString: url }) : null
 const app = Fastify()
+const runtimeRole = 'password_runtime_' + randomUUID().replaceAll('-', '')
+let runtime: Pool
 const id = randomUUID(),
   installation = randomUUID(),
   token = 'isolated-password-test-' + randomUUID()
@@ -33,14 +36,38 @@ describe.skipIf(!pool)('actual PostgreSQL password change', () => {
       (await new PostgresAuthStore(pool!).findAccountByUsername(id))
         ?.passwordChangeRecommended,
     ).toBe(true)
+    const secret = randomUUID()
+    await pool!.query(
+      `CREATE ROLE "${runtimeRole}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD '${secret}'`,
+    )
+    const grants = await readFile(
+      new URL('../../../../deploy/baota/runtime-grants.sql', import.meta.url),
+      'utf8',
+    )
+    await pool!.query(grants.replaceAll(':"runtime_role"', `"${runtimeRole}"`))
+    const connection = new URL(url!)
+    connection.username = runtimeRole
+    connection.password = secret
+    runtime = new Pool({ connectionString: connection.toString() })
+    expect(
+      (await runtime.query('SELECT current_user AS role')).rows[0].role,
+    ).toBe(runtimeRole)
+    await expect(
+      runtime.query('CREATE TABLE forbidden_runtime_ddl(id int)'),
+    ).rejects.toMatchObject({ code: '42501' })
     registerPasswordChange(
       app,
-      new AuthService(new PostgresAuthStore(pool!), { verify: argon2.verify }),
-      pool!,
+      new AuthService(new PostgresAuthStore(runtime), {
+        verify: argon2.verify,
+      }),
+      runtime,
     )
   })
   afterAll(async () => {
     await app.close()
+    await runtime?.end()
+    await pool!.query(`DROP OWNED BY "${runtimeRole}"`)
+    await pool!.query(`DROP ROLE "${runtimeRole}"`)
     await pool!.end()
   })
   it('rejects unauthenticated calls and short replacements without changing the password', async () => {
