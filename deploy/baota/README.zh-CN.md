@@ -10,6 +10,39 @@ node --env-file=.env apps/server/dist/index.js
 
 将 `.env.example` 复制为 `.env`，只填写运行角色凭据；不得使用数据库所有者作为 API 运行账号。初始化/升级必须使用包内受控 migration-runner（维护角色连接），禁止手工拼接 SQL 或将所有表授予运行账号。Seed 按独立入口的运行时参数执行，禁止提交初始密码。
 
+## 首次空库初始化
+
+以下命令在部署根目录运行，使用宝塔已安装的 `psql`。先在宝塔创建空 PostgreSQL 数据库和维护所有者；不要对业务数据库重建或清空。
+
+```sh
+read -rsp '维护角色 PostgreSQL 连接串: ' POSTGRES_URL; echo
+export POSTGRES_URL
+node apps/server/dist/db/migrate.js
+read -rsp '已批准的首次 admin 密码: ' INITIAL_ADMIN_PASSWORD; echo
+printf '%s' "$INITIAL_ADMIN_PASSWORD" | node apps/server/dist/scripts/bootstrap-v1.js
+unset INITIAL_ADMIN_PASSWORD
+psql "$POSTGRES_URL" -v ON_ERROR_STOP=1
+```
+
+在 psql 中创建独立运行角色（名称可统一采用以下值），通过交互密码提示设置密码：
+
+```sql
+CREATE ROLE honsen_api LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+\password honsen_api
+\q
+```
+
+然后仍用维护角色执行受控的首次空库授权：
+
+```sh
+psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -v runtime_role=honsen_api -f deploy/baota/runtime-grants.sql
+unset POSTGRES_URL
+```
+
+将独立运行角色连接串填入本机 `.env`，宝塔 Node 项目使用该环境运行。上述 SQL 为首次空库初始化使用，不是现有生产升级授权脚本；现有数据库升级必须保留原受控升级机制及兼容性验证。迁移版本实际记录在 `schema_migrations`，禁止另行执行手工拼接的初始化 SQL。
+
+首次 admin 密码由操作员运行时提供，不写在 ZIP 中；首次登录仅建议改密。Seed 重复执行不会重置密码。当前 Seed 包含 2 国家、3 项目、14 单位、0 新站点；国家法定税率和印花税条件未获权威确认，因此未写入猜测税率，税费配置验收保持阻塞。不能将本候选宣称为正式生产就绪。
+
 ## 单活动路径
 
 在宝塔现有域名 HTTP 站点添加以下 location；Cloudflare Flexible 回源 HTTP，源站不要强制跳转 HTTPS，否则会形成循环。公网域名仅发布 Cloudflare HTTPS，源站访问限制沿用已批准安全配置。
