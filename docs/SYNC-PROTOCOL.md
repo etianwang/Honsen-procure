@@ -16,7 +16,7 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 ## Push
 
 - `POST /api/sync/push` accepts a maximum of 100 versioned events and requires the authenticated account session. The request carries a non-secret installation UUID for event/session tracking and formal-number namespace validation; it is not a credential.
-- The desktop obtains its API base URL from the deployment-time `HONSEN_SYNC_API_BASE_URL` runtime configuration. It accepts only a clean `https` origin/path (no embedded credentials, query or fragment); PostgreSQL/Neon credentials never appear in desktop configuration. The access token is kept in OS secure storage and is never returned to the renderer or written to SQLite.
+- The desktop defaults to `https://api-pr.honsen.africa/v1` when `HONSEN_SYNC_API_BASE_URL` is absent, as explicitly approved on 2026-11-06. An explicit valid runtime value takes precedence; an invalid explicit value fails safely instead of falling back to production. It accepts only a clean `https` origin/path (no embedded credentials, query or fragment); PostgreSQL/Neon credentials never appear in desktop configuration. The access token is kept in OS secure storage and is never returned to the renderer or written to SQLite.
 - Each result has the original `eventId`, `accepted`, `conflict` or `validation_error` status, plus the server version when one exists. A batch can therefore contain a safe retry beside a rejected event without losing either result.
 - Send pending events in stable creation order over HTTPS using the authenticated account session.
 - The server validates the account/project scope, request payload, event-id idempotency and expected entity version inside one PostgreSQL transaction.
@@ -24,6 +24,7 @@ If the transaction fails, neither the business mutation nor the outbox event is 
 - An owner formal-issue payload also contains the primary currency and every line’s original quote/manual price and currency, frozen source-to-primary rate snapshot, converted reference price, exclusive markup and final price. The server validates the exact integer/rational calculation and required rate presence; acceptance never substitutes a newer exchange rate.
 - On acceptance it commits the mutation and a change-log entry atomically, assigns the next entity version, and returns the event acknowledgment.
 - Only after the client receives an accepted acknowledgment may it mark that local outbox event acknowledged.
+- HTTP 410/426 from an API control route means the API version is retired: show an upgrade notice, stop automatic retries and retain pending Outbox/conflicts. Signed COS object responses are not API-version signals.
 - Transport failure is retryable. The same event ID must be safe to resend indefinitely.
 - Validation rejection is retained with its structured reason. Version mismatch becomes a conflict; neither local nor remote value is silently discarded.
 - A duplicate formal number on another UUID, a reused `(installation UUID, sequence)`, or a divergent frozen snapshot for an issued UUID is an auditable conflict. The original issued records remain available; the client must not manufacture a replacement number during retry or resolution.

@@ -8,6 +8,7 @@ The React renderer is untrusted. It may request actions but it may not decide au
 
 - Every launch requires username/password plus a local image or arithmetic CAPTCHA. The app locks after 30 minutes idle, saves drafts, then requires password re-entry.
 - An administrator creates accounts with a temporary password and binds the user to a photo, country/project, department and team. First login must change that password and complete all bindings before access.
+- The user-approved V1 empty-database bootstrap is a narrow exception to forced first-login change: its initial admin password is supplied at runtime, login recommends a change without blocking access, and normal replacement passwords keep the twelve-character policy. Self-service change requires an active account session and current password, audits the change and revokes all sessions. This exception does not relax ordinary account-provisioning requirements.
 - Store only a strong salted Argon2id password hash. Never store, return, log or place a plaintext password in the frontend.
 - After five failed attempts, lock the account for 15 minutes. An administrator can unlock it. A user may have several roles; stopped accounts retain their history but cannot sign in.
 - A user can have one active device session. A second online login invalidates the first; an offline device is locked on its next authenticated request. Locally cached enabled users may sign in offline for at most 24 hours after their last verified sign-in/sync.
