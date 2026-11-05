@@ -7,6 +7,7 @@ export type SyncState = {
     | 'offline-pending'
     | 'auth-required'
     | 'account-boundary'
+    | 'upgrade-required'
   pendingCount?: number
   conflictCount?: number
   quarantinedCount?: number
@@ -61,6 +62,7 @@ export function startSyncLifecycle(
   let offline = false
   let authRequired = false
   let accountBoundary = false
+  let upgradeRequired = false
   let requestedDuringRun = false
   let failures = 0
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -80,7 +82,14 @@ export function startSyncLifecycle(
   }
 
   const run = async () => {
-    if (!active || offline || authRequired || accountBoundary) return
+    if (
+      !active ||
+      offline ||
+      authRequired ||
+      accountBoundary ||
+      upgradeRequired
+    )
+      return
     if (running) {
       requestedDuringRun = true
       return
@@ -147,6 +156,21 @@ export function startSyncLifecycle(
         if (active) publish('account-boundary')
         return
       }
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'upgrade_required'
+      ) {
+        upgradeRequired = true
+        try {
+          lastStatus = await readSyncStatus(invoke)
+        } catch {
+          /* retain upgrade status */
+        }
+        if (active) publish('upgrade-required')
+        return
+      }
       failures += 1
       publish('retrying')
       schedule(
@@ -160,7 +184,8 @@ export function startSyncLifecycle(
         active &&
         !offline &&
         !authRequired &&
-        !accountBoundary
+        !accountBoundary &&
+        !upgradeRequired
       ) {
         requestedDuringRun = false
         schedule(0)
@@ -174,13 +199,21 @@ export function startSyncLifecycle(
       offline ||
       authRequired ||
       accountBoundary ||
+      upgradeRequired ||
       running ||
       failures > 0
     )
       return
     try {
       const status = await readSyncStatus(invoke)
-      if (!active || offline || authRequired || accountBoundary || running)
+      if (
+        !active ||
+        offline ||
+        authRequired ||
+        accountBoundary ||
+        upgradeRequired ||
+        running
+      )
         return
       const newPending = status.pendingCount > (lastStatus?.pendingCount ?? 0)
       lastStatus = status
@@ -203,13 +236,14 @@ export function startSyncLifecycle(
 
   const online = () => {
     offline = false
-    if (!authRequired && !accountBoundary) schedule(0)
+    if (!authRequired && !accountBoundary && !upgradeRequired) schedule(0)
   }
   const onOffline = () => {
     offline = true
     if (timer) clearTimeout(timer)
     timer = undefined
-    if (!authRequired && !accountBoundary) publish('offline-pending')
+    if (!authRequired && !accountBoundary && !upgradeRequired)
+      publish('offline-pending')
   }
   host.addEventListener('online', online)
   host.addEventListener('offline', onOffline)

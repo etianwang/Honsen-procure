@@ -37,6 +37,14 @@ export function useUiLocale() {
 }
 
 const messages = {
+  '初始密码仍在使用，建议修改密码；可继续使用系统': [
+    'The initial password is still in use. A password change is recommended; you may continue.',
+    'Le mot de passe initial est toujours utilisé. Il est recommandé de le modifier ; vous pouvez continuer.',
+  ],
+  '服务版本已停用，请升级客户端；本地数据已保留': [
+    'API version retired; upgrade the client. Local data is retained.',
+    'Version API retirée ; mettez le client à jour. Les données locales sont conservées.',
+  ],
   '当前账户没有有效的离线授权范围，无法新建采购申请。': [
     'This account has no valid offline authorization scope; a requisition cannot be created.',
     'Ce compte ne dispose d’aucun périmètre hors ligne valide ; impossible de créer une demande.',

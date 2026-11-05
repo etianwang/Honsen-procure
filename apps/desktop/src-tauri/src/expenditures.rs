@@ -777,8 +777,7 @@ impl LocalAuthService {
         };
         self.refresh_authorization_for_session(&request, now)
             .await?;
-        let base =
-            std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+        let base = configured_api_base_url()?;
         let response = self
             .https_client()?
             .get(sync_endpoint_from(&base, "payment-conflicts")?)
@@ -796,6 +795,7 @@ impl LocalAuthService {
         if response.status() == reqwest::StatusCode::FORBIDDEN {
             return Err(AuthError::Forbidden);
         }
+        require_active_api(response.status())?;
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }

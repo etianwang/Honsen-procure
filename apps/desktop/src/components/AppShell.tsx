@@ -34,6 +34,7 @@ type AppShellProps = PropsWithChildren<{
   role: UserRole
   onNavigate: (page: AppPage) => void
   onLock?: () => void
+  passwordChangeRecommended?: boolean
   syncState?: SyncState
   authorizationContexts?: AuthorizationContextOption[]
   selectedAuthorizationContext?: string
@@ -50,6 +51,7 @@ const roleLabel: Record<UserRole, ShellMessage> = {
 
 export function AppShell({
   children,
+  passwordChangeRecommended,
   page,
   pageTitle,
   role,
@@ -199,11 +201,13 @@ export function AppShell({
                     ? `${t('待同步')} ${syncState.pendingCount ?? t('未知')}`
                     : syncState?.kind === 'retrying'
                       ? t('连接失败，等待重试；本地数据待同步')
-                      : syncState?.kind === 'auth-required'
-                        ? t('登录已失效，请重新在线登录')
-                        : syncState?.kind === 'account-boundary'
-                          ? t('多账号拉取已暂停，需先完成账号隔离恢复')
-                          : t('离线本地数据')}
+                      : syncState?.kind === 'upgrade-required'
+                        ? t('服务版本已停用，请升级客户端；本地数据已保留')
+                        : syncState?.kind === 'auth-required'
+                          ? t('登录已失效，请重新在线登录')
+                          : syncState?.kind === 'account-boundary'
+                            ? t('多账号拉取已暂停，需先完成账号隔离恢复')
+                            : t('离线本地数据')}
               {syncState?.kind !== 'pending' &&
               syncState?.pendingCount !== undefined
                 ? ` · ${t('待同步')} ${syncState.pendingCount}`
@@ -230,7 +234,14 @@ export function AppShell({
             )}
           </div>
         </header>
-        <div className="content">{children}</div>
+        <div className="content">
+          {passwordChangeRecommended && (
+            <p role="status">
+              {t('初始密码仍在使用，建议修改密码；可继续使用系统')}
+            </p>
+          )}
+          {children}
+        </div>
       </main>
     </div>
   )

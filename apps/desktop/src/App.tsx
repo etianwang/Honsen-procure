@@ -200,6 +200,7 @@ function App() {
     user_id: string
     username: string
     roles: string[]
+    password_change_recommended?: boolean
     requires_password_change: boolean
     onlineAuthenticated: boolean
   } | null>(null)
@@ -437,6 +438,7 @@ function App() {
               : undefined
           }
           onSelectAuthorizationContext={selectAuthorizationContext}
+          passwordChangeRecommended={session?.password_change_recommended}
           syncState={syncState}
           onLock={
             session

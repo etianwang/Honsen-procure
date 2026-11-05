@@ -1,5 +1,9 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '服务版本已停用，请升级客户端；本地数据已保留': [
+    'API version retired; upgrade the client. Local data is retained.',
+    'Version API retirée ; mettez le client à jour. Les données locales sont conservées.',
+  ],
   '登录 HONSEN Procure': [
     'Sign in to HONSEN Procure',
     'Connexion à HONSEN Procure',

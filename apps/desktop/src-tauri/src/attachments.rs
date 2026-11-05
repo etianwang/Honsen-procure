@@ -554,6 +554,7 @@ impl LocalAuthService {
         if response.status() == reqwest::StatusCode::FORBIDDEN {
             return Err(AuthError::Forbidden);
         }
+        require_active_api(response.status())?;
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }
@@ -684,6 +685,9 @@ impl LocalAuthService {
             match self.transfer_attachment(id, now, &sync).await {
                 Ok(()) => completed += 1,
                 Err(error) => {
+                    if error == AuthError::UpgradeRequired {
+                        return Err(error);
+                    }
                     let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
                     Self::require_request_session(&connection, sync.session)?;
                     let attempts: i64 = connection
@@ -1019,6 +1023,13 @@ mod tests {
             .unwrap();
         let old = service.sync_request(now).unwrap().session;
         assert!(service.attachment_response(response(200), old).is_ok());
+        for status in [410, 426] {
+            assert!(matches!(
+                service.attachment_response(response(status), old),
+                Err(AuthError::UpgradeRequired)
+            ));
+        }
+        assert!(service.sync_request(now).is_ok());
         service
             .activate_online_session(b, &"b".repeat(32), now)
             .unwrap();

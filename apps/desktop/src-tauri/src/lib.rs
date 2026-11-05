@@ -69,6 +69,7 @@ pub struct CaptchaChallenge {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AuthenticatedSession {
+    pub password_change_recommended: bool,
     pub user_id: Uuid,
     pub username: String,
     pub roles: Vec<Role>,
@@ -143,6 +144,8 @@ struct CloudLoginResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CloudLoginUser {
+    #[serde(default)]
+    password_change_recommended: bool,
     id: Uuid,
     username: String,
     roles: Vec<Role>,
@@ -1310,6 +1313,8 @@ pub enum AuthError {
     ImmutableBusinessCode,
     #[error("synchronization transport error")]
     SyncTransport,
+    #[error("this API version is retired; upgrade the client; local changes are retained")]
+    UpgradeRequired,
     #[error("synchronization account boundary requires recovery")]
     SyncAccountBoundary,
 }
@@ -1974,6 +1979,7 @@ impl LocalAuthService {
             .send()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
+        require_active_api(response.status())?;
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }
@@ -2022,6 +2028,7 @@ impl LocalAuthService {
         {
             return Err(AuthError::InvalidCredentials);
         }
+        require_active_api(response.status())?;
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }
@@ -2045,6 +2052,7 @@ impl LocalAuthService {
         )?;
         self.activate_online_session(login.user.id, &login.access_token, now)?;
         Ok(AuthenticatedSession {
+            password_change_recommended: login.user.password_change_recommended,
             user_id: login.user.id,
             username: login.user.username,
             roles: login.user.roles,
@@ -2119,6 +2127,7 @@ impl LocalAuthService {
         connection.execute("INSERT INTO local_session (user_id, started_at, last_active_at) VALUES (?1, ?2, ?2)", params![id, unix_seconds(now)]).map_err(|_| AuthError::Database)?;
         connection.session_invalidated = false;
         Ok(AuthenticatedSession {
+            password_change_recommended: false,
             user_id: account_id,
             username,
             roles,
@@ -6559,8 +6568,7 @@ impl LocalAuthService {
             &*self.connection.lock().map_err(|_| AuthError::Database)?,
             request.session,
         )?;
-        let base =
-            std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+        let base = configured_api_base_url()?;
         let response = self
             .https_client()?
             .get(sync_endpoint_from(&base, "category-quarantine")?)
@@ -6574,6 +6582,7 @@ impl LocalAuthService {
         if response.status() == reqwest::StatusCode::FORBIDDEN {
             return Err(AuthError::Forbidden);
         }
+        require_active_api(response.status())?;
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }
@@ -6630,8 +6639,7 @@ impl LocalAuthService {
             &*self.connection.lock().map_err(|_| AuthError::Database)?,
             request.session,
         )?;
-        let base =
-            std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+        let base = configured_api_base_url()?;
         let response = self.https_client()?.post(sync_endpoint_from(&base, "category-repairs")?).bearer_auth(&request.token).json(&serde_json::json!({"requestId": request_id, "categoryId": input.category_id, "expectedVersion": input.expected_version, "newBusinessCode": input.new_business_code, "reason": input.reason})).send().await.map_err(|_| AuthError::SyncTransport)?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             self.reject_sync_session(request.session)?;
@@ -6645,6 +6653,7 @@ impl LocalAuthService {
             connection.execute("UPDATE local_remote_category_repair_intents SET status = 'conflict' WHERE request_id = ?1", [&request_id]).map_err(|_| AuthError::Database)?;
             return Err(AuthError::InvalidInput);
         }
+        require_active_api(response.status())?;
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }
@@ -6723,6 +6732,7 @@ impl LocalAuthService {
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             self.reject_sync_session(request.session)?;
         }
+        require_active_api(response.status())?;
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }
@@ -6824,6 +6834,7 @@ impl LocalAuthService {
             if response.status() == reqwest::StatusCode::UNAUTHORIZED {
                 self.reject_sync_session(request.session)?;
             }
+            require_active_api(response.status())?;
             if !response.status().is_success() {
                 return Err(AuthError::SyncTransport);
             }
@@ -7055,6 +7066,7 @@ impl LocalAuthService {
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             self.reject_sync_session(request.session)?;
         }
+        require_active_api(response.status())?;
         if !response.status().is_success() {
             return Err(AuthError::SyncTransport);
         }
@@ -7091,6 +7103,7 @@ impl LocalAuthService {
             &*self.connection.lock().map_err(|_| AuthError::Database)?,
             session,
         )?;
+        require_active_api(status)?;
         match status {
             reqwest::StatusCode::FORBIDDEN => Err(AuthError::Forbidden),
             reqwest::StatusCode::BAD_REQUEST => Err(AuthError::InvalidInput),
@@ -7313,6 +7326,7 @@ pub mod commands {
                 AuthError::ImmutableBusinessCode => "immutable_business_code",
                 AuthError::PasswordHashing | AuthError::SecureStorage => "credential_storage_error",
                 AuthError::SyncTransport => "sync_transport_error",
+                AuthError::UpgradeRequired => "upgrade_required",
                 AuthError::SyncAccountBoundary => "sync_account_boundary",
             };
             Self { code }
@@ -10549,28 +10563,55 @@ fn pull_page_has_more(cursor: &str, page: &SyncPullPageInput) -> Result<bool, Au
     Ok(page.changes.len() == SYNC_PULL_PAGE_LIMIT)
 }
 
+const DEFAULT_API_BASE_URL: &str = "https://api-pr.honsen.africa/v1";
+
+fn api_base_url_from(explicit: Option<&str>) -> Result<String, AuthError> {
+    let value = explicit.unwrap_or(DEFAULT_API_BASE_URL);
+    // Invalid explicit configuration must not silently fall back to production.
+    api_endpoint_from(value, "auth/captcha")?;
+    Ok(value.to_owned())
+}
+
+fn configured_api_base_url() -> Result<String, AuthError> {
+    match std::env::var("HONSEN_SYNC_API_BASE_URL") {
+        Ok(value) => api_base_url_from(Some(&value)),
+        Err(std::env::VarError::NotPresent) => api_base_url_from(None),
+        Err(_) => Err(AuthError::SyncTransport),
+    }
+}
+
+fn require_active_api(status: reqwest::StatusCode) -> Result<(), AuthError> {
+    if matches!(
+        status,
+        reqwest::StatusCode::GONE | reqwest::StatusCode::UPGRADE_REQUIRED
+    ) {
+        return Err(AuthError::UpgradeRequired);
+    }
+    Ok(())
+}
+
 fn sync_push_endpoint() -> Result<reqwest::Url, AuthError> {
-    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    let value = configured_api_base_url()?;
     sync_endpoint_from(&value, "push")
 }
 
 fn sync_pull_endpoint() -> Result<reqwest::Url, AuthError> {
-    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    let value = configured_api_base_url()?;
     sync_endpoint_from(&value, "pull")
 }
 
 fn authorization_context_endpoint() -> Result<reqwest::Url, AuthError> {
-    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    let value = configured_api_base_url()?;
     api_endpoint_from(&value, "authorization/context")
 }
 
 fn authorization_binding_endpoint(account_id: Uuid) -> Result<reqwest::Url, AuthError> {
-    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    let value = configured_api_base_url()?;
     api_endpoint_from(&value, &format!("authorization/bindings/{account_id}"))
 }
 
 fn cloud_auth_endpoint(operation: &str) -> Result<reqwest::Url, AuthError> {
-    let value = std::env::var("HONSEN_SYNC_API_BASE_URL").map_err(|_| AuthError::SyncTransport)?;
+    let value = configured_api_base_url()?;
     api_endpoint_from(&value, &format!("auth/{operation}"))
 }
 
@@ -10579,7 +10620,10 @@ fn sync_endpoint_from(value: &str, operation: &str) -> Result<reqwest::Url, Auth
 }
 
 fn api_endpoint_from(value: &str, path: &str) -> Result<reqwest::Url, AuthError> {
-    let mut endpoint = reqwest::Url::parse(&value).map_err(|_| AuthError::SyncTransport)?;
+    if value.trim() != value || value.is_empty() {
+        return Err(AuthError::SyncTransport);
+    }
+    let mut endpoint = reqwest::Url::parse(value).map_err(|_| AuthError::SyncTransport)?;
     if endpoint.scheme() != "https"
         || endpoint.host_str().is_none()
         || endpoint.username() != ""
@@ -13596,6 +13640,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(sum, 400);
+    }
+
+    #[test]
+    fn api_base_url_default_override_and_paths() {
+        let default = api_base_url_from(None).unwrap();
+        assert_eq!(default, "https://api-pr.honsen.africa/v1");
+        for operation in [
+            "auth/login",
+            "sync/push",
+            "sync/pull",
+            "authorization/context",
+            "attachments/prepare",
+        ] {
+            assert_eq!(
+                api_endpoint_from(&default, operation).unwrap().as_str(),
+                format!("https://api-pr.honsen.africa/v1/api/{operation}")
+            );
+        }
+        let explicit = "https://test.example/custom/";
+        assert_eq!(api_base_url_from(Some(explicit)).unwrap(), explicit);
+        assert_eq!(
+            sync_endpoint_from(explicit, "push").unwrap().as_str(),
+            "https://test.example/custom/api/sync/push"
+        );
+        for invalid in [
+            "",
+            " ",
+            " https://example.test",
+            "http://example.test",
+            "https://u:p@example.test",
+            "https://example.test?q=x",
+            "https://example.test/#x",
+        ] {
+            assert_eq!(
+                api_base_url_from(Some(invalid)).unwrap_err(),
+                AuthError::SyncTransport
+            );
+        }
+    }
+
+    #[test]
+    fn retired_api_status_requires_upgrade() {
+        for status in [
+            reqwest::StatusCode::GONE,
+            reqwest::StatusCode::UPGRADE_REQUIRED,
+        ] {
+            assert_eq!(
+                require_active_api(status).unwrap_err(),
+                AuthError::UpgradeRequired
+            );
+        }
+        assert!(require_active_api(reqwest::StatusCode::OK).is_ok());
+        assert!(require_active_api(reqwest::StatusCode::UNAUTHORIZED).is_ok());
     }
 
     #[test]

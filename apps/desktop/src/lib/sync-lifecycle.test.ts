@@ -242,4 +242,33 @@ describe('authenticated desktop sync lifecycle', () => {
     ])
     stop()
   })
+
+  it('retains pending status and never retries a retired API after network recovery', async () => {
+    const states: SyncState[] = []
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'sync_status')
+        return {
+          pendingCount: 3,
+          conflictCount: 1,
+          quarantinedCount: 0,
+          lastSuccessAt: null,
+        }
+      throw { code: 'upgrade_required' }
+    })
+    const host = new EventTarget()
+    const stop = startSyncLifecycle(invoke, (state) => states.push(state), host)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(states.at(-1)).toMatchObject({
+      kind: 'upgrade-required',
+      pendingCount: 3,
+      conflictCount: 1,
+    })
+    host.dispatchEvent(new Event('offline'))
+    host.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(
+      invoke.mock.calls.filter(([command]) => command !== 'sync_status'),
+    ).toHaveLength(1)
+    stop()
+  })
 })

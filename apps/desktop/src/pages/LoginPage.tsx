@@ -8,6 +8,7 @@ type Session = {
   user_id: string
   username: string
   roles: string[]
+  password_change_recommended?: boolean
   requires_password_change: boolean
 }
 
@@ -91,7 +92,15 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
         'issue_cloud_captcha',
       )
         .then(setCloudCaptcha)
-        .catch(() => undefined)
+        .catch((error: unknown) => {
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            error.code === 'upgrade_required'
+          )
+            setMessage('服务版本已停用，请升级客户端；本地数据已保留')
+        })
       setAnswer('')
       setMessage('')
     } catch {
@@ -233,7 +242,16 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
               },
             })
               .then((authenticated) => onLogin(authenticated, 'online'))
-              .catch(async () => {
+              .catch(async (error: unknown) => {
+                if (
+                  typeof error === 'object' &&
+                  error !== null &&
+                  'code' in error &&
+                  error.code === 'upgrade_required'
+                ) {
+                  setMessage('服务版本已停用，请升级客户端；本地数据已保留')
+                  return
+                }
                 await refreshCaptcha()
                 setMessage('在线登录失败，请检查连接并重新获取验证码。')
               })
