@@ -21,6 +21,10 @@ const manifest = {
     readFileSync(join(root, 'apps/server/package.json')),
   ).version,
   apiVersion: 'v1',
+  apiContract: {
+    sharedBundleSha256: digest('packages/shared/dist/index.js'),
+    serverEntrySha256: digest('apps/server/dist/index.js'),
+  },
   apiBaseUrl: 'https://api-pr.honsen.africa/v1',
   deploymentDirectory: '/www/wwwroot/api-pr/v1/',
   node: '24.22.1',
