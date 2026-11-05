@@ -180,12 +180,21 @@ describe.skipIf(!pool)('HPA PostgreSQL formal registration', () => {
       status: 'conflict',
       serverVersion: 4,
     })
+    const duplicateApproved = {
+      ...approved,
+      lines: approved.lines.map((line) => ({ ...line, id: randomUUID() })),
+    }
     const duplicate = {
       ...event,
       eventId: randomUUID(),
       entityId: randomUUID(),
+      payload: {
+        ...event.payload,
+        lines: duplicateApproved.lines,
+        formalSnapshotJson: JSON.stringify(duplicateApproved),
+      },
     }
-    await approve(duplicate, approved)
+    await approve(duplicate, duplicateApproved)
     expect(await push(duplicate)).toMatchObject({ status: 'conflict' })
     const page = await store.pullChanges({
       actor: {

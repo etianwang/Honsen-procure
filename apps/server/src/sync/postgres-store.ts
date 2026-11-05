@@ -4,6 +4,7 @@ import {
   projectDefaultsSchema,
   referenceMasterDataSchema,
   taxTemplateSchema,
+  uuidSchema,
 } from '@honsen/shared'
 import type { SyncChange, SyncEvent, SyncEventResult } from '@honsen/shared'
 import { isDeepStrictEqual } from 'node:util'
@@ -815,6 +816,55 @@ export class PostgresSyncStore implements SyncStore {
         await this.recordConflict(client, input, current, result)
         await client.query('COMMIT')
         return result
+      }
+
+      // The existing exclusive purchase-order transaction lock above serializes
+      // this check and the eventual write across different order/event IDs.
+      // SQLite line UUIDs remain reserved even when their order is soft-deleted.
+      if (
+        input.event.entityType === 'purchase_order' &&
+        input.event.operation === 'upsert' &&
+        Array.isArray(input.event.payload.lines)
+      ) {
+        const ids: string[] = []
+        let invalidDeclaredId = false
+        for (const line of input.event.payload.lines) {
+          if (!line || typeof line !== 'object' || !('id' in line)) continue
+          const parsed = uuidSchema.safeParse(
+            (line as Record<string, unknown>).id,
+          )
+          if (!parsed.success) invalidDeclaredId = true
+          else ids.push(parsed.data.toLowerCase())
+        }
+        const occupied = ids.length
+          ? await client.query(
+              `SELECT 1 FROM sync_entities other_order
+           WHERE other_order.entity_type = 'purchase_order' AND other_order.entity_id <> $1
+             AND EXISTS (
+               SELECT 1 FROM jsonb_array_elements(CASE
+                 WHEN jsonb_typeof(other_order.payload_json->'lines') = 'array'
+                 THEN other_order.payload_json->'lines' ELSE '[]'::jsonb END) AS line(value)
+               WHERE LOWER(line.value->>'id') = ANY($2::text[])
+             ) LIMIT 1`,
+              [input.event.entityId, ids],
+            )
+          : null
+        if (
+          invalidDeclaredId ||
+          new Set(ids).size !== ids.length ||
+          occupied?.rowCount
+        ) {
+          const result: SyncEventResult = {
+            eventId: input.event.eventId,
+            status: 'conflict',
+            serverVersion: currentVersion,
+          }
+          // Only the current target's payload is returned. Never disclose the
+          // occupying order, its project, or any of its business fields.
+          await this.recordConflict(client, input, current, result)
+          await client.query('COMMIT')
+          return result
+        }
       }
 
       if (

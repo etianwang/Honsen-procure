@@ -491,7 +491,11 @@ describe.skipIf(!pool)('catalog quote push', () => {
       ).status,
     ).toBe('accepted')
     const staleOrder = randomUUID()
-    expect((await push('purchase_order', staleOrder, data)).status).toBe(
+    const staleData = {
+      ...data,
+      lines: data.lines.map((line) => ({ ...line, id: randomUUID() })),
+    }
+    expect((await push('purchase_order', staleOrder, staleData)).status).toBe(
       'accepted',
     )
     const replacement = randomUUID()
@@ -513,7 +517,7 @@ describe.skipIf(!pool)('catalog quote push', () => {
     const result = await push(
       'purchase_order',
       staleOrder,
-      { ...data, workflowStatus: 'pending_confirmation' },
+      { ...staleData, workflowStatus: 'pending_confirmation' },
       1,
     )
     expect(result).toMatchObject({
@@ -857,7 +861,11 @@ describe.skipIf(!pool)('catalog quote push', () => {
     expect(
       (await push('material_price', latest, { ...quote, id: latest })).status,
     ).toBe('accepted')
-    const lineData = { ...data.lines[0], catalogPriceId: latest }
+    const lineData = {
+      ...data.lines[0],
+      id: randomUUID(),
+      catalogPriceId: latest,
+    }
     expect(
       (
         await push('purchase_order', randomUUID(), {
@@ -894,6 +902,7 @@ describe.skipIf(!pool)('catalog quote push', () => {
     ).toBe('FORBIDDEN')
     const manual = {
       ...lineData,
+      id: randomUUID(),
       catalogPriceId: null,
       priceSource: 'manual',
       unitPriceMinor: '999',
@@ -906,7 +915,7 @@ describe.skipIf(!pool)('catalog quote push', () => {
       (
         await push('purchase_order', randomUUID(), {
           ...next,
-          lines: [{ ...manual, catalogPriceId: latest }],
+          lines: [{ ...manual, id: randomUUID(), catalogPriceId: latest }],
         })
       ).errorCode,
     ).toBe('QUOTE_UNAVAILABLE')
@@ -937,7 +946,7 @@ describe.skipIf(!pool)('catalog quote push', () => {
         (
           await push('purchase_order', randomUUID(), {
             ...next,
-            lines: [manual],
+            lines: [{ ...manual, id: randomUUID() }],
           })
         ).errorCode,
       ).toBe('QUOTE_UNAVAILABLE')

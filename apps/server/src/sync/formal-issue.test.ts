@@ -224,11 +224,24 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
     }
     await seedApproved(firstId)
     expect(await store.pushEvent(first)).toMatchObject({ status: 'accepted' })
+    const duplicateSnapshot = {
+      ...snapshot,
+      lines: snapshot.lines.map((line) => ({ ...line, id: randomUUID() })),
+    }
     const duplicate = {
       ...first,
-      event: { ...first.event, eventId: randomUUID(), entityId: randomUUID() },
+      event: {
+        ...first.event,
+        eventId: randomUUID(),
+        entityId: randomUUID(),
+        payload: {
+          ...payload,
+          lines: duplicateSnapshot.lines,
+          formalSnapshotJson: JSON.stringify(duplicateSnapshot),
+        },
+      },
     }
-    await seedApproved(duplicate.event.entityId)
+    await seedApproved(duplicate.event.entityId, duplicateSnapshot)
     expect(await store.pushEvent(duplicate)).toMatchObject({
       status: 'conflict',
     })
@@ -288,7 +301,11 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       payload.formalSnapshotJson,
     )
 
-    const badLine = { ...line, ownerFinalUnitPriceMinor: '121' }
+    const badLine = {
+      ...line,
+      id: randomUUID(),
+      ownerFinalUnitPriceMinor: '121',
+    }
     const badSnapshot = { ...snapshot, lines: [badLine] }
     const badPayload = {
       ...payload,
@@ -320,6 +337,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
     ).toBe(0)
     const zeroRateLine = {
       ...line,
+      id: randomUUID(),
       ownerLockedExchangeRateDecimal: '0',
       ownerConvertedReferenceUnitMinor: '0',
       ownerFinalUnitPriceMinor: '20',
@@ -363,9 +381,14 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
       )
     }
     const reusedSequenceId = randomUUID()
+    const reusedSequenceLines = snapshot.lines.map((line) => ({
+      ...line,
+      id: randomUUID(),
+    }))
     await seedApproved(reusedSequenceId, {
       ...snapshot,
       projectId: secondProjectId,
+      lines: reusedSequenceLines,
     })
     expect(
       await store.pushEvent({
@@ -377,10 +400,12 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
           payload: {
             ...payload,
             projectId: secondProjectId,
+            lines: reusedSequenceLines,
             formalDocumentNo: `${countryCode}-${secondProjectCode}-20261015-OPA-${shortCode(installationId)}-1`,
             formalSnapshotJson: JSON.stringify({
               ...snapshot,
               projectId: secondProjectId,
+              lines: reusedSequenceLines,
             }),
           },
         },
@@ -488,6 +513,7 @@ describe.skipIf(!pool)('formal issue Push/Pull', () => {
     }
     const crossZeroLine = {
       ...convertedLine,
+      id: randomUUID(),
       ownerLockedExchangeRateDecimal: '0',
       ownerConvertedReferenceUnitMinor: '0',
       ownerFinalUnitPriceMinor: '20',
