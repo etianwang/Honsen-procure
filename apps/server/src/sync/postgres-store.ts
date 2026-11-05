@@ -798,6 +798,12 @@ export class PostgresSyncStore implements SyncStore {
       }
       if (
         currentVersion !== input.event.baseVersion ||
+        // Older clients may ignore this additive field when editing an unissued
+        // order. Preserve both versions instead of silently erasing its amount.
+        (input.event.entityType === 'purchase_order' &&
+          input.event.operation === 'upsert' &&
+          current?.payload_json.manualStampDutyMinor !== undefined &&
+          input.event.payload.manualStampDutyMinor === undefined) ||
         (input.event.entityType === 'procurement_expenditure' &&
           current !== undefined)
       ) {

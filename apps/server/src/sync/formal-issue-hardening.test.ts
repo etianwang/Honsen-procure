@@ -310,6 +310,58 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
     expect(saved).not.toHaveProperty('manualStampDutyMinor')
   })
 
+  it('retains an unissued manual stamp when an old client omits it and allows explicit zero', async () => {
+    const f = fixture(603, true)
+    const pending = { ...f.pending, manualStampDutyMinor: '37' }
+    const initial = {
+      event: f.event(pending, 0),
+      installationId,
+      actorId: engineerId,
+    }
+    expect((await store.pushEvent(initial)).status).toBe('accepted')
+    const omitted: Record<string, unknown> = {
+      ...pending,
+      notes: 'old client edit',
+    }
+    delete omitted.manualStampDutyMinor
+    const stale = { ...initial, event: f.event(omitted, 1) }
+    const first = await store.pushEvent(stale)
+    expect(first).toMatchObject({
+      status: 'conflict',
+      serverVersion: 1,
+      serverPayload: pending,
+    })
+    expect(await store.pushEvent(stale)).toEqual(first)
+    expect(
+      (
+        await pool!.query(
+          'SELECT payload_json FROM sync_entities WHERE entity_id=$1',
+          [f.orderId],
+        )
+      ).rows[0].payload_json,
+    ).toEqual(pending)
+    const conflict = (
+      await pool!.query(
+        'SELECT local_payload_json,server_payload_json FROM sync_conflicts WHERE event_id=$1',
+        [stale.event.eventId],
+      )
+    ).rows[0]
+    expect(conflict.local_payload_json).toEqual(omitted)
+    expect(conflict.server_payload_json).toEqual(pending)
+    const zero = { ...pending, manualStampDutyMinor: '0' }
+    expect(
+      await store.pushEvent({ ...initial, event: f.event(zero, 1) }),
+    ).toMatchObject({ status: 'accepted', serverVersion: 2 })
+    expect(
+      (
+        await pool!.query(
+          'SELECT payload_json FROM sync_entities WHERE entity_id=$1',
+          [f.orderId],
+        )
+      ).rows[0].payload_json,
+    ).toEqual(zero)
+  })
+
   it('rejects applicant self-approval lies while accepting a distinct approver', async () => {
     const own = fixture(106)
     const ownPending = { ...own.pending, applicantId: actorId }

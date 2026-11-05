@@ -223,6 +223,25 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     }
   }
   const parent = randomUUID()
+  const compatibilityId = randomUUID()
+  const compatibilityDraft = {
+    ...common,
+    workflowStatus: 'draft',
+    confirmedBy: null,
+    confirmedAt: null,
+  }
+  await push(event(compatibilityId, compatibilityDraft), engToken)
+  const oldClientDraft = { ...compatibilityDraft }
+  delete oldClientDraft.manualStampDutyMinor
+  const oldClientEvent = event(compatibilityId, oldClientDraft, 1)
+  await push(oldClientEvent, engToken, 'conflict')
+  await push(oldClientEvent, engToken, 'conflict')
+  const compatibilityZero = {
+    ...compatibilityDraft,
+    manualStampDutyMinor: '0',
+    totalMinor: '2950',
+  }
+  await push(event(compatibilityId, compatibilityZero, 1), engToken)
   await approved(parent, common)
   const hpa = formal(common, 'HPA', 1),
     hpaEvent = event(parent, hpa, 2)
@@ -384,6 +403,7 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     'validation_error',
   )
   const rows = await pull(token)
+  expected.push({ id: compatibilityId, payload: compatibilityZero })
   for (const e of expected)
     assert.deepEqual(
       rows.filter((x) => x.entityId === e.id).at(-1)?.payload,
