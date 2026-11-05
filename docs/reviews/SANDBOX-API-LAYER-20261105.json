@@ -148,7 +148,7 @@
       "completedUtc": "2026-11-05T03:22:05.2309633Z"
     },
     "alias": {
-      "completedUtc": "2026-11-05T03:35:47.7466660Z",
+      "completedUtc": "2026-11-05T03:35:47.746666Z",
       "case": "alias program control",
       "utc": "2026-11-05T03:35:42.7061258Z",
       "error": "5s timeout",
@@ -171,5 +171,27 @@
       "removedUtc": "2026-11-05T03:38:29.9168456Z",
       "phase": "B2 completed; all owned diagnostic rules removed"
     }
+  },
+  "explicitApprovalResubmission": {
+    "recordedUtc": "2026-11-05T06:26:28.8104535Z",
+    "guestId": "dd3adece-9887-4f34-b31d-381d8a095c84",
+    "guestAddress": "172.18.190.164",
+    "endpoint": "https://172.18.176.1:3444",
+    "packageSource": "21491c5f4ccfbb668425b302f9be6e0523e1d1df",
+    "packageVersion": "0.1.13",
+    "packageSha256": "19f4648d0fd2269ebaf46620d5ad1ef533d5061f0a41442136f62297619c1f7b",
+    "caThumbprint": "EA450575942FD681A41157146726D8E4E448F92B",
+    "explicitUserApproval": true,
+    "toolApproval": "REJECTED",
+    "toolReason": "CreateProcess rejected: blocked by policy",
+    "rejectionSpecificReasonProvided": false,
+    "combinedOperationExecuted": false,
+    "strictTls": "NOT RUN",
+    "installedLogin": "NOT RUN",
+    "roleScopeSessionRevocation": "NOT RUN",
+    "retriesAfterRenewedRejection": 0,
+    "alternateMechanismUsed": false,
+    "ruleCleanup": "controller approved-resume-cleanup.json remaining0 at06:25:43Z",
+    "guestDisposition": "preserved pending user manual action or tool policy resolution"
   }
 }
