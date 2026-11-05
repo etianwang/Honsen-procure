@@ -9672,6 +9672,37 @@ fn project_remote_purchase_order_change(
         })
     {
         if let Some(order) = &order {
+            if change.operation == "upsert" {
+                let mut current: RemotePurchaseOrderPayload =
+                    serde_json::from_str(&order_sync_payload(transaction, change.entity_id)?)
+                        .map_err(|_| AuthError::InvalidInput)?;
+                let market_parent = current.parent_order_id.is_none()
+                    && current.procurement_mode.as_deref() == Some("honsen_self_purchase")
+                    && !current.has_formal_fields()
+                    && !transaction.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM local_purchase_orders WHERE parent_order_id=?1 AND deleted_at IS NULL) OR EXISTS(SELECT 1 FROM local_rfqs WHERE source_order_id=?1)",
+                        [change.entity_id.to_string()], |row| row.get::<_, bool>(0),
+                    ).map_err(|_| AuthError::Database)?;
+                if market_parent {
+                    let (previous, version, _) =
+                        existing.as_ref().ok_or(AuthError::InvalidInput)?;
+                    if !market_workflow_can_advance(previous, &order.workflow_status)
+                        || (*version == change.version && previous != &order.workflow_status)
+                    {
+                        return Err(AuthError::InvalidInput);
+                    }
+                    current.workflow_status = order.workflow_status.clone();
+                    if current != *order {
+                        return Err(AuthError::InvalidInput);
+                    }
+                    // Receiving/closure do not rewrite the approved financial/line snapshot.
+                    transaction.execute(
+                        "UPDATE local_purchase_orders SET workflow_status=?2,version=?3,updated_at=?4 WHERE id=?1 AND version<?3",
+                        params![change.entity_id.to_string(),order.workflow_status,change.version,unix_seconds(now)],
+                    ).map_err(|_| AuthError::Database)?;
+                    return Ok(true);
+                }
+            }
             if order.procurement_mode.as_deref() == Some("owner_self_purchase") {
                 transaction.execute(
                     "UPDATE local_purchase_orders SET procurement_mode = 'owner_self_purchase', version = ?2, updated_at = ?3 WHERE id = ?1 AND version < ?2 AND procurement_mode IS NULL AND parent_order_id IS NULL AND workflow_status IN ('confirmed', 'approved') AND country_id = ?4 AND project_id = ?5 AND NOT EXISTS (SELECT 1 FROM local_sync_outbox WHERE entity_type = 'purchase_order' AND entity_id = ?1 AND acknowledged_at IS NULL AND superseded_at IS NULL AND (rejected_at IS NULL OR quote_recovery_event_id IS NULL)) AND NOT EXISTS (SELECT 1 FROM local_rfqs WHERE source_order_id = ?1) AND NOT EXISTS (SELECT 1 FROM local_purchase_orders child WHERE child.parent_order_id = ?1 AND child.deleted_at IS NULL)",
@@ -9810,6 +9841,25 @@ fn formal_workflow_can_advance(previous: &str, next: &str) -> bool {
         "receiving" => !matches!(next, "formally_issued" | "executing"),
         _ => previous == next,
     }
+}
+
+fn market_workflow_can_advance(previous: &str, next: &str) -> bool {
+    previous == next
+        || match previous {
+            "confirmed" | "approved" => matches!(
+                next,
+                "executing" | "receiving" | "completed" | "completed_with_conditions" | "cancelled"
+            ),
+            "executing" => matches!(
+                next,
+                "receiving" | "completed" | "completed_with_conditions" | "cancelled"
+            ),
+            "receiving" => matches!(
+                next,
+                "completed" | "completed_with_conditions" | "cancelled"
+            ),
+            _ => false,
+        }
 }
 
 fn validate_remote_formal_number(

@@ -641,6 +641,124 @@ fn g2_pull_production_issue_outbox_reaches_second_file_without_changing_issuer_n
 }
 
 #[test]
+fn g2_pull_native_market_progresses_across_pages_without_rewriting_closed_money() {
+    let (producer, _, now) = service();
+    let (consumer, _, _) = service();
+    dependencies(&producer, true);
+    dependencies(&consumer, true);
+    let mut initial = approved();
+    initial["procurementMode"] = json!("honsen_self_purchase");
+    initial["workflowStatus"] = json!("confirmed");
+    initial["ownerPrintTotalsJson"] = Value::Null;
+    initial["orderDiscountJson"] = json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
+    initial["orderFreightJson"] = initial["orderDiscountJson"].clone();
+    initial["manualStampDutyMinor"] = json!("7");
+    initial["subtotalMinor"] = json!("200");
+    initial["lineDiscountMinor"] = json!("0");
+    initial["orderDiscountMinor"] = json!("0");
+    initial["freightMinor"] = json!("0");
+    initial["taxRateBasisPoints"] = json!(0);
+    initial["taxMinor"] = json!("0");
+    initial["totalMinor"] = json!("207");
+    initial["lines"].as_array_mut().unwrap().truncate(1);
+    let line = &mut initial["lines"][0];
+    for field in LINE_FIELDS {
+        line[field] = Value::Null;
+    }
+    line["currency"] = json!("XOF");
+    line["quantity"] = json!("2");
+    line["unitPriceMinor"] = json!("100");
+    line["lineTotalMinor"] = json!("200");
+    for target in [&producer, &consumer] {
+        target
+            .apply_sync_pull_page(page(initial.clone(), 1, 1), now)
+            .unwrap();
+    }
+    let original_lines = stored(&consumer)["lines"].clone();
+    let mut same_version = stored(&consumer);
+    same_version["workflowStatus"] = json!("executing");
+    assert_eq!(
+        consumer.apply_sync_pull_page(page(same_version, 2, 1), now),
+        Err(AuthError::InvalidInput)
+    );
+    assert_eq!(consumer.pull_cursor_for_account(id(1)).unwrap(), "1");
+    assert_eq!(stored(&consumer)["workflowStatus"], json!("confirmed"));
+    {
+        let connection = producer.connection.lock().unwrap();
+        connection.execute("INSERT INTO local_authorization_snapshots (account_id,project_id,department_id,team_id,verified_at,expires_at) VALUES (?1,?2,?3,?4,?5,?6)", params![id(1).to_string(),id(3).to_string(),id(4).to_string(),id(5).to_string(),unix_seconds(now),unix_seconds(now+AUTHORIZATION_CACHE_WINDOW)]).unwrap();
+    }
+    let wire = || -> Value {
+        serde_json::from_str(&producer.connection.lock().unwrap().query_row("SELECT payload_json FROM local_sync_outbox WHERE entity_id=?1 ORDER BY rowid DESC LIMIT 1", [id(9).to_string()], |row| row.get::<_,String>(0)).unwrap()).unwrap()
+    };
+    producer.start_honsen_market_execution(id(9), now).unwrap();
+    consumer
+        .apply_sync_pull_page(page(wire(), 2, 2), now)
+        .unwrap();
+    assert_eq!(stored(&consumer)["workflowStatus"], json!("executing"));
+    producer
+        .record_receipt(
+            RecordReceiptInput {
+                id: id(44),
+                order_id: id(9),
+                received_at: "2026-10-19".into(),
+                receiver_id: id(1),
+                over_receipt_reason: None,
+                attachment_ids: vec![],
+                items: vec![ReceiptItemInput {
+                    order_item_id: id(10),
+                    quantity: "1".into(),
+                    unit: "pcs".into(),
+                }],
+            },
+            now,
+        )
+        .unwrap();
+    consumer
+        .apply_sync_pull_page(page(wire(), 3, 3), now)
+        .unwrap();
+    assert_eq!(stored(&consumer)["workflowStatus"], json!("receiving"));
+    producer
+        .close_supplier_order_with_conditions(
+            id(9),
+            "Synthetic partial market delivery".into(),
+            now,
+        )
+        .unwrap();
+    let closed = wire();
+    consumer
+        .apply_sync_pull_page(page(closed.clone(), 4, 4), now)
+        .unwrap();
+    assert_eq!(
+        stored(&consumer)["workflowStatus"],
+        json!("completed_with_conditions")
+    );
+    assert_eq!(stored(&consumer)["totalMinor"], json!("207"));
+    assert_eq!(stored(&consumer)["manualStampDutyMinor"], json!("7"));
+    assert_eq!(stored(&consumer)["lines"], original_lines);
+    for field in [
+        "procurementMode",
+        "workflowStatus",
+        "totalMinor",
+        "manualStampDutyMinor",
+        "unitPriceMinor",
+    ] {
+        let mut bad = closed.clone();
+        match field {
+            "workflowStatus" => bad[field] = json!("executing"),
+            "procurementMode" => bad[field] = json!("owner_self_purchase"),
+            "unitPriceMinor" => bad["lines"][0][field] = json!("101"),
+            _ => bad[field] = json!("999"),
+        }
+        assert_eq!(
+            consumer.apply_sync_pull_page(page(bad, 5, 5), now),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(stored(&consumer), closed);
+        assert_eq!(consumer.pull_cursor_for_account(id(1)).unwrap(), "4");
+    }
+}
+
+#[test]
 fn g2_pull_sqlite_collision_and_cursor_failure_roll_back_complete_page() {
     for cursor_failure in [false, true] {
         let (service, _, now) = service();
