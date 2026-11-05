@@ -361,6 +361,19 @@ const failPullAtCursor = optionalTestCursor(
   'HONSEN_PROCURE_TEST_FAIL_PULL_AT_CURSOR',
 )
 nativeApp.addHook('onSend', async (request, reply, payload) => {
+  if (request.url.startsWith('/api/auth/login') || reply.statusCode === 401) {
+    // Test-only session metadata: never record password, access token, hash or login payload.
+    const sessions = await pool.query(
+      'SELECT id,user_id,installation_id,revoked_at FROM account_sessions ORDER BY created_at DESC LIMIT 12',
+    )
+    writeDiagnostic({
+      phase: 'authentication-boundary',
+      route: `${request.method} ${request.url.split('?')[0]}`,
+      serverStatus: reply.statusCode,
+      observedAt: new Date().toISOString(),
+      sessions: sessions.rows,
+    })
+  }
   if (request.url.startsWith('/api/authorization/bindings/')) {
     const token = request.headers.authorization?.replace(/^Bearer /, '')
     const session = token

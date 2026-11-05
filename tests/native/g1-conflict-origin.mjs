@@ -34,6 +34,7 @@ const lateResponses = []
 const managementRevocations = []
 const managementReplacementSessions = []
 let revokedSessionAccess = null
+let currentPhase = 'startup'
 const accountA = '10000000-0000-4000-8000-000000000013'
 const accountB = '10000000-0000-4000-8000-000000000012'
 const sourceA = `G1-local-${randomUUID()}`
@@ -73,6 +74,7 @@ async function launch(profile, port) {
   const environment = {
     ...globalThis.process.env,
     HONSEN_PROCURE_TEST_DB_PATH: profile,
+    HONSEN_NATIVE_WEBVIEW_TEST: 'config',
     HONSEN_NATIVE_WEBVIEW_TEST_PORT: String(port),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1`,
     WEBVIEW2_USER_DATA_FOLDER: `${profile}.webview`,
@@ -101,9 +103,7 @@ async function launch(profile, port) {
     if (message.type() === 'error') consoleErrors.push(message.text())
   })
   try {
-    await expect(
-      page.getByRole('button', { name: '在线登录', exact: true }),
-    ).toBeVisible({ timeout: 30_000 })
+    await expect(page.locator('#account')).toBeVisible({ timeout: 30_000 })
   } catch (error) {
     await page.screenshot({ path: `${resultPath}-startup.png` })
     throw new Error(
@@ -151,6 +151,7 @@ function answer(question) {
   return Number(match[1]) + Number(match[2])
 }
 async function login(page, username, password, pending = 0) {
+  currentPhase = 'ui-login:' + username
   await page.getByLabel('账号', { exact: true }).fill(username)
   await page.getByLabel('密码', { exact: true }).fill(password)
   await page.getByRole('button', { name: '获取验证码', exact: true }).click()
@@ -164,6 +165,10 @@ async function login(page, username, password, pending = 0) {
     .locator('#cloud-captcha')
     .fill(String(answer((await cloud.innerText()).split('：')[1])))
   await page.getByRole('button', { name: '在线登录', exact: true }).click()
+  // AntD's loading icon changes the button accessible name before login resolves.
+  // Require completed renderer navigation, never interpret a transient role mismatch as authentication.
+  await expect(page.locator('.app-shell')).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('.login-page')).toHaveCount(0)
   await expect(
     page.getByRole('button', { name: '在线登录', exact: true }),
   ).toHaveCount(0)
@@ -178,6 +183,7 @@ async function lock(page) {
   ).toBeVisible()
 }
 async function loginCore(page, username, password) {
+  currentPhase = 'ipc-login:' + username
   const local = await call(page, 'issue_local_captcha')
   const cloud = await call(page, 'issue_cloud_captcha')
   return call(page, 'online_login', {
@@ -246,8 +252,22 @@ try {
   await call(page, 'save_material', {
     material: { ...material, nameZh: sourceA },
   })
-  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 1)
+  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 0)
   await call(page, 'pull_sync')
+  const retainedDb = new DatabaseSync(profileA, { readOnly: true })
+  const retained = retainedDb
+    .prepare(
+      'SELECT c.local_payload_json,c.server_payload_json,o.payload_json,o.acknowledged_at,o.superseded_at,o.owner_account_id FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id=c.event_id WHERE c.entity_id=? AND c.resolved_at IS NULL',
+    )
+    .all(material.id)
+  assert.equal(retained.length, 1)
+  assert.equal(retained[0].owner_account_id, accountA)
+  assert.equal(retained[0].acknowledged_at, null)
+  assert.notEqual(retained[0].superseded_at, null)
+  assert.equal(retained[0].payload_json, retained[0].local_payload_json)
+  assert.ok(retained[0].local_payload_json.includes(sourceA))
+  assert.ok(retained[0].server_payload_json.includes(sourceServer))
+  retainedDb.close()
   const own = await call(page, 'list_sync_conflicts')
   assert.equal(own.length, 1)
   assert.ok(own[0].localPayloadJson.includes(sourceA))
@@ -257,7 +277,7 @@ try {
     resolution: 'keep_local',
     reason: 'G1 independent owner resolution',
   }
-  await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD, 1)
+  await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD, 0)
   await lock(page)
   await denied(
     page,
@@ -270,6 +290,36 @@ try {
     'resolve_sync_conflict',
     { input },
     'reauthentication_required',
+  )
+  const snapshotAccount = (accountId) => {
+    const db = new DatabaseSync(profileA, { readOnly: true })
+    try {
+      return {
+        cursor: db
+          .prepare(
+            'SELECT * FROM local_sync_account_pull_state WHERE account_id=?',
+          )
+          .all(accountId),
+        outbox: db
+          .prepare(
+            'SELECT * FROM local_sync_outbox WHERE owner_account_id=? ORDER BY event_id',
+          )
+          .all(accountId),
+        conflicts: db
+          .prepare(
+            'SELECT c.* FROM local_sync_conflicts c JOIN local_sync_outbox o ON o.event_id=c.event_id WHERE o.owner_account_id=? ORDER BY c.id',
+          )
+          .all(accountId),
+      }
+    } finally {
+      db.close()
+    }
+  }
+  const preservedA = snapshotAccount(accountA)
+  assert.deepEqual(
+    snapshotAccount(accountB).cursor,
+    [],
+    'B must begin without borrowing A cursor',
   )
   await login(page, 'engineer-b', process.env.HONSEN_TEST_ENGINEER_B_PASSWORD)
   assert.deepEqual(await call(page, 'list_sync_conflicts'), [])
@@ -299,20 +349,53 @@ try {
       input: { ...input, [field]: forged[field] },
     })
   }
+  const bLegitimateMaterialId = randomUUID()
   await call(page, 'save_material', {
     material: {
       ...material,
-      id: randomUUID(),
+      id: bLegitimateMaterialId,
       nameZh: 'G1 legitimate B event',
     },
   })
   assert.equal((await call(page, 'push_pending_sync', forged)).acceptedCount, 1)
-  await denied(page, 'pull_sync', forged, 'sync_account_boundary')
+  await call(page, 'pull_sync', forged)
+  const bState = snapshotAccount(accountB)
+  assert.equal(bState.cursor.length, 1)
+  assert.ok(BigInt(bState.cursor[0].last_pull_cursor) > 0n)
+  assert.deepEqual(
+    snapshotAccount(accountA),
+    preservedA,
+    'B sync must not alter A cursor/success/outbox/dual conflict payload bytes',
+  )
+  const bOrigin = (
+    await pool.query(
+      'SELECT origin_account_id,origin_installation_id FROM sync_events WHERE entity_id=$1',
+      [bLegitimateMaterialId],
+    )
+  ).rows
+  assert.equal(bOrigin.length, 1)
+  assert.equal(bOrigin[0].origin_account_id, accountB)
+  const observations = readFileSync(
+    process.env.HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH,
+    'utf8',
+  )
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+  const bPulls = observations.filter(
+    (row) =>
+      row.route === 'GET /api/sync/pull' &&
+      row.session?.user_id === accountB &&
+      row.session?.installation_id === bOrigin[0].origin_installation_id,
+  )
+  assert.ok(bPulls.length > 0)
+  assert.equal(bPulls[0].requestedCursor, '0')
+  assert.deepEqual(await call(page, 'list_sync_conflicts', forged), [])
   const bodyB = await page.locator('body').innerText()
   assert.ok(!bodyB.includes(sourceA) && !bodyB.includes(sourceServer))
   await page.screenshot({ path: `${resultPath}-B.png` })
   await lock(page)
-  await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD, 1)
+  await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD, 0)
   assert.deepEqual(await call(page, 'list_sync_conflicts'), own)
   // Real second login revokes A's old token; no direct session/conflict-table mutation.
   await login(producer, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
@@ -404,7 +487,7 @@ try {
   await call(page, 'save_material', {
     material: { ...bMaterial, nameZh: sourceB },
   })
-  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 1)
+  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 0)
   await call(page, 'pull_sync')
   const ownB = await call(page, 'list_sync_conflicts')
   assert.equal(ownB.length, 1)
@@ -474,7 +557,7 @@ try {
     lateResponses.push({ ...actual[0], clientError: response.error.code })
   }
   await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
-  await expect(page.getByText(/多账号拉取已暂停/u)).toBeVisible()
+  assert.equal((await call(page, 'sync_status')).pendingCount, 0)
   const readyB = await startHeldPull('late-account')
   // Revoke the held A token via a second real EXE; B's login alone must not be assumed to revoke A.
   await login(producer, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
@@ -483,7 +566,7 @@ try {
     page,
     'engineer-b',
     process.env.HONSEN_TEST_ENGINEER_B_PASSWORD,
-    1,
+    0,
   )
   await releaseHeldPull('late-account', readyB)
   assert.deepEqual(await call(page, 'list_sync_conflicts'), ownB)
@@ -496,12 +579,12 @@ try {
     { input },
     'sync_account_boundary',
   )
-  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 1)
+  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 0)
   await page.screenshot({ path: `${resultPath}-late-B.png` })
   await lock(producer)
   await lock(page)
   await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
-  await expect(page.getByText(/多账号拉取已暂停/u)).toBeVisible()
+  assert.equal((await call(page, 'sync_status')).pendingCount, 0)
   const readyA = await startHeldPull('late-same-account')
   await lock(page)
   await login(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
@@ -635,7 +718,7 @@ try {
   assert.deepEqual(await call(page, 'list_authorization_contexts'), contextsB)
   await call(page, 'select_authorization_context', { selection: binding })
   assert.deepEqual(await call(page, 'list_sync_conflicts'), ownB)
-  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 1)
+  assert.equal((await call(page, 'push_pending_sync')).pendingCount, 0)
   await call(page, 'lock_session')
   await call(producer, 'lock_session')
   await loginCore(page, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
@@ -683,7 +766,7 @@ try {
         mode: 'g1-conflict-origin',
         coreResult: 'PASS',
         uiConflictResidue:
-          'BLOCKED: production conflict panel is not mounted; no sensitive conflict UI exercised',
+          'NOT_EXERCISED: this command-focused slice does not navigate the production conflict panel',
         profilePath: profileA,
         accountA,
         accountB,
@@ -702,6 +785,7 @@ try {
         lateSameAccountPreserved: 'PASS',
         origins,
         sameProfileSwitch: 'PASS',
+        perAccountCursorAndOwnedEvidenceRetention: 'PASS',
         ownerRecoveryAndResolution: 'PASS',
         consoleErrors,
         ipc: 'real WebView2 -> Tauri commands',
@@ -718,7 +802,8 @@ try {
       {
         mode: 'g1-conflict-origin',
         coreResult: 'FAIL',
-        error: String(error),
+        error: error.stack ?? String(error),
+        currentPhase,
         denials,
         revokedSessionAccess,
         lateResponses,

@@ -8,6 +8,8 @@ param(
   [string]$RunId,
   [switch]$SkipBuild,
   [switch]$ExistingDatabase,
+  [ValidatePattern('^[a-z][a-z0-9_]*test[a-z0-9_]*$')]
+  [string]$TestDatabaseName,
   [string]$NativeExe,
   [string]$NativeProfileExe,
   [string]$WslDistribution = 'Ubuntu-24.04',
@@ -69,6 +71,7 @@ try {
     if (!(Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue)) { throw "$name is required by .env.test" }
   }
 
+  if ($TestDatabaseName) { $env:POSTGRES_TEST_DATABASE = $TestDatabaseName }
   if ($ExistingDatabase) {
     if ($env:POSTGRES_TEST_PORT -ne '54329' -or $env:POSTGRES_TEST_DATABASE -notmatch 'test') { throw 'ExistingDatabase requires test-only database on 127.0.0.1:54329' }
     if (!(Test-NetConnection -ComputerName 127.0.0.1 -Port 54329 -InformationLevel Quiet)) { throw 'controller-owned test database is unavailable' }
@@ -113,7 +116,7 @@ try {
   $env:HONSEN_PROCURE_TEST_RUN_ID = $runId
   $env:HONSEN_PROCURE_TEST_AUTH_BARRIER_PREFIX = if ($Mode -eq 'g1-conflict-origin') { Join-Path $qaRoot "$runId-auth.test" } else { '' }
   $env:HONSEN_PROCURE_TEST_DIAGNOSTICS_PATH = $diagnostics
-  $env:HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE = if ($Mode -in @('g2-formal-pull', 'hpa-formal-pull', 'spo-formal-pull')) { '1' } else { '0' }
+  $env:HONSEN_PROCURE_TEST_G2_PULL_EVIDENCE = if ($Mode -in @('g1-conflict-origin', 'g2-formal-pull', 'hpa-formal-pull', 'spo-formal-pull')) { '1' } else { '0' }
 
   $tsxCli = Join-Path $repo 'node_modules\tsx\dist\cli.mjs'
   for ($launch = 0; $launch -lt 3; $launch++) {
