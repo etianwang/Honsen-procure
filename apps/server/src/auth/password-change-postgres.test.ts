@@ -1,3 +1,4 @@
+import { createApp } from '../app.js'
 import { readFile } from 'node:fs/promises'
 import Fastify from 'fastify'
 import argon2 from 'argon2'
@@ -180,5 +181,65 @@ describe.skipIf(!pool)('actual PostgreSQL password change', () => {
         )
       ).rows[0].failed_login_attempts,
     ).toBe(5)
+  })
+  it('returns 401 for old passwords and locks the fifth failed login using the actual runtime role', async () => {
+    const accountId = randomUUID()
+    await pool!.query(
+      "INSERT INTO users(id,business_code,username,password_hash,ui_locale,requires_password_change) VALUES($1,$2,$2,$3,'zh-CN',FALSE)",
+      [
+        accountId,
+        accountId,
+        await argon2.hash('changed-password-actual', { type: argon2.argon2id }),
+      ],
+    )
+    const loginApp = createApp(
+      new AuthService(new PostgresAuthStore(runtime), {
+        verify: argon2.verify,
+      }),
+    )
+    try {
+      const attempt = async (password: string) => {
+        const captcha = (
+          await loginApp.inject({ method: 'GET', url: '/api/auth/captcha' })
+        ).json()
+        const numbers = captcha.question.match(/\d+/g).map(Number)
+        return loginApp.inject({
+          method: 'POST',
+          url: '/api/auth/login',
+          headers: { 'x-installation-id': randomUUID() },
+          payload: {
+            username: accountId,
+            password,
+            captchaId: captcha.id,
+            captchaAnswer: String(numbers[0] + numbers[1]),
+          },
+        })
+      }
+      expect((await attempt('changed-password-actual')).statusCode).toBe(200)
+      for (let failure = 1; failure <= 5; failure++) {
+        const response = await attempt('old-password-wrong')
+        expect(response.statusCode).toBe(401)
+        expect(response.json()).toEqual({ code: 'INVALID_LOGIN' })
+        const state = (
+          await pool!.query(
+            'SELECT failed_login_attempts,locked_until FROM users WHERE id=$1',
+            [accountId],
+          )
+        ).rows[0]
+        expect(state.failed_login_attempts).toBe(failure)
+        expect(state.locked_until !== null).toBe(failure === 5)
+      }
+      expect((await attempt('changed-password-actual')).statusCode).toBe(423)
+      expect(
+        (
+          await pool!.query(
+            'SELECT count(*) FROM account_sessions WHERE user_id=$1',
+            [accountId],
+          )
+        ).rows[0].count,
+      ).toBe('1')
+    } finally {
+      await loginApp.close()
+    }
   })
 })

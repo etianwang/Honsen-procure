@@ -105,7 +105,7 @@ export class PostgresAuthStore implements AuthStore {
     await this.pool.query(
       `UPDATE users
        SET failed_login_attempts = failed_login_attempts + 1,
-           locked_until = CASE WHEN failed_login_attempts + 1 >= 5 THEN $2 + interval '15 minutes' ELSE locked_until END,
+           locked_until = CASE WHEN failed_login_attempts + 1 >= 5 THEN $2::timestamptz + interval '15 minutes' ELSE locked_until END,
            updated_at = $2
        WHERE id = $1`,
       [accountId, now],
