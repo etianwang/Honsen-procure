@@ -52,6 +52,31 @@ function candidate() {
   } as Record<string, unknown>
 }
 describe('versioned owner formal amounts trust boundary', () => {
+  it('requires manual stamp to match the frozen snapshot and independently calculated totals', () => {
+    const value = candidate()
+    const snapshot = JSON.parse(String(value.formalSnapshotJson))
+    snapshot.manualStampDutyMinor = '37'
+    snapshot.ownerPrintTotalsJson = JSON.stringify(
+      calculateOwnerPrintTotals(
+        snapshot,
+        JSON.parse(String(snapshot.orderDiscountJson)),
+        JSON.parse(String(snapshot.orderFreightJson)),
+      ),
+    )
+    value.manualStampDutyMinor = '37'
+    value.ownerPrintTotalsJson = snapshot.ownerPrintTotalsJson
+    value.formalSnapshotJson = JSON.stringify(snapshot)
+    expect(parseFormalIssue(value)).not.toBe('invalid')
+    expect(parseFormalIssue({ ...value, manualStampDutyMinor: '38' })).toBe(
+      'invalid',
+    )
+    const stripped = { ...value }
+    delete stripped.manualStampDutyMinor
+    expect(parseFormalIssue(stripped)).toBe('invalid')
+    expect(parseFormalIssue({ ...value, manualStampDutyMinor: '-1' })).toBe(
+      'invalid',
+    )
+  })
   it('accepts valid frozen totals and retains legacy absent-field compatibility', () => {
     expect(parseFormalIssue(candidate())).not.toBe('invalid')
     const old = candidate()

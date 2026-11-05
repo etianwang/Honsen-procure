@@ -178,6 +178,9 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     selfApproved: false,
     primaryCurrency: 'XOF',
     orderDate: '2026-10-15',
+    taxRateBasisPoints: 1800,
+    manualStampDutyMinor: '37',
+    totalMinor: '2987',
     lines: [
       {
         id: randomUUID(),
@@ -227,6 +230,11 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
   await push(hpaEvent)
   expected.push({ id: parent, payload: hpa })
   await push(event(parent, { ...hpa, totalMinor: '999' }, 3), token, 'conflict')
+  await push(
+    event(parent, { ...hpa, manualStampDutyMinor: '38' }, 3),
+    token,
+    'conflict',
+  )
   const supplier = randomUUID()
   await push(
     event(
@@ -276,8 +284,8 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     opaBase = {
       ...common,
       procurementMode: 'owner_self_purchase',
-      totalMinor: '252',
-      taxRateBasisPoints: 500, // Synthetic arithmetic fixture, never a statutory rate.
+      totalMinor: '323',
+      taxRateBasisPoints: 1925, // User-approved CM percentage; stamp is manually chosen per order.
       orderDiscountJson: '{"kind":"fixed_minor","minor":"0"}',
       orderFreightJson: '{"kind":"fixed_minor","minor":"0"}',
       lines: [
@@ -317,8 +325,9 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     lineDiscountMinor: '0',
     orderDiscountMinor: '0',
     freightMinor: '0',
-    taxMinor: '12',
-    totalMinor: '252',
+    taxMinor: '46',
+    manualStampDutyMinor: '37',
+    totalMinor: '323',
   })
   const ownerApproval = { ...opaBase }
   delete ownerApproval.ownerPrintTotalsJson

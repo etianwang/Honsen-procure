@@ -36,6 +36,27 @@ assert.equal(changes.filter((c) => c.entityType === 'country').length, 2)
 assert.equal(changes.filter((c) => c.entityType === 'project').length, 3)
 assert.equal(changes.filter((c) => c.entityType === 'unit').length, 14)
 assert.equal(changes.filter((c) => c.entityType === 'site').length, 0)
+const taxes = changes
+  .filter((c) => c.entityType === 'tax_template')
+  .map((c) => c.payload)
+assert.deepEqual(
+  taxes.map((t) => t.rateBasisPoints).sort((a, b) => a - b),
+  [1800, 1925],
+)
+const defaults = changes
+  .filter((c) => c.entityType === 'project_defaults')
+  .map((c) => c.payload)
+assert.equal(defaults.length, 3)
+for (const p of changes
+  .filter((c) => c.entityType === 'project')
+  .map((c) => c.payload)) {
+  const config = defaults.find((d) => d.projectId === p.id)
+  assert(config)
+  const tax = taxes.find((t) => t.id === config.defaultTaxTemplateId)
+  assert(tax)
+  assert.equal(tax.countryId, p.country_id)
+  assert.equal(config.defaultCurrency, p.default_currency)
+}
 const password = randomBytes(24).toString('base64url')
 r = await fetch(new URL('/api/auth/change-password', base), {
   method: 'POST',

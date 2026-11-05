@@ -78,6 +78,55 @@ function purchaseOrderEvent(applicantId = engineer.id) {
 }
 
 describe('SyncService', () => {
+  it('rejects malformed manual stamp duty before writing and retains valid optional values', async () => {
+    const store = new FixtureStore(),
+      service = new SyncService(store)
+    for (const amount of ['-1', '1.5', '9223372036854775808', null, 37]) {
+      const event = purchaseOrderEvent()
+      const result = await service.push(engineer, {
+        deviceId: engineer.installationId,
+        events: [
+          {
+            ...event,
+            payload: { ...event.payload, manualStampDutyMinor: amount },
+          },
+        ],
+      })
+      expect(result.results[0]?.status).toBe('validation_error')
+    }
+    expect(store.pushed).toBe(0)
+    const event = purchaseOrderEvent()
+    for (const payload of [
+      { ...event.payload, manualStampDutyMinor: '37' },
+      {
+        ...event.payload,
+        primaryCurrency: 'XOF',
+        manualStampDutyMinor: '37',
+        lines: [{ currency: 'XOF' }, { currency: 'USD' }],
+      },
+    ]) {
+      const denied = await service.push(engineer, {
+        deviceId: engineer.installationId,
+        events: [{ ...event, payload }],
+      })
+      expect(denied.results[0]?.status).toBe('validation_error')
+    }
+    expect(store.pushed).toBe(0)
+    await service.push(engineer, {
+      deviceId: engineer.installationId,
+      events: [
+        {
+          ...event,
+          payload: {
+            ...event.payload,
+            primaryCurrency: 'XOF',
+            manualStampDutyMinor: '37',
+          },
+        },
+      ],
+    })
+    expect(store.lastPush?.event.payload.manualStampDutyMinor).toBe('37')
+  })
   it('rejects malformed supplier and quote events before storing them', async () => {
     const store = new FixtureStore()
     const actor = { ...engineer, roles: ['purchaser' as const] }

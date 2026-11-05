@@ -10,6 +10,8 @@ import {
   syncPullQuerySchema,
   syncPushRequestSchema,
   taxTemplateSchema,
+  manualStampDutyMinorSchema,
+  currencySchema,
   type SyncEvent,
   type SyncEventResult,
   type SyncPullResponse,
@@ -219,6 +221,37 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (
+      event.entityType === 'purchase_order' &&
+      event.payload.manualStampDutyMinor !== undefined
+    ) {
+      if (
+        !manualStampDutyMinorSchema.safeParse(
+          event.payload.manualStampDutyMinor,
+        ).success
+      )
+        return false
+      if (BigInt(String(event.payload.manualStampDutyMinor)) > 0n) {
+        const currency =
+          event.payload.parentOrderId != null
+            ? event.payload.currency
+            : (event.payload.primaryCurrency ?? event.payload.currency)
+        if (!currencySchema.safeParse(currency).success) return false
+        if (
+          event.payload.procurementMode !== 'owner_self_purchase' &&
+          Array.isArray(event.payload.lines)
+        ) {
+          const currencies = new Set(
+            event.payload.lines.map((line) =>
+              line && typeof line === 'object'
+                ? (line as Record<string, unknown>).currency
+                : undefined,
+            ),
+          )
+          if (currencies.size > 1) return false
+        }
+      }
+    }
     if (event.entityType === 'payment_conflict_resolution') {
       const request = paymentConflictResolutionRequestSchema.safeParse(
         event.payload,

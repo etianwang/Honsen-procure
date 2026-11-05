@@ -251,6 +251,65 @@ describe.skipIf(!pool)('owner formal issue trust boundary', () => {
     ).toEqual(stored.rows[0].payload_json)
   })
 
+  it('persists manual stamp duty in formal snapshots, retries and retains conflicts without rewriting legacy history', async () => {
+    const f = fixture(601, true)
+    const approved = f.approved as Record<string, unknown>
+    const pending = f.pending as Record<string, unknown>
+    const issued = f.issued as Record<string, unknown>
+    approved.manualStampDutyMinor = '37'
+    pending.manualStampDutyMinor = '37'
+    issued.manualStampDutyMinor = '37'
+    const snapshot = JSON.parse(String(issued.formalSnapshotJson))
+    snapshot.manualStampDutyMinor = '37'
+    snapshot.ownerPrintTotalsJson = JSON.stringify(
+      calculateOwnerPrintTotals(
+        snapshot,
+        JSON.parse(String(snapshot.orderDiscountJson)),
+        JSON.parse(String(snapshot.orderFreightJson)),
+      ),
+    )
+    issued.ownerPrintTotalsJson = snapshot.ownerPrintTotalsJson
+    issued.formalSnapshotJson = JSON.stringify(snapshot)
+    await seedApproved(f)
+    const input = { event: f.event(issued, 2), installationId, actorId }
+    expect((await store.pushEvent(input)).status).toBe('accepted')
+    expect((await store.pushEvent(input)).status).toBe('accepted')
+    const changed = { ...issued, manualStampDutyMinor: '38' }
+    expect(
+      (await store.pushEvent({ ...input, event: f.event(changed, 3) })).status,
+    ).toBe('conflict')
+    const stripped = { ...issued }
+    delete stripped.manualStampDutyMinor
+    expect(
+      (await store.pushEvent({ ...input, event: f.event(stripped, 3) })).status,
+    ).toBe('conflict')
+    expect(
+      (
+        await pool!.query(
+          'SELECT payload_json FROM sync_entities WHERE entity_id=$1',
+          [f.orderId],
+        )
+      ).rows[0].payload_json,
+    ).toEqual(issued)
+    const legacy = fixture(602, true)
+    await seedApproved(legacy)
+    const old = {
+      event: legacy.event(legacy.issued, 2),
+      installationId,
+      actorId,
+    }
+    expect((await store.pushEvent(old)).status).toBe('accepted')
+    expect((await store.pushEvent(old)).status).toBe('accepted')
+    const saved = (
+      await pool!.query(
+        'SELECT payload_json FROM sync_entities WHERE entity_id=$1',
+        [legacy.orderId],
+      )
+    ).rows[0].payload_json
+    expect(saved).toEqual(legacy.issued)
+    expect(saved).not.toHaveProperty('manualStampDutyMinor')
+  })
+
   it('rejects applicant self-approval lies while accepting a distinct approver', async () => {
     const own = fixture(106)
     const ownPending = { ...own.pending, applicantId: actorId }

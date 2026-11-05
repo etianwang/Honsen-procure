@@ -4,6 +4,7 @@ import {
   currencySchema,
   multiplyMinorByQuantity,
   divideRoundHalfUp,
+  manualStampDutyMinorSchema,
 } from '@honsen/shared'
 
 type Rule = ReturnType<typeof adjustmentSchema.parse>
@@ -99,6 +100,9 @@ export function calculateOwnerPrintTotals(
   )
     throw Error('Invalid tax rate')
   const tax = divideRoundHalfUp(taxable * BigInt(taxRate), 10000n)
+  const stamp = BigInt(
+    manualStampDutyMinorSchema.parse(payload.manualStampDutyMinor ?? '0'),
+  )
   return {
     version: 1,
     currency,
@@ -108,6 +112,9 @@ export function calculateOwnerPrintTotals(
     orderDiscountMinor: limit(orderDiscountMinor),
     freightMinor: limit(freight),
     taxMinor: limit(tax),
-    totalMinor: limit(taxable + tax),
+    ...(payload.manualStampDutyMinor !== undefined
+      ? { manualStampDutyMinor: limit(stamp) }
+      : {}),
+    totalMinor: limit(taxable + tax + stamp),
   }
 }

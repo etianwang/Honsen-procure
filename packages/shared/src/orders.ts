@@ -15,6 +15,12 @@ const nonNegativeMinorSchema = minorAmountSchema.refine(
   { message: 'Amount must be non-negative.' },
 )
 
+export const manualStampDutyMinorSchema = minorAmountSchema.refine(
+  (value) =>
+    /^(0|[1-9]\d{0,18})$/.test(value) && BigInt(value) <= 9223372036854775807n,
+  { message: 'Manual stamp duty must be a non-negative i64 minor amount.' },
+)
+
 export const adjustmentSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('fixed_minor'), minor: nonNegativeMinorSchema }),
   z.object({
@@ -123,6 +129,7 @@ export const requisitionDraftSchema = z.object({
   orderDiscount: adjustmentSchema,
   orderFreight: adjustmentSchema,
   taxRateBasisPoints: z.number().int().min(0).max(100_000),
+  manualStampDutyMinor: manualStampDutyMinorSchema.optional(),
   lines: z.array(requisitionLineSchema).min(1).max(500),
 })
 
@@ -136,6 +143,7 @@ export type DraftTotals = {
   orderDiscountMinor: string
   freightMinor: string
   taxMinor: string
+  manualStampDutyMinor?: string
   totalMinor: string
   sourceCurrencyTotals: Array<{ currency: Currency; totalMinor: string }>
   lineTotals: Array<{ lineId: string; lineTotalMinor: string }>
@@ -175,6 +183,7 @@ export function calculateDraftTotals(draft: RequisitionDraft): DraftTotals {
   if (sourceTotals.size > 1) {
     if (
       draft.taxRateBasisPoints !== 0 ||
+      BigInt(draft.manualStampDutyMinor ?? '0') !== 0n ||
       !isZeroAdjustment(draft.orderDiscount) ||
       !isZeroAdjustment(draft.orderFreight)
     ) {
@@ -212,15 +221,27 @@ export function calculateDraftTotals(draft: RequisitionDraft): DraftTotals {
     taxable * BigInt(draft.taxRateBasisPoints),
     10_000n,
   )
+  const stamp = BigInt(draft.manualStampDutyMinor ?? '0')
+  if (
+    draft.manualStampDutyMinor !== undefined &&
+    taxable + tax + stamp > 9223372036854775807n
+  )
+    throw new RangeError('Total including manual stamp duty exceeds i64.')
   return {
     subtotalMinor: subtotal.toString(),
     lineDiscountMinor: lineDiscount.toString(),
     orderDiscountMinor: orderDiscount.toString(),
     freightMinor: freight.toString(),
     taxMinor: tax.toString(),
-    totalMinor: (taxable + tax).toString(),
+    ...(draft.manualStampDutyMinor !== undefined
+      ? { manualStampDutyMinor: stamp.toString() }
+      : {}),
+    totalMinor: (taxable + tax + stamp).toString(),
     sourceCurrencyTotals: [
-      { currency: draft.currency, totalMinor: (taxable + tax).toString() },
+      {
+        currency: draft.currency,
+        totalMinor: (taxable + tax + stamp).toString(),
+      },
     ],
     lineTotals,
   }

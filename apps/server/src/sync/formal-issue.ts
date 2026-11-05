@@ -5,6 +5,7 @@ import {
   calculateOwnerLinePrice,
   currencySchema,
   minorAmountSchema,
+  manualStampDutyMinorSchema,
   positiveQuantitySchema,
   uuidSchema,
 } from '@honsen/shared'
@@ -95,6 +96,15 @@ export function parseFormalIssue(
     return 'invalid'
   }
   if (!isRecord(snapshot)) return 'invalid'
+  if (payload.manualStampDutyMinor !== snapshot.manualStampDutyMinor)
+    return 'invalid'
+  if (payload.manualStampDutyMinor !== undefined) {
+    if (
+      !manualStampDutyMinorSchema.safeParse(payload.manualStampDutyMinor)
+        .success
+    )
+      return 'invalid'
+  }
   if (
     (supplierChild
       ? snapshot.procurementMode != null && snapshot.procurementMode !== mode

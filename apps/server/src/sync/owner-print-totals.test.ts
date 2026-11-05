@@ -22,6 +22,37 @@ const fixture = () => ({
   ],
 })
 describe('owner print versioned final totals', () => {
+  it('adds a manually supplied stamp after tax and preserves absent legacy fields', () => {
+    const data = fixture()
+    const legacy = calculateOwnerPrintTotals(data, percent(1000), fixed('20'))
+    expect(legacy).not.toHaveProperty('manualStampDutyMinor')
+    expect(
+      calculateOwnerPrintTotals(
+        { ...data, manualStampDutyMinor: '37' },
+        percent(1000),
+        fixed('20'),
+      ),
+    ).toMatchObject({
+      taxMinor: '124',
+      manualStampDutyMinor: '37',
+      totalMinor: '2631',
+    })
+    for (const value of ['-1', '1.1', '9223372036854775808'])
+      expect(() =>
+        calculateOwnerPrintTotals(
+          { ...data, manualStampDutyMinor: value },
+          fixed('0'),
+          fixed('0'),
+        ),
+      ).toThrow()
+    expect(() =>
+      calculateOwnerPrintTotals(
+        { ...data, manualStampDutyMinor: '9223372036854775807' },
+        fixed('0'),
+        fixed('0'),
+      ),
+    ).toThrow('out of range')
+  })
   it('converts fixed source adjustments then applies line/order rules and tax exactly', () => {
     const result = calculateOwnerPrintTotals(
       fixture(),
