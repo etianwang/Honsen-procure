@@ -31,7 +31,13 @@ const manifest = {
   seed: {
     entry: 'apps/server/dist/scripts/bootstrap-v1.js',
     sha256: digest('apps/server/dist/scripts/bootstrap-v1.js'),
-    taxAuthority: 'UNVERIFIED_NOT_SEEDED',
+    taxAuthority: 'USER_APPROVED_CONFIGURATION_2026-11-06',
+    taxPolicy: {
+      CI: { percentage: '18' },
+      CM: { percentage: '19.25' },
+      stampDuty: 'MANUALLY_ENTERED_ORDER_AMOUNT',
+      automaticFixedStampDuty: false,
+    },
   },
   acceptance: 'NOT_YET_VERIFIED',
   rollback: 'CANDIDATE_ONLY_REQUIRES_SCHEMA_COMPATIBILITY_AND_VERIFIED_BACKUP',
