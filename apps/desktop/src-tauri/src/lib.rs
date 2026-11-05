@@ -9628,6 +9628,15 @@ fn project_remote_purchase_order_change(
                     }
                     current.procurement_mode = snapshot.procurement_mode.clone();
                 }
+                // OPA issuance freezes canonical owner print totals after approval.
+                // Only a previously absent derived value may first arrive here; all
+                // original rules, money and stamp fields still compare below.
+                if order.document_type.as_deref() == Some("OPA")
+                    && matches!(status.as_str(), "approved" | "confirmed")
+                    && current.owner_print_totals_json.is_none()
+                {
+                    current.owner_print_totals_json = snapshot.owner_print_totals_json.clone();
+                }
                 // Approved legacy projectors omitted owner pricing; only those fields may be filled.
                 current.lines = current
                     .lines

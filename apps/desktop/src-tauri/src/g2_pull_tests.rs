@@ -549,7 +549,7 @@ fn g2_pull_production_issue_outbox_reaches_second_file_without_changing_issuer_n
     incoming["orderDiscountJson"] = serde_json::json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
     incoming["orderFreightJson"] = serde_json::json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
     producer
-        .apply_sync_pull_page(page(incoming, 1, 1), now)
+        .apply_sync_pull_page(page(incoming.clone(), 1, 1), now)
         .unwrap();
     {
         let c = producer.connection.lock().unwrap();
@@ -588,10 +588,46 @@ fn g2_pull_production_issue_outbox_reaches_second_file_without_changing_issuer_n
     );
     let (consumer, _, _) = service();
     dependencies(&consumer, true);
+    // A reconnect/page boundary may persist approval before the producer issues.
     consumer
-        .apply_sync_pull_page(page(payload.clone(), 1, 2), now)
+        .apply_sync_pull_page(page(incoming, 1, 1), now)
+        .unwrap();
+    let approval = stored(&consumer);
+    assert!(approval["ownerPrintTotalsJson"].is_null());
+    let mut corrupted = payload.clone();
+    let mut totals: Value =
+        serde_json::from_str(corrupted["ownerPrintTotalsJson"].as_str().unwrap()).unwrap();
+    totals["totalMinor"] = json!("1");
+    corrupted["ownerPrintTotalsJson"] = json!(totals.to_string());
+    assert_eq!(
+        consumer.apply_sync_pull_page(page(corrupted, 2, 2), now),
+        Err(AuthError::InvalidInput)
+    );
+    assert_eq!(stored(&consumer), approval);
+    assert_eq!(consumer.pull_cursor_for_account(id(1)).unwrap(), "1");
+    consumer
+        .apply_sync_pull_page(page(payload.clone(), 2, 2), now)
         .unwrap();
     assert_fields(&consumer, &payload);
+    assert_eq!(
+        stored(&consumer)["ownerPrintTotalsJson"],
+        payload["ownerPrintTotalsJson"]
+    );
+    let mut removed = payload.clone();
+    removed["ownerPrintTotalsJson"] = Value::Null;
+    let mut snapshot: Value =
+        serde_json::from_str(removed["formalSnapshotJson"].as_str().unwrap()).unwrap();
+    snapshot["ownerPrintTotalsJson"] = Value::Null;
+    removed["formalSnapshotJson"] = json!(snapshot.to_string());
+    assert_eq!(
+        consumer.apply_sync_pull_page(page(removed, 3, 3), now),
+        Err(AuthError::InvalidInput)
+    );
+    assert_eq!(
+        stored(&consumer)["ownerPrintTotalsJson"],
+        payload["ownerPrintTotalsJson"]
+    );
+    assert_eq!(consumer.pull_cursor_for_account(id(1)).unwrap(), "2");
     assert_eq!(
         consumer
             .connection
