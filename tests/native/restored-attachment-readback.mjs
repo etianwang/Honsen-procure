@@ -44,6 +44,10 @@ const report = {
     'HOST_NATIVE restored readback only; fixture creation was HTTP, not native',
   exeHash,
   applicationSource: config.applicationSource,
+  clientImplementationSource:
+    config.clientImplementationSource ?? config.applicationSource,
+  clientBuildObservedHead: config.clientBuildObservedHead ?? null,
+  backendSource: config.backendSource ?? null,
   profiles,
   calls,
   clients: [],
@@ -392,6 +396,206 @@ try {
     json({ ...report, result: 'PASS' }),
     { mode: 0o600 },
   )
+  if (process.env.HONSEN_NATIVE_MARKET_CLOSE === '1') {
+    phase = 'native-created-market-conditional-close'
+    const orderId = randomUUID(),
+      lineId = randomUUID(),
+      receiptId = randomUUID()
+    await login(apps[0].page, config.accounts[0])
+    await login(apps[1].page, config.accounts[1])
+    const context = await invoke(apps[0].page, 'get_authorization_context')
+    const zero = { kind: 'fixed_minor', minor: '0' }
+    const draft = {
+      id: orderId,
+      displayNo: `NATIVE-CLOSED-${orderId}`,
+      countryId: context.countryId,
+      projectId: context.projectId,
+      site: context.site,
+      departmentId: context.departmentId,
+      teamId: context.teamId,
+      applicantId: config.accounts[0].userId,
+      currency: 'XOF',
+      primaryCurrency: 'XOF',
+      languagePair: 'zh_fr',
+      urgency: 'normal',
+      urgencyReason: null,
+      orderDate: '2026-11-06',
+      deliveryAddress: 'Synthetic native closed-order acceptance',
+      expectedDeliveryDate: null,
+      notes: null,
+      orderDiscount: zero,
+      orderFreight: zero,
+      taxRateBasisPoints: 0,
+      manualStampDutyMinor: '7',
+      lines: [
+        {
+          id: lineId,
+          materialId: null,
+          catalogPriceId: null,
+          priceSource: null,
+          materialSnapshot: {
+            nameZh: '合成关闭测试',
+            nameFr: 'Test synthétique',
+            model: 'NATIVE-CLOSED',
+            specification: 'Synthetic only',
+          },
+          supplierId: null,
+          currency: 'XOF',
+          quantity: '2',
+          unit: 'pcs',
+          unitPriceMinor: '100',
+          lineDiscount: zero,
+          lineFreight: zero,
+          freightIncluded: false,
+          sortOrder: 0,
+        },
+      ],
+    }
+    const archived = config.orders.map(
+      (order) =>
+        rows(
+          profiles[0],
+          'SELECT * FROM local_purchase_orders WHERE id=?',
+          order.id,
+        )[0],
+    )
+    await invoke(apps[0].page, 'save_requisition_draft', { draft })
+    await invoke(apps[0].page, 'set_procurement_mode', {
+      orderId,
+      mode: 'honsen_self_purchase',
+    })
+    await invoke(apps[0].page, 'submit_requisition_draft', { orderId })
+    const applicantPush = await invoke(apps[0].page, 'push_pending_sync')
+    assert.equal(applicantPush.acceptedCount, 3)
+    assert.equal(applicantPush.pendingCount, 0)
+    await drainPull(apps[1].page)
+    await invoke(apps[1].page, 'confirm_requisition', { orderId })
+    await invoke(apps[1].page, 'start_honsen_market_execution', { orderId })
+    const approvalPush = await invoke(apps[1].page, 'push_pending_sync')
+    assert.equal(approvalPush.acceptedCount, 2)
+    assert.equal(approvalPush.pendingCount, 0)
+    await drainPull(apps[0].page)
+    const stable = rows(
+      profiles[1],
+      'SELECT material_snapshot_json,quantity_decimal,unit_price_minor,line_total_minor FROM local_purchase_order_items WHERE id=?',
+      lineId,
+    )[0]
+    await invoke(apps[1].page, 'record_receipt', {
+      input: {
+        id: receiptId,
+        orderId,
+        receivedAt: '2026-11-06',
+        receiverId: config.accounts[1].userId,
+        overReceiptReason: null,
+        attachmentIds: [],
+        items: [{ orderItemId: lineId, quantity: '1', unit: 'pcs' }],
+      },
+    })
+    assert.equal(
+      rows(
+        profiles[1],
+        'SELECT workflow_status FROM local_purchase_orders WHERE id=?',
+        orderId,
+      )[0].workflow_status,
+      'receiving',
+    )
+    await invoke(apps[1].page, 'close_supplier_order_with_conditions', {
+      orderId,
+      reason:
+        'Synthetic market partial delivery; remaining item intentionally not delivered',
+    })
+    const closurePush = await invoke(apps[1].page, 'push_pending_sync')
+    assert.equal(closurePush.acceptedCount, 3)
+    assert.equal(closurePush.pendingCount, 0)
+    await drainPull(apps[0].page)
+    for (let index = 0; index < 2; index++) {
+      const closed = rows(
+        profiles[index],
+        'SELECT * FROM local_purchase_orders WHERE id=?',
+        orderId,
+      )[0]
+      assert.equal(closed.workflow_status, 'completed_with_conditions')
+      assert.equal(closed.total_minor, 207n)
+      assert.equal(closed.manual_stamp_duty_minor, 7n)
+      assert.equal(
+        json(
+          rows(
+            profiles[index],
+            'SELECT material_snapshot_json,quantity_decimal,unit_price_minor,line_total_minor FROM local_purchase_order_items WHERE id=?',
+            lineId,
+          )[0],
+        ),
+        json(stable),
+      )
+      const before = json(closed)
+      await invoke(apps[index].page, 'get_requisition_detail', { orderId })
+      await expectDenied(
+        apps[index].page,
+        'save_requisition_draft',
+        { draft },
+        'invalid_input',
+      )
+      await expectDenied(
+        apps[index].page,
+        'set_procurement_mode',
+        { orderId, mode: 'owner_self_purchase' },
+        'forbidden',
+      )
+      await expectDenied(
+        apps[index].page,
+        'close_supplier_order_with_conditions',
+        { orderId, reason: 'Synthetic repeat close must be denied' },
+        'forbidden',
+      )
+      assert.equal(
+        json(
+          rows(
+            profiles[index],
+            'SELECT * FROM local_purchase_orders WHERE id=?',
+            orderId,
+          )[0],
+        ),
+        before,
+      )
+      assert.equal(
+        rows(
+          profiles[index],
+          'SELECT count(*) AS count FROM local_sync_outbox WHERE entity_id=? AND acknowledged_at IS NULL AND superseded_at IS NULL',
+          orderId,
+        )[0].count,
+        0n,
+      )
+    }
+    assert.equal(
+      json(
+        config.orders.map(
+          (order) =>
+            rows(
+              profiles[0],
+              'SELECT * FROM local_purchase_orders WHERE id=?',
+              order.id,
+            )[0],
+        ),
+      ),
+      json(archived),
+    )
+    report.nativeMarketClose = {
+      orderId,
+      lineId,
+      receiptId,
+      status: 'completed_with_conditions',
+      totalMinor: '207',
+      manualStampDutyMinor: '7',
+      pushAcknowledged: true,
+      twoAccountsReadonly: true,
+      originalFormalHistoryUnchanged: true,
+    }
+    writeFileSync(
+      join(root, 'native-market-closed.test.json'),
+      json({ ...report, result: 'PASS' }),
+      { mode: 0o600 },
+    )
+  }
   if (config.exerciseConditionalClose && readbackScope === 'all-configured') {
     phase = 'native-conditional-close'
     const target = config.orders.find(
@@ -498,14 +702,16 @@ try {
     const page = apps[1].page
     await login(page, account)
     const pull = await drainPull(page)
-    const parent = config.orders.find(
-      (order) =>
-        !rows(
-          profiles[1],
-          'SELECT parent_order_id FROM local_purchase_orders WHERE id=?',
-          order.id,
-        )[0]?.parent_order_id,
-    )
+    const parent = report.nativeMarketClose
+      ? { id: report.nativeMarketClose.orderId }
+      : config.orders.find(
+          (order) =>
+            !rows(
+              profiles[1],
+              'SELECT parent_order_id FROM local_purchase_orders WHERE id=?',
+              order.id,
+            )[0]?.parent_order_id,
+        )
     assert.ok(parent)
     if (account.canReadHistory) {
       const detail = await invoke(page, 'get_requisition_detail', {
