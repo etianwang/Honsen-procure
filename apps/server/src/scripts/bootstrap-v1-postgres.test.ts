@@ -243,6 +243,13 @@ describe.skipIf(!owner)('isolated PostgreSQL V1 bootstrap', () => {
         projectDefaults: 3,
       })
       expect(
+        (
+          await client.query(
+            "SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND relation='server_change_log'::regclass AND mode='ShareRowExclusiveLock' AND granted",
+          )
+        ).rowCount,
+      ).toBe(1)
+      expect(
         (await client.query('SELECT count(*) FROM project_print_defaults'))
           .rows[0].count,
       ).toBe('3')

@@ -19,6 +19,8 @@ export async function applyApprovedV1TaxConfig(
       taxTemplates: 0,
       projectDefaults: 0,
     }
+  // Keep cursor publication ordered with ordinary API writers during legacy upgrades.
+  await client.query('LOCK TABLE server_change_log IN SHARE ROW EXCLUSIVE MODE')
   const publish = async (kind: string, id: string, payload: unknown) => {
     await client.query(
       'INSERT INTO sync_entities(entity_type,entity_id,version,is_deleted,payload_json,updated_by) VALUES($1,$2,1,FALSE,$3,$4)',
