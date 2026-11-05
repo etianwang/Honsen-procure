@@ -82,9 +82,12 @@ pub(super) fn calculate_owner_print_totals(
             .ok_or(AuthError::InvalidInput)?,
         10_000,
     )?;
-    Ok(
-        serde_json::json!({"version":1,"currency":snapshot.primary_currency,"lines":lines,"subtotalMinor":as_i64(subtotal)?.to_string(),"lineDiscountMinor":as_i64(discounts)?.to_string(),"orderDiscountMinor":as_i64(order_discount_minor)?.to_string(),"freightMinor":as_i64(freight)?.to_string(),"taxMinor":as_i64(tax)?.to_string(),"totalMinor":as_i64(taxable.checked_add(tax).ok_or(AuthError::InvalidInput)?)?.to_string()}),
-    )
+    let stamp = parse_manual_stamp(snapshot.manual_stamp_duty_minor.as_deref().unwrap_or("0"))?;
+    let mut result = serde_json::json!({"version":1,"currency":snapshot.primary_currency,"lines":lines,"subtotalMinor":as_i64(subtotal)?.to_string(),"lineDiscountMinor":as_i64(discounts)?.to_string(),"orderDiscountMinor":as_i64(order_discount_minor)?.to_string(),"freightMinor":as_i64(freight)?.to_string(),"taxMinor":as_i64(tax)?.to_string(),"totalMinor":as_i64(taxable.checked_add(tax).and_then(|v|v.checked_add(stamp)).ok_or(AuthError::InvalidInput)?)?.to_string()});
+    if let Some(value) = &snapshot.manual_stamp_duty_minor {
+        result["manualStampDutyMinor"] = serde_json::json!(value);
+    }
+    Ok(result)
 }
 #[cfg(test)]
 mod migration_tests {

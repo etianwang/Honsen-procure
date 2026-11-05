@@ -34,6 +34,7 @@ export type RequisitionContext = Omit<
   | 'orderDiscount'
   | 'orderFreight'
   | 'taxRateBasisPoints'
+  | 'manualStampDutyMinor'
 > & {
   displayNo: string
 }
@@ -103,11 +104,13 @@ function toOrder(
   lines: EditorLine[],
   context: RequisitionContext,
   taxRateBasisPoints: string,
+  manualStampDutyMinor: string,
 ): RequisitionDraft {
   return {
     ...context,
     id,
     lines: lines.map((line, index) => ({ ...line, sortOrder: index })),
+    manualStampDutyMinor,
     orderDiscount: { kind: 'fixed_minor', minor: '0' },
     orderFreight: { kind: 'fixed_minor', minor: '0' },
     taxRateBasisPoints:
@@ -349,6 +352,7 @@ export function RequisitionPage({
   const [lines, setLines] = useState<EditorLine[]>([newLine(context.currency)])
   const [orderId, setOrderId] = useState(() => crypto.randomUUID())
   const [taxRateBasisPoints, setTaxRateBasisPoints] = useState('0')
+  const [manualStampDutyMinor, setManualStampDutyMinor] = useState('0')
   const [materials, setMaterials] = useState<CatalogMaterialView[]>([])
   const [quotePages, setQuotePages] = useState<
     Record<
@@ -374,8 +378,15 @@ export function RequisitionPage({
   }, [catalogApi, context.projectId])
 
   const draft = useMemo(
-    () => toOrder(orderId, lines, editorContext, taxRateBasisPoints),
-    [editorContext, lines, orderId, taxRateBasisPoints],
+    () =>
+      toOrder(
+        orderId,
+        lines,
+        editorContext,
+        taxRateBasisPoints,
+        manualStampDutyMinor,
+      ),
+    [editorContext, lines, orderId, taxRateBasisPoints, manualStampDutyMinor],
   )
   const totals = useMemo(() => {
     try {
@@ -657,6 +668,16 @@ export function RequisitionPage({
             disabled={status === 'pending'}
             value={taxRateBasisPoints}
             onChange={(event) => setTaxRateBasisPoints(event.target.value)}
+          />
+        </label>
+        <label>
+          {t('印花税（手填，单据币种最小单位）')}
+          <Input
+            aria-label={t('印花税（手填，单据币种最小单位）')}
+            inputMode="numeric"
+            disabled={status === 'pending'}
+            value={manualStampDutyMinor}
+            onChange={(event) => setManualStampDutyMinor(event.target.value)}
           />
         </label>
         {mode === 'owner_self_purchase' ? (

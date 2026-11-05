@@ -704,3 +704,63 @@ fn g2_old_approved_rules_cannot_be_backfilled_by_later_pull() {
         .unwrap();
     assert_eq!(saved, (None, None));
 }
+
+#[test]
+fn manual_stamp_pull_restart_retry_and_frozen_rejection_preserve_value() {
+    let (service, path, now) = service();
+    dependencies(&service, true);
+    let mut payload = issued();
+    let mut snapshot: Value =
+        serde_json::from_str(payload["formalSnapshotJson"].as_str().unwrap()).unwrap();
+    snapshot["manualStampDutyMinor"] = json!("375");
+    snapshot["totalMinor"] = json!("575");
+    payload["manualStampDutyMinor"] = json!("375");
+    payload["totalMinor"] = json!("575");
+    payload["formalSnapshotJson"] = json!(snapshot.to_string());
+    service
+        .apply_sync_pull_page(page(payload.clone(), 1, 1), now)
+        .unwrap();
+    assert_eq!(stored(&service)["manualStampDutyMinor"], "375");
+    drop(service);
+    let service = LocalAuthService::open_file_for_test(path.to_str().unwrap()).unwrap();
+    service
+        .activate_online_session(id(1), &"x".repeat(32), now)
+        .unwrap();
+    service
+        .apply_sync_pull_page(page(payload.clone(), 1, 1), now)
+        .unwrap();
+    assert_eq!(stored(&service)["manualStampDutyMinor"], "375");
+    {
+        let c = service.connection.lock().unwrap();
+        assert!(
+            c.execute(
+                "UPDATE local_purchase_orders SET manual_stamp_duty_minor=999 WHERE id=?1",
+                [id(9).to_string()]
+            )
+            .is_err()
+        );
+    }
+    payload["manualStampDutyMinor"] = json!("999");
+    assert!(
+        service
+            .apply_sync_pull_page(page(payload, 2, 2), now)
+            .is_err()
+    );
+    assert_eq!(service.pull_cursor_for_account(id(1)).unwrap(), "1");
+    assert_eq!(stored(&service)["manualStampDutyMinor"], "375");
+}
+
+#[test]
+fn manual_stamp_owner_totals_preserve_legacy_shape_and_use_primary_currency() {
+    let payload: RemotePurchaseOrderPayload = serde_json::from_value(approved()).unwrap();
+    let zero = AdjustmentInput::FixedMinor { minor: "0".into() };
+    let legacy = owner_print_totals::calculate_owner_print_totals(&payload, &zero, &zero).unwrap();
+    assert!(legacy.get("manualStampDutyMinor").is_none());
+    let mut current = payload;
+    current.manual_stamp_duty_minor = Some("375".into());
+    let totals = owner_print_totals::calculate_owner_print_totals(&current, &zero, &zero).unwrap();
+    assert_eq!(totals["currency"], "XOF");
+    assert_eq!(totals["manualStampDutyMinor"], "375");
+    assert_eq!(totals["totalMinor"], "2439");
+    assert_eq!(totals["taxMinor"], "0");
+}

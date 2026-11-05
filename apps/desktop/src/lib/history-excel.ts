@@ -170,6 +170,7 @@ export async function buildHistoryWorkbook(
       '运费',
       '税额',
       '税率基点',
+      '印花税（手填）',
     ],
     'fr-FR': [
       'Fournisseur',
@@ -182,6 +183,7 @@ export async function buildHistoryWorkbook(
       'Frais',
       'Taxe',
       'Taux en points de base',
+      'Droit de timbre (manuel)',
     ],
     'en-US': [
       'Supplier',
@@ -194,6 +196,7 @@ export async function buildHistoryWorkbook(
       'Freight',
       'Tax',
       'Tax basis points',
+      'Stamp duty (manual)',
     ],
   }[locale]
   textCommentHeader()
@@ -301,6 +304,7 @@ export async function buildHistoryWorkbook(
           formal.freightMinor,
           formal.taxMinor,
           String(formal.taxRateBasisPoints),
+          formal.manualStampDutyMinor ?? '',
         ])
       for (const line of formal?.lines ?? detail.lines) {
         textRow(lines, [

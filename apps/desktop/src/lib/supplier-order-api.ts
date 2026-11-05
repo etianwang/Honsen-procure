@@ -28,6 +28,7 @@ export type SupplierChildTermsInput = {
   orderDiscount: Adjustment
   orderFreight: Adjustment
   taxRateBasisPoints: number
+  manualStampDutyMinor?: string
 }
 
 export type SupplierChildTermsView = {

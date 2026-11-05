@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod g2_pull_tests;
+#[cfg(test)]
+mod manual_stamp_tests;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -363,6 +365,8 @@ pub struct RequisitionDraftInput {
     pub order_discount: AdjustmentInput,
     pub order_freight: AdjustmentInput,
     pub tax_rate_basis_points: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_stamp_duty_minor: Option<String>,
     pub lines: Vec<RequisitionLineInput>,
 }
 
@@ -533,6 +537,8 @@ pub struct SupplierChildTermsInput {
     pub order_discount: AdjustmentInput,
     pub order_freight: AdjustmentInput,
     pub tax_rate_basis_points: i32,
+    #[serde(default)]
+    pub manual_stamp_duty_minor: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -825,6 +831,8 @@ struct RemotePurchaseOrderPayload {
     freight_minor: String,
     tax_rate_basis_points: i32,
     tax_minor: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    manual_stamp_duty_minor: Option<String>,
     total_minor: String,
     confirmed_by: Option<Uuid>,
     confirmed_at: Option<i64>,
@@ -4338,6 +4346,7 @@ impl LocalAuthService {
             order_discount: input.order_discount,
             order_freight: input.order_freight,
             tax_rate_basis_points: input.tax_rate_basis_points,
+            manual_stamp_duty_minor: input.manual_stamp_duty_minor.clone(),
             lines,
         };
         let calculated = calculate_requisition(&draft)?;
@@ -4354,6 +4363,20 @@ impl LocalAuthService {
             .execute(
                 "UPDATE local_purchase_orders SET subtotal_minor = ?2, line_discount_minor = ?3, order_discount_minor = ?4, freight_minor = ?5, tax_rate_basis_points = ?6, tax_minor = ?7, total_minor = ?8, supplier_terms_completed_at = ?9, version = version + 1, updated_at = ?9 WHERE id = ?1",
                 params![input.order_id.to_string(), calculated.subtotal, calculated.line_discount, calculated.order_discount, calculated.freight, draft.tax_rate_basis_points, calculated.tax, calculated.total, unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "UPDATE local_purchase_orders SET manual_stamp_duty_minor=?2 WHERE id=?1",
+                params![
+                    input.order_id.to_string(),
+                    draft
+                        .manual_stamp_duty_minor
+                        .as_deref()
+                        .map(str::parse::<i64>)
+                        .transpose()
+                        .map_err(|_| AuthError::InvalidInput)?
+                ],
             )
             .map_err(|_| AuthError::Database)?;
         let next = order_audit_snapshot(&transaction, input.order_id)?;
@@ -5119,6 +5142,20 @@ impl LocalAuthService {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'draft', ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?27)
                  ON CONFLICT(id) DO UPDATE SET display_no = excluded.display_no, country_id = excluded.country_id, project_id = excluded.project_id, site = excluded.site, department_id = excluded.department_id, team_id = excluded.team_id, applicant_id = excluded.applicant_id, currency = excluded.currency, primary_currency = excluded.primary_currency, language_pair = excluded.language_pair, urgency = excluded.urgency, urgency_reason = excluded.urgency_reason, order_date = excluded.order_date, delivery_address = excluded.delivery_address, expected_delivery_date = excluded.expected_delivery_date, notes = excluded.notes, subtotal_minor = excluded.subtotal_minor, line_discount_minor = excluded.line_discount_minor, order_discount_minor = excluded.order_discount_minor, freight_minor = excluded.freight_minor, tax_rate_basis_points = excluded.tax_rate_basis_points, tax_minor = excluded.tax_minor, total_minor = excluded.total_minor, workflow_status = excluded.workflow_status, rejection_reason = NULL, version = excluded.version, updated_at = excluded.updated_at",
                 params![draft.id.to_string(), draft.display_no, draft.country_id.to_string(), draft.project_id.to_string(), draft.site, draft.department_id.to_string(), draft.team_id.to_string(), draft.applicant_id.to_string(), draft.currency, draft.primary_currency, draft.language_pair, workflow_status, draft.urgency, draft.urgency_reason, draft.order_date, draft.delivery_address, draft.expected_delivery_date, draft.notes, calculated.subtotal, calculated.line_discount, calculated.order_discount, calculated.freight, draft.tax_rate_basis_points, calculated.tax, calculated.total, version, unix_seconds(now)],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "UPDATE local_purchase_orders SET manual_stamp_duty_minor=?2 WHERE id=?1",
+                params![
+                    draft.id.to_string(),
+                    draft
+                        .manual_stamp_duty_minor
+                        .as_deref()
+                        .map(str::parse::<i64>)
+                        .transpose()
+                        .map_err(|_| AuthError::InvalidInput)?
+                ],
             )
             .map_err(|_| AuthError::Database)?;
         transaction.execute("UPDATE local_purchase_orders SET order_discount_json=?2, order_freight_json=?3, owner_print_totals_json=NULL WHERE id=?1", params![draft.id.to_string(), serde_json::to_string(&draft.order_discount).map_err(|_| AuthError::InvalidInput)?, serde_json::to_string(&draft.order_freight).map_err(|_| AuthError::InvalidInput)?]).map_err(|_| AuthError::Database)?;
@@ -8437,6 +8474,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0061_material_english_name",
             include_str!("../migrations/0061_material_english_name.sql"),
         ),
+        (
+            "0062_manual_stamp_duty",
+            include_str!("../migrations/0062_manual_stamp_duty.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -9718,6 +9759,20 @@ fn project_remote_purchase_order_change(
             ],
         )
         .map_err(|_| AuthError::Database)?;
+    transaction
+        .execute(
+            "UPDATE local_purchase_orders SET manual_stamp_duty_minor=?2 WHERE id=?1",
+            params![
+                change.entity_id.to_string(),
+                order
+                    .manual_stamp_duty_minor
+                    .as_deref()
+                    .map(str::parse::<i64>)
+                    .transpose()
+                    .map_err(|_| AuthError::InvalidInput)?
+            ],
+        )
+        .map_err(|_| AuthError::Database)?;
     transaction.execute("UPDATE local_purchase_orders SET order_discount_json=?2, order_freight_json=?3, owner_print_totals_json=?4 WHERE id=?1", params![change.entity_id.to_string(), order.order_discount_json, order.order_freight_json, order.owner_print_totals_json]).map_err(|_| AuthError::Database)?;
     if is_formal {
         // Freeze only after lines are complete; both operations and the cursor share the page transaction.
@@ -10057,6 +10112,9 @@ fn remote_order_references_exist(
 }
 
 fn validate_remote_purchase_order(order: &RemotePurchaseOrderPayload) -> Result<(), AuthError> {
+    if let Some(stamp) = &order.manual_stamp_duty_minor {
+        as_i64(parse_manual_stamp(stamp)?)?;
+    }
     if let Some(raw) = &order.owner_print_totals_json {
         let discount: AdjustmentInput = serde_json::from_str(
             order
@@ -10466,9 +10524,23 @@ fn validate_requisition_draft(draft: &RequisitionDraftInput) -> Result<(), AuthE
     validate_adjustment(&draft.order_freight)
 }
 
+fn parse_manual_stamp(value: &str) -> Result<i128, AuthError> {
+    if value.is_empty()
+        || (value.len() > 1 && value.starts_with('0'))
+        || !value.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(AuthError::InvalidInput);
+    }
+    let amount = parse_non_negative_minor(value)?;
+    as_i64(amount)?;
+    Ok(amount)
+}
+
 fn calculate_requisition(
     draft: &RequisitionDraftInput,
 ) -> Result<CalculatedRequisition, AuthError> {
+    let stamp = parse_manual_stamp(draft.manual_stamp_duty_minor.as_deref().unwrap_or("0"))?;
+    as_i64(stamp)?;
     let mixed_currencies = draft
         .lines
         .iter()
@@ -10477,7 +10549,8 @@ fn calculate_requisition(
         .len()
         > 1;
     if mixed_currencies
-        && (draft.tax_rate_basis_points != 0
+        && (stamp != 0
+            || draft.tax_rate_basis_points != 0
             || !is_zero_adjustment(&draft.order_discount)
             || !is_zero_adjustment(&draft.order_freight))
     {
@@ -10533,7 +10606,7 @@ fn calculate_requisition(
         order_discount: as_i64(order_discount)?,
         freight: as_i64(freight)?,
         tax: as_i64(tax)?,
-        total: as_i64(taxable + tax)?,
+        total: as_i64(taxable + tax + stamp)?,
         lines,
     })
 }
@@ -10779,7 +10852,7 @@ fn installation_short_code(installation_id: Uuid) -> String {
 fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<String, AuthError> {
     let header = transaction
         .query_row(
-            "SELECT parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at, procurement_mode, document_type, formal_document_no, formal_installation_id, formal_sequence, formally_issued_at, formal_snapshot_json, order_discount_json, order_freight_json, owner_print_totals_json FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at, procurement_mode, document_type, formal_document_no, formal_installation_id, formal_sequence, formally_issued_at, formal_snapshot_json, order_discount_json, order_freight_json, owner_print_totals_json, manual_stamp_duty_minor FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
             [order_id.to_string()],
             |row| { let mut value = serde_json::json!({
                 "parentOrderId": row.get::<_, Option<String>>(0)?,
@@ -10827,6 +10900,7 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
             value["orderDiscountJson"] = serde_json::json!(row.get::<_, Option<String>>(41)?);
             value["orderFreightJson"] = serde_json::json!(row.get::<_, Option<String>>(42)?);
             value["ownerPrintTotalsJson"] = serde_json::json!(row.get::<_, Option<String>>(43)?);
+            if let Some(stamp) = row.get::<_, Option<i64>>(44)? { value["manualStampDutyMinor"] = serde_json::json!(stamp.to_string()); }
             Ok(value) },
         )
         .map_err(|_| AuthError::Database)?;
@@ -16468,6 +16542,7 @@ mod tests {
                         order_discount: AdjustmentInput::FixedMinor { minor: "10".into() },
                         order_freight: AdjustmentInput::FixedMinor { minor: "20".into() },
                         tax_rate_basis_points: 500,
+                        manual_stamp_duty_minor: None,
                     },
                     now,
                 )
@@ -17272,6 +17347,7 @@ mod tests {
                     order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
                     order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
                     tax_rate_basis_points: 0,
+                    manual_stamp_duty_minor: None,
                     lines: vec![RequisitionLineInput {
                         id: draft_item_id,
                         material_id: Some(material_id),
@@ -17475,6 +17551,7 @@ mod tests {
                     order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
                     order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
                     tax_rate_basis_points: 0,
+                    manual_stamp_duty_minor: None,
                     lines: vec![RequisitionLineInput {
                         id: draft_item_id,
                         material_id: Some(material_id),
@@ -18714,6 +18791,7 @@ mod tests {
             order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
             order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
             tax_rate_basis_points: 0,
+            manual_stamp_duty_minor: None,
             lines: vec![RequisitionLineInput {
                 id: Uuid::new_v4(),
                 material_id: Some(id("10000000-0000-4000-8000-000000000005")),
@@ -19129,6 +19207,7 @@ mod tests {
             order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
             order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
             tax_rate_basis_points: 1800,
+            manual_stamp_duty_minor: None,
             lines: vec![RequisitionLineInput {
                 id: Uuid::new_v4(),
                 material_id: Some(material.id),
@@ -19783,6 +19862,7 @@ mod tests {
                     },
                     order_freight: AdjustmentInput::FixedMinor { minor: "50".into() },
                     tax_rate_basis_points: 1800,
+                    manual_stamp_duty_minor: None,
                 },
                 now,
             )
@@ -21293,6 +21373,7 @@ mod tests {
             order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
             order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
             tax_rate_basis_points: 0,
+            manual_stamp_duty_minor: None,
             lines: vec![RequisitionLineInput {
                 id: Uuid::new_v4(),
                 material_id: Some(material),

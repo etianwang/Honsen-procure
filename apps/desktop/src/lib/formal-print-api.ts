@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { currencySchema } from '@honsen/shared'
 export type FormalPrintDocument = z.infer<typeof documentSchema>
 
 const minor = z.string().regex(/^-?\d+$/)
@@ -13,12 +14,13 @@ export const documentSchema = z
     deliveryAddress: z.string(),
     expectedDeliveryDate: z.string().nullable(),
     notes: z.string().nullable(),
-    currency: z.enum(['XOF', 'EUR', 'USD', 'CNY']),
+    currency: currencySchema,
     subtotalMinor: minor,
     lineDiscountMinor: minor,
     orderDiscountMinor: minor,
     freightMinor: minor,
     taxMinor: minor,
+    manualStampDutyMinor: z.string().regex(/^\d+$/).optional(),
     totalMinor: minor,
     taxRateBasisPoints: z.number().int(),
     selfApproved: z.boolean(),
@@ -64,8 +66,8 @@ export const documentSchema = z
 export function formatPrintMoney(value: string, currency: string): string {
   if (!/^-?\d+$/.test(value)) throw new Error('Invalid minor amount')
   const amount = BigInt(value)
-  if (currency === 'XOF') return `${amount} XOF`
-  if (!['CNY', 'EUR', 'USD'].includes(currency))
+  if (currency === 'XOF' || currency === 'XAF') return `${amount} ${currency}`
+  if (!['CNY', 'EUR', 'USD', 'ETB'].includes(currency))
     throw new Error('Unsupported currency')
   const absolute = amount < 0n ? -amount : amount
   return `${amount < 0n ? '-' : ''}${absolute / 100n}.${String(absolute % 100n).padStart(2, '0')} ${currency}`

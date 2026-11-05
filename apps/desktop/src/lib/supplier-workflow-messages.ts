@@ -1,5 +1,9 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '印花税（手填，单据币种最小单位）': [
+    'Stamp duty (manual, document currency minor units)',
+    'Droit de timbre (manuel, unités minimales de la devise du document)',
+  ],
   供应商子单条款: [
     'Supplier order terms',
     'Conditions de la commande fournisseur',

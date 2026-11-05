@@ -100,6 +100,13 @@ function FormalDocumentSheet({ document }: { document: FormalPrintDocument }) {
         税费 / {label('Taxes', 'Tax')}:{' '}
         {formatPrintMoney(document.taxMinor, document.currency)}
       </p>
+      {document.manualStampDutyMinor !== undefined && (
+        <p>
+          印花税（手填） /{' '}
+          {label('Droit de timbre (manuel)', 'Stamp duty (manual)')}:{' '}
+          {formatPrintMoney(document.manualStampDutyMinor, document.currency)}
+        </p>
+      )}
       <p>
         合计 / Total: {formatPrintMoney(document.totalMinor, document.currency)}
       </p>

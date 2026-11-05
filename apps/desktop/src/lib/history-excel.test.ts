@@ -70,6 +70,7 @@ describe('authorized XLSX history export', () => {
       freightMinor: '0',
       taxMinor: '0',
       totalMinor: '250',
+      manualStampDutyMinor: '37',
       taxRateBasisPoints: 0,
       selfApproved: false,
       supplier: null,
@@ -110,6 +111,7 @@ describe('authorized XLSX history export', () => {
     )
     expect(book.getWorksheet('Commandes')?.getCell('G2').value).toBe('2.50 CNY')
     expect(book.getWorksheet('Commandes')?.getCell('I2').value).toBe('')
+    expect(book.getWorksheet('Conditions')?.getCell('M2').value).toBe('37')
     expect(book.getWorksheet('Lignes')?.getCell('C2').value).toBe('冻结材料')
     expect(book.getWorksheet('Commandes')?.getCell('B1').value).toBe(
       'Numéro officiel',

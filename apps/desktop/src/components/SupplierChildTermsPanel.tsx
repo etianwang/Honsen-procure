@@ -34,6 +34,7 @@ export function SupplierChildTermsPanel({
   const { locale } = useUiLocale()
   const t = (key: SupplierMessage) => supplierText(locale, key)
   const [taxRateBasisPoints, setTaxRateBasisPoints] = useState('0')
+  const [manualStampDutyMinor, setManualStampDutyMinor] = useState('0')
   const [orderDiscount, setOrderDiscount] = useState('0')
   const [orderFreight, setOrderFreight] = useState('0')
   const [lineTerms, setLineTerms] = useState(() =>
@@ -52,6 +53,8 @@ export function SupplierChildTermsPanel({
     if (
       !/^\d+$/.test(taxRateBasisPoints) ||
       tax > 100_000 ||
+      !/^(0|[1-9]\d*)$/.test(manualStampDutyMinor) ||
+      BigInt(manualStampDutyMinor) > 9223372036854775807n ||
       !/^\d+$/.test(orderDiscount) ||
       !/^\d+$/.test(orderFreight)
     ) {
@@ -61,6 +64,7 @@ export function SupplierChildTermsPanel({
     return {
       orderId,
       taxRateBasisPoints: tax,
+      manualStampDutyMinor,
       orderDiscount: { kind: 'fixed_minor', minor: orderDiscount },
       orderFreight: { kind: 'fixed_minor', minor: orderFreight },
       lines: lines.map((line) => {
@@ -185,6 +189,15 @@ export function SupplierChildTermsPanel({
         })}
       </div>
       <div className="requisition-fields">
+        <label>
+          {t('印花税（手填，单据币种最小单位）')}
+          <Input
+            aria-label={t('印花税（手填，单据币种最小单位）')}
+            inputMode="numeric"
+            value={manualStampDutyMinor}
+            onChange={(event) => setManualStampDutyMinor(event.target.value)}
+          />
+        </label>
         <label>
           {t('税率（基点；18% = 1800）')}
           <Input
