@@ -1722,6 +1722,7 @@ fn native_sync_draft(order_id: Uuid, applicant_id: Uuid) -> RequisitionDraftInpu
         order_discount: AdjustmentInput::FixedMinor { minor: "0".into() },
         order_freight: AdjustmentInput::FixedMinor { minor: "0".into() },
         tax_rate_basis_points: 0,
+        manual_stamp_duty_minor: None,
         lines: vec![RequisitionLineInput {
             id: Uuid::new_v4(),
             material_id: None,
