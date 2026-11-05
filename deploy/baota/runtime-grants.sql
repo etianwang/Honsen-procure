@@ -9,8 +9,7 @@ GRANT SELECT, INSERT, UPDATE ON users, user_roles, account_sessions,
   project_print_defaults, sync_entities, sync_events, sync_conflicts,
   sync_origin_quarantine, formal_issue_registry TO :"runtime_role";
 GRANT SELECT, INSERT ON audit_entries TO :"runtime_role";
--- Later payment/archive/quarantine grants are deliberately controlled separately
--- by deploy/linux/grant-api.cjs and api-grant-policy.json. No blanket table grant.
+-- Later fresh-init grants below mirror api-grant-policy.json. No blanket grant.
 COMMIT;
 
 -- Fresh initialization only: exact reviewed later-migration privileges.

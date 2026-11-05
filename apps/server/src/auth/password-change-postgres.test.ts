@@ -147,4 +147,38 @@ describe.skipIf(!pool)('actual PostgreSQL password change', () => {
       ).rows[0].count,
     ).toBe('1')
   })
+  it('enforces the fifth-failure lock under concurrent current-password guesses', async () => {
+    const retryToken = 'bounded-lock-' + randomUUID()
+    await pool!.query(
+      'UPDATE users SET failed_login_attempts=0,locked_until=NULL WHERE id=$1',
+      [id],
+    )
+    await pool!.query(
+      "INSERT INTO account_sessions(id,user_id,token_hash,installation_id,expires_at) VALUES($1,$2,$3,$4,NOW()+interval '1 hour')",
+      [randomUUID(), id, hashToken(retryToken), installation],
+    )
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          headers: { authorization: `Bearer ${retryToken}` },
+          payload: {
+            currentPassword: 'wrong-guess',
+            newPassword: 'new-replacement-password',
+          },
+        }),
+      ),
+    )
+    expect(responses.filter((r) => r.statusCode === 401)).toHaveLength(5)
+    expect(responses.filter((r) => r.statusCode === 423)).toHaveLength(1)
+    expect(
+      (
+        await pool!.query(
+          'SELECT failed_login_attempts FROM users WHERE id=$1',
+          [id],
+        )
+      ).rows[0].failed_login_attempts,
+    ).toBe(5)
+  })
 })

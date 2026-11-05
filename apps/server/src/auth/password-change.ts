@@ -30,8 +30,11 @@ export function registerPasswordChange(
         return reply.code(423).send({ code: 'ACCOUNT_LOCKED' })
       await client.query('BEGIN')
       // Serialize against login and other password changes, then recheck session under the lock.
-      const result = await client.query<{ password_hash: string }>(
-        'SELECT password_hash FROM users WHERE id=$1 AND is_enabled=TRUE AND deleted_at IS NULL FOR UPDATE',
+      const result = await client.query<{
+        password_hash: string
+        locked_until: Date | null
+      }>(
+        'SELECT password_hash, locked_until FROM users WHERE id=$1 AND is_enabled=TRUE AND deleted_at IS NULL FOR UPDATE',
         [account.id],
       )
       const active = await client.query(
@@ -41,6 +44,13 @@ export function registerPasswordChange(
       if (active.rowCount !== 1 || !result.rows[0]) {
         await client.query('ROLLBACK')
         return reply.code(401).send({ code: 'UNAUTHENTICATED' })
+      }
+      if (
+        result.rows[0].locked_until &&
+        result.rows[0].locked_until > new Date()
+      ) {
+        await client.query('ROLLBACK')
+        return reply.code(423).send({ code: 'ACCOUNT_LOCKED' })
       }
       if (
         !(await argon2.verify(
