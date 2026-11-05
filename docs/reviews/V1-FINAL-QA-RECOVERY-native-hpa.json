@@ -1,0 +1,31 @@
+{
+  "restoredRealNativeLogin": true,
+  "correctedRecoveryEvidenceValidator": "PASS",
+  "restoredNativePushReplay": true,
+  "wrapperFailure": "Historical generic validator expected3 launches; restore workflow has5",
+  "exePids": [2848, 28052, 1488, 13024, 3452],
+  "dirtyBoundary": "?? docs/reviews/V1-FINAL-QA-NATIVE.md\n?? tests/native/prepare-hpa-restored.mjs",
+  "formalPull": {
+    "appliedCount": 6,
+    "nextCursor": "5"
+  },
+  "scope": "debug native HPA archive restore only; not installed013, OPA/SPO/payments/COS-byte restore or application upgrade",
+  "applicationSource": "f1420cbc3f2ad19afede1bf86bae5e82d96d1044",
+  "archiveRestore": {
+    "sourceClusterId": "7704611432940658722",
+    "targetClusterId": "7704611613567561762",
+    "archiveSha256": "6fb777f3c68757741e61987d58aa34393731bc8c4d6d1ae9ae5bb24031e574d3"
+  },
+  "unchangedApplicationBoundary": true,
+  "result": "PASS",
+  "restartPreserved": true,
+  "replayPreserved": true,
+  "exeHashes": [
+    "74774bfe641c851a5762fc7b6f39f8b7f6771f88b9b040e5a1d8c9d99c160769",
+    "74774bfe641c851a5762fc7b6f39f8b7f6771f88b9b040e5a1d8c9d99c160769"
+  ],
+  "currentPriceDidNotOverwrite": true,
+  "wrapperExit": 1,
+  "fieldsMatched": 12,
+  "observedHead": "5dbd7f369bc7d79d2b2a5444ca7326d39a8bc738"
+}
