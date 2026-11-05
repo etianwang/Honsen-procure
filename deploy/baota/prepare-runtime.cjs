@@ -16,6 +16,13 @@ function clean(path) {
     else if (/\.test\.js$/.test(e.name)) fs.unlinkSync(f)
   }
 }
+for (const name of fs.readdirSync('apps/server/dist/scripts')) {
+  if (name.startsWith('native-'))
+    fs.rmSync('apps/server/dist/scripts/' + name, {
+      recursive: true,
+      force: true,
+    })
+}
 clean('apps/server/dist')
 clean('packages/shared/dist')
 for (const name of fs.readdirSync('node_modules/argon2/prebuilds')) {

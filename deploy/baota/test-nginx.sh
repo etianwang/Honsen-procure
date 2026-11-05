@@ -24,10 +24,10 @@ http {
 CONF
 docker run -d --rm --name "$name" --network host -v "$work/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:1.28 >/dev/null
 for attempt in $(seq 1 30); do
-  if curl -fsS http://127.0.0.1:18081/v1/health > "$work/health.json"; then break; fi
+  if curl -fsS http://127.0.0.1:18081/v1/api/auth/captcha > "$work/health.json"; then break; fi
   sleep 1
 done
-curl -fsS http://127.0.0.1:18081/v1/health > "$work/health.json"
+curl -fsS http://127.0.0.1:18081/v1/api/auth/captcha > "$work/health.json"
 test "$(curl -s -o "$work/rejected.json" -w '%{http_code}' -X POST http://127.0.0.1:18081/v2/api/sync/push)" = 410
 grep -q client_upgrade_required "$work/rejected.json"
 test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18081/api/sync/push)" = 410
