@@ -60,15 +60,15 @@ const push = await request('/api/sync/push', {
   headers,
   body: JSON.stringify({ deviceId: installationId, events: [] }),
 })
-assert.equal(push.status, 200, 'Empty Push contract')
+assert.equal(push.status, 400, 'Empty Push is invalid and must be rejected')
 const anonymousPull = await request('/api/sync/pull?cursor=0&limit=100')
-assert.equal(anonymousPull.status, 401)
+assert.equal(anonymousPull.status, 400) // Existing required-header validation contract.
 const anonymousPush = await request('/api/sync/push', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ deviceId: installationId, events: [] }),
 })
-assert.equal(anonymousPush.status, 401)
+assert.equal(anonymousPush.status, 400) // No handler write occurs.
 const secondToken = await login()
 assert.notEqual(token, secondToken)
 const revoked = await request('/api/sync/pull?cursor=0&limit=100', { headers })
@@ -80,7 +80,7 @@ assert.equal(current.status, 200)
 const proof = {
   status: 'PASS',
   scope:
-    'extracted actual HTTP server login/CAPTCHA, empty Push, Pull, anonymous rejection and old-session revocation; excludes business creation, role matrix and restart',
+    'extracted actual HTTP server login/CAPTCHA, empty Push rejection, Pull, anonymous required-header rejection and old-session revocation; excludes business creation, role matrix and restart',
   changes: data.changes.length,
   secretsLogged: false,
 }

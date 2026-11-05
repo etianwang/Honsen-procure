@@ -380,9 +380,23 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
       rows.filter((x) => x.entityId === e.id).at(-1)?.payload,
       e.payload,
     )
-  writeFileSync(statePath, JSON.stringify({ username, password, expected }), {
-    mode: 0o600,
-  })
+  writeFileSync(
+    statePath,
+    JSON.stringify({
+      username,
+      engineerName,
+      actor,
+      engineer,
+      project,
+      department,
+      team,
+      password,
+      expected,
+    }),
+    {
+      mode: 0o600,
+    },
+  )
   console.log(
     JSON.stringify({
       status: 'PASS',
