@@ -512,6 +512,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       try {
         await pool.query(`GRANT USAGE ON SCHEMA public TO "${role}"`)
         await pool.query(
+          `GRANT EXECUTE ON FUNCTION canonical_procurement_payment(jsonb,uuid,timestamptz) TO "${role}"`,
+        )
+        await pool.query(
           `GRANT SELECT ON users,user_roles,countries,projects,departments,teams,user_project_bindings,user_project_scope_bindings,category_code_quarantine,category_code_repairs TO "${role}"`,
         )
         // PostgreSQL SELECT ... FOR SHARE needs UPDATE on its locked relations.
