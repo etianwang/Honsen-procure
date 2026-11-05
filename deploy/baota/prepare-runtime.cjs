@@ -25,3 +25,27 @@ for (const name of fs.readdirSync('node_modules/argon2/prebuilds')) {
       force: true,
     })
 }
+
+function removePackageFixtures(path) {
+  for (const e of fs.readdirSync(path, { withFileTypes: true })) {
+    if (e.isSymbolicLink()) continue
+    const f = `${path}/${e.name}`
+    if (e.isDirectory()) {
+      if (
+        [
+          'test',
+          'tests',
+          '__tests__',
+          'fixture',
+          'fixtures',
+          'benchmarks',
+          'benchmark',
+          'examples',
+        ].includes(e.name)
+      )
+        fs.rmSync(f, { recursive: true, force: true })
+      else removePackageFixtures(f)
+    } else if (/\.(test|spec)\.[cm]?[jt]s$/.test(e.name)) fs.unlinkSync(f)
+  }
+}
+removePackageFixtures('node_modules')
