@@ -276,7 +276,10 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     opaBase = {
       ...common,
       procurementMode: 'owner_self_purchase',
-      totalMinor: '120',
+      totalMinor: '252',
+      taxRateBasisPoints: 500, // Synthetic arithmetic fixture, never a statutory rate.
+      orderDiscountJson: '{"kind":"fixed_minor","minor":"0"}',
+      orderFreightJson: '{"kind":"fixed_minor","minor":"0"}',
       lines: [
         {
           id: randomUUID(),
@@ -291,9 +294,32 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
           ownerConvertedReferenceUnitMinor: '100',
           ownerMarkupJson: '{"kind":"fixed_minor","minor":"20"}',
           ownerFinalUnitPriceMinor: '120',
+          quantity: '2',
+          lineDiscountJson: '{"kind":"fixed_minor","minor":"0"}',
+          lineFreightJson: '{"kind":"fixed_minor","minor":"0"}',
+          freightIncluded: false,
         },
       ],
     }
+  opaBase.ownerPrintTotalsJson = JSON.stringify({
+    version: 1,
+    currency: 'XOF',
+    lines: [
+      {
+        id: opaBase.lines[0].id,
+        subtotalMinor: '240',
+        discountMinor: '0',
+        freightMinor: '0',
+        totalMinor: '240',
+      },
+    ],
+    subtotalMinor: '240',
+    lineDiscountMinor: '0',
+    orderDiscountMinor: '0',
+    freightMinor: '0',
+    taxMinor: '12',
+    totalMinor: '252',
+  })
   await approved(owner, opaBase)
   const opa = formal(opaBase, 'OPA', 3)
   await push(event(owner, opa, 2))
