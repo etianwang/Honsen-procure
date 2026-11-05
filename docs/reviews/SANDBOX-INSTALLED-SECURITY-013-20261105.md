@@ -1,3 +1,5 @@
+> Current layered clarification: a fresh Networking Enable guest independently passed publicTCP. Its hostAPI TCP block was diagnosed with actual WFP receive events and same-guest alias/physical Node path controls; the exact physical-image exception passed and was removed. Strict guestHTTPS/installed login have not run because a subsequent automatic approval review rejected the CA/install operation. Previous guest187 transport failures below remain historical, not evidence of globally offline Sandbox. See [layered diagnosis](SANDBOX-API-LAYER-20261105.md).
+
 # Installed0.1.13 security acceptance — 2026-11-05
 
 Exact candidate source: `21491c5f4ccfbb668425b302f9be6e0523e1d1df`, branch `codex/v1-resume-20261104`. Local test version0.1.13; no formal Release or production deployment. New package built from this frozen tree rather than relabeling the old012 artifact.
