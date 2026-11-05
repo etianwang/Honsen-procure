@@ -74,9 +74,9 @@ node --env-file=.env apps/server/dist/index.js
 
 The package Chinese README includes the executable empty-database migration/bootstrap/runtime-role flow and the controlled existing-bootstrap tax update entry. Cloudflare Flexible uses the existing Baota HTTP origin; no new production Docker dependency or backup system is introduced.
 
-BLOCKER: any still-open original parent/security/native/private-COS acceptance remains open; these are not silently closed by this package result. Agent B's exact-source server result is 213 PASS with 3 live-COS opt-in skips, not proof of actual private COS object round trips.
+BLOCKER: none identified within the bounded tax/route/ZIP acceptance above. Overall server/V1 readiness remains owned by the main acceptance report; original security/Formal holds have not been reassessed or closed by this package result.
 
-DEFERRED: user-operated remote upload/deployment, authorized production backup/restore verification and V2. No such operation was attempted.
+DEFERRED: original installed/native and private-COS acceptance, user-operated remote upload/deployment, authorized production backup/restore verification and V2. Agent B's exact-source server result is 213 PASS with 3 live-COS opt-in skips, not proof of actual private COS object round trips. No remote operation was attempted.
 
 WARNING: npm reported one low and one moderate advisory and install-script notices; runtime modules were actually verified, no lock-file/dependency upgrade was introduced. The package remains a test candidate rather than a published stable asset.
 
