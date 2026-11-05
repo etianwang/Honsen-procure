@@ -56,16 +56,29 @@ for (const method of ['upload', 'inspect', 'download'])
 const auth = new AuthService(new PostgresAuthStore(pool), {
   verify: argon2.verify,
 })
+const Fastify = require('fastify')
+const instance =
+  process.env.TEST_HTTPS === '1'
+    ? Fastify({
+        logger: false,
+        https: {
+          pfx: readFileSync('/run/native-server.pfx'),
+          passphrase: readFileSync('/run/native-pfx-pass', 'utf8'),
+        },
+      })
+    : Fastify({ logger: false })
 const app = createApp(
   auth,
   new MasterDataService(new PostgresMasterDataStore(pool)),
   new SyncService(new PostgresSyncStore(pool)),
   new AuthorizationService(new PostgresAuthorizationStore(pool)),
   new AttachmentService(pool, guarded, prefix),
+  instance,
 )
 registerPasswordChange(app, auth, pool)
 app.addHook('onClose', async () => pool.end())
-await app.listen({ host: '127.0.0.1', port: 3000 })
+const port = process.env.TEST_HTTPS === '1' ? 3443 : 3000
+await app.listen({ host: '127.0.0.1', port })
 console.log(
   JSON.stringify({
     status: 'READY',

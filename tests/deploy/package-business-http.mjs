@@ -84,7 +84,10 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
   )
   const db = new Pool({ connectionString: u.href }),
     password = randomBytes(24).toString('base64url')
-  const actor = randomUUID(),
+  const actor =
+      process.env.TEST_NATIVE_COMPATIBLE === '1'
+        ? '10000000-0000-4000-8000-000000000013'
+        : randomUUID(),
     engineer = randomUUID(),
     country = randomUUID(),
     project = randomUUID(),
@@ -141,6 +144,79 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
   const token = await login(username, password),
     engToken = await login(engineerName, password)
   const expected = []
+  const lifecycle = []
+  if (process.env.TEST_NATIVE_COMPATIBLE === '1') {
+    for (const record of [
+      {
+        kind: 'country',
+        id: country,
+        businessCode: countryCode,
+        name: 'Synthetic native country',
+        timeZone: 'UTC',
+        isActive: true,
+      },
+      {
+        kind: 'project',
+        id: project,
+        countryId: country,
+        businessCode: projectCode,
+        name: 'Synthetic native project',
+        site: 'Synthetic site',
+        departmentName: 'Synthetic department',
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        isActive: true,
+      },
+      {
+        kind: 'department',
+        id: department,
+        businessCode: `TD${department}`,
+        name: 'Synthetic department',
+        isActive: true,
+      },
+      {
+        kind: 'team',
+        id: team,
+        departmentId: department,
+        businessCode: `TT${team}`,
+        name: 'Synthetic team',
+        isActive: true,
+      },
+    ]) {
+      const response = await fetch(
+        `${base.href.replace(/\/$/, '')}/api/master-data/reference`,
+        {
+          method: 'PUT',
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(record),
+        },
+      )
+      assert.equal(response.status, 200)
+      const publication = await api('/api/sync/push', token, {
+        deviceId: installationId,
+        events: [
+          {
+            eventId: randomUUID(),
+            entityId: record.id,
+            entityType: record.kind,
+            operation: 'upsert',
+            baseVersion: 0,
+            payload: record,
+          },
+        ],
+      })
+      assert.equal(publication.results[0]?.status, 'accepted')
+    }
+    const changes = await pull(token)
+    for (const id of [country, project, department, team])
+      assert(
+        changes.some((c) => c.entityId === id),
+        'Reference publication missing',
+      )
+  }
   const event = (id, payload, version = 0, type = 'purchase_order') => ({
     eventId: randomUUID(),
     entityId: id,
@@ -155,6 +231,7 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
       events: [e],
     })
     assert.equal(r.results[0].status, status, JSON.stringify(r))
+    lifecycle.push({ event: e, result: r.results[0] })
     return r.results[0]
   }
   let bits = BigInt(`0x${installationId.replaceAll('-', '')}`),
@@ -178,6 +255,35 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     selfApproved: false,
     primaryCurrency: 'XOF',
     orderDate: '2026-10-15',
+    displayNo: 'SYNTHETIC-NATIVE-HISTORY',
+    site: 'Synthetic site',
+    currency: 'XOF',
+    languagePair: 'zh_fr',
+    status: 'pending_confirmation',
+    urgency: 'normal',
+    urgencyReason: null,
+    deliveryAddress: 'Synthetic delivery',
+    expectedDeliveryDate: null,
+    notes: null,
+    subtotalMinor: '2500',
+    lineDiscountMinor: '0',
+    orderDiscountMinor: '0',
+    freightMinor: '0',
+    taxMinor: '450',
+    rejectionReason: null,
+    supplierId: null,
+    supplierSnapshotJson: null,
+    lockedExchangeRateDecimal: null,
+    supplierTermsCompletedAt: null,
+    documentType: null,
+    formalDocumentNo: null,
+    formalInstallationId: null,
+    formalSequence: null,
+    formallyIssuedAt: null,
+    formalSnapshotJson: null,
+    orderDiscountJson: '{"kind":"fixed_minor","minor":"0"}',
+    orderFreightJson: '{"kind":"fixed_minor","minor":"0"}',
+    ownerPrintTotalsJson: null,
     taxRateBasisPoints: 1800,
     manualStampDutyMinor: '37',
     totalMinor: '2987',
@@ -190,6 +296,22 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
         unitPriceMinor: '1250',
         lineTotalMinor: '2500',
         priceSource: 'manual',
+        materialId: null,
+        catalogPriceId: null,
+        materialSnapshotJson: JSON.stringify({
+          nameZh: '合成恢复材料',
+          nameFr: 'Matériau synthétique',
+          nameEn: 'Synthetic restore material',
+          model: 'SYN',
+          specification: 'Synthetic only',
+        }),
+        supplierSnapshotJson: null,
+        lineDiscountJson: '{"kind":"fixed_minor","minor":"0"}',
+        lineFreightJson: '{"kind":"fixed_minor","minor":"0"}',
+        freightIncluded: false,
+        sortOrder: 0,
+        createdAt: 1792022400,
+        updatedAt: 1792022400,
       },
     ],
   }
@@ -303,12 +425,17 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     opaBase = {
       ...common,
       procurementMode: 'owner_self_purchase',
-      totalMinor: '323',
+      totalMinor: '276',
+      subtotalMinor: '200',
+      taxMinor: '39',
       taxRateBasisPoints: 1925, // User-approved CM percentage; stamp is manually chosen per order.
       orderDiscountJson: '{"kind":"fixed_minor","minor":"0"}',
       orderFreightJson: '{"kind":"fixed_minor","minor":"0"}',
       lines: [
         {
+          ...common.lines[0],
+          unitPriceMinor: '100',
+          lineTotalMinor: '200',
           id: randomUUID(),
           currency: 'XOF',
           ownerQuoteSource: 'manual_reference',
@@ -426,6 +553,21 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
       mode: 0o600,
     },
   )
+  if (process.env.TEST_NATIVE_COMPATIBLE === '1')
+    writeFileSync(
+      '/evidence/fixture-public.json',
+      JSON.stringify(
+        {
+          source:
+            'complete DTO generated before first HTTP draft/approval; no postissue rewrite',
+          referenceIds: [country, project, department, team],
+          lifecycle,
+          expected,
+        },
+        null,
+        2,
+      ),
+    )
   console.log(
     JSON.stringify({
       status: 'PASS',

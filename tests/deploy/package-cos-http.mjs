@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 assert.equal(process.env.HONSEN_DEPLOY_TEST, '1')
-const base = 'http://127.0.0.1:3000',
+const base = process.env.TEST_API_BASE_URL ?? 'http://127.0.0.1:3000',
   installation = randomUUID()
 const s = JSON.parse(readFileSync('/evidence/business-state.json', 'utf8')),
   prefix = readFileSync('/evidence/cos-prefix', 'utf8').trim(),
