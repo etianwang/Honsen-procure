@@ -44,3 +44,7 @@ Supplier API integration, inventory, approvals, accounting, OCR, AI, mobile, ext
 ## 2026-11-04 SPO issuance boundary
 
 User selected reuse of the existing supplier-order send action: completed child terms under an approved Honsen parent issue SPO and transition draft to sent in one trusted transaction. No independent child approval is added and historical sent children are not backfilled. The implementation accepts approved/confirmed parents or executing parents with verifiable frozen HPA approval; cancelled/completed parents are excluded. Existing one-supplier/one-currency terms, ordinary integer pricing, snapshots and authorization remain enforced.
+
+## 2026-11-06 user-approved country tax and manual stamp
+
+CI rate is configured as1800 basis points and CM as1925, per explicit user approval. Stamp duty is manually entered per document in integer currency minor units, optional/default-zero for new input, with no automatic applicability or mandatory fixed1000XOF rule. It is separately displayed and added after percentage tax; signed amounts freeze. Existing user-edited tax configuration is not overwritten. These are approved operational settings, not a claim of independently verified law.

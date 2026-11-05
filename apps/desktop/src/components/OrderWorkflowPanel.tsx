@@ -271,6 +271,7 @@ const labels: Record<string, WorkflowMessage> = {
   expectedDeliveryDate: '期望到货日期',
   notes: '备注',
   taxRateBasisPoints: '税率',
+  manualStampDutyMinor: '印花税（手填）',
   totalMinor: '订单总额',
   lines: '采购明细',
 }

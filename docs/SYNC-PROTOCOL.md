@@ -98,3 +98,7 @@ Payment reconciliation uses the separate `payment_conflict_resolution` entity, n
 ## Required tests
 
 Test duplicate delivery, timeout after server commit, restart during push, partial batch rejection, out-of-order responses, paged pull interruption, concurrent price editing, tombstone/update conflict, revoked-session handling, formal-number clone/re-key/collision and append-only payment retries. See `TEST-RULES.md` for acceptance IDs.
+
+## 2026-11-06 optional manual stamp compatibility
+
+`manualStampDutyMinor` is an optional canonical integer minor-unit string; absence preserves old payload shape. New ordinary upserts may explicitly set zero. If stored state contains the field and a legacy upsert omits it, retain both payloads as a conflict instead of silently dropping the amount. Formal snapshot comparisons include the field and reject changes/removal. Server schema remains unchanged; SQLite0062 projects and freezes the optional value.

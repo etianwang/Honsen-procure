@@ -1,5 +1,6 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '印花税（手填）': ['Stamp duty (manual)', 'Droit de timbre (manuel)'],
   草稿: ['Draft', 'Brouillon'],
   已批准: ['Approved', 'Approuvée'],
   已正式签发: ['Formally issued', 'Émise officiellement'],

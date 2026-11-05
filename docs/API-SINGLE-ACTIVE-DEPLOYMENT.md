@@ -55,3 +55,7 @@ WARNING：当前旧文件保留不等于具备已验证的生产回退能力。
 国家税率权威依据与条件印花规则仍未完成，不能报告 `SERVER_V1_READY`。原有安全/原生/安装/Toolbox最终门禁仍开放，不由本包替代。旧包保留仅形成回退候选，没有已验证的生产数据库回退能力。
 
 最终实际交付候选绑定源码 `ebd7d6b1ff303fd68ad3abb7eb455570d15a043f`；独立Linux解包、登录改密、业务/重启/撤权及真实代理范围已通过。最终总结果仍为 `SERVER_V1_BLOCKED`，详见 [交付汇总](reviews/SERVER-V1-DELIVERY-20261106.md)。
+
+## 2026-11-06 tax clarification implemented
+
+The user confirmed CI18%/CM19.25% and manual stamp duty. The earlier missing-tax configuration blocker is resolved for this approved operational setting; see [updated tax delivery](reviews/SERVER-V1-TAX-DELIVERY-20261106.md). Latest independently tested server ZIP pins03c2c82b7a0a34cc4f360a293478e58fd529c8f3. Original release/security/native/COS gates remain separate. Rollback compatibility must cover business JSON and signed snapshots as well as PostgreSQL migrations.

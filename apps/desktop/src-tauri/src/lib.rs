@@ -11014,11 +11014,11 @@ fn order_audit_snapshot(
     transaction: &Transaction<'_>,
     order_id: Uuid,
 ) -> Result<String, AuthError> {
-    let header: (String, String, String, Option<String>, Option<String>, i32, i64) = transaction
+    let header: (String, String, String, Option<String>, Option<String>, i32, i64, Option<i64>) = transaction
         .query_row(
-            "SELECT display_no, currency, delivery_address, expected_delivery_date, notes, tax_rate_basis_points, total_minor FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
+            "SELECT display_no, currency, delivery_address, expected_delivery_date, notes, tax_rate_basis_points, total_minor, manual_stamp_duty_minor FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
             [order_id.to_string()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
         )
         .map_err(|_| AuthError::Database)?;
     let mut statement = transaction
@@ -11052,7 +11052,7 @@ fn order_audit_snapshot(
         .map_err(|_| AuthError::Database)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| AuthError::Database)?;
-    serde_json::to_string(&serde_json::json!({
+    let mut value = serde_json::json!({
         "displayNo": header.0,
         "currency": header.1,
         "deliveryAddress": header.2,
@@ -11061,8 +11061,11 @@ fn order_audit_snapshot(
         "taxRateBasisPoints": header.5,
         "totalMinor": header.6.to_string(),
         "lines": lines,
-    }))
-    .map_err(|_| AuthError::Database)
+    });
+    if let Some(stamp) = header.7 {
+        value["manualStampDutyMinor"] = serde_json::json!(stamp.to_string());
+    }
+    serde_json::to_string(&value).map_err(|_| AuthError::Database)
 }
 
 fn mentioned_usernames(body: &str) -> HashSet<String> {

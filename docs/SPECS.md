@@ -115,3 +115,7 @@ Reserved `/api/integrations/suppliers/*` disabled until future implementation.
 - Local save success must not depend on network; pending outbox visible.
 - Server retries must be idempotent using event IDs and transactional writes.
 - Account/session APIs enforce one online device session per user, five-failure/15-minute lock, forced first password change and administrator unlock.
+
+## 2026-11-06 manual stamp extension
+
+Purchase-order sync payload optionally carries `manualStampDutyMinor`, a canonical nonnegative integer string bounded by signed64-bit minor units in the document currency. It is persisted in SQLite `manual_stamp_duty_minor` by0062 and server `sync_entities` JSON; no new PostgreSQL business column is introduced. Missing legacy fields remain missing, not backfilled. Explicit zero is allowed before issue; omission of an existing field on upsert retains a conflict. Formal snapshots/totals freeze the field. Percentage VAT is calculated independently, then manual stamp is added to total.

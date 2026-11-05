@@ -91,6 +91,13 @@ fn manual_stamp_save_and_outbox_are_atomic() {
         let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(value["manualStampDutyMinor"], "375");
         assert_eq!(value["totalMinor"], "12300");
+        let tx = c.unchecked_transaction().unwrap();
+        let audit = order_audit_snapshot(&tx, id).unwrap();
+        drop(tx);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&audit).unwrap()["manualStampDutyMinor"],
+            "375"
+        );
         c.execute_batch("CREATE TRIGGER fail_stamp_outbox BEFORE INSERT ON local_sync_outbox BEGIN SELECT RAISE(ABORT,'injected');END;").unwrap();
     }
     let mut changed = d.clone();

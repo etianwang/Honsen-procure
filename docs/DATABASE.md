@@ -45,3 +45,7 @@ The initial entity set is `materials`, `suppliers`, `material_prices`, `purchase
 - Is the new field represented in local schema, server schema, shared validation and sync payloads?
 - Does it add tests for upgrade, retry/failure and any changed constraint?
 - Is a rollback or recovery approach documented before production use?
+
+## 2026-11-06 stamp persistence
+
+Desktop0062 adds a nullable nonnegative integer manual stamp amount and an issued-document update guard. Existing rows, totals, snapshots and Outbox are not rewritten. Draft/terms mutation, amount, audit and Outbox remain transactional. Server JSON handles the optional field with conflict retention; PostgreSQL migration set remains17/latest014. Equal SQL migration versions alone do not prove old APIs can read/write the newer business JSON snapshots safely.
