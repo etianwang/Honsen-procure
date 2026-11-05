@@ -9,6 +9,7 @@ export type LoginAccount = {
   isEnabled: boolean
   lockedUntil: Date | null
   requiresPasswordChange: boolean
+  passwordChangeRecommended?: boolean
 }
 
 export type AuthenticatedAccount = LoginAccount & {
@@ -29,6 +30,7 @@ export type AuthStore = {
     tokenHash: string
     installationId: string
     expiresAt: Date
+    expectedPasswordHash?: string
   }): Promise<void>
 }
 

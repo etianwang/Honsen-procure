@@ -60,6 +60,7 @@ export class AuthService {
       tokenHash: hashToken(accessToken),
       installationId,
       expiresAt,
+      expectedPasswordHash: account.passwordHash,
     })
 
     return {
@@ -71,6 +72,9 @@ export class AuthService {
         roles: account.roles,
         locale: account.locale,
         requiresPasswordChange: account.requiresPasswordChange,
+        ...(account.passwordChangeRecommended
+          ? { passwordChangeRecommended: true }
+          : {}),
       },
     }
   }

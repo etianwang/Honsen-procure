@@ -1,4 +1,5 @@
 {
+  "014_master_data_currencies.sql": [],
   "001_auth_and_master_data.sql": [],
   "002_project_defaults_and_master_data.sql": [],
   "003_sync.sql": [

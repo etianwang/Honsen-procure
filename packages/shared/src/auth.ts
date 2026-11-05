@@ -21,6 +21,7 @@ export const loginResponseSchema = z.object({
     roles: z.array(roleSchema),
     locale: uiLocaleSchema,
     requiresPasswordChange: z.boolean(),
+    passwordChangeRecommended: z.boolean().optional(),
   }),
 })
 

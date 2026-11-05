@@ -30,4 +30,12 @@ const app = createApp(
 )
 
 app.addHook('onClose', async () => pool.end())
+
+import { registerPasswordChange } from './auth/password-change.js'
+registerPasswordChange(
+  app,
+  new AuthService(new PostgresAuthStore(pool), { verify: argon2.verify }),
+  pool,
+)
+
 await app.listen({ host: '127.0.0.1', port: 3000 })
