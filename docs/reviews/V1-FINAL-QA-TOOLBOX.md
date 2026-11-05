@@ -11,3 +11,9 @@ Evidence environment: HOST_NATIVE read-only artifact/registry inspection plus No
 Integration gaps: actual caller availability and stable qualified asset source remain open; loose artifact provenance must be resolved before native use. Public contract remains unchanged. Cached Toolbox five-source preflight inventory was inspected in required order; this slice makes no application/installer/contract code change and claims no fresh upstream contract validation. Existing installation P1 was not repeated. No security or parent final gate closed.
 
 Validation: Node strict assertions PASS; documentation formatting and diff checks required before checkpoint. DEFERRED: real caller chain and installed upgrade/history proof. WARNING: loose main hash mismatch with installed artifact; use verified package for installation. No production data, Windows credentials, registry, firewall, CA trust or business data changed.
+
+## Follow-up caller and local-channel investigation
+
+Read-only bounded search of H:\Honsen directory names to depth2, Toolbox executable/archive names to depth2, and artifact filenames found no caller; only the preflight documentation cache was found. Conventional Honsen Program Files/local Programs locations also yielded no existing directory. This search has a stated boundary and does not assert absence across all drives.
+
+Inspection of current update_launch.rs confirms canonical latest-Release constant and fixed GitHub versioned asset URL. No existing local test-channel override was identified in that owning boundary. Thus a local source substitution is not an existing authorized test mode. No production source/manifest mutation or fake qualified stable artifact was attempted. A separately supplied real Toolbox caller and an approved existing isolated channel, or a qualified stable asset when separately authorized, remain prerequisites for the real cross-repository launch/apply chain. No skipped caller case is labelled PASS.
