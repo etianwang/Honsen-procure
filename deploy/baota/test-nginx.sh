@@ -27,6 +27,7 @@ for attempt in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:18081/v1/health > "$work/health.json"; then break; fi
   sleep 1
 done
+curl -fsS http://127.0.0.1:18081/v1/health > "$work/health.json"
 test "$(curl -s -o "$work/rejected.json" -w '%{http_code}' -X POST http://127.0.0.1:18081/v2/api/sync/push)" = 410
 grep -q client_upgrade_required "$work/rejected.json"
 test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18081/api/sync/push)" = 410
