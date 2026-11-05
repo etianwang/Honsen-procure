@@ -1,3 +1,43 @@
+# V1 server independent ZIP acceptance — approved tax/manual stamp continuation
+
+Current evidence supersedes the earlier ebd7 candidate below only for the newly tested exact source and package. **Current bounded server/API and extracted ZIP checks PASS.** Original native/installed/security/Formal and external recovery/COS acceptance holds remain separate; this report does not automatically close them or declare stable production release.
+
+## Current artifact and scope
+
+- Frozen server source: `03c2c82b7a0a34cc4f360a293478e58fd529c8f3`.
+- Actual ZIP: `H:\Honsen\Honsen-Procure\.cache\server-release\honsen-procure-server-v1-03c2c82b7a0a34cc4f360a293478e58fd529c8f3.zip`.
+- Size: **3,499,032 bytes**; independent Windows SHA-256: `59fa0cfdb7176034c816015bd1fa55613244c7091bf9317507b61addc9e223cd` (matches Linux archive sidecar).
+- New independent extraction `/home/honsen-dev/a-v1-independent-03c2c82b7a0a34cc4f360a293478e58fd529c8f3/unpacked`; fresh `a_tax_stamp_release_test`, nonowner runtime `a_tax_stamp_runtime`. No other API ran concurrently. OS Ubuntu 24.04.5 LTS, Node 24.22.1, PostgreSQL actual `16.15 (Debian 16.15-1.pgdg13+2)`.
+- Software version remains `0.0.0-development`; API active version v1, Base URL `https://api-pr.honsen.africa/v1`, deployment `/www/wwwroot/api-pr/v1/`; server migration set remains 17/latest `014_master_data_currencies.sql`. Desktop's separate additive SQLite migration `0062_manual_stamp_duty` is not a PostgreSQL migration.
+
+## New actual acceptance
+
+Every operation below ran against this new extraction, fresh database and actual packaged Node process. No prior candidate's HTTP result was transferred.
+
+1. Archive `SHA256SUMS`, all migration hashes, bootstrap hash, incremental tax entry/helper hashes, shared bundle/server entry manifest hashes and secret-file scan PASS. Nonowner role properties and actual CREATE TABLE denial 42501 PASS. Packaged migration and bootstrap commands PASS.
+2. Fresh bootstrap reports 2 countries, 3 projects, 14 units, 0 site records, 2 tax templates and 3 project defaults. Real admin HTTP Pull has 24 initial projected records. Assertions verify approved rates 1800/1925 basis points, each project default's tax country equals project country and its currency matches project default currency. No additional site records are created. These are user-approved CI18%/CM19.25% configuration values, not an independent statutory tax opinion.
+3. Actual admin initial-password login, advisory true/nonmandatory, password change, old-token401, old-password401, new-password200 and cleared advisory PASS. Anonymous missing-header rejection remains existing 400, empty Push rejection 400, old authenticated session invalidation401 PASS.
+4. Actual HTTP engineer submission/purchaser approval/formal HPA, supplier/SPO, formal OPA, payment/full reversal, idempotent replay, immutable change conflict and project/payment permission denial PASS. Manual stamp is explicitly chosen **37 minor units**, not a universal fixed charge. HPA/SPO sample: 2500 + CI18%450 + manual37 = 2987. OPA sample: 240 + CM19.25% half-up46 + manual37 = 323; frozen totals and snapshot carry the explicit amount. Proportional tax excludes manual stamp from its tax base.
+5. Actual unissued-draft compatibility check: new client saves manual37; same-version old-client edit omitting the field receives retained conflict, duplicate delivery receives conflict again; explicit manual `'0'` succeeds and cancels the fee (total2950). No silent field omission overwrites a stored amount. Formal changed stamp is rejected with conflict. PostgreSQL targeted regression additionally verifies both conflict payloads and legacy absent-field snapshots remain unchanged.
+6. Actual API restart followed by normal login/Pull deep-equality of **six** complete persisted payloads (HPA/SPO/OPA/payment/reversal/explicit-zero unissued draft) PASS. Exact amounts, snapshots and formal numbers remain preserved.
+7. Actual disabled-account Pull401, purchaser-role removal write rejection and engineer-project-binding removal write rejection PASS; synthetic account/role/bindings restored afterward. These are server HTTP boundaries, not closure of the prior native G1 failure.
+8. C reran actual Nginx route switching against this package/database: active `/v1` CAPTCHA200, inactive POST410, retired `/v1` POST410 after switch, business row counts unchanged PASS. Raw result `.cache/server-release-controller/nginx-tax-release-proof.log`; temporary proxy removed.
+
+Reproducible committed HTTP controllers: `tests/deploy/package-http-smoke.mjs`, `package-admin-http.mjs`, `package-business-http.mjs` (normal/verify modes) and `package-revocation-http.mjs`. Run them with explicit `HONSEN_DEPLOY_TEST=1`, loopback `TEST_API_BASE_URL`, disposable owner fixture URL and private test state path; actual API itself always uses the separately granted runtime role. Commands and sanitized actual logs are retained in `.cache/server-release-controller/independent-tax-stamp-evidence/`. No production connection, SSH or deployment occurred.
+
+## Review corrections, limitations and cleanup
+
+- Earlier tax/conditional-stamp blocker is resolved within the user's newly approved scope: country percentages above plus manually entered order amount; absence means zero manually recorded fee, not a legal applicability determination. No hardcoded1000 charge or automatic statutory condition inference was added.
+- Independent review initially suspected `sharedBundleSha256` covered only a reexport entry. Actual final ZIP inspection disproved this: `packages/shared/dist/index.js` is the 25,764-byte esbuild bundle containing concrete schemas including manual stamp; the suspicion is withdrawn. Its manifest digest covers the actual shared bundle. External zod and other runtime dependencies are additionally fixed by package SHA256SUMS and full ZIP hash.
+- Diagnostic inspection initially guessed a Debian packaging suffix `+1`; actual version was `+2`. The check was corrected to the requested PostgreSQL16.15 version, not an invented packaging suffix. No product repair or package change was needed.
+- Historical OPA test-fixture mistake, 400-vs401 missing-header expectation and real d69 old-password500 failure below remain historical evidence. Final old-password401 was freshly rerun. The new legacy-client stamp omission data-loss boundary was fixed by `9136bea`, with real PG retained-conflict/explicit-zero regression before this package was built.
+- No BLOCKER found for these bounded server tax/manual-stamp/package checks. DEFERRED: original native/installed/security/Formal full acceptance, authorized live COS object flow and production backup/restore/schema compatibility. WARNING: development software version, release not stable production, preserved old ZIPs are only compatibility-dependent rollback candidates.
+- Unique API container `a-v1-api-proof` stopped and removed after final checks; private synthetic owner/runtime URL and restart-state files removed from this extraction's evidence directory. Public logs retained. C was explicitly authorized to perform owned disposable PostgreSQL Compose down--volumes cleanup after the handoff; its final listener/container cleanup belongs to C's record.
+
+---
+
+## Historical ebd7 candidate evidence (superseded for current tax/manual-stamp scope)
+
 # V1 server independent ZIP acceptance — 2026-11-06
 
 Result: **bounded package/runtime checks PASS; SERVER_V1_BLOCKED overall**. This is independent verification by Agent A of Agent C's actual ZIP, not acceptance inferred from a build or source-unit tests. Tax/conditional stamp-duty requirements remain unsatisfied; existing native/security/release gates are not closed.
