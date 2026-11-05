@@ -145,6 +145,14 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     engToken = await login(engineerName, password)
   const expected = []
   const lifecycle = []
+  const lineOwners = new Map()
+  const fixtureLineIds = {
+    parent: randomUUID(),
+    compatibility: randomUUID(),
+    supplier: randomUUID(),
+    owner: randomUUID(),
+  }
+  assert.equal(new Set(Object.values(fixtureLineIds)).size, 4)
   if (process.env.TEST_NATIVE_COMPATIBLE === '1') {
     for (const record of [
       {
@@ -226,6 +234,14 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     payload,
   })
   async function push(e, t = token, status = 'accepted') {
+    if (e.entityType === 'purchase_order')
+      for (const line of e.payload.lines ?? []) {
+        assert(
+          !lineOwners.has(line.id) || lineOwners.get(line.id) === e.entityId,
+          'Fixture reuses a line UUID across orders',
+        )
+        lineOwners.set(line.id, e.entityId)
+      }
     const r = await api('/api/sync/push', t, {
       deviceId: installationId,
       events: [e],
@@ -289,7 +305,7 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     totalMinor: '2987',
     lines: [
       {
-        id: randomUUID(),
+        id: fixtureLineIds.parent,
         currency: 'XOF',
         quantity: '2',
         unit: 'pcs',
@@ -348,6 +364,10 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
   const compatibilityId = randomUUID()
   const compatibilityDraft = {
     ...common,
+    lines: common.lines.map((line) => ({
+      ...line,
+      id: fixtureLineIds.compatibility,
+    })),
     workflowStatus: 'draft',
     confirmedBy: null,
     confirmedAt: null,
@@ -406,6 +426,10 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
   const child = randomUUID(),
     draft = {
       ...common,
+      lines: common.lines.map((line) => ({
+        ...line,
+        id: fixtureLineIds.supplier,
+      })),
       parentOrderId: parent,
       procurementMode: null,
       workflowStatus: 'draft',
@@ -436,7 +460,7 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
           ...common.lines[0],
           unitPriceMinor: '100',
           lineTotalMinor: '200',
-          id: randomUUID(),
+          id: fixtureLineIds.owner,
           currency: 'XOF',
           ownerQuoteSource: 'manual_reference',
           ownerCatalogPriceId: null,
@@ -517,6 +541,7 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     event(randomUUID(), {
       ...common,
       projectId: randomUUID(),
+      lines: common.lines.map((line) => ({ ...line, id: randomUUID() })),
       workflowStatus: 'draft',
       confirmedBy: null,
       confirmedAt: null,
@@ -531,6 +556,14 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
   )
   const rows = await pull(token)
   expected.push({ id: compatibilityId, payload: compatibilityZero })
+  const finalLineIds = expected.flatMap((e) =>
+    (e.payload.lines ?? []).map((line) => line.id),
+  )
+  assert.equal(
+    new Set(finalLineIds).size,
+    finalLineIds.length,
+    'Accepted fixture graph line IDs must be globally unique',
+  )
   for (const e of expected)
     assert.deepEqual(
       rows.filter((x) => x.entityId === e.id).at(-1)?.payload,

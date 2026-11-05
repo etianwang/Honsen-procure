@@ -43,6 +43,57 @@ try {
     [reader, s.project, s.department, s.team],
   )
   await db.query('COMMIT')
+  const roleAccounts = []
+  for (const [id, name, role, canReadHistory] of [
+    [
+      '10000000-0000-4000-8000-000000000014',
+      'native-restore-viewer',
+      'viewer',
+      true,
+    ],
+    [
+      '10000000-0000-4000-8000-000000000012',
+      'native-restore-unbound',
+      'engineer',
+      false,
+    ],
+  ]) {
+    assert.equal(
+      (
+        await db.query('SELECT 1 FROM users WHERE id=$1 OR username=$2', [
+          id,
+          name,
+        ])
+      ).rowCount,
+      0,
+    )
+    const secret = randomBytes(24).toString('base64url')
+    await db.query(
+      "INSERT INTO users(id,business_code,username,password_hash,ui_locale,is_enabled,requires_password_change) VALUES($1,$2,$2,$3,'zh-CN',true,false)",
+      [id, name, await argon2.hash(secret)],
+    )
+    await db.query('INSERT INTO user_roles(user_id,role) VALUES($1,$2)', [
+      id,
+      role,
+    ])
+    if (canReadHistory) {
+      await db.query(
+        'INSERT INTO user_project_bindings(user_id,project_id) VALUES($1,$2)',
+        [id, s.project],
+      )
+      await db.query(
+        'INSERT INTO user_project_scope_bindings(user_id,project_id,department_id,team_id) VALUES($1,$2,$3,$4)',
+        [id, s.project, s.department, s.team],
+      )
+    }
+    roleAccounts.push({
+      userId: id,
+      username: name,
+      password: secret,
+      role,
+      canReadHistory,
+    })
+  }
   for (const e of s.expected)
     assert.deepEqual(
       (
@@ -78,7 +129,10 @@ try {
         fields: {
           unit_price_minor: l.unitPriceMinor,
           line_total_minor: l.lineTotalMinor,
-          quantity: l.quantity,
+          quantity_hundredths: (
+            BigInt(l.quantity.split('.')[0]) * 100n +
+            BigInt((l.quantity.split('.')[1] ?? '').padEnd(2, '0'))
+          ).toString(),
           currency: l.currency,
         },
       })),
@@ -99,8 +153,8 @@ try {
     apiBaseUrl: 'https://127.0.0.1:3443',
     caPemPath:
       'H:\\Honsen\\Honsen-Procure\\.cache\\final-cos\\native-tls\\ca.pem',
-    exeHash: '26d1e3173284dc9c5ba146e75be5e18dacf379929cfba39ac38c4febd38ba35b',
-    applicationSource: 'f3e6af88e4da2cbcd2d6950ccf16007a235fe8ff',
+    exeHash: '31039ff87b198f24df94904cc2864d7fb8212b1d4e244f60543599c6b37458ff',
+    applicationSource: '24a1287bb95225c80f3abf69d27ad271fb4b81c4',
     accounts: [
       { userId: reader, username, password },
       { userId: s.actor, username: s.username, password: s.password },
@@ -117,6 +171,8 @@ try {
         : {}),
     })),
     prefix: o.prefix,
+    roleAccounts,
+    exerciseConditionalClose: true,
   }
   writeFileSync(
     '/evidence/native-handoff.json',
@@ -126,7 +182,11 @@ try {
   writeFileSync(
     '/evidence/native-handoff-public.json',
     JSON.stringify(
-      { ...config, accounts: config.accounts.map(({ password, ...a }) => a) },
+      {
+        ...config,
+        accounts: config.accounts.map(({ password, ...a }) => a),
+        roleAccounts: config.roleAccounts.map(({ password, ...a }) => a),
+      },
       null,
       2,
     ),

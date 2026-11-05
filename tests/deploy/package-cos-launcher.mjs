@@ -67,6 +67,41 @@ const instance =
         },
       })
     : Fastify({ logger: false })
+if (process.env.TEST_PULL_PAGE_LIMIT !== undefined) {
+  const pageLimit = Number(process.env.TEST_PULL_PAGE_LIMIT)
+  assert(Number.isInteger(pageLimit) && pageLimit >= 1 && pageLimit <= 500)
+  instance.addHook('preValidation', async (request) => {
+    if (
+      request.method === 'GET' &&
+      request.raw.url?.split('?')[0] === '/api/sync/pull'
+    )
+      request.query = { ...request.query, limit: String(pageLimit) }
+  })
+  instance.addHook('onSend', async (request, reply, payload) => {
+    if (
+      request.method === 'GET' &&
+      request.raw.url?.split('?')[0] === '/api/sync/pull' &&
+      reply.statusCode === 200 &&
+      typeof payload === 'string'
+    ) {
+      const page = JSON.parse(payload)
+      console.log(
+        JSON.stringify({
+          boundary: 'test-valid-pull-page-limit',
+          requestedCursor: request.query.cursor ?? '0',
+          limit: pageLimit,
+          nextCursor: page.nextCursor,
+          changes: page.changes.map((c) => ({
+            cursor: c.cursor,
+            type: c.entityType,
+            id: c.entityId,
+          })),
+        }),
+      )
+    }
+    return payload
+  })
+}
 const app = createApp(
   auth,
   new MasterDataService(new PostgresMasterDataStore(pool)),
