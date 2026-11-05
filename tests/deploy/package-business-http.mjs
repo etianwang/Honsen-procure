@@ -320,7 +320,9 @@ if (process.env.TEST_BUSINESS_MODE === 'verify') {
     taxMinor: '12',
     totalMinor: '252',
   })
-  await approved(owner, opaBase)
+  const ownerApproval = { ...opaBase }
+  delete ownerApproval.ownerPrintTotalsJson
+  await approved(owner, ownerApproval)
   const opa = formal(opaBase, 'OPA', 3)
   await push(event(owner, opa, 2))
   expected.push({ id: owner, payload: opa })
