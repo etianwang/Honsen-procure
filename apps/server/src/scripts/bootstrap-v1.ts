@@ -1,3 +1,4 @@
+import { applyApprovedV1TaxConfig } from './v1-tax-config.js'
 import argon2 from 'argon2'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -30,11 +31,19 @@ try {
       throw new Error(
         'Existing admin was not initialized by this bootstrap; refusing changes',
       )
+    const taxConfiguration = await applyApprovedV1TaxConfig(
+      client,
+      existing.rows[0].id,
+    )
     // A repeat never resets passwords or rewrites historical master data.
     console.log(
-      JSON.stringify({ status: 'already_initialized', passwordReset: false }),
+      JSON.stringify({
+        status: 'already_initialized',
+        passwordReset: false,
+        taxConfiguration,
+      }),
     )
-    await client.query('ROLLBACK')
+    await client.query('COMMIT')
   } else {
     const count = await client.query<{ count: string }>(
       'SELECT count(*) FROM users',
@@ -147,6 +156,7 @@ try {
       "INSERT INTO audit_entries(id,actor_id,entity_type,entity_id,action,reason) VALUES(gen_random_uuid(),$1,'user',$1,'initial_super_administrator_provisioned','V1 bootstrap; password change recommended')",
       [admin],
     )
+    const taxConfiguration = await applyApprovedV1TaxConfig(client, admin)
     await client.query('COMMIT')
     console.log(
       JSON.stringify({
@@ -156,7 +166,7 @@ try {
         units: 14,
         sites: 0,
         passwordChangeRecommended: true,
-        taxConfiguration: 'BLOCKED_UNVERIFIED_AUTHORITY',
+        taxConfiguration,
       }),
     )
   }

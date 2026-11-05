@@ -1,3 +1,4 @@
+import { applyApprovedV1TaxConfig } from './v1-tax-config.js'
 import argon2 from 'argon2'
 import { AuthService } from '../auth/service.js'
 import { PostgresAuthStore } from '../db/postgres-auth-store.js'
@@ -56,6 +57,28 @@ describe.skipIf(!owner)('isolated PostgreSQL V1 bootstrap', () => {
       ).toBe('0')
     await pool.query('ALTER TABLE units DROP CONSTRAINT bootstrap_failure_test')
   })
+  it('rolls back every initial record when tax/default configuration fails after tax publication', async () => {
+    await pool.query(
+      'ALTER TABLE project_print_defaults ADD CONSTRAINT tax_seed_failure_test CHECK(FALSE)',
+    )
+    expect(() => bootstrap()).toThrow()
+    for (const table of [
+      'users',
+      'countries',
+      'projects',
+      'units',
+      'tax_templates',
+      'project_print_defaults',
+      'sync_entities',
+      'server_change_log',
+    ])
+      expect(
+        (await pool.query(`SELECT count(*) FROM ${table}`)).rows[0].count,
+      ).toBe('0')
+    await pool.query(
+      'ALTER TABLE project_print_defaults DROP CONSTRAINT tax_seed_failure_test',
+    )
+  })
   it('atomically seeds approved data, publishes all records, and repeat never resets password', async () => {
     expect(bootstrap()).toMatchObject({
       status: 'initialized',
@@ -63,7 +86,11 @@ describe.skipIf(!owner)('isolated PostgreSQL V1 bootstrap', () => {
       projects: 3,
       units: 14,
       sites: 0,
-      taxConfiguration: 'BLOCKED_UNVERIFIED_AUTHORITY',
+      taxConfiguration: {
+        status: 'applied_user_approved_configuration',
+        taxTemplates: 2,
+        projectDefaults: 3,
+      },
     })
     expect(
       (
@@ -81,16 +108,39 @@ describe.skipIf(!owner)('isolated PostgreSQL V1 bootstrap', () => {
     )
     expect(
       (await pool.query('SELECT count(*) FROM sync_entities')).rows[0].count,
-    ).toBe('19')
+    ).toBe('24')
     expect(
       (await pool.query('SELECT count(*) FROM server_change_log')).rows[0]
         .count,
-    ).toBe('19')
+    ).toBe('24')
     const original = (
       await pool.query(
         "SELECT password_hash,requires_password_change FROM users WHERE username='admin'",
       )
     ).rows[0]
+    const configured = (
+      await pool.query(
+        'SELECT p.business_code,t.rate_basis_points FROM project_print_defaults d JOIN projects p ON p.id=d.project_id JOIN tax_templates t ON t.id=d.default_tax_template_id ORDER BY p.business_code',
+      )
+    ).rows
+    expect(configured).toEqual([
+      { business_code: 'BETHEL2', rate_basis_points: 1800 },
+      { business_code: 'KERENE', rate_basis_points: 1800 },
+      { business_code: 'MINREX', rate_basis_points: 1925 },
+    ])
+    expect(
+      (
+        await pool.query(
+          "SELECT payload_json FROM sync_entities WHERE entity_type='tax_template' ORDER BY payload_json->>'businessCode'",
+        )
+      ).rows.map((r) => ({
+        rate: r.payload_json.rateBasisPoints,
+        version: r.payload_json.version,
+      })),
+    ).toEqual([
+      { rate: 1800, version: 1 },
+      { rate: 1925, version: 1 },
+    ])
     expect(original.requires_password_change).toBe(false)
     const auth = new AuthService(new PostgresAuthStore(pool), {
       verify: argon2.verify,
@@ -115,6 +165,11 @@ describe.skipIf(!owner)('isolated PostgreSQL V1 bootstrap', () => {
     expect(bootstrap()).toEqual({
       status: 'already_initialized',
       passwordReset: false,
+      taxConfiguration: {
+        status: 'already_applied_preserving_user_configuration',
+        taxTemplates: 0,
+        projectDefaults: 0,
+      },
     })
     expect(
       (
@@ -126,6 +181,91 @@ describe.skipIf(!owner)('isolated PostgreSQL V1 bootstrap', () => {
     expect(
       (await pool.query('SELECT count(*) FROM server_change_log')).rows[0]
         .count,
-    ).toBe('19')
+    ).toBe('24')
+  })
+  it('keeps user-edited tax/default records on repeated bootstrap', async () => {
+    await pool.query(
+      "UPDATE tax_templates SET rate_basis_points=1700,version=version+1 WHERE business_code='CI-VAT'",
+    )
+    const before = (
+      await pool.query(
+        'SELECT row_to_json(t) AS data FROM tax_templates t ORDER BY business_code',
+      )
+    ).rows
+    expect(
+      JSON.parse(
+        execFileSync(
+          process.execPath,
+          ['--import', 'tsx', 'src/scripts/apply-v1-tax-config.ts'],
+          {
+            env: { ...process.env, POSTGRES_URL: connection },
+            encoding: 'utf8',
+          },
+        ),
+      ).status,
+    ).toBe('already_applied_preserving_user_configuration')
+    expect(bootstrap().taxConfiguration.status).toBe(
+      'already_applied_preserving_user_configuration',
+    )
+    expect(
+      (
+        await pool.query(
+          'SELECT row_to_json(t) AS data FROM tax_templates t ORDER BY business_code',
+        )
+      ).rows,
+    ).toEqual(before)
+  })
+  it('adds approved tax configuration to a legacy bootstrap candidate transactionally and rejects conflicting existing settings', async () => {
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      const admin = (
+        await client.query(
+          "SELECT id,password_hash FROM users WHERE username='admin'",
+        )
+      ).rows[0]
+      // Reversible synthetic fixture: emulate the earlier candidate lacking tax defaults.
+      await client.query(
+        "DELETE FROM server_change_log WHERE entity_type IN ('tax_template','project_defaults'); DELETE FROM sync_entities WHERE entity_type IN ('tax_template','project_defaults'); DELETE FROM project_print_defaults; DELETE FROM tax_templates; DELETE FROM audit_entries WHERE action IN ('v1_tax_defaults_seeded','v1_user_approved_tax_created')",
+      )
+      await client.query('SAVEPOINT legacy_empty')
+      await client.query(
+        "INSERT INTO tax_templates(id,business_code,name,rate_basis_points,effective_at,is_active) VALUES(gen_random_uuid(),'CM-VAT','Existing operator configuration',100,'2026-11-06',TRUE)",
+      )
+      await client.query('SAVEPOINT existing_configuration')
+      await expect(applyApprovedV1TaxConfig(client, admin.id)).rejects.toThrow(
+        'TAX_SEED_EXISTING_CONFIGURATION_REQUIRES_REVIEW',
+      )
+      await client.query('ROLLBACK TO SAVEPOINT legacy_empty')
+      expect(await applyApprovedV1TaxConfig(client, admin.id)).toMatchObject({
+        status: 'applied_user_approved_configuration',
+        taxTemplates: 2,
+        projectDefaults: 3,
+      })
+      expect(
+        (await client.query('SELECT count(*) FROM project_print_defaults'))
+          .rows[0].count,
+      ).toBe('3')
+      expect(
+        (
+          await client.query(
+            'SELECT rate_basis_points FROM tax_templates ORDER BY business_code',
+          )
+        ).rows.map((r) => r.rate_basis_points),
+      ).toEqual([1800, 1925])
+      expect(
+        (
+          await client.query(
+            "SELECT password_hash FROM users WHERE username='admin'",
+          )
+        ).rows[0].password_hash,
+      ).toBe(admin.password_hash)
+      expect(
+        (await client.query('SELECT count(*) FROM sites')).rows[0].count,
+      ).toBe('0')
+    } finally {
+      await client.query('ROLLBACK')
+      client.release()
+    }
   })
 })
