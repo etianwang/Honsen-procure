@@ -806,6 +806,10 @@ test('desktop project-default page uses the Tauri command adapter', async ({
   await expect(
     page.getByRole('heading', { name: '基础资料管理' }).last(),
   ).toBeVisible()
+  await page
+    .getByRole('navigation', { name: '基础资料分类' })
+    .getByRole('button', { name: '项目默认设置', exact: true })
+    .click()
   await expect(page.getByText('Bethel2工地')).toBeVisible()
   await page.getByLabel('页脚联系方式').fill('desktop fixture contact')
   await page.getByRole('button', { name: '保存项目默认值' }).click()

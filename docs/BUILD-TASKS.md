@@ -494,3 +494,7 @@ Existing T02/T04/T10/T15 mappings only: supported account provisioning and first
 ### 2026-11-06 user-selected account wizard and UI completeness
 
 Existing T02/T04/T10/UI acceptance mapping only: four-step account/name-scope UI, independent shell scrolling, discoverable password change and corrected password/scope guidance; home/conflict styling preserves functions. Local independent DOM and Rust evidence in [UI ledger](reviews/ACCOUNT-WIZARD-UI-20261106.md). Master-data appearance proposals await user selection; implementation unchanged. No parent checkbox/dependency change, no remote/installed/Alpha gate closure.
+
+### 2026-11-06 selected master-data appearance
+
+Existing T04 UI scope: user-selected category navigation plus tables, retaining all ten categories and original CRUD/read-only/validation. Local evidence: [master-data navigation](reviews/MASTER-DATA-NAVIGATION-20261106.md). Original dependencies/complete acceptance gates and parent checkboxes remain unchanged; remote Alpha is not accepted by renderer tests.

@@ -382,3 +382,7 @@ Local account-management/first-login and employee fixed-API startup prerequisite
 ### 2026-11-06 account and workspace UI
 
 User-selected account wizard/name selectors, fixed navigation and requested password/home/conflict UI completeness delivered locally under existing tasks; [evidence](reviews/ACCOUNT-WIZARD-UI-20261106.md). Remote business/installed/security/Formal/Toolbox gates remain open. Master-data redesign awaits selection; no milestone closes.
+
+### 2026-11-06 master-data navigation
+
+Selected category/table appearance delivered locally under existing T04 scope; all original master-data functions retained. [Evidence](reviews/MASTER-DATA-NAVIGATION-20261106.md). No remote/installed/security/Formal/Toolbox or milestone gate closes.

@@ -10,11 +10,17 @@ type Props = {
   api: MasterDataApi
   records: ReferenceMasterDataView[]
   canEdit: boolean
+  activeCategory?: string
 }
 
 const newId = () => crypto.randomUUID()
 
-export function MasterDataManager({ api, records, canEdit }: Props) {
+export function MasterDataManager({
+  api,
+  records,
+  canEdit,
+  activeCategory,
+}: Props) {
   const t = useMasterText()
   const [items, setItems] = useState(records)
   const [message, setMessage] = useState<string | null>(null)
@@ -115,9 +121,15 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
   }
 
   return (
-    <Card title={t('管理员基础资料')} aria-label={t('管理员基础资料')}>
+    <Card
+      title={activeCategory ? undefined : t('管理员基础资料')}
+      aria-label={t('管理员基础资料')}
+    >
       {message && <Alert type="info" title={t(message)} showIcon />}
       <Tabs
+        activeKey={activeCategory}
+        renderTabBar={activeCategory ? () => <></> : undefined}
+        destroyOnHidden={false}
         items={[
           {
             key: 'countries',
@@ -206,7 +218,7 @@ export function MasterDataManager({ api, records, canEdit }: Props) {
               />
             ),
           },
-        ]}
+        ].map((item) => ({ ...item, forceRender: true }))}
       />
     </Card>
   )

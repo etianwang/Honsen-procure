@@ -1193,3 +1193,185 @@
   color: #6f7866;
   max-width: 200px;
 }
+
+.master-data-workspace {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  align-items: start;
+}
+.master-data-navigation {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 18px;
+  padding: 8px 0;
+}
+.master-data-nav-group {
+  display: grid;
+  gap: 4px;
+}
+.master-data-nav-group h3 {
+  margin: 8px 12px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #6b8175;
+  font-weight: 600;
+}
+.master-data-navigation button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #456553;
+  font: inherit;
+}
+.master-data-navigation button:hover {
+  background: #e9f2ec;
+}
+.master-data-navigation button[aria-pressed='true'] {
+  background: #dfeee5;
+  color: #145d40;
+  border-color: #cce1d3;
+  font-weight: 600;
+}
+.master-data-detail {
+  min-width: 0;
+}
+.master-data-detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0 20px;
+}
+.master-data-detail-header h2 {
+  margin: 0;
+  color: #173e2c;
+  font-size: 25px;
+}
+.master-data-detail-header p {
+  margin: 0;
+  color: #698172;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.master-data-panel {
+  min-width: 0;
+}
+.master-data-panel > .ant-card {
+  border-color: #d9e6de;
+  border-radius: 12px;
+}
+.master-data-panel .ant-card-head {
+  min-height: 62px;
+}
+.master-data-panel .ant-card-body {
+  padding: 24px;
+}
+.master-data-panel .ant-space {
+  max-width: 100%;
+}
+.master-data-panel .ant-table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 8px;
+}
+.master-data-panel .ant-table-thead > tr > th {
+  background: #f4f8f5;
+  color: #516d5c;
+  font-weight: 500;
+}
+.master-data-panel .ant-table-tbody > tr > td {
+  padding-block: 16px;
+}
+.master-data-panel .ant-table-cell {
+  overflow-wrap: anywhere;
+}
+.master-data-panel .ant-input,
+.master-data-panel .ant-select {
+  min-width: 0;
+}
+@media (max-width: 1050px) {
+  .master-data-workspace {
+    grid-template-columns: 155px minmax(0, 1fr);
+    gap: 16px;
+  }
+  .master-data-panel .ant-card-body {
+    padding: 18px;
+  }
+}
+@media (max-width: 760px) {
+  .master-data-workspace {
+    grid-template-columns: 1fr;
+  }
+  .master-data-navigation {
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .master-data-navigation button {
+    padding: 10px;
+    font-size: 13px;
+  }
+  .master-data-nav-group h3 {
+    margin-inline: 10px;
+  }
+}
+@media (max-width: 440px) {
+  .master-data-navigation {
+    grid-template-columns: 1fr;
+  }
+  .master-data-nav-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .master-data-nav-group h3 {
+    grid-column: 1 / -1;
+  }
+}
+.master-data-panel[hidden] {
+  display: none;
+}
+.master-data-panel .project-default-editor {
+  width: 100%;
+}
+.master-data-panel .project-default-editor h1 {
+  font-size: 20px;
+  line-height: 1.4;
+  margin-top: 0;
+}
+.master-data-panel .project-default-editor .ant-select {
+  width: 100%;
+}
+.master-data-panel .project-default-editor .ant-space-item {
+  width: 100%;
+}
+.master-data-panel .project-default-editor label {
+  color: #506e5c;
+  font-size: 13px;
+}
+.master-data-panel .master-defaults {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 18px;
+  margin: 0;
+  border-radius: 8px;
+  background: #f4f8f5;
+}
+.master-data-panel .master-defaults dt {
+  color: #6d8175;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.master-data-panel .master-defaults dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

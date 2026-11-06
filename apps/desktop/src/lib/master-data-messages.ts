@@ -1,5 +1,16 @@
 import { useUiLocale } from './ui-locale'
 const messages = {
+  基础资料分类: [
+    'Master data categories',
+    'Catégories des données de référence',
+  ],
+  组织资料: ['Organization', 'Organisation'],
+  采购字典: ['Purchasing dictionaries', 'Référentiels achats'],
+  财务与打印: ['Finance and printing', 'Finance et impression'],
+  '切换分类会保留本页未保存的输入；离开本页前请保存。': [
+    'Switching categories preserves unsaved input on this page. Save before leaving the page.',
+    'Changer de catégorie conserve les saisies non enregistrées sur cette page. Enregistrez avant de quitter la page.',
+  ],
   '无法读取本地分类冲突。': [
     'Cannot read local category conflicts.',
     'Impossible de lire les conflits de catégories locaux.',
