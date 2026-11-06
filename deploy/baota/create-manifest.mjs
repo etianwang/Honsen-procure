@@ -30,6 +30,17 @@ const manifest = {
   node: '24.22.1',
   postgres: '16.15',
   postgresRequiredExtensions: [],
+  deploymentReadme: {
+    source: 'README-DEPLOY.md',
+    sha256: digest('README-DEPLOY.md'),
+    aliases: ['README.zh-CN.md', 'deploy/baota/README.zh-CN.md'],
+  },
+  baotaEntry: {
+    path: 'deploy/baota/start.cjs',
+    sha256: digest('deploy/baota/start.cjs'),
+    envFile: '.env',
+    listen: '127.0.0.1:3000',
+  },
   migrationChecksumCompatibility: {
     module: 'apps/server/dist/db/migration-checksums.js',
     sha256: digest('apps/server/dist/db/migration-checksums.js'),
