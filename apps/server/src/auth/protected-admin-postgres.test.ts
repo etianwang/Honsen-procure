@@ -263,11 +263,12 @@ describe.skipIf(!control)('permanent administrator PostgreSQL safety', () => {
     ).toEqual([{ role: 'super_administrator' }])
     const audit = (
       await pool.query(
-        "SELECT reason FROM audit_entries WHERE entity_id=$1 AND action='admin_password_recovered'",
+        "SELECT actor_id,reason FROM audit_entries WHERE entity_id=$1 AND action='admin_password_recovered'",
         [admin],
       )
     ).rows
     expect(audit).toHaveLength(1)
+    expect(audit[0].actor_id).toBeNull()
     expect(audit[0].reason).toContain('isolated test maintainer')
     expect(audit[0].reason).not.toContain(password)
     await expect(auth.authenticate(oldToken)).rejects.toThrow('INVALID_LOGIN')

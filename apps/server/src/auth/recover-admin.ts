@@ -44,7 +44,7 @@ export async function recoverAdmin(
     )
     await client.query(
       `INSERT INTO audit_entries(id,actor_id,entity_type,entity_id,action,reason)
-       VALUES(gen_random_uuid(),$1,'user',$1,'admin_password_recovered',$2)`,
+       VALUES(gen_random_uuid(),NULL,'user',$1,'admin_password_recovered',$2)`,
       [
         id,
         JSON.stringify({
