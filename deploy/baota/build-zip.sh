@@ -7,7 +7,7 @@ mkdir -p "$out"
 test ! -e "$out/honsen-procure-server-v1-$sha.zip"
 stage="$(mktemp -d)"
 trap 'docker run --rm -v "$stage:/work" node:24.22.1-bookworm chown -R "$(id -u):$(id -g)" /work >/dev/null 2>&1 || true; rm -rf -- "$stage"' EXIT
-git -c safe.directory="$root" -C "$root" archive "$sha" README-DEPLOY.md package.json package-lock.json apps/server packages/shared deploy/baota deploy/linux/grant-api.cjs deploy/linux/api-grant-policy.json | tar -x -C "$stage"
+git -c safe.directory="$root" -C "$root" archive "$sha" README-DEPLOY.md start.mjs package.json package-lock.json apps/server packages/shared deploy/baota deploy/linux/grant-api.cjs deploy/linux/api-grant-policy.json | tar -x -C "$stage"
 cmp "$stage/README-DEPLOY.md" "$stage/deploy/baota/README.zh-CN.md"
 docker run --rm -v honsen-v1-npm-cache:/root/.npm -v "$stage:/work" -w /work node:24.22.1-bookworm bash -euc '
  npm ci --workspace @honsen/server --workspace @honsen/shared --include-workspace-root=false --include=dev --fetch-retries=3

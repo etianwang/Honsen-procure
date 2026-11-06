@@ -1,4 +1,4 @@
-# Honsen Procure V1 宝塔首次部署：按 1→10 顺序执行
+# Honsen Procure V1 宝塔首次部署：按 1→11 顺序执行
 
 适用：Ubuntu24.04、宝塔、Node24.22.1、PostgreSQL16.15；目录 `/www/wwwroot/api-pr/v1/`；公网Base URL `https://api-pr.honsen.africa/v1`；Cloudflare Flexible，源站HTTP。数据库 `honsen_procure`，维护角色 `honsen_procure`，运行角色 `honsen_api`。用户当前两个角色已经存在，第2步只核对，不重复创建。
 
@@ -35,7 +35,7 @@ chmod 755 /www/wwwroot/api-pr
 chmod -R a+rX /www/wwwroot/api-pr/v1
 cd /www/wwwroot/api-pr/v1
 sha256sum --quiet -c SHA256SUMS
-for file in README-DEPLOY.md build-manifest.json .env.example apps/server/dist/index.js apps/server/dist/db/migrate.js apps/server/dist/scripts/bootstrap-v1.js deploy/baota/runtime-grants.sql deploy/baota/start.cjs; do test -f "$file"; done
+for file in README-DEPLOY.md build-manifest.json .env.example apps/server/dist/index.js apps/server/dist/db/migrate.js apps/server/dist/scripts/bootstrap-v1.js deploy/baota/runtime-grants.sql start.mjs; do test -f "$file"; done
 read -rp 'Node24.22.1绝对路径 [/www/server/nodejs/v24.22.1/bin/node]: ' NODE_BIN
 NODE_BIN=${NODE_BIN:-/www/server/nodejs/v24.22.1/bin/node}
 test -x "$NODE_BIN"
@@ -49,22 +49,35 @@ printf '%s\n' "$NODE_BIN" > .deploy-node-path
 
 **失败必须停止：** 哈希不符、文件缺失、版本不符、旧服务未停都不能进入第2步。不执行覆盖解压、清库或删除旧ZIP。
 
-## 第 2 步：配置 PostgreSQL
+## 第 2 步：确认 PostgreSQL 数据库和用户
 
-**在哪里执行：** 宝塔数据库界面核对；同一个Linux终端使用真实客户端 `/www/server/pgsql/bin/psql`。现有数据库/角色不重复创建、不改密码。
+**在哪里执行：** 宝塔“数据库→PostgreSQL”创建或核对数据库honsen_procure及维护用户honsen_procure；Linux终端使用 `/www/server/pgsql/bin/psql`。用户当前库和两个角色已存在，下面条件判断只核查，不重复创建或重置密码。
 
-**输入：** PostgreSQL本机端口（默认5432）、维护账号 `honsen_procure` 的密码。
+宝塔普通维护账号不能创建角色。只有新的环境确实缺API角色时，才由PostgreSQL管理员postgres创建honsen_api；不能给维护账号临时授予CREATEROLE/SUPERUSER来绕过。
+
+**输入：** PostgreSQL端口、postgres管理员密码；只有缺API角色才按 `\password` 两次输入新的honsen_api密码；最后输入维护账号密码。全新数据库及维护用户由宝塔界面创建并以维护用户为库所有者，不删除/重建已有库。
 
 ```bash
+set -euo pipefail
 cd /www/wwwroot/api-pr/v1
 NODE_BIN=$(cat .deploy-node-path)
 export NODE_BIN
 export PSQL=/www/server/pgsql/bin/psql
 test -x "$PSQL"
 "$PSQL" --version
-export PGHOST=127.0.0.1 PGDATABASE=honsen_procure PGUSER=honsen_procure
 read -rp 'PostgreSQL端口 [5432]: ' PGPORT
 export PGPORT=${PGPORT:-5432}
+unset PGPASSWORD POSTGRES_URL
+"$PSQL" -X -h 127.0.0.1 -p "$PGPORT" -U postgres -d postgres -W -v ON_ERROR_STOP=1 <<'SQL'
+SELECT NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='honsen_api') AS create_api \gset
+\if :create_api
+CREATE ROLE honsen_api WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+\password honsen_api
+\endif
+\du honsen_api
+\q
+SQL
+export PGHOST=127.0.0.1 PGDATABASE=honsen_procure PGUSER=honsen_procure
 read -rsp '维护账号honsen_procure的密码: ' PGPASSWORD; echo
 export PGPASSWORD
 "$PSQL" -X -v ON_ERROR_STOP=1 <<'SQL'
@@ -73,41 +86,16 @@ SELECT rolname,rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolreplication,rol
 FROM pg_roles WHERE rolname IN ('honsen_procure','honsen_api') ORDER BY rolname;
 DO $$ BEGIN
  IF current_setting('server_version_num')::int <> 160015 THEN RAISE EXCEPTION 'expected PostgreSQL16.15'; END IF;
- IF current_user <> 'honsen_procure' OR current_database() <> 'honsen_procure' THEN RAISE EXCEPTION 'wrong maintenance connection'; END IF;
+ IF current_user<>'honsen_procure' OR current_database()<>'honsen_procure' THEN RAISE EXCEPTION 'wrong maintenance connection'; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_database WHERE datname=current_database() AND pg_get_userbyid(datdba)='honsen_procure') THEN RAISE EXCEPTION 'maintenance account must own this database'; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='honsen_api' AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls) THEN RAISE EXCEPTION 'missing or privileged API role'; END IF;
 END $$;
 SQL
 ```
 
-仅**全新环境缺数据库/角色**才在宝塔新终端用实际PostgreSQL管理员执行此完整创建块。现有用户应跳过此块；连接密码错误、角色权限异常不能靠创建同名用户解决。管理员密码按psql提示输入，新角色密码按 `\password` 的两次提示输入。此块不重建已有库、不重置现有密码。
+**成功看到：** 管理员侧 `\du honsen_api` 有该角色；维护侧当前库/用户honsen_procure、PostgreSQL16.15，honsen_api的高权限列均f、rolcanlogin为t，DO成功。当前用户不需要新建任何角色。
 
-```bash
-PSQL=/www/server/pgsql/bin/psql
-read -rp 'PostgreSQL管理员账号 [postgres]: ' PG_ADMIN_USER
-PG_ADMIN_USER=${PG_ADMIN_USER:-postgres}
-read -rp 'PostgreSQL端口 [5432]: ' CREATE_PORT
-CREATE_PORT=${CREATE_PORT:-5432}
-"$PSQL" -X -h 127.0.0.1 -p "$CREATE_PORT" -U "$PG_ADMIN_USER" -d postgres -W -v ON_ERROR_STOP=1 <<'SQL'
-SELECT NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='honsen_procure') AS create_maint \gset
-\if :create_maint
-CREATE ROLE honsen_procure LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
-\password honsen_procure
-\endif
-SELECT NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='honsen_api') AS create_api \gset
-\if :create_api
-CREATE ROLE honsen_api LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
-\password honsen_api
-\endif
-SELECT 'CREATE DATABASE honsen_procure OWNER honsen_procure' WHERE NOT EXISTS(SELECT 1 FROM pg_database WHERE datname='honsen_procure') \gexec
-SQL
-```
-
-新建分支完成后，在原Linux终端执行本步骤的核对块取得维护连接；不是跳过核对直接Migration。
-
-**成功看到：** PostgreSQL16.15、当前库/用户均为honsen_procure，两行角色，honsen_api各特权列为f、rolcanlogin为t，DO成功。
-
-**失败必须停止：** 数据库缺失、连接失败、非维护所有者或API角色有特权时不进入Migration。绝不授予SUPERUSER。
+**失败必须停止：** 管理员或维护连接失败、角色缺失/过度授权、非维护所有者、数据库不符都不进入Migration。不要把CREATE ROLE交给普通维护账号，不授予SUPERUSER，不删除schema_migrations。
 
 ## 第 3 步：运行 Migration
 
@@ -249,184 +237,145 @@ JS
 
 **失败必须停止：** 数据库连接、账号、COS参数格式或文件权限失败不启动Node；格式通过不证明COS网络/STS/对象读写可用。已有.env会由本步骤交互值重新生成，旧部署原.env保存在备份目录。
 
-## 第 7 步：在终端首次启动 Node
+## 第 7 步：在宝塔 PM2 项目管理器启动
 
-**在哪里执行：** 第一Linux终端前台启动；另开一个Linux终端做只读探测。
+**在哪里执行：** 宝塔“网站→Node项目→添加PM2项目”，或编辑当前已有的唯一PM2项目。不要在终端执行pm2 start另建项目，不创建独立ecosystem.config.cjs。若面板提示该Node版本缺PM2，通过宝塔Node版本/模块管理安装PM2，再添加项目；不要重新安装项目依赖。
 
-**输入：** 不再输入维护密码，不在命令行拼密码。
+**输入/填写项：**
 
-第一终端：
+| 字段              | 实际值                                                         |
+| ----------------- | -------------------------------------------------------------- |
+| 项目类型          | PM2；自定义启动文件，不用配置文件方式                          |
+| 项目名称          | honsen_procure_v1（已有项目沿用原名称，不并行新建）            |
+| 项目目录/运行目录 | /www/wwwroot/api-pr/v1                                         |
+| 启动文件          | /www/wwwroot/api-pr/v1/start.mjs                               |
+| Node版本          | 24.22.1                                                        |
+| 参数栏            | 留空；不填--env-file，也不填应用参数                           |
+| 实例/模式         | 1 / fork，关闭集群和watch                                      |
+| 项目端口          | 3000；不放行防火墙3000到公网                                   |
+| 安装依赖          | 选择“不安装依赖”；ZIP已包含Linux node_modules                  |
+| 运行用户          | www                                                            |
+| 环境文件          | 入口从自身所在部署根目录加载.env；面板不再填写维护POSTGRES_URL |
 
-```bash
-cd /www/wwwroot/api-pr/v1
-unset POSTGRES_URL PGPASSWORD
-NODE_BIN=$(cat .deploy-node-path)
-"$NODE_BIN" deploy/baota/start.cjs
-```
-
-第二终端：
-
-```bash
-set -euo pipefail
-cd /www/wwwroot/api-pr/v1
-ss -ltnp 'sport = :3000'
-curl --fail --show-error --silent http://127.0.0.1:3000/api/auth/captcha
-printf '\n'
-```
-
-**成功看到：** 第一终端 `Honsen Procure API listening on 127.0.0.1:3000`；ss只监听127.0.0.1:3000；GET返回id、question、expiresAt JSON。当前代码没有 `/health`；真实活性探针是GET `/api/auth/captcha`，数据库连接在启动和.env检查中已实际验证，登录在第10步验证。
-
-**失败必须停止：** STARTUP_FAILED、数据库认证失败、缺表/权限、COS参数错误、EADDRINUSE、非200、进程退出均不交给守护器反复重启。停止这个前台进程，保留日志排查；不能先把错误项目放到宝塔运行。
-
-## 第 8 步：交给宝塔 Node 项目管理器
-
-**在哪里执行：** 第一终端按Ctrl+C停止手动Node；宝塔“网站→Node项目→添加项目/现有项目设置”；Linux终端验证。
-
-**输入/宝塔配置：** 名称honsen_procure_v1；目录 `/www/wwwroot/api-pr/v1/`；Node24.22.1；启动方式选择“运行文件/自定义启动文件”（不是npm dev）；启动文件 `/www/wwwroot/api-pr/v1/deploy/baota/start.cjs`；运行用户www；单实例/fork，不开集群、不启动第二版本。入口会自动加载根目录.env，不依赖面板是否自动识别.env，也不要在面板另填维护POSTGRES_URL。
-
-启动项目前，终端执行：
+终端只做启动前检查，不在终端另启动API：
 
 ```bash
 set -euo pipefail
 cd /www/wwwroot/api-pr/v1
 unset POSTGRES_URL PGPASSWORD
-test -z "$(ss -ltnH 'sport = :3000')" || { echo '停止：手动Node尚未退出'; exit 1; }
+test -f start.mjs
 test -r .env
-test -f deploy/baota/start.cjs
+test -z "$(ss -ltnH 'sport = :3000')" || { echo '停止：3000仍有旧进程，先在宝塔停止已知旧项目'; exit 1; }
 ```
 
-在宝塔保存并启动该唯一项目；在项目“日志”查看stdout/stderr，应有监听成功行。记录面板实际显示的日志文件路径，不猜测不同面板版本的日志目录。终端执行：
+在宝塔保存并启动。`start.mjs`会先加载根目录.env，再导入API；路径按入口文件位置解析，兼容当前固定目录，不依赖工作目录或Node参数栏。没有.env时明确STARTUP_FAILED并退出，不输出连接串/密码；不存在同时运行index与start两套服务的步骤。
+
+**成功看到：** 宝塔PM2唯一实例online；项目日志出现 `Honsen Procure API listening on 127.0.0.1:3000`。日志由面板管理，使用项目“日志”显示的实际路径，不猜测不同面板版本的目录。面板自动生成的内部PM2配置属于该项目管理器，不是额外创建的独立项目。
+
+**失败必须停止：** .env未加载、STARTUP_FAILED、EADDRINUSE或项目反复重启都停止该项目，不进入反代。若旧index项目仍在运行，应在宝塔停止并编辑为start.mjs，不另建第二个活动项目。不使用pkill node影响其他项目。
+
+## 第 8 步：验证本机 API
+
+**在哪里执行：** 宝塔Linux终端root；同一PM2项目的日志界面。
+
+**输入：** 项目日志界面显示的真实日志绝对路径。API探针无需密码。
 
 ```bash
 set -euo pipefail
+cd /www/wwwroot/api-pr/v1
+ss -lntp | grep ':3000'
 API_PIDS=$(ss -ltnpH 'sport = :3000' | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u)
 test -n "$API_PIDS"
 test "$(printf '%s\n' "$API_PIDS" | wc -l)" -eq 1
 ps -p "$API_PIDS" -o pid,ppid,user,args
 readlink -f "/proc/$API_PIDS/cwd"
 readlink -f "/proc/$API_PIDS/exe"
+test "$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3000/api/auth/captcha)" = 200
 curl --fail --show-error --silent http://127.0.0.1:3000/api/auth/captcha
 printf '\n'
-read -rp '面板日志界面显示的实际日志绝对路径: ' API_LOG
+read -rp '宝塔PM2日志界面显示的实际日志绝对路径: ' API_LOG
 test -f "$API_LOG"
 tail -n 30 "$API_LOG"
+stat -c '%a %U:%G' .env
 ```
 
-**成功看到：** 宝塔该项目运行，监听PID恰好1个，用户www，cwd为v1目录，exe为所选Node24.22.1，探针200，日志无启动失败。管理器守护进程自身不等于第二个API进程。
+**成功看到：** 只有一个API监听PID，127.0.0.1:3000；进程用户www、cwd为v1目录，exe为所选Node24.22.1；探针HTTP200并有id/question/expiresAt JSON。PM2守护进程自身不等于第二个API进程。面板可能将项目目录和.env拥有者改为www；.env仍须保持640或600，不能世界可读。
 
-**失败必须停止：** 前台进程未退出、项目反复重启、多实例、运行用户不对、.env未加载或200失败均不绑定公网域名。不要使用全局pkill node，不影响其他项目。隔离演练若没有真实宝塔项目管理器，此步骤必须记录NOT RUN，不能用裸Node/普通PM2替代后宣称宝塔验收通过。
+当前代码没有 `/health`。实际健康活性探针是 `/api/auth/captcha`，数据库连接已在启动和.env检查中验证；验证码200不代替登录、同步与COS验收。
 
-## 第 9 步：绑定域名并配置反向代理
+**失败必须停止：** 非200、监听到公网、PID不唯一、日志启动失败、.env世界可读，都不进入公网反代。不批量杀未知Node进程。
 
-**在哪里执行：** 宝塔“网站”创建/选择域名 `api-pr.honsen.africa` 的HTTP站点，设置中编辑该站点Nginx配置；Cloudflare界面确认DNS指向服务器、代理开启且SSL/TLS为Flexible。只改此域名站点，不覆盖整个nginx.conf。
+## 第 9 步：绑定域名并配置宝塔 Nginx
 
-**输入：** 服务器实际公网IP（填Cloudflare DNS）、本机实际Nginx可执行路径。关闭该宝塔站点的“强制HTTPS”和重复自动反代；不开放3000到公网、不在源站添加HTTPS重定向。
+**在哪里执行：** 宝塔软件商店确认Nginx已安装并启动；在该PM2项目的域名/外网映射中绑定 `api-pr.honsen.africa`，HTTP80转发内部3000；编辑该域名站点的Nginx配置。Cloudflare DNS填写服务器实际公网IP、开启代理，SSL/TLS选Flexible，边缘HTTPS/源站HTTP。
 
-将这个站点的server块配置为：
+**输入：** 服务器实际公网IP；在现有server块中保留listen80、server_name、日志、证书验证路径和已有安全拒绝规则。把同名的三个location替换成下面内容，每种只保留一份；不要把server再嵌入server，不创建重复location。API站点不做项目文件静态直出，不能公开.env、node_modules或部署包。关闭此源站站点的强制HTTPS和重复自动反代，避免Flexible循环。
 
 ```nginx
-server {
-    listen 80;
-    server_name api-pr.honsen.africa;
-    access_log /www/wwwlogs/api-pr.honsen.africa.log;
-    error_log /www/wwwlogs/api-pr.honsen.africa.error.log;
-    location = /v1 { return 308 /v1/; }
-    location ^~ /v1/ {
-        proxy_pass http://127.0.0.1:3000/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-    location / {
-        default_type application/json;
-        return 410 '{"code":"client_upgrade_required","message":"请升级客户端后重试"}';
-    }
+location = /v1 {
+    return 308 /v1/;
+}
+location ^~ /v1/ {
+    proxy_pass http://127.0.0.1:3000/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+location / {
+    default_type application/json;
+    return 410 '{"code":"client_upgrade_required","message":"API版本不可用"}';
 }
 ```
 
-宝塔保存配置后，Linux终端执行：
+**成功判断：** 保存的是此域名的HTTP站点配置，三个location无重复；`proxy_pass`末尾的斜杠必须保留，它把外部 `/v1/api/...` 转成内部 `/api/...`。客户端Base URL只含一个/v1，不再手工拼/v1。
+
+**失败必须停止：** 面板拒绝保存、重复location、其他站点被覆盖、强制HTTPS仍开时不继续。Nginx语法及reload由第10步的连续命令验证，不能只看保存提示宣布成功。
+
+## 第 10 步：验证 Nginx 和公网
+
+**在哪里执行：** 宝塔Linux终端；公网测试使用真实域名。当前宝塔Nginx真实程序为 `/www/server/nginx/sbin/nginx`。
+
+**输入：** 不需要数据库或COS密码。
 
 ```bash
 set -euo pipefail
-read -rp '实际Nginx可执行路径 [/www/server/nginx/sbin/nginx]: ' NGINX_BIN
-NGINX_BIN=${NGINX_BIN:-/www/server/nginx/sbin/nginx}
-test -x "$NGINX_BIN"
-"$NGINX_BIN" -t
-"$NGINX_BIN" -s reload
-curl --fail --show-error --silent --resolve api-pr.honsen.africa:80:127.0.0.1 http://api-pr.honsen.africa/v1/api/auth/captcha
+/www/server/nginx/sbin/nginx -t
+/www/server/nginx/sbin/nginx -s reload
+test "$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' -H 'Host: api-pr.honsen.africa' http://127.0.0.1/v1/api/auth/captcha)" = 200
+curl --fail --show-error --silent -H 'Host: api-pr.honsen.africa' http://127.0.0.1/v1/api/auth/captcha
 printf '\n'
-test "$(curl --silent --output /dev/null --write-out '%{http_code}' --resolve api-pr.honsen.africa:80:127.0.0.1 http://api-pr.honsen.africa/v2/api/auth/captcha)" = 410
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Host: api-pr.honsen.africa' http://127.0.0.1/v2/api/auth/captcha)" = 410
 curl --fail --show-error --silent --max-redirs 0 https://api-pr.honsen.africa/v1/api/auth/captcha
 printf '\n'
 ```
 
-**成功看到：** Nginx配置有效；本机HTTP源站/v1探针200、/v2拒绝410；公网HTTPS/v1探针200，没有到HTTPS的源站重定向。`proxy_pass`末尾斜杠把 `/v1/api/...` 转为内部 `/api/...`；客户端Base URL只填 `https://api-pr.honsen.africa/v1`，业务请求再拼 `/api/...`，不再拼/v1。
+**成功看到：** nginx -t成功后reload；本机HTTP/v1探针200、/v2拒绝410；真实公网HTTPS/v1探针200，无源站HTTPS重定向。Host头确保127.0.0.1测试命中正确域名站点，而非其他默认站点。
 
-**失败必须停止：** 域名错误、证书/DNS/代理失败、重定向循环、404/502、双/v1、停用路径没有拒绝时不进入公网登录验收。不使用curl -k绕过TLS。隔离测试的本机Host映射只证明源站路由，真实Cloudflare/DNS/HTTPS由用户部署后验证，不能标已完成。
+**失败必须停止验收：** 404、502、DNS/证书/代理失败、重定向循环均记录FAIL，不使用curl -k。隔离测试的本机Host映射或受信任测试HTTPS入口只证明路径/协议流程，不能当作真实Cloudflare公网PASS；尚未测公网必须标NOT RUN，由用户部署后实际验证。
 
-## 第 10 步：最终验收
+## 第 11 步：真实 Windows 客户端验收
 
-**在哪里执行：** 宝塔Linux终端执行只读/拒绝探测；Windows客户端执行有审批的真实业务与COS验收。只使用合法账号，不用SQL伪造业务单据或越过权限。
+**在哪里执行：** 真实Windows客户端，不用SQL造业务、不用HTTP脚本冒充客户端。
 
-**输入：** admin实际密码、验证码答案；脚本只在内存使用token，不打印token/密码。一次新登录会按现有安全规则使旧在线会话失效。
+**输入/填写项：** 连接设置的API Base URL填 `https://api-pr.honsen.africa/v1`；账号admin及第4步设置的密码；按客户端提示完成验证码。初始登录只提示改密，不强制；维护账号/数据库密码不能填到客户端。
 
-```bash
-set -euo pipefail
-cd /www/wwwroot/api-pr/v1
-NODE_BIN=$(cat .deploy-node-path)
-read -rsp 'admin实际密码: ' DEPLOY_LOGIN_PASSWORD; echo
-export DEPLOY_LOGIN_PASSWORD
-VERIFY_SCRIPT=$(mktemp /tmp/honsen-verify-XXXXXX.mjs)
-cat > "$VERIFY_SCRIPT" <<'JS'
-import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
-import {createInterface} from 'node:readline/promises';
-const base='https://api-pr.honsen.africa/v1';
-const c=await (await fetch(base+'/api/auth/captcha')).json();
-const rl=createInterface({input:process.stdin,output:process.stdout});
-let answer;try{answer=await rl.question('验证码 '+c.question+' ');}finally{rl.close()}
-const installation=randomUUID();
-let r=await fetch(base+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json','x-installation-id':installation},body:JSON.stringify({username:'admin',password:process.env.DEPLOY_LOGIN_PASSWORD,captchaId:c.id,captchaAnswer:answer})});
-assert.equal(r.status,200,'admin登录失败，请停止');
-const login=await r.json();assert(login.user.roles.includes('super_administrator'));
-const headers={authorization:'Bearer '+login.accessToken};
-r=await fetch(base+'/api/sync/pull?cursor=0&limit=500',{headers});assert.equal(r.status,200);
-const changes=(await r.json()).changes;
-const countries=changes.filter(x=>x.entityType==='country').map(x=>x.payload);
-const projects=changes.filter(x=>x.entityType==='project').map(x=>x.payload);
-const taxes=changes.filter(x=>x.entityType==='tax_template').map(x=>x.payload);
-const defaults=changes.filter(x=>x.entityType==='project_defaults');
-assert.equal(countries.length,2);assert.equal(projects.length,3);assert.equal(defaults.length,3);
-assert.deepEqual(taxes.map(x=>x.rateBasisPoints).sort((a,b)=>a-b),[1800,1925]);
-console.log('admin登录/超级管理员/Pull/国家2/项目3/税率1800-1925/默认税3：PASS');
-r=await fetch(base+'/api/sync/pull?cursor=0&limit=1');assert.equal(r.status,401);
-r=await fetch(base+'/api/sync/push',{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({deviceId:installation,events:[]})});assert.equal(r.status,400);
-console.log('匿名访问拒绝、空Push安全拒绝：PASS；没有创建业务数据');
-console.log('仍需用户真实验证：非空Push/Pull双客户端、角色/项目撤权、COS原件/衍生上传下载及哈希、重启恢复。');
-JS
-if "$NODE_BIN" "$VERIFY_SCRIPT"; then
-  rm -f -- "$VERIFY_SCRIPT"
-  unset DEPLOY_LOGIN_PASSWORD
-else
-  rm -f -- "$VERIFY_SCRIPT"
-  unset DEPLOY_LOGIN_PASSWORD
-  echo '停止：终端最终验收未通过'
-  exit 1
-fi
-```
+**依次执行并保存结果：**
 
-**成功看到/用户逐项记录：**
+1. admin真实登录，确认超级管理员身份；在界面核对CI/CM及Bethel2办公楼、Kerene别墅、Minrex数据中心、14单位和0新站点。
+2. 核对CI18%、CM19.25%国家默认税及3项目税费配置；印花按订单人工填写，不自动每单固定征收。
+3. 用超级管理员界面配置合法采购/工程师/查看者角色和项目授权；分别验证允许、禁止和撤权，不能把admin登录成功当权限矩阵PASS。
+4. 用授权测试业务在一个客户端创建、得到真实Push ack，再由另一客户端Pull；重启后历史保留。空Push被拒绝不代替非空同步成功。此版本缺认证头可能400，无效会话401；两者均是拒绝，不伪称已有业务写入成功。
+5. 使用授权账号完成正式订单、付款及冲销，确认正式编号、历史快照、金额和权限保持正确。
+6. 用明确归属的测试附件验证COS真实上传、完成、下载、原件/衍生关系及字节哈希和权限拒绝；只清理拥有的测试对象，不枚举或删除历史业务对象。COS配置格式正确或验证码200均不代替COS功能验收。
+7. 在宝塔确认仍只有一个活动V1 PM2实例，保存项目日志/Nginx日志和验收结果，不保存明文密码/token。
 
-- 真实验证码探针200、admin登录200且super_administrator；Pull有CI/CM、三个已批准项目、国家默认税和项目税配置。首次库有24条初始发布记录、14单位、0新站点；已有业务数据不能继续用首次数量断言覆盖。
-- 匿名接口401、空Push400。这个拒绝测试不能代替非空Push/Pull成功；用户应在Windows客户端使用正式授权的测试业务，记录Push真实ack、另一客户端Pull及重启后保留。
-- 用户通过Windows超级管理员界面配置合法采购/工程师/查看者角色和项目范围，实际验证允许/拒绝及撤权，不能靠admin登录成功替代权限矩阵。
-- COS配置格式通过只是第一个检查；用户部署后用合法归属的测试附件验证真实上传、完成、下载、原始/衍生字节哈希和权限拒绝。只清理明确拥有的测试对象，不枚举/删除历史业务对象。不把503、只HEAD或伪签名当COS成功。
-- 宝塔只有一个活动V1项目；保存项目日志、Nginx日志和验收结果，不保存明文密码/token。
+**成功判断：** 每项都有实际客户端结果才分别记PASS；本轮未连接真实Windows客户端则整个客户端验收记 **NOT RUN**，由用户部署后执行。用户提供的PostgreSQL/Migration/Seed/授权/Node及本机Nginx200结果属于已报告的基础部署证据，不能自动扩展为公网、Windows、完整业务或COS通过。
 
-**失败必须停止验收：** 任一已执行检查失败即记录FAIL；真实宝塔接管、公网Cloudflare、业务同步、角色或COS未执行则记录“待用户部署后验证/NOT RUN”，不能宣布全项生产验收完成。本流程不会自动发布稳定版本。
+**失败停止条件：** 任一实际检查失败记FAIL；未执行记NOT RUN，不宣布完整V1稳定发布。不要重复创建服务器PM2项目来尝试解决客户端故障。
 
 ## 附录：未来升级与回退
 

@@ -36,8 +36,9 @@ const manifest = {
     aliases: ['README.zh-CN.md', 'deploy/baota/README.zh-CN.md'],
   },
   baotaEntry: {
-    path: 'deploy/baota/start.cjs',
-    sha256: digest('deploy/baota/start.cjs'),
+    path: 'start.mjs',
+    sha256: digest('start.mjs'),
+    mode: 'BAOTA_PM2_FORK_SINGLE_INSTANCE_EMPTY_ARGS',
     envFile: '.env',
     listen: '127.0.0.1:3000',
   },
