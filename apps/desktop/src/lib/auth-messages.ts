@@ -1,5 +1,25 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '无法安全保存登录凭据，请检查 Windows 凭据存储。': [
+    'Cannot securely save sign-in credentials. Check Windows credential storage.',
+    'Impossible de stocker les identifiants en sécurité. Vérifiez le gestionnaire Windows.',
+  ],
+  '本地数据库不可用，请检查数据目录权限。': [
+    'Local database unavailable. Check data-directory permissions.',
+    'Base locale indisponible. Vérifiez les droits du dossier de données.',
+  ],
+  '账号已锁定，请稍后重试或联系管理员。': [
+    'Account locked. Retry later or contact an administrator.',
+    'Compte verrouillé. Réessayez plus tard ou contactez un administrateur.',
+  ],
+  '登录输入格式无效，请检查账号与验证码。': [
+    'Invalid sign-in input. Check the account and CAPTCHA.',
+    'Saisie invalide. Vérifiez le compte et le CAPTCHA.',
+  ],
+  '无法完成 HTTPS 登录，请检查网络或服务器响应。': [
+    'HTTPS sign-in could not complete. Check the network or server response.',
+    'Connexion HTTPS impossible. Vérifiez le réseau ou la réponse du serveur.',
+  ],
   '无法获取云端验证码，请检查网络后重试。': [
     'Unable to get the cloud CAPTCHA. Check your network and retry.',
     'Impossible d’obtenir le CAPTCHA serveur. Vérifiez le réseau et réessayez.',

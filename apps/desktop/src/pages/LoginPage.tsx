@@ -81,16 +81,19 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
   const [cloudAnswer, setCloudAnswer] = useState('')
   const [cloudCaptchaFailed, setCloudCaptchaFailed] = useState(false)
   const [message, setMessage] = useState('')
+  const [cloudMessage, setCloudMessage] = useState<AuthMessage | ''>('')
   const [submitting, setSubmitting] = useState(false)
 
-  const refreshCaptcha = async () => {
+  const refreshCaptcha = async (preserveMessage = false) => {
     if (!desktopInvoke) return
+    if (!preserveMessage) setMessage('')
     try {
       setCaptcha(await desktopInvoke('issue_local_captcha'))
       setCloudCaptcha(null)
       setCloudCaptchaFailed(false)
+      setCloudMessage('')
       setCloudAnswer('')
-      void desktopInvoke<{ id: string; question: string }>(
+      await desktopInvoke<{ id: string; question: string }>(
         'issue_cloud_captcha',
       )
         .then(setCloudCaptcha)
@@ -102,11 +105,10 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
             'code' in error &&
             error.code === 'upgrade_required'
           )
-            setMessage('服务版本已停用，请升级客户端；本地数据已保留')
-          else setMessage('无法获取云端验证码，请检查网络后重试。')
+            setCloudMessage('服务版本已停用，请升级客户端；本地数据已保留')
+          else setCloudMessage('无法获取云端验证码，请检查网络后重试。')
         })
       setAnswer('')
-      setMessage('')
     } catch {
       setMessage('无法生成本地验证码。')
     }
@@ -156,6 +158,14 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
             type="error"
             showIcon
             title={t(message as AuthMessage)}
+          />
+        )}
+        {cloudMessage && (
+          <Alert
+            className="login-alert"
+            type="error"
+            showIcon
+            title={t(cloudMessage)}
           />
         )}
         <label htmlFor="account">{t('账号')}</label>
@@ -223,8 +233,8 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
             })
               .then((authenticated) => onLogin(authenticated, 'offline'))
               .catch(async () => {
-                await refreshCaptcha()
                 setMessage('账号、密码或验证码无效。')
+                await refreshCaptcha(true)
               })
               .finally(() => setSubmitting(false))
           }}
@@ -260,8 +270,26 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
                   setMessage('服务版本已停用，请升级客户端；本地数据已保留')
                   return
                 }
-                await refreshCaptcha()
-                setMessage('在线登录失败，请检查连接并重新获取验证码。')
+                const code =
+                  typeof error === 'object' && error !== null && 'code' in error
+                    ? error.code
+                    : undefined
+                setMessage(
+                  code === 'invalid_credentials'
+                    ? '账号、密码或验证码无效。'
+                    : code === 'credential_storage_error'
+                      ? '无法安全保存登录凭据，请检查 Windows 凭据存储。'
+                      : code === 'local_storage_error'
+                        ? '本地数据库不可用，请检查数据目录权限。'
+                        : code === 'account_locked'
+                          ? '账号已锁定，请稍后重试或联系管理员。'
+                          : code === 'invalid_input'
+                            ? '登录输入格式无效，请检查账号与验证码。'
+                            : code === 'sync_transport_error'
+                              ? '无法完成 HTTPS 登录，请检查网络或服务器响应。'
+                              : '在线登录失败，请检查连接并重新获取验证码。',
+                )
+                await refreshCaptcha(true)
               })
               .finally(() => setSubmitting(false))
           }}
