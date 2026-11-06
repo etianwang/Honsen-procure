@@ -1,4 +1,4 @@
-import type { Pool } from 'pg'
+import type { Pool, PoolClient } from 'pg'
 import {
   AuthorizationError,
   type AuthorizationScope,
@@ -7,6 +7,21 @@ import {
 
 export class PostgresAuthorizationStore implements AuthorizationStore {
   constructor(private readonly pool: Pool) {}
+
+  private async protectAdmin(
+    client: PoolClient,
+    accountId: string,
+    actorId: string,
+  ) {
+    const denied = await client.query(
+      `SELECT 1 FROM users target WHERE target.id=$1 AND target.username='admin'
+       AND NOT EXISTS(SELECT 1 FROM users actor JOIN user_roles r ON r.user_id=actor.id
+       WHERE actor.id=$2 AND actor.is_enabled AND actor.deleted_at IS NULL
+       AND r.role='super_administrator')`,
+      [accountId, actorId],
+    )
+    if (denied.rowCount) throw new AuthorizationError('FORBIDDEN')
+  }
 
   async listScopes(accountId: string): Promise<AuthorizationScope[]> {
     const result = await this.pool.query<{
@@ -47,6 +62,7 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.protectAdmin(client, input.accountId, input.actorId)
       await client.query(
         `INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2) ON CONFLICT (user_id, project_id) DO UPDATE SET deleted_at = NULL`,
         [input.accountId, input.scope.projectId],
@@ -103,6 +119,7 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.protectAdmin(client, input.accountId, input.actorId)
       await client.query(
         `UPDATE user_project_scope_bindings
          SET deleted_at = NOW(), updated_at = NOW()
@@ -148,6 +165,7 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.protectAdmin(client, input.accountId, input.actorId)
       const valid = await client.query<{
         country_id: string
         site: string

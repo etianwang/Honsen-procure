@@ -32,3 +32,9 @@ The React renderer is untrusted. It may request actions but it may not decide au
 ## Security tests
 
 Verify that an unauthenticated renderer cannot invoke privileged mutations; wrong-password attempts are rate-limited; a disabled account or revoked session cannot push/pull; no API payload exposes a password hash or credential; SQL injection-shaped inputs are treated as data; and logs/fixtures contain no secrets or real supplier contacts.
+
+## Protected permanent administrator
+
+The existing username `admin` is the permanent recovery/governance account, using `super_administrator` with global country/project/system management access. It is not a daily procurement account and does not bypass procurement approval policy. Ordinary administrators cannot modify its authorization, disable, delete, rename or downgrade it. Its ID, history and audit remain intact. No operation may remove the final effective super administrator; retain the existing final-two safety rule after two have been provisioned. Initial bootstrap with one protected admin is supported without inventing a second account.
+
+Self-service password change remains authenticated with the current password and revokes old sessions. Forgotten-password recovery is a local, explicitly authorized maintenance-owner operation, never a public HTTP bypass: require operator identity, reason and a new strong password, update the existing healthy admin transactionally, revoke every prior session and append audit evidence. No embedded/default/master recovery password. Repeated Seed must never reset or recreate admin. Automated tests use distinct authorized accounts except tests specifically proving protected-admin/Seed/recovery behavior.

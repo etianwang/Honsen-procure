@@ -14,7 +14,7 @@ export class PostgresAuthStore implements AuthStore {
       `SELECT u.id, u.username, u.password_hash, u.ui_locale, u.is_enabled,
               u.locked_until, u.requires_password_change,
               (EXISTS(SELECT 1 FROM audit_entries a WHERE a.actor_id=u.id AND a.action='initial_super_administrator_provisioned' AND a.reason='V1 bootstrap; password change recommended')
-               AND NOT EXISTS(SELECT 1 FROM audit_entries a WHERE a.actor_id=u.id AND a.action='password_changed')) AS password_change_recommended,
+               AND NOT EXISTS(SELECT 1 FROM audit_entries a WHERE a.actor_id=u.id AND a.action IN ('password_changed','admin_password_recovered'))) AS password_change_recommended,
               COALESCE(array_agg(ur.role ORDER BY ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
        FROM users u
        LEFT JOIN user_roles ur ON ur.user_id = u.id
@@ -43,7 +43,7 @@ export class PostgresAuthStore implements AuthStore {
       `SELECT u.id, u.username, u.password_hash, u.ui_locale, u.is_enabled,
               u.locked_until, u.requires_password_change,
               (EXISTS(SELECT 1 FROM audit_entries a WHERE a.actor_id=u.id AND a.action='initial_super_administrator_provisioned' AND a.reason='V1 bootstrap; password change recommended')
-               AND NOT EXISTS(SELECT 1 FROM audit_entries a WHERE a.actor_id=u.id AND a.action='password_changed')) AS password_change_recommended,
+               AND NOT EXISTS(SELECT 1 FROM audit_entries a WHERE a.actor_id=u.id AND a.action IN ('password_changed','admin_password_recovered'))) AS password_change_recommended,
               s.installation_id,
               COALESCE(array_agg(ur.role ORDER BY ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
        FROM account_sessions s

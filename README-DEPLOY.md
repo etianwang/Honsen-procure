@@ -115,7 +115,7 @@ JS
 "$PSQL" -X -v ON_ERROR_STOP=1 <<'SQL'
 SELECT name,checksum,applied_at FROM schema_migrations ORDER BY name;
 DO $$ BEGIN
- IF (SELECT count(*) FROM schema_migrations) <> 17 THEN RAISE EXCEPTION 'expected 17 migrations'; END IF;
+ IF (SELECT count(*) FROM schema_migrations) <> 18 THEN RAISE EXCEPTION 'expected 18 migrations'; END IF;
  IF EXISTS(SELECT 1 FROM schema_migrations WHERE checksum IS NULL OR length(checksum)<>64) THEN RAISE EXCEPTION 'invalid migration history'; END IF;
 END $$;
 SQL
@@ -392,3 +392,15 @@ printf '\n'
 - 502查唯一项目和127.0.0.1:3000；循环跳转查源站强制HTTPS；404查/v1/末尾斜杠及实际/api/...路径。
 
 规范来源：宝塔官方 [Node项目说明](https://docs.bt.cn/practical-tutorials/nextjs-deployment/) 和 [Node/PM2说明](https://docs.bt.cn/practical-tutorials/nodejs-pm2-deployment/)。实际面板菜单以用户安装版本为准；不据此声称本机已经完成宝塔界面、公网DNS或Cloudflare操作。
+
+### 受控恢复 admin 密码（仅遗忘密码时）
+
+执行位置：经授权的 Linux 维护终端。先暂停宝塔 API 项目并完成数据库备份；不要重复 Seed、删除 admin 或重建数据库。当前数据库迁移必须成功包含 015_protected_admin.sql。维护人员先按首次部署的交互方式设置 POSTGRES_URL 为 users 表维护所有者连接；不得使用 API 的 .env 或 honsen_api 连接。执行：
+
+```bash
+cd /www/wwwroot/api-pr/v1
+"$(cat .deploy-node-path)" deploy/baota/recover-admin.mjs
+unset POSTGRES_URL
+```
+
+输入维护人员身份、恢复原因和两次新密码（至少12字符，终端不显示密码）。成功显示保留原账号与撤销全部旧会话；账号ID、角色、业务历史不变，恢复原因和维护身份写入审计。失败必须停止，不得改用SQL直接覆盖密码；恢复失败不会创建账号或修改角色。成功后通过同一宝塔项目启动并用正常密码/CAPTCHA登录。此工具仅接受已通过数据库认证的维护所有者，运行账号不能调用；没有隐藏应急密码或公共恢复接口。

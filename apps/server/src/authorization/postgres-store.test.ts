@@ -11,6 +11,8 @@ describe('PostgresAuthorizationStore', () => {
     const client = {
       async query(sql: string) {
         calls.push(sql)
+        if (sql.includes('SELECT 1 FROM users target'))
+          return { rowCount: 0, rows: [] }
         if (sql.includes('SELECT p.country_id')) {
           return {
             rowCount: 1,
