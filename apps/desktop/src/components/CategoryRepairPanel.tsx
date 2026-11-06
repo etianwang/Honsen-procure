@@ -87,12 +87,15 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
     }
   }
   return (
-    <section className="card" aria-label={t('分类编码冲突')}>
-      <div className="card-header">
+    <section
+      className="card category-repair-panel"
+      aria-label={t('分类编码冲突')}
+    >
+      <div className="card-header conflict-panel-header">
         <h3>{t('分类编码冲突')}</h3>
       </div>
-      <div className="workflow-comments">
-        <label>
+      <div className="workflow-comments conflict-panel-body">
+        <label className="conflict-field">
           {t('分类新编码')}
           <input
             aria-label={t('分类新编码')}
@@ -101,7 +104,7 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
             onChange={(event) => setCode(event.target.value)}
           />
         </label>
-        <label>
+        <label className="conflict-field">
           {t('分类修复原因')}
           <input
             aria-label={t('分类修复原因')}
@@ -110,9 +113,16 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
             onChange={(event) => setReason(event.target.value)}
           />
         </label>
-        {message && <p role="status">{t(message)}</p>}
+        {message && (
+          <p className="conflict-feedback" role="status">
+            {t(message)}
+          </p>
+        )}
         {local.map((item) => (
-          <article className="workflow-comment" key={item.eventId}>
+          <article
+            className="workflow-comment conflict-record"
+            key={item.eventId}
+          >
             <p>
               {t('冲突分类')} {item.businessCode}
             </p>
@@ -129,7 +139,10 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
           </article>
         ))}
         {remote.map((item) => (
-          <article className="workflow-comment" key={item.categoryId}>
+          <article
+            className="workflow-comment conflict-record"
+            key={item.categoryId}
+          >
             <p>
               {t('云端隔离分类')} {item.businessCode}
             </p>
@@ -146,7 +159,10 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
           </article>
         ))}
         {pending.map((item) => (
-          <article className="workflow-comment" key={item.categoryId}>
+          <article
+            className="workflow-comment conflict-record"
+            key={item.categoryId}
+          >
             <p>
               {t('待确认的云端修复')} {item.categoryId} · {item.newBusinessCode}
             </p>
@@ -163,7 +179,7 @@ export function CategoryRepairPanel({ api }: { api: CategoryRepairApi }) {
           </article>
         ))}
         {local.length === 0 && remote.length === 0 && pending.length === 0 && (
-          <p>{t('没有已发现的分类编码冲突。')}</p>
+          <p className="conflict-empty">{t('没有已发现的分类编码冲突。')}</p>
         )}
       </div>
     </section>

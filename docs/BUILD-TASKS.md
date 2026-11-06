@@ -490,3 +490,7 @@ CI source6b18850: database/build/Linux gates PASS, automatic browsere2e70PASS1FA
 ### 2026-11-06 remote Alpha prerequisite checkpoint (C/B)
 
 Existing T02/T04/T10/T15 mappings only: supported account provisioning and first-login/security prerequisites plus employee fixed-API/zero-configuration boundary repaired locally. Independent server221PASS/3liveCOS SKIP, Rust164PASS/7ignored, desktop30PASS and renderer DOM5PASS are local evidence only. Real remote accounts/business/installed retention remain unaccepted; no T00–T15 parent checkbox or dependency changed. See [remote Alpha ledger](reviews/V1-REMOTE-ALPHA-ACCEPTANCE.md). Decision ALPHA_INTERNAL_TEST_BLOCKED; original full gates remain mandatory.
+
+### 2026-11-06 user-selected account wizard and UI completeness
+
+Existing T02/T04/T10/UI acceptance mapping only: four-step account/name-scope UI, independent shell scrolling, discoverable password change and corrected password/scope guidance; home/conflict styling preserves functions. Local independent DOM and Rust evidence in [UI ledger](reviews/ACCOUNT-WIZARD-UI-20261106.md). Master-data appearance proposals await user selection; implementation unchanged. No parent checkbox/dependency change, no remote/installed/Alpha gate closure.

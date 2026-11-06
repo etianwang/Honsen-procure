@@ -1,3 +1,4 @@
+import { AccountPasswordDialog } from './components/AccountPasswordDialog'
 import { RequiredPasswordChange } from './components/ManagedAccountForm'
 import { shellText, useUiLocale, type ShellMessage } from './lib/ui-locale'
 import zhCN from 'antd/locale/zh_CN'
@@ -197,6 +198,7 @@ function App() {
     new URLSearchParams(window.location.search).get('test') === 'sync-conflict'
   const [page, setPage] = useState<AppPage>('home')
   const [isPreviewOpen, setPreviewOpen] = useState(false)
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
   const [session, setSession] = useState<{
     user_id: string
     username: string
@@ -378,10 +380,9 @@ function App() {
   const requisitionContext = session
     ? authorizationContext
     : previewRequisitionContext
-  const canApprove =
-    role === 'purchaser' ||
-    role === 'administrator' ||
-    role === 'super_administrator'
+  const canApprove = !!session?.roles.some(
+    (role) => role === 'purchaser' || role === 'administrator',
+  )
 
   return (
     <ConfigProvider
@@ -438,6 +439,7 @@ function App() {
                         : '基础资料管理'
           }
           role={session ? role : 'purchaser'}
+          username={session?.username}
           onNavigate={setPage}
           authorizationContexts={session ? authorizationContexts : undefined}
           selectedAuthorizationContext={
@@ -451,6 +453,18 @@ function App() {
           }
           onSelectAuthorizationContext={selectAuthorizationContext}
           passwordChangeRecommended={session?.password_change_recommended}
+          passwordChangeAvailable={
+            !!session?.onlineAuthenticated &&
+            ![
+              'retrying',
+              'auth-required',
+              'account-boundary',
+              'upgrade-required',
+            ].includes(syncState.kind)
+          }
+          onChangePassword={
+            session ? () => setPasswordDialogOpen(true) : undefined
+          }
           syncState={syncState}
           onLock={
             session
@@ -466,11 +480,31 @@ function App() {
                     setAuthorizationContexts([])
                     setAuthorizationContext(null)
                     setSession(null)
+                    setPasswordDialogOpen(false)
                   })
                 }
               : undefined
           }
         >
+          {session && page === 'home' && role === 'super_administrator' && (
+            <p className="account-role-notice" role="status">
+              {shellText(
+                locale,
+                '超级管理员负责账号、角色和授权治理；该角色本身不授予日常采购业务权限。',
+              )}
+            </p>
+          )}
+          {session &&
+            page === 'home' &&
+            contextError &&
+            !authorizationContext && (
+              <p className="account-scope-notice" role="status">
+                {shellText(
+                  locale,
+                  '当前没有可用的项目业务授权。请联系授权管理员分配项目、部门和班组；修改密码不会授予这些权限。',
+                )}
+              </p>
+            )}
           {page === 'home' ? (
             <HomePage
               key={`${session?.user_id ?? 'preview'}:${authorizationContext?.projectId ?? ''}`}
@@ -548,7 +582,15 @@ function App() {
             />
           ) : page === 'requisition' ? (
             <main className="empty-state" role="alert">
-              {shellText(locale, contextError || '正在加载授权范围…')}
+              <p>{shellText(locale, contextError || '正在加载授权范围…')}</p>
+              {contextError && (
+                <p>
+                  {shellText(
+                    locale,
+                    '当前没有可用的项目业务授权。请联系授权管理员分配项目、部门和班组；修改密码不会授予这些权限。',
+                  )}
+                </p>
+              )}
             </main>
           ) : page === 'execution' ? (
             <ProcurementExecutionPage
@@ -570,7 +612,7 @@ function App() {
           ) : page === 'authorization' &&
             session &&
             (role === 'administrator' || role === 'super_administrator') ? (
-            <AuthorizationManagementPage />
+            <AuthorizationManagementPage role={role} />
           ) : (
             <MasterDataPage role={session ? role : 'purchaser'} />
           )}
@@ -589,6 +631,19 @@ function App() {
             })
           }}
           onPreview={() => setPreviewOpen(true)}
+        />
+      )}
+      {session && (
+        <AccountPasswordDialog
+          open={passwordDialogOpen}
+          onClose={() => setPasswordDialogOpen(false)}
+          onChanged={() => {
+            setPasswordDialogOpen(false)
+            setAuthorizationContexts([])
+            setAuthorizationContext(null)
+            setSession(null)
+            setPreviewOpen(false)
+          }}
         />
       )}
     </ConfigProvider>

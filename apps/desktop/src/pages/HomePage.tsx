@@ -57,7 +57,7 @@ export function HomePage({
     }
   }, [api, projectId, requestKey])
   return (
-    <>
+    <div className="home-workbench">
       <section className="page-heading">
         <div>
           <h2>{t('今日概览')}</h2>
@@ -160,8 +160,10 @@ export function HomePage({
           </Card>
         </>
       )}
-      <Button onClick={onOpenExecution}>{t('打开采购执行与收货')}</Button>{' '}
-      <Button onClick={onOpenMaterials}>{t('打开材料库')}</Button>
-    </>
+      <div className="home-shortcuts">
+        <Button onClick={onOpenExecution}>{t('打开采购执行与收货')}</Button>
+        <Button onClick={onOpenMaterials}>{t('打开材料库')}</Button>
+      </div>
+    </div>
   )
 }

@@ -37,6 +37,20 @@ export function useUiLocale() {
 }
 
 const messages = {
+  修改密码: ['Change password', 'Modifier le mot de passe'],
+  '修改密码需要在线登录和可用连接。': [
+    'Changing the password requires online sign-in and an available connection.',
+    'La modification du mot de passe exige une connexion en ligne active.',
+  ],
+  '超级管理员负责账号、角色和授权治理；该角色本身不授予日常采购业务权限。': [
+    'Super administrators govern accounts, roles and access; this role alone does not grant daily purchasing permissions.',
+    'Les super administrateurs gèrent les comptes, rôles et autorisations ; ce rôle seul n’accorde aucun droit d’achat quotidien.',
+  ],
+  '当前没有可用的项目业务授权。请联系授权管理员分配项目、部门和班组；修改密码不会授予这些权限。':
+    [
+      'No project business scope is available. Ask an authorized administrator to assign a project, department and team; changing the password does not grant these permissions.',
+      'Aucun périmètre métier disponible. Demandez à un administrateur habilité d’attribuer un projet, un service et une équipe ; changer le mot de passe n’accorde pas ces droits.',
+    ],
   '初始密码仍在使用，建议修改密码；可继续使用系统': [
     'The initial password is still in use. A password change is recommended; you may continue.',
     'Le mot de passe initial est toujours utilisé. Il est recommandé de le modifier ; vous pouvez continuer.',

@@ -44,6 +44,35 @@ impl CreateManagedAccount {
 }
 
 impl LocalAuthService {
+    async fn password_change_response(
+        &self,
+        session: OnlineSession,
+        response: reqwest::Response,
+    ) -> Result<(), AuthError> {
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::LOCKED {
+            // Never expose or log the response body; only the supported code is interpreted.
+            let failure = response.json::<serde_json::Value>().await.ok();
+            Self::require_request_session(
+                &*self.connection.lock().map_err(|_| AuthError::Database)?,
+                session,
+            )?;
+            if status == reqwest::StatusCode::UNAUTHORIZED
+                && failure
+                    .as_ref()
+                    .and_then(|v| v.get("code"))
+                    .and_then(|v| v.as_str())
+                    == Some("INVALID_LOGIN")
+            {
+                return Err(AuthError::InvalidCredentials);
+            }
+            if status == reqwest::StatusCode::LOCKED {
+                return Err(AuthError::AccountLocked);
+            }
+        }
+        self.authorization_management_response(session, status)
+    }
+
     pub async fn find_managed_accounts(
         &self,
         username: String,
@@ -153,7 +182,7 @@ impl LocalAuthService {
             .send()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
-        self.authorization_management_response(session, response.status())?;
+        self.password_change_response(session, response).await?;
         // Server revokes all sessions; never permit reuse of the cached old password.
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         Self::require_request_session(&connection, session)?;
@@ -171,6 +200,76 @@ impl LocalAuthService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn password_change_http_errors_preserve_only_valid_sessions() {
+        use std::io::{Read, Write};
+        for (status, body, expected, retained) in [
+            (
+                401,
+                "{\"code\":\"INVALID_LOGIN\"}",
+                AuthError::InvalidCredentials,
+                true,
+            ),
+            (
+                401,
+                "{\"code\":\"UNAUTHENTICATED\"}",
+                AuthError::NoActiveSession,
+                false,
+            ),
+            (401, "not-json", AuthError::NoActiveSession, false),
+            (
+                423,
+                "{\"code\":\"ACCOUNT_LOCKED\"}",
+                AuthError::AccountLocked,
+                true,
+            ),
+        ] {
+            let service = LocalAuthService::open_in_memory().unwrap();
+            let session = OnlineSession {
+                account_id: Uuid::new_v4(),
+                generation: Uuid::new_v4(),
+            };
+            {
+                let mut c = service.connection.lock().unwrap();
+                c.execute("INSERT INTO local_accounts(id,username,roles_json,enabled,requires_password_change,cached_verified_at) VALUES(?1,'synthetic','[]',1,0,0)", [session.account_id.to_string()]).unwrap();
+                c.online_session = Some(session);
+                c.session_invalidated = false;
+                c.execute(
+                    "INSERT INTO local_session(user_id,started_at,last_active_at) VALUES(?1,0,0)",
+                    [session.account_id.to_string()],
+                )
+                .unwrap();
+            }
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut request = [0; 2048];
+                socket.read(&mut request).unwrap();
+                write!(socket, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            tauri::async_runtime::block_on(async {
+                let response = reqwest::Client::builder()
+                    .no_proxy()
+                    .timeout(Duration::from_secs(5))
+                    .build()
+                    .unwrap()
+                    .get(format!("http://{address}/change-password"))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    service.password_change_response(session, response).await,
+                    Err(expected)
+                );
+            });
+            server.join().unwrap();
+            assert_eq!(
+                service.connection.lock().unwrap().online_session.is_some(),
+                retained
+            );
+        }
+    }
     #[test]
     fn first_login_trusted_business_gate_and_bootstrap_exception() {
         let service = LocalAuthService::open_in_memory().unwrap();

@@ -47,6 +47,7 @@ test('workbench replaces demo orders with authorized saved data and clears stale
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
   await expect(page.getByText('SAVED-ORDER', { exact: true })).toBeVisible()
+  await page.screenshot({ path: '.cache/account-home-saved-data.png' })
   await expect(
     page.getByLabel('采购统计').getByText('1', { exact: true }),
   ).toBeVisible()

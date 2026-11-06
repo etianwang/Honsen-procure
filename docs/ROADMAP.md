@@ -378,3 +378,7 @@ CI source6b18850: database/build/Linux gates PASS, automatic browsere2e70PASS1FA
 ### 2026-11-06 remote Alpha status
 
 Local account-management/first-login and employee fixed-API startup prerequisites repaired under existing T02/T04/T10/T15; local gates do not establish remote readiness. Remote account creation, procurement/security/sync, installed history/data preservation and original release gates remain open. No milestone closes. See [remote Alpha evidence](reviews/V1-REMOTE-ALPHA-ACCEPTANCE.md): ALPHA_INTERNAL_TEST_BLOCKED.
+
+### 2026-11-06 account and workspace UI
+
+User-selected account wizard/name selectors, fixed navigation and requested password/home/conflict UI completeness delivered locally under existing tasks; [evidence](reviews/ACCOUNT-WIZARD-UI-20261106.md). Remote business/installed/security/Formal/Toolbox gates remain open. Master-data redesign awaits selection; no milestone closes.

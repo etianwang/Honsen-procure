@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import type { UserRole } from '../lib/permissions'
 import type { SyncState } from '../lib/sync-lifecycle'
+import defaultAvatar from '../assets/default-avatar.svg'
 
 export type AppPage =
   | 'home'
@@ -32,8 +33,11 @@ type AppShellProps = PropsWithChildren<{
   page: AppPage
   pageTitle: ShellMessage
   role: UserRole
+  username?: string
   onNavigate: (page: AppPage) => void
   onLock?: () => void
+  onChangePassword?: () => void
+  passwordChangeAvailable?: boolean
   passwordChangeRecommended?: boolean
   syncState?: SyncState
   authorizationContexts?: AuthorizationContextOption[]
@@ -55,8 +59,11 @@ export function AppShell({
   page,
   pageTitle,
   role,
+  username,
   onNavigate,
   onLock,
+  onChangePassword,
+  passwordChangeAvailable = false,
   syncState,
   authorizationContexts,
   selectedAuthorizationContext,
@@ -225,8 +232,25 @@ export function AppShell({
                 ? ` · ${t('上次拉取成功')} ${new Date(syncState.lastSuccessAt * 1000).toLocaleString(locale === 'zh' ? 'zh-CN' : locale === 'en' ? 'en-US' : 'fr-FR')}`
                 : ''}
             </span>
-            <span className="avatar">张</span>
+            <span className="avatar" aria-hidden="true">
+              <img src={defaultAvatar} width={32} height={32} alt="" />
+            </span>
+            {username && <span className="signed-in-username">{username}</span>}
             <span>{t(roleLabel[role])}</span>
+            {onChangePassword && (
+              <button
+                type="button"
+                disabled={!passwordChangeAvailable}
+                onClick={onChangePassword}
+              >
+                {t('修改密码')}
+              </button>
+            )}
+            {onChangePassword && !passwordChangeAvailable && (
+              <span className="password-online-note">
+                {t('修改密码需要在线登录和可用连接。')}
+              </span>
+            )}
             {onLock && (
               <button type="button" onClick={onLock}>
                 {t('锁定')}
@@ -236,9 +260,20 @@ export function AppShell({
         </header>
         <div className="content">
           {passwordChangeRecommended && (
-            <p role="status">
-              {t('初始密码仍在使用，建议修改密码；可继续使用系统')}
-            </p>
+            <div className="password-recommendation">
+              <p role="status">
+                {t('初始密码仍在使用，建议修改密码；可继续使用系统')}
+              </p>
+              {onChangePassword && (
+                <button
+                  type="button"
+                  disabled={!passwordChangeAvailable}
+                  onClick={onChangePassword}
+                >
+                  {t('修改密码')}
+                </button>
+              )}
+            </div>
           )}
           {children}
         </div>
