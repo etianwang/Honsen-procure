@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   LibraryBig,
   Settings,
+  Truck,
 } from 'lucide-react'
 import type { UserRole } from '../lib/permissions'
 import type { SyncState } from '../lib/sync-lifecycle'
@@ -13,6 +14,7 @@ import defaultAvatar from '../assets/default-avatar.svg'
 export type AppPage =
   | 'home'
   | 'materials'
+  | 'suppliers'
   | 'requisition'
   | 'execution'
   | 'conflicts'
@@ -97,6 +99,14 @@ export function AppShell({
             {t('材料库')}
           </button>
           <button
+            className={`nav-button ${page === 'suppliers' ? 'active' : ''}`}
+            type="button"
+            onClick={() => onNavigate('suppliers')}
+          >
+            <Truck size={17} aria-hidden="true" />
+            {t('供应商与价格')}
+          </button>
+          <button
             className={`nav-button ${page === 'requisition' ? 'active' : ''}`}
             type="button"
             onClick={() => onNavigate('requisition')}
@@ -140,10 +150,6 @@ export function AppShell({
               {t('在线授权管理')}
             </button>
           )}
-          <p className="nav-label">{t('即将接入')}</p>
-          <button className="nav-button" type="button" disabled>
-            {t('供应商与价格')}
-          </button>
         </nav>
       </aside>
       <main className="workspace">

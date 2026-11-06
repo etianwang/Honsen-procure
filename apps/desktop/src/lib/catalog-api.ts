@@ -56,6 +56,27 @@ export type SupplierView = {
   version: number
 }
 
+export type SupplierPriceHistoryView = {
+  priceId: string
+  materialId: string
+  materialNameZh: string
+  materialNameFr: string | null
+  materialNameEn: string | null
+  materialModel: string
+  materialSpecification: string
+  materialActive: boolean
+  supplierId: string
+  supplierName: string
+  supplierActive: boolean
+  isBlacklisted: boolean
+  currency: Currency
+  unitPriceMinor: string
+  unit: string
+  effectiveAt: string
+  sourceNote: string | null
+  isActive: boolean
+}
+
 export type MaterialImageInput = {
   id: string
   materialId: string
@@ -78,6 +99,11 @@ export type CatalogApi = {
   ): Promise<CatalogPriceView[]>
   saveMaterial(material: Material): Promise<void>
   listSuppliers(): Promise<SupplierView[]>
+  listSupplierPrices?(
+    supplierId: string,
+    projectId: string,
+    after: string | null,
+  ): Promise<SupplierPriceHistoryView[]>
   saveSupplier(supplier: Supplier): Promise<void>
   addMaterialPrice(price: MaterialPrice): Promise<void>
   saveMaterialImage(image: MaterialImageInput): Promise<void>
@@ -117,6 +143,12 @@ export const tauriCatalogApi: CatalogApi = {
   saveMaterial: (material) =>
     tauriInvoke()<void>('save_material', { material }),
   listSuppliers: () => tauriInvoke()<SupplierView[]>('list_suppliers'),
+  listSupplierPrices: (supplierId, projectId, after) =>
+    tauriInvoke()<SupplierPriceHistoryView[]>('list_supplier_prices', {
+      supplierId,
+      projectId,
+      after,
+    }),
   saveSupplier: (supplier) =>
     tauriInvoke()<void>('save_supplier', { supplier }),
   addMaterialPrice: (price) =>

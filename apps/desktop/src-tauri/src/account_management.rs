@@ -245,7 +245,8 @@ mod tests {
             let server = std::thread::spawn(move || {
                 let (mut socket, _) = listener.accept().unwrap();
                 let mut request = [0; 2048];
-                socket.read(&mut request).unwrap();
+                let received = socket.read(&mut request).unwrap();
+                assert!(received > 0, "expected an HTTP request before responding");
                 write!(socket, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             });
             tauri::async_runtime::block_on(async {

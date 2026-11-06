@@ -247,6 +247,7 @@ fn main() {
             commands::search_catalog,
             commands::list_catalog_prices,
             commands::list_suppliers,
+            commands::list_supplier_prices,
             commands::save_project_defaults,
             commands::list_project_defaults,
             commands::save_reference_master_data,

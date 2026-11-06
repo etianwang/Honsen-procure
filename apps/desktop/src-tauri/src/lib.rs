@@ -29,6 +29,7 @@ mod attachments;
 mod expenditures;
 pub mod formal_print;
 mod owner_print_totals;
+pub mod supplier_history;
 pub use attachments::{AttachmentInput, AttachmentTarget, AttachmentView, ProcurementSyncReport};
 mod seed;
 mod update_launch;
@@ -8056,6 +8057,17 @@ pub mod commands {
         auth: State<'_, LocalAuthService>,
     ) -> Result<Vec<super::SupplierView>, CommandError> {
         auth.list_suppliers(SystemTime::now()).map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_supplier_prices(
+        auth: State<'_, LocalAuthService>,
+        supplier_id: Uuid,
+        project_id: Uuid,
+        after: Option<Uuid>,
+    ) -> Result<Vec<super::supplier_history::SupplierPriceHistoryView>, CommandError> {
+        auth.list_supplier_prices(supplier_id, project_id, after, SystemTime::now())
+            .map_err(Into::into)
     }
 
     #[tauri::command]

@@ -1,24 +1,19 @@
+import {
+  SupplierFormFields,
+  PriceFormFields,
+} from '../components/CatalogMaintenanceFields'
+import {
+  supplierFromForm,
+  priceFromForm,
+  type SupplierFormValues,
+  type PriceFormValues,
+} from '../lib/catalog-maintenance'
 import { useUiLocale } from '../lib/ui-locale'
 import { catalogText, type CatalogMessage } from '../lib/catalog-messages'
-import {
-  Alert,
-  Button,
-  Card,
-  Form,
-  Input,
-  Modal,
-  Select,
-  Spin,
-  Switch,
-} from 'antd'
+import { Alert, Button, Card, Form, Input, Modal, Spin, Switch } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Plus, Search, SlidersHorizontal } from 'lucide-react'
-import {
-  formatMoney,
-  type Material,
-  type MaterialPrice,
-  type Supplier,
-} from '@honsen/shared'
+import { formatMoney, type Material } from '@honsen/shared'
 import {
   tauriCatalogApi,
   type CatalogApi,
@@ -36,6 +31,7 @@ type MaterialsPageProps = {
   role: UserRole
   countryId?: string
   projectId?: string
+  contextNotice?: string
   api?: CatalogApi
 }
 type MaterialFormValues = {
@@ -51,35 +47,12 @@ type MaterialFormValues = {
   notes?: string
   isActive: boolean
 }
-type SupplierFormValues = {
-  businessCode: string
-  name: string
-  contactName?: string
-  address?: string
-  city?: string
-  country?: string
-  phone?: string
-  whatsapp?: string
-  email?: string
-  paymentTerms?: string
-  deliveryLeadTime?: string
-  isPreferred: boolean
-  isBlacklisted: boolean
-  isActive: boolean
-}
-type PriceFormValues = {
-  supplierId: string
-  currency: 'XOF' | 'CNY' | 'USD' | 'EUR'
-  unitPriceMinor: string
-  unit: string
-  effectiveAt: string
-  sourceNote?: string
-}
 
 export function MaterialsPage({
   role,
   countryId,
   projectId,
+  contextNotice,
   api = tauriCatalogApi,
 }: MaterialsPageProps) {
   const { locale } = useUiLocale()
@@ -158,6 +131,7 @@ export function MaterialsPage({
 
   useEffect(() => {
     if (!supplierEditor) return
+    supplierForm.resetFields()
     const supplier = supplierEditor === 'new' ? undefined : supplierEditor
     supplierForm.setFieldsValue(
       supplier
@@ -183,6 +157,7 @@ export function MaterialsPage({
 
   useEffect(() => {
     if (!quoteMaterial) return
+    priceForm.resetFields()
     priceForm.setFieldsValue({
       currency: 'XOF',
       unit: quoteMaterial.unit,
@@ -278,25 +253,11 @@ export function MaterialsPage({
       setError('请选择有效的授权范围后再新增供应商')
       return
     }
-    const supplier: Supplier = {
-      id: existing?.id ?? crypto.randomUUID(),
-      countryId: supplierCountryId,
-      businessCode: values.businessCode.trim(),
-      name: values.name.trim(),
-      contactName: optionalText(values.contactName),
-      address: optionalText(values.address),
-      city: optionalText(values.city),
-      country: optionalText(values.country),
-      phone: optionalText(values.phone),
-      whatsapp: optionalText(values.whatsapp),
-      email: optionalText(values.email),
-      paymentTerms: optionalText(values.paymentTerms),
-      deliveryLeadTime: optionalText(values.deliveryLeadTime),
-      isPreferred: values.isPreferred,
-      isBlacklisted: values.isBlacklisted,
-      isActive: values.isActive,
-      version: (existing?.version ?? 0) + 1,
-    }
+    const supplier = supplierFromForm(
+      values,
+      existing ?? undefined,
+      supplierCountryId,
+    )
     setSaving(true)
     try {
       await api.saveSupplier(supplier)
@@ -344,17 +305,7 @@ export function MaterialsPage({
 
   async function savePrice(values: PriceFormValues) {
     if (!quoteMaterial) return
-    const price: MaterialPrice = {
-      id: crypto.randomUUID(),
-      materialId: quoteMaterial.id,
-      supplierId: values.supplierId,
-      currency: values.currency,
-      unitPriceMinor: values.unitPriceMinor,
-      unit: values.unit.trim(),
-      effectiveAt: values.effectiveAt,
-      sourceNote: optionalText(values.sourceNote),
-      version: 1,
-    }
+    const price = priceFromForm(values, quoteMaterial.id)
     setSaving(true)
     try {
       await api.addMaterialPrice(price)
@@ -417,7 +368,7 @@ export function MaterialsPage({
       {!projectId ? (
         <Alert
           type="error"
-          title={t('请选择有效的授权项目以查看报价')}
+          title={contextNotice ?? t('请选择有效的授权项目以查看报价')}
           showIcon
         />
       ) : error ? (
@@ -642,75 +593,7 @@ export function MaterialsPage({
         destroyOnHidden
       >
         <Form form={supplierForm} layout="vertical" onFinish={saveSupplier}>
-          <Form.Item
-            label={t('供应商编码')}
-            name="businessCode"
-            rules={[{ required: true, message: t('请填写供应商编码') }]}
-          >
-            <Input disabled={supplierEditor !== 'new'} maxLength={64} />
-          </Form.Item>
-          <Form.Item
-            label={t('供应商名称')}
-            name="name"
-            rules={[{ required: true, message: t('请填写供应商名称') }]}
-          >
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label={t('联系人')} name="contactName">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label={t('地址')} name="address">
-            <Input.TextArea
-              maxLength={1000}
-              autoSize={{ minRows: 2, maxRows: 4 }}
-            />
-          </Form.Item>
-          <Form.Item label={t('城市')} name="city">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label={t('国家')} name="country">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label={t('电话')} name="phone">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label="WhatsApp" name="whatsapp">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item
-            label={t('邮箱')}
-            name="email"
-            rules={[{ type: 'email', message: t('请填写有效邮箱') }]}
-          >
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label={t('付款条件')} name="paymentTerms">
-            <Input maxLength={1000} />
-          </Form.Item>
-          <Form.Item label={t('交货期')} name="deliveryLeadTime">
-            <Input maxLength={1000} />
-          </Form.Item>
-          <Form.Item
-            label={t('首选供应商')}
-            name="isPreferred"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            label={t('黑名单')}
-            name="isBlacklisted"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            label={t('启用状态')}
-            name="isActive"
-            valuePropName="checked"
-          >
-            <Switch checkedChildren={t('启用')} unCheckedChildren={t('停用')} />
-          </Form.Item>
+          <SupplierFormFields editing={supplierEditor !== 'new'} />
         </Form>
       </Modal>
       <Modal
@@ -728,65 +611,7 @@ export function MaterialsPage({
         destroyOnHidden
       >
         <Form form={priceForm} layout="vertical" onFinish={savePrice}>
-          <Form.Item
-            label={t('供应商')}
-            name="supplierId"
-            rules={[{ required: true, message: t('请选择供应商') }]}
-          >
-            <Select
-              placeholder={t('选择启用且非黑名单供应商')}
-              options={suppliers
-                .filter(
-                  (supplier) => supplier.isActive && !supplier.isBlacklisted,
-                )
-                .map((supplier) => ({
-                  value: supplier.id,
-                  label: `${supplier.businessCode} · ${supplier.name}`,
-                }))}
-            />
-          </Form.Item>
-          <Form.Item
-            label={t('货币')}
-            name="currency"
-            rules={[{ required: true }]}
-          >
-            <Select
-              options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({ value }))}
-            />
-          </Form.Item>
-          <Form.Item
-            label={t('单价（最小货币单位）')}
-            name="unitPriceMinor"
-            rules={[
-              {
-                required: true,
-                pattern: /^\d+$/,
-                message: t('请输入非负整数，不可使用小数'),
-              },
-            ]}
-          >
-            <Input inputMode="numeric" />
-          </Form.Item>
-          <Form.Item
-            label={t('单位')}
-            name="unit"
-            rules={[{ required: true, message: t('请填写单位') }]}
-          >
-            <Input maxLength={64} />
-          </Form.Item>
-          <Form.Item
-            label={t('生效日期')}
-            name="effectiveAt"
-            rules={[{ required: true, message: t('请选择生效日期') }]}
-          >
-            <Input type="date" />
-          </Form.Item>
-          <Form.Item label={t('来源备注')} name="sourceNote">
-            <Input.TextArea
-              maxLength={1000}
-              autoSize={{ minRows: 2, maxRows: 4 }}
-            />
-          </Form.Item>
+          <PriceFormFields suppliers={suppliers} />
         </Form>
       </Modal>
     </>

@@ -386,3 +386,7 @@ User-selected account wizard/name selectors, fixed navigation and requested pass
 ### 2026-11-06 master-data navigation
 
 Selected category/table appearance delivered locally under existing T04 scope; all original master-data functions retained. [Evidence](reviews/MASTER-DATA-NAVIGATION-20261106.md). No remote/installed/security/Formal/Toolbox or milestone gate closes.
+
+### 2026-11-06 supplier workspace candidate
+
+Existing supplier/quote contracts reused by new desktop navigation/UI and SQLite history read. [Evidence](reviews/SUPPLIERS-PRICES-V1-20261106.md). Server remains frozen; original notes field gap and real remote/installed acceptance remain open. No milestone or Alpha readiness closure.

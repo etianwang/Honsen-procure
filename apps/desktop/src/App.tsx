@@ -44,6 +44,7 @@ import {
 } from './pages/RequisitionPage'
 import { tauriRequisitionApi, type RequisitionApi } from './lib/requisition-api'
 import { tauriCatalogApi } from './lib/catalog-api'
+import { SuppliersPricesPage } from './pages/SuppliersPricesPage'
 import { tauriProcurementExecutionApi } from './lib/procurement-execution-api'
 import { tauriRfqApi } from './lib/rfq-api'
 import { tauriSupplierOrderApi } from './lib/supplier-order-api'
@@ -306,11 +307,19 @@ function App() {
         })
         setContextError('')
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!active) return
         setAuthorizationContexts([])
         setAuthorizationContext(null)
-        setContextError('当前账户没有有效的离线授权范围，无法新建采购申请。')
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? error.code
+            : undefined
+        setContextError(
+          code === 'forbidden'
+            ? '当前账户没有有效的离线授权范围，无法新建采购申请。'
+            : '无法读取本地授权资料；请重试同步或重新登录，当前不能判定为缺少项目授权。',
+        )
       })
     return () => {
       active = false
@@ -383,6 +392,23 @@ function App() {
   const canApprove = !!session?.roles.some(
     (role) => role === 'purchaser' || role === 'administrator',
   )
+  const businessRole: UserRole = session?.roles.includes('administrator')
+    ? 'administrator'
+    : session?.roles.includes('purchaser')
+      ? 'purchaser'
+      : role
+  const catalogContextNotice: ShellMessage =
+    role === 'super_administrator' &&
+    session?.roles.every((assigned) => assigned === 'super_administrator')
+      ? '超级管理员不会自动获得项目范围；查看报价需要有效项目授权，维护另需管理员或采购员角色。'
+      : syncState.kind === 'retrying' || syncState.kind === 'auth-required'
+        ? '连接或同步失败，当前尚无可用的本地项目上下文；请重试同步，不代表服务器已拒绝项目授权。'
+        : authorizationContexts.length
+          ? '已加载授权范围，但当前项目尚未就绪；请从顶部授权范围中选择项目。'
+          : contextError ===
+              '无法读取本地授权资料；请重试同步或重新登录，当前不能判定为缺少项目授权。'
+            ? contextError
+            : '当前没有可用的项目业务授权。请联系授权管理员分配项目、部门和班组；修改密码不会授予这些权限。'
 
   return (
     <ConfigProvider
@@ -428,15 +454,17 @@ function App() {
               ? '工作台'
               : page === 'materials'
                 ? '材料库总览'
-                : page === 'requisition'
-                  ? '采购申请单'
-                  : page === 'execution'
-                    ? '采购执行'
-                    : page === 'conflicts'
-                      ? '同步冲突'
-                      : page === 'authorization'
-                        ? '在线授权管理'
-                        : '基础资料管理'
+                : page === 'suppliers'
+                  ? '供应商与价格'
+                  : page === 'requisition'
+                    ? '采购申请单'
+                    : page === 'execution'
+                      ? '采购执行'
+                      : page === 'conflicts'
+                        ? '同步冲突'
+                        : page === 'authorization'
+                          ? '在线授权管理'
+                          : '基础资料管理'
           }
           role={session ? role : 'purchaser'}
           username={session?.username}
@@ -525,7 +553,8 @@ function App() {
           ) : page === 'materials' ? (
             <MaterialsPage
               key={requisitionContext?.projectId}
-              role={session ? role : 'purchaser'}
+              role={session ? businessRole : 'purchaser'}
+              contextNotice={shellText(locale, catalogContextNotice)}
               countryId={requisitionContext?.countryId}
               projectId={requisitionContext?.projectId}
               api={
@@ -546,6 +575,13 @@ function App() {
                       getMaterialSquareImage: async () => null,
                     }
               }
+            />
+          ) : page === 'suppliers' ? (
+            <SuppliersPricesPage
+              role={session ? businessRole : 'purchaser'}
+              countryId={requisitionContext?.countryId}
+              projectId={requisitionContext?.projectId}
+              contextNotice={shellText(locale, catalogContextNotice)}
             />
           ) : page === 'requisition' && requisitionContext ? (
             <RequisitionPage

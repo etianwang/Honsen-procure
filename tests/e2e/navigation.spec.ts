@@ -1016,6 +1016,14 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
     ),
   ).resolves.toBe('00000000-0000-4000-8000-000000000101')
   await page.getByRole('button', { name: '编辑供应商' }).click()
+  await page
+    .getByLabel('联系人', { exact: true })
+    .fill('Cancelled synthetic contact')
+  await page.getByRole('button', { name: /取\s*消/ }).click()
+  await page.getByRole('button', { name: '新增供应商', exact: true }).click()
+  await expect(page.getByLabel('联系人', { exact: true })).toHaveValue('')
+  await page.getByRole('button', { name: /取\s*消/ }).click()
+  await page.getByRole('button', { name: '编辑供应商' }).click()
   await page.getByRole('button', { name: '保存供应商' }).click()
   await expect(
     page.evaluate(
@@ -1027,6 +1035,13 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
   await page.getByRole('button', { name: '关闭供应商管理' }).click()
 
   await page.getByRole('button', { name: '维护报价' }).click()
+  await page.getByRole('combobox', { name: /供应商/ }).click()
+  await page.getByText('SUP-001 · fixture active supplier').click()
+  await page.getByLabel('单价（最小货币单位）').fill('1250')
+  await page.getByRole('button', { name: /取\s*消/ }).click()
+  await page.getByRole('button', { name: '维护报价', exact: true }).click()
+  await expect(page.getByLabel('单价（最小货币单位）')).toHaveValue('')
+  await expect(page.getByRole('combobox', { name: /供应商/ })).toHaveValue('')
   await page.getByRole('combobox', { name: /供应商/ }).click()
   await page.getByText('SUP-001 · fixture active supplier').click()
   await page.getByLabel('单价（最小货币单位）').fill('1250')

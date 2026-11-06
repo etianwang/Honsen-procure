@@ -37,6 +37,24 @@ export function useUiLocale() {
 }
 
 const messages = {
+  '超级管理员不会自动获得项目范围；查看报价需要有效项目授权，维护另需管理员或采购员角色。':
+    [
+      'Super administrators do not automatically receive project scopes. Viewing quotes requires valid project access; maintenance additionally requires an administrator or purchaser role.',
+      'Les super administrateurs ne reçoivent pas automatiquement de périmètre de projet. Consulter les devis exige un accès valide ; leur maintenance exige aussi un rôle administrateur ou acheteur.',
+    ],
+  '连接或同步失败，当前尚无可用的本地项目上下文；请重试同步，不代表服务器已拒绝项目授权。':
+    [
+      'Connection or sync failed and no usable local project context is available. Retry synchronization; this does not establish a server authorization refusal.',
+      'Connexion ou synchronisation échouée et aucun contexte de projet local disponible. Réessayez ; cela ne prouve pas un refus d’autorisation serveur.',
+    ],
+  '已加载授权范围，但当前项目尚未就绪；请从顶部授权范围中选择项目。': [
+    'Authorized scopes are loaded, but the current project is not ready. Select a scope in the header.',
+    'Les périmètres autorisés sont chargés, mais le projet courant n’est pas prêt. Sélectionnez un périmètre dans l’en-tête.',
+  ],
+  '无法读取本地授权资料；请重试同步或重新登录，当前不能判定为缺少项目授权。': [
+    'Local authorization data could not be read. Retry synchronization or sign in again; missing project authorization is not established.',
+    'Impossible de lire les autorisations locales. Synchronisez ou reconnectez-vous ; l’absence de droits au projet n’est pas établie.',
+  ],
   修改密码: ['Change password', 'Modifier le mot de passe'],
   '修改密码需要在线登录和可用连接。': [
     'Changing the password requires online sign-in and an available connection.',

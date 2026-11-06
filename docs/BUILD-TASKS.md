@@ -498,3 +498,7 @@ Existing T02/T04/T10/UI acceptance mapping only: four-step account/name-scope UI
 ### 2026-11-06 selected master-data appearance
 
 Existing T04 UI scope: user-selected category navigation plus tables, retaining all ten categories and original CRUD/read-only/validation. Local evidence: [master-data navigation](reviews/MASTER-DATA-NAVIGATION-20261106.md). Original dependencies/complete acceptance gates and parent checkboxes remain unchanged; remote Alpha is not accepted by renderer tests.
+
+### 2026-11-06 suppliers and prices desktop integration
+
+Existing T03/T04/T10 local slice: independent supplier/quote UI and trusted existing-SQLite history read, unchanged server/shared/push-pull/schema. [Scoped evidence and original supplier-notes contract gap](reviews/SUPPLIERS-PRICES-V1-20261106.md). Local checks pass; real remote two-client and original Alpha/installed/security/Formal/Toolbox gates remain open. No task dependency or parent checkbox is changed.
