@@ -1,10 +1,12 @@
 # Permanent admin protection — actual acceptance 2026-11-06
 
-Source frozen at `a17c37d5f10ebcd6b3180af1668f00f03a4897be` (task branch `codex/admin-protection-20261106`). Previous69052e0 ZIP is superseded: it omitted reviewed trigger functions from the deployment grant tool whitelist. The actual failure and repair are preserved below.
+Source frozen at `0829780499a9b0ffe4bc490a9d4530e0416a24cb` (task branch `codex/admin-protection-20261106`). Previous69052e0 ZIP is superseded: it omitted reviewed trigger functions from the deployment grant tool whitelist. The actual failure and repair are preserved below.
 
-ZIP: `H:\Honsen\Honsen-Procure\.cache\server-release\honsen-procure-server-v1-a17c37d5f10ebcd6b3180af1668f00f03a4897be.zip`.
+ZIP: `H:\Honsen\Honsen-Procure\.cache\server-release\honsen-procure-server-v1-0829780499a9b0ffe4bc490a9d4530e0416a24cb.zip`.
 
-Size **3,537,658 bytes**. SHA-256 **480eaa13eac161284c0e3976f5ef66af7f8749f2750595c2ac39413d68668c6b**.
+Size **3,537,677 bytes**. SHA-256 **c9233b3e5a9a7222dd53cbab831877af2352ca264a1569e32091a59ee0018f12**.
+
+Independent audit attribution recheck supersedes the a17 candidate: local maintenance recovery writes actor_id NULL, verified maintenance database role and operator/reason, and target entity_id=existing admin. It never pretends the forgotten-password account authenticated the recovery. Actual final ZIP asserts this attribution. No historical audit rows rewritten.
 
 ## Implemented boundary
 
@@ -18,7 +20,7 @@ PRD, SPECS, SECURITY and permission/test rules updated; canonical root README an
 
 ## Executed checks
 
-- Full server with real disposable PostgreSQL:225 PASS,3 opt-in real COS SKIP. Source69052e0 application/migrations are identical to a17c37d (`git diff` empty); grant-tool repair separately rechecked below.
+- Full final server source0829780 with real disposable PostgreSQL16.15 without pgcrypto:225 PASS,3 opt-in real COS SKIP. Exact final-code evidence is audit-full.log; grant-tool repair independently rechecked below.
 - Protected-admin suite6 PASS, including upgrade from pre015 object boundary preserving full user rows, runtime/ordinary-administrator denials, concurrent reduction, maintenance owner NOSUPERUSER/NOCREATEDB/NOCREATEROLE recovery, immutable identity/roles, audit-failure rollback, revoked token/stale login rejection and new-password CAPTCHA authentication.
 - Focused auth/password/scope recheck17 PASS. Strict server typecheck/lint/build and affected formatting PASS. Release14 PASS.
 - Existing affected authorization-management Playwright DOM1 PASS. No new desktop UI or offline SQLite mutation was introduced.
@@ -27,7 +29,7 @@ PRD, SPECS, SECURITY and permission/test rules updated; canonical root README an
 - Actual final ZIP freshly unpacked in Ubuntu24.04/Node24.22.1 with PostgreSQL16.15 image physically lacking pgcrypto: available0, installed0,18 migrations PASS under ordinary owner; Seed2 countries/3 projects/14 units, tax1800/1925 basis points; runtime grants and protected writes refusal; root start.mjs loads .env from different cwd; admin login, recovery, old-session401, old-password401, new-password200, authenticated admin self-change200, repeated Seed/password preservation, migration repeat, restart/history preservation PASS. Packaged grant-policy --check PASS.
 - Packaged SHA256SUMS,18 SQL manifest hashes and fixed source identity verified. start.mjs/recovery entry present, forbidden secret filenames0. No real .env, cos.txt or key included.
 
-Logs/controllers live in ignored task-owned `.cache/admin-protection`. Full package proof is `linux-a17.log`; source690 initial package proof is retained separately. Build controllers needed explicit Linux GIT_DIR/GIT_WORK_TREE for a Windows-created worktree; no Git metadata or foreign branch was changed. The first local PostgreSQL attempt hit ECONNREFUSED because WSL had exited; a deliberate WSL keeper fixed the disposable environment. First cleanup wrapper returned1 after removal due shell assertion/quoting; explicit subsequent container/Compose-volume/network inventories were empty. Test-only private credentials and env were removed. Keeper67722 intentionally interrupted, exit1, after cleanup. No production DB/SSH access or reset of an existing user account.
+Logs/controllers live in ignored task-owned `.cache/admin-protection`. Full package proof is `linux-082.log`; source690 initial package proof is retained separately. Build controllers needed explicit Linux GIT_DIR/GIT_WORK_TREE for a Windows-created worktree; no Git metadata or foreign branch was changed. The first local PostgreSQL attempt hit ECONNREFUSED because WSL had exited; a deliberate WSL keeper fixed the disposable environment. First cleanup wrapper returned1 after removal due shell assertion/quoting; explicit subsequent container/Compose-volume/network inventories were empty. Test-only private credentials and env were removed. Final keeper56935 intentionally interrupted, exit1, after cleanup. No production DB/SSH access or reset of an existing user account.
 
 ## CI and remaining gates
 
