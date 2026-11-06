@@ -46,3 +46,17 @@ Real remote multi-client acceptance needs two different enabled business account
 Real Staging Push/Pull and second-client readback: NOT RUN / BLOCKED by missing usable distinct scoped business sessions, not replaced by SQL seeding or simulated acknowledgements. A request for the user to identify existing business test accounts is pending; passwords are only entered by the user in the normal client UI. No authentication guesses or role escalation were attempted.
 
 Bounded local supplier/quote functionality can be reviewed in the candidate, but full remote compatibility and Alpha internal distribution readiness are not accepted. Supplier notes remain an explicit original-spec gap requiring a later reviewed contract change. Candidate packaging does not close original installation/data-retention/security/Formal/Toolbox/release gates.
+
+## Windows Alpha candidate
+
+- Frozen application source: `d9d00958b5f0daf765119506c42072af719fe153`, pushed on `codex/suppliers-prices-20261106`.
+- Existing release script produced a real x64 NSIS installer, numeric `0.1.17` (no existing local Setup of that version was reused). Directory `.cache/alpha-candidate-d9d00958/` explicitly marks this as an Alpha candidate. No identity, numeric Manifest schema, public Runner protocol or canonical stable update source was changed.
+- `Honsen-Procure-0.1.17-Setup.exe`: 7,490,158 bytes; SHA-256 `0442cd4a5525d6bc5f22d719d910d65253a70dadefb10f55abe4c6c1122989ce`.
+- Main SHA-256 `9d2f7e98b93e1968da8deb9f14d4c5845406ddfe2cc532d8d156f48963334d8f`; Runner SHA-256 `c0a3f2f0307a9189f34c954a497ac91433194354bcb73a7b608e4a68d83cba21`. Installer, main, Runner PE and Manifest versions were all independently read as `0.1.17`.
+- Candidate includes `SHA256SUMS` and `ALPHA-CANDIDATE-NOTES.md`. Main Release defaults to `https://api-pr.honsen.africa/v1`, with no isolated override feature. Limited binary pattern scans found no private-key, COS access-key-ID or PostgreSQL credential-URL patterns; this is scoped evidence, not an assertion of arbitrary-secret detection. No passwords are included in the candidate notes.
+- Fresh installation, installed online login, upgrade/uninstall preservation, remote two-client sync and real Toolbox update: NOT RUN. Existing policy/authorization constraints and separate account prerequisites were not bypassed. No Setup execution, deployment, GitHub Release or stable publication occurred.
+- CI run [42160742682](https://github.com/etianwang/Honsen-procure/actions/runs/42160742682) was still in progress at the final check; CI PASS is not claimed. Local checks above remain separate evidence.
+
+Final decision: **ALPHA_INTERNAL_TEST_BLOCKED**. This is a reviewable installer candidate, not approval to distribute it to company testers.
+
+Next safe action: obtain two existing scoped business sessions through user-entered normal client login, run real supplier/quote Push/Pull and second-client/restart readback, then run installed/data-retention acceptance. If no such accounts exist, report the account-provisioning prerequisite; do not change server authorization or seed remote tables. Supplier notes await a separate reviewed compatibility decision. A potential pre-existing material-editor cancel/new draft-reset issue outside the supplier/quote controls was noted but not independently reproduced; record it as a nonblocking follow-up, not a new release acceptance claim.
