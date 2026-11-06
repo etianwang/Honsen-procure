@@ -1,0 +1,287 @@
+use super::*;
+
+// Password-bearing requests deliberately do not implement Debug or Clone.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateManagedAccount {
+    pub username: String,
+    pub temporary_password: String,
+    pub roles: Vec<Role>,
+    pub ui_locale: String,
+    pub employee_photo_key: String,
+    pub scope: ManagedAuthorizationBinding,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedAccount {
+    pub id: Uuid,
+    pub username: String,
+    pub roles: Vec<Role>,
+    pub is_enabled: bool,
+    pub requires_password_change: bool,
+    #[serde(default)]
+    pub scopes: Vec<ManagedAuthorizationBinding>,
+}
+
+impl CreateManagedAccount {
+    fn validate(&self) -> Result<(), AuthError> {
+        if !valid_required_text(&self.username, 100)
+            || !(8..=1024).contains(&self.temporary_password.chars().count())
+            || !valid_required_text(&self.employee_photo_key, 1024)
+            || self.roles.is_empty()
+            || self.roles.len() > 4
+            || self.roles.contains(&Role::SuperAdministrator)
+            || !["zh-CN", "en-US", "fr-FR"].contains(&self.ui_locale.as_str())
+            || self.scope.project_id.is_nil()
+            || self.scope.department_id.is_nil()
+            || self.scope.team_id.is_nil()
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        Ok(())
+    }
+}
+
+impl LocalAuthService {
+    pub async fn find_managed_accounts(
+        &self,
+        username: String,
+        now: SystemTime,
+    ) -> Result<Vec<ManagedAccount>, AuthError> {
+        if !valid_required_text(&username, 100) {
+            return Err(AuthError::InvalidInput);
+        }
+        let request = self.authorization_management_request(now)?;
+        let mut endpoint = api_endpoint_from(&configured_api_base_url()?, "accounts")?;
+        endpoint
+            .query_pairs_mut()
+            .append_pair("username", &username);
+        let response = self
+            .https_client()?
+            .get(endpoint)
+            .bearer_auth(&request.token)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        self.authorization_management_response(request.session, response.status())?;
+        let result = response
+            .json::<Vec<ManagedAccount>>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        if result.iter().any(|account| account.username != username) {
+            return Err(AuthError::SyncTransport);
+        }
+        Ok(result)
+    }
+
+    pub async fn create_managed_account(
+        &self,
+        input: CreateManagedAccount,
+        now: SystemTime,
+    ) -> Result<ManagedAccount, AuthError> {
+        input.validate()?;
+        let request = self.authorization_management_request(now)?;
+        if input
+            .roles
+            .iter()
+            .any(|r| matches!(r, Role::Administrator | Role::Purchaser))
+        {
+            self.require_role(Role::SuperAdministrator, now)?;
+        }
+        let response = self
+            .https_client()?
+            .post(api_endpoint_from(&configured_api_base_url()?, "accounts")?)
+            .bearer_auth(&request.token)
+            .json(&input)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        self.authorization_management_response(request.session, response.status())?;
+        let result = response
+            .json::<ManagedAccount>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        Ok(result)
+    }
+
+    pub async fn change_account_password(
+        &self,
+        current: String,
+        replacement: String,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if current.is_empty()
+            || current.len() > 1024
+            || !(12..=1024).contains(&replacement.chars().count())
+            || current == replacement
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        // Password change is available before ordinary business authorization.
+        let session = self
+            .connection
+            .lock()
+            .map_err(|_| AuthError::Database)?
+            .online_session
+            .ok_or(AuthError::NoActiveSession)?;
+        {
+            let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+            Self::require_request_session(&connection, session)?;
+            let active: bool = connection.query_row("SELECT enabled=1 AND ?2-last_active_at <= ?3 FROM local_accounts a JOIN local_session s ON s.user_id=a.id WHERE a.id=?1", params![session.account_id.to_string(),unix_seconds(now),IDLE_LOCK_WINDOW.as_secs() as i64], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+            if !active {
+                return Err(AuthError::NoActiveSession);
+            }
+        }
+        let token = self
+            .credential_vault
+            .load_sync_token(session.account_id)?
+            .ok_or(AuthError::NoActiveSession)?;
+        let response = self
+            .https_client()?
+            .post(cloud_auth_endpoint("change-password")?)
+            .bearer_auth(token)
+            .json(&serde_json::json!({"currentPassword":current,"newPassword":replacement}))
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        self.authorization_management_response(session, response.status())?;
+        // Server revokes all sessions; never permit reuse of the cached old password.
+        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        Self::require_request_session(&connection, session)?;
+        connection
+            .execute(
+                "UPDATE local_accounts SET cached_verified_at=0 WHERE id=?1",
+                [session.account_id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        drop(connection);
+        self.lock()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn first_login_trusted_business_gate_and_bootstrap_exception() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        let now = SystemTime::now();
+        let id = Uuid::new_v4();
+        service
+            .cache_verified_account(
+                CachedAccount {
+                    id,
+                    username: "synthetic-first-login".into(),
+                    roles: vec![Role::Administrator],
+                    enabled: true,
+                    requires_password_change: true,
+                },
+                "synthetic-temporary",
+                now,
+            )
+            .unwrap();
+        let mut connection = service.connection.lock().unwrap();
+        connection.session_invalidated = false;
+        connection
+            .execute(
+                "INSERT INTO local_session(user_id,started_at,last_active_at) VALUES(?1,?2,?2)",
+                params![id.to_string(), unix_seconds(now)],
+            )
+            .unwrap();
+        assert!(matches!(
+            LocalAuthService::require_role_on_connection(&connection, Role::Administrator, now),
+            Err(AuthError::Forbidden)
+        ));
+        assert!(matches!(
+            LocalAuthService::require_conflict_resolution(&connection, now),
+            Err(AuthError::Forbidden)
+        ));
+        // Bootstrap accounts explicitly use requires_password_change=false.
+        connection
+            .execute(
+                "UPDATE local_accounts SET requires_password_change=0 WHERE id=?1",
+                [id.to_string()],
+            )
+            .unwrap();
+        assert!(
+            LocalAuthService::require_role_on_connection(&connection, Role::Administrator, now)
+                .is_ok()
+        );
+        assert!(LocalAuthService::require_conflict_resolution(&connection, now).is_ok());
+    }
+    fn input() -> CreateManagedAccount {
+        CreateManagedAccount {
+            username: "synthetic-account".into(),
+            temporary_password: "synthetic-temporary".into(),
+            roles: vec![Role::Engineer],
+            ui_locale: "zh-CN".into(),
+            employee_photo_key: "synthetic/photo".into(),
+            scope: ManagedAuthorizationBinding {
+                project_id: Uuid::new_v4(),
+                department_id: Uuid::new_v4(),
+                team_id: Uuid::new_v4(),
+            },
+        }
+    }
+    #[test]
+    fn managed_account_rejects_super_and_missing_bindings() {
+        let mut value = input();
+        assert!(value.validate().is_ok());
+        value.roles = vec![Role::SuperAdministrator];
+        assert!(matches!(value.validate(), Err(AuthError::InvalidInput)));
+        value.roles = vec![Role::Engineer];
+        value.employee_photo_key.clear();
+        assert!(value.validate().is_err());
+        value.employee_photo_key = "synthetic/photo".into();
+        value.scope.project_id = Uuid::nil();
+        assert!(value.validate().is_err());
+    }
+    #[test]
+    fn managed_account_requires_authenticated_online_session_before_transport() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        tauri::async_runtime::block_on(async {
+            assert!(matches!(
+                service
+                    .find_managed_accounts("synthetic".into(), SystemTime::now())
+                    .await,
+                Err(AuthError::NoActiveSession)
+            ));
+            assert!(matches!(
+                service
+                    .create_managed_account(input(), SystemTime::now())
+                    .await,
+                Err(AuthError::NoActiveSession)
+            ));
+            assert!(matches!(
+                service
+                    .change_account_password(
+                        "synthetic-current".into(),
+                        "synthetic-replacement".into(),
+                        SystemTime::now()
+                    )
+                    .await,
+                Err(AuthError::NoActiveSession)
+            ));
+        });
+    }
+    #[test]
+    fn account_lookup_summary_does_not_require_scopes() {
+        let account: ManagedAccount = serde_json::from_value(serde_json::json!({"id":Uuid::new_v4(),"username":"synthetic","roles":["engineer"],"isEnabled":true,"requiresPasswordChange":true})).unwrap();
+        assert!(account.scopes.is_empty());
+        assert!(
+            serde_json::from_value::<ManagedAccount>(
+                serde_json::json!({"passwordHash":"forbidden"})
+            )
+            .is_err()
+        );
+    }
+}

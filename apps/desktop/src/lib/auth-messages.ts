@@ -1,5 +1,10 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '无法获取云端验证码，请检查网络后重试。': [
+    'Unable to get the cloud CAPTCHA. Check your network and retry.',
+    'Impossible d’obtenir le CAPTCHA serveur. Vérifiez le réseau et réessayez.',
+  ],
+  重新获取云端验证码: ['Retry cloud CAPTCHA', 'Réessayer le CAPTCHA serveur'],
   '服务版本已停用，请升级客户端；本地数据已保留': [
     'API version retired; upgrade the client. Local data is retained.',
     'Version API retirée ; mettez le client à jour. Les données locales sont conservées.',

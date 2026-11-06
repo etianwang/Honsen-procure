@@ -11,6 +11,7 @@ import { PostgresSyncStore } from './sync/postgres-store.js'
 import { SyncService } from './sync/service.js'
 import { PostgresAuthorizationStore } from './authorization/postgres-store.js'
 import { AuthorizationService } from './authorization/service.js'
+import { registerAccounts } from './auth/accounts.js'
 
 const databaseUrl = process.env.POSTGRES_URL
 if (!databaseUrl)
@@ -30,6 +31,11 @@ const app = createApp(
 )
 
 app.addHook('onClose', async () => pool.end())
+registerAccounts(
+  app,
+  new AuthService(new PostgresAuthStore(pool), { verify: argon2.verify }),
+  pool,
+)
 
 import { registerPasswordChange } from './auth/password-change.js'
 registerPasswordChange(

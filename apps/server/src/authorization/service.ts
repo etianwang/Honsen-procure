@@ -16,6 +16,10 @@ export type AuthorizationScope = z.infer<typeof scopeSchema> & {
 
 export type AuthorizationStore = {
   listScopes(accountId: string): Promise<AuthorizationScope[]>
+  listManagedScopes?(
+    actorId: string,
+    accountId: string,
+  ): Promise<AuthorizationScope[]>
   saveScope(input: {
     accountId: string
     scope: z.infer<typeof scopeSchema>
@@ -58,7 +62,10 @@ export class AuthorizationService {
     ) {
       throw new AuthorizationError('FORBIDDEN')
     }
-    return this.store.listScopes(accountId)
+    if (actor.roles.includes('super_administrator') || actor.id === accountId)
+      return this.store.listScopes(accountId)
+    if (!this.store.listManagedScopes) throw new AuthorizationError('FORBIDDEN')
+    return this.store.listManagedScopes(actor.id, accountId)
   }
 
   async save(

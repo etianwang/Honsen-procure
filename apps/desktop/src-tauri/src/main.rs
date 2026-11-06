@@ -17,6 +17,7 @@ use std::{thread, time::Duration};
 use tauri::Manager;
 use uuid::Uuid;
 
+#[cfg(debug_assertions)]
 fn profile_path() -> Result<(PathBuf, bool), String> {
     match env::var("HONSEN_PROCURE_PROFILE").as_deref() {
         Ok("test") => {
@@ -45,10 +46,26 @@ fn profile_path() -> Result<(PathBuf, bool), String> {
     }
 }
 
+#[cfg(not(debug_assertions))]
+fn profile_path() -> Result<(PathBuf, bool), String> {
+    let root = env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .ok_or_else(|| "LOCALAPPDATA is unavailable".to_owned())?;
+    Ok((
+        root.join("Honsen Program")
+            .join("honsen.procure")
+            .join("honsen.procure.sqlite"),
+        false,
+    ))
+}
+
 fn main() {
     let (database_path, is_test_profile) =
         profile_path().unwrap_or_else(|message| panic!("{message}"));
+    #[cfg(debug_assertions)]
     let native_smoke = env::var("HONSEN_PROCURE_NATIVE_SMOKE").ok();
+    #[cfg(not(debug_assertions))]
+    let native_smoke: Option<String> = None;
     if native_smoke.is_some() && !is_test_profile {
         panic!("native smoke requires HONSEN_PROCURE_PROFILE=test");
     }
@@ -203,6 +220,9 @@ fn main() {
             commands::lock_session,
             commands::get_authorization_context,
             commands::refresh_authorization,
+            commands::find_managed_accounts,
+            commands::create_managed_account,
+            commands::change_account_password,
             commands::list_managed_authorizations,
             commands::change_managed_authorization,
             commands::replace_managed_authorization,

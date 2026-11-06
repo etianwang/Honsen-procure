@@ -1,4 +1,4 @@
-import type { Pool } from 'pg'
+import type { Pool, PoolClient } from 'pg'
 import {
   AuthorizationError,
   type AuthorizationScope,
@@ -7,6 +7,49 @@ import {
 
 export class PostgresAuthorizationStore implements AuthorizationStore {
   constructor(private readonly pool: Pool) {}
+
+  async listManagedScopes(
+    actorId: string,
+    accountId: string,
+  ): Promise<AuthorizationScope[]> {
+    const allowed = await this.pool.query(
+      `SELECT 1 FROM users u WHERE u.id=$1 AND u.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_roles WHERE user_id=u.id AND role IN ('super_administrator','administrator','purchaser'))`,
+      [accountId],
+    )
+    if (allowed.rowCount !== 1) throw new AuthorizationError('FORBIDDEN')
+    const [own, target] = await Promise.all([
+      this.listScopes(actorId),
+      this.listScopes(accountId),
+    ])
+    return target.filter((scope) =>
+      own.some(
+        (candidate) =>
+          candidate.projectId === scope.projectId &&
+          candidate.departmentId === scope.departmentId &&
+          candidate.teamId === scope.teamId,
+      ),
+    )
+  }
+
+  private async assertDelegation(
+    client: PoolClient,
+    actorId: string,
+    accountId: string,
+    scope: Pick<AuthorizationScope, 'projectId' | 'departmentId' | 'teamId'>,
+  ) {
+    // Serialize provisioning/delegation with changes to either account's bindings.
+    const locked = await client.query(
+      'SELECT id FROM users WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY id FOR UPDATE',
+      [[actorId, accountId]],
+    )
+    if (locked.rowCount !== new Set([actorId, accountId]).size)
+      throw new AuthorizationError('FORBIDDEN')
+    const result = await client.query(
+      `SELECT 1 FROM users u WHERE u.id=$1 AND u.is_enabled AND u.deleted_at IS NULL AND (EXISTS(SELECT 1 FROM user_roles WHERE user_id=u.id AND role='super_administrator') OR (u.id<>$2 AND EXISTS(SELECT 1 FROM user_roles WHERE user_id=u.id AND role='administrator') AND NOT EXISTS(SELECT 1 FROM user_roles WHERE user_id=$2 AND role IN ('super_administrator','administrator','purchaser')) AND EXISTS(SELECT 1 FROM user_project_scope_bindings b JOIN user_project_bindings p ON p.user_id=b.user_id AND p.project_id=b.project_id AND p.deleted_at IS NULL WHERE b.user_id=u.id AND b.project_id=$3 AND b.department_id=$4 AND b.team_id=$5 AND b.deleted_at IS NULL)))`,
+      [actorId, accountId, scope.projectId, scope.departmentId, scope.teamId],
+    )
+    if (result.rowCount !== 1) throw new AuthorizationError('FORBIDDEN')
+  }
 
   async listScopes(accountId: string): Promise<AuthorizationScope[]> {
     const result = await this.pool.query<{
@@ -22,6 +65,7 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
         FROM user_project_scope_bindings b
         JOIN user_project_bindings p_binding ON p_binding.user_id = b.user_id AND p_binding.project_id = b.project_id AND p_binding.deleted_at IS NULL
         JOIN projects p ON p.id = b.project_id AND p.is_active = TRUE AND p.deleted_at IS NULL
+        JOIN countries c ON c.id=p.country_id AND c.is_active=TRUE AND c.deleted_at IS NULL
         JOIN departments d ON d.id = b.department_id AND d.is_active = TRUE AND d.deleted_at IS NULL
         JOIN teams t ON t.id = b.team_id AND t.department_id = d.id AND t.is_active = TRUE AND t.deleted_at IS NULL
         WHERE b.user_id = $1 AND b.deleted_at IS NULL
@@ -47,13 +91,19 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.assertDelegation(
+        client,
+        input.actorId,
+        input.accountId,
+        input.scope,
+      )
       await client.query(
         `INSERT INTO user_project_bindings (user_id, project_id) VALUES ($1, $2) ON CONFLICT (user_id, project_id) DO UPDATE SET deleted_at = NULL`,
         [input.accountId, input.scope.projectId],
       )
       const valid = await client.query(
         `SELECT p.country_id, p.site, p.default_currency, p.default_language_pair
-        FROM projects p JOIN departments d ON d.id = $2 AND d.is_active = TRUE AND d.deleted_at IS NULL
+        FROM projects p JOIN countries c ON c.id=p.country_id AND c.is_active=TRUE AND c.deleted_at IS NULL JOIN departments d ON d.id = $2 AND d.is_active = TRUE AND d.deleted_at IS NULL
         JOIN teams t ON t.id = $3 AND t.department_id = d.id AND t.is_active = TRUE AND t.deleted_at IS NULL
         WHERE p.id = $1 AND p.is_active = TRUE AND p.deleted_at IS NULL`,
         [input.scope.projectId, input.scope.departmentId, input.scope.teamId],
@@ -103,6 +153,12 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.assertDelegation(
+        client,
+        input.actorId,
+        input.accountId,
+        input.scope,
+      )
       await client.query(
         `UPDATE user_project_scope_bindings
          SET deleted_at = NOW(), updated_at = NOW()
@@ -148,6 +204,18 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.assertDelegation(
+        client,
+        input.actorId,
+        input.accountId,
+        input.oldScope,
+      )
+      await this.assertDelegation(
+        client,
+        input.actorId,
+        input.accountId,
+        input.newScope,
+      )
       const valid = await client.query<{
         country_id: string
         site: string
@@ -155,7 +223,7 @@ export class PostgresAuthorizationStore implements AuthorizationStore {
         default_language_pair: string
       }>(
         `SELECT p.country_id, p.site, p.default_currency, p.default_language_pair
-         FROM projects p JOIN departments d ON d.id = $2 AND d.is_active = TRUE AND d.deleted_at IS NULL
+         FROM projects p JOIN countries c ON c.id=p.country_id AND c.is_active=TRUE AND c.deleted_at IS NULL JOIN departments d ON d.id = $2 AND d.is_active = TRUE AND d.deleted_at IS NULL
          JOIN teams t ON t.id = $3 AND t.department_id = d.id AND t.is_active = TRUE AND t.deleted_at IS NULL
          WHERE p.id = $1 AND p.is_active = TRUE AND p.deleted_at IS NULL`,
         [

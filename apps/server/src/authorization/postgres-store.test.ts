@@ -11,6 +11,8 @@ describe('PostgresAuthorizationStore', () => {
     const client = {
       async query(sql: string) {
         calls.push(sql)
+        if (sql.includes('ORDER BY id FOR UPDATE'))
+          return { rowCount: 2, rows: [] }
         if (sql.includes('SELECT p.country_id')) {
           return {
             rowCount: 1,
@@ -107,6 +109,28 @@ describe.skipIf(!pool)('PostgreSQL authorization bindings', () => {
     const store = new PostgresAuthorizationStore(pool!)
     const oldScope = { projectId, departmentId, teamId: firstTeamId }
     const newScope = { projectId, departmentId, teamId: secondTeamId }
+    await pool!.query(
+      "INSERT INTO user_roles(user_id,role) VALUES($1,'administrator')",
+      [accountId],
+    )
+    await expect(
+      store.saveScope({ accountId, actorId: accountId, scope: oldScope }),
+    ).rejects.toEqual(new AuthorizationError('FORBIDDEN'))
+    expect(await store.listScopes(accountId)).toEqual([])
+    await pool!.query(
+      "INSERT INTO user_roles(user_id,role) VALUES($1,'super_administrator')",
+      [accountId],
+    )
+    await expect(
+      store.saveScope({
+        accountId: randomUUID(),
+        actorId: accountId,
+        scope: oldScope,
+      }),
+    ).rejects.toEqual(new AuthorizationError('FORBIDDEN'))
+    await expect(
+      store.listManagedScopes(accountId, randomUUID()),
+    ).rejects.toEqual(new AuthorizationError('FORBIDDEN'))
     await expect(
       store.saveScope({ accountId, actorId: accountId, scope: oldScope }),
     ).resolves.toMatchObject(oldScope)

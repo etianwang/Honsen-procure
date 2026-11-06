@@ -79,6 +79,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
   } | null>(null)
   const [answer, setAnswer] = useState('')
   const [cloudAnswer, setCloudAnswer] = useState('')
+  const [cloudCaptchaFailed, setCloudCaptchaFailed] = useState(false)
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -87,12 +88,14 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
     try {
       setCaptcha(await desktopInvoke('issue_local_captcha'))
       setCloudCaptcha(null)
+      setCloudCaptchaFailed(false)
       setCloudAnswer('')
       void desktopInvoke<{ id: string; question: string }>(
         'issue_cloud_captcha',
       )
         .then(setCloudCaptcha)
         .catch((error: unknown) => {
+          setCloudCaptchaFailed(true)
           if (
             typeof error === 'object' &&
             error !== null &&
@@ -100,6 +103,7 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
             error.code === 'upgrade_required'
           )
             setMessage('服务版本已停用，请升级客户端；本地数据已保留')
+          else setMessage('无法获取云端验证码，请检查网络后重试。')
         })
       setAnswer('')
       setMessage('')
@@ -180,7 +184,11 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
           onChange={(event) => setAnswer(event.target.value)}
         />
         <Button type="link" onClick={() => void refreshCaptcha()}>
-          {captcha ? t('换一个验证码') : t('获取验证码')}
+          {cloudCaptchaFailed
+            ? t('重新获取云端验证码')
+            : captcha
+              ? t('换一个验证码')
+              : t('获取验证码')}
         </Button>
         {cloudCaptcha && (
           <>

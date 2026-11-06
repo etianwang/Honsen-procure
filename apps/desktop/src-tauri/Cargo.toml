@@ -30,6 +30,10 @@ path = "src/bin/seed.rs"
 name = "honsen_materials_desktop_core"
 path = "src/lib.rs"
 
+[features]
+# Explicitly isolated Alpha/test builds only; employee release builds omit this.
+isolated-api-override = []
+
 [dependencies]
 argon2 = "0.5.3"
 base64 = "0.22.1"

@@ -1,3 +1,4 @@
+import { RequiredPasswordChange } from './components/ManagedAccountForm'
 import { shellText, useUiLocale, type ShellMessage } from './lib/ui-locale'
 import zhCN from 'antd/locale/zh_CN'
 import enUS from 'antd/locale/en_US'
@@ -217,7 +218,8 @@ function App() {
     session?.onlineAuthenticated &&
     (syncState.kind === 'pending' || syncState.kind === 'synced')
   useEffect(() => {
-    if (!session?.onlineAuthenticated) return
+    if (!session?.onlineAuthenticated || session.requires_password_change)
+      return
     const invoke = (
       window as Window & {
         __TAURI__?: { core?: { invoke?: <T>(command: string) => Promise<T> } }
@@ -225,7 +227,11 @@ function App() {
     ).__TAURI__?.core?.invoke
     if (!invoke) return
     return startSyncLifecycle(invoke, setSyncState, window)
-  }, [session?.user_id, session?.onlineAuthenticated])
+  }, [
+    session?.user_id,
+    session?.onlineAuthenticated,
+    session?.requires_password_change,
+  ])
   useEffect(() => {
     if (!session || session.onlineAuthenticated) return
     const invoke = (
@@ -255,7 +261,7 @@ function App() {
     }
   }, [session])
   useEffect(() => {
-    if (!session) {
+    if (!session || session.requires_password_change) {
       setAuthorizationContext(null)
       return
     }
@@ -309,9 +315,13 @@ function App() {
     }
   }, [session, authorizationRefreshReady])
   useEffect(() => {
-    if (session?.onlineAuthenticated)
+    if (session?.onlineAuthenticated && !session.requires_password_change)
       return startProcurementSync(syncProcurement)
-  }, [session?.user_id, session?.onlineAuthenticated])
+  }, [
+    session?.user_id,
+    session?.onlineAuthenticated,
+    session?.requires_password_change,
+  ])
   const selectAuthorizationContext = (value: string) => {
     const [projectId, departmentId, teamId] = value.split(':')
     const invoke = (
@@ -407,6 +417,8 @@ function App() {
         <AuthFixturePage />
       ) : isMoneyPreview ? (
         <MoneyPreviewPage />
+      ) : session?.requires_password_change ? (
+        <RequiredPasswordChange onChanged={() => setSession(null)} />
       ) : isPreviewOpen || session ? (
         <AppShell
           page={page}

@@ -1,3 +1,4 @@
+import { ManagedAccountForm } from '../components/ManagedAccountForm'
 import { useUiLocale } from '../lib/ui-locale'
 import { authText, type AuthMessage } from '../lib/auth-messages'
 import { useState } from 'react'
@@ -142,6 +143,10 @@ export function AuthorizationManagementPage() {
           {t('查询云端授权')}
         </button>
       </div>
+      <ManagedAccountForm
+        scope={{ projectId, departmentId, teamId }}
+        onAccount={setAccountId}
+      />
       <ul aria-label={t('已授权范围')}>
         {bindings.map((binding) => (
           <li

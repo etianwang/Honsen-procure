@@ -24,6 +24,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod account_management;
 mod attachments;
 mod expenditures;
 pub mod formal_print;
@@ -2158,7 +2159,11 @@ impl LocalAuthService {
         if connection.session_invalidated {
             return Err(AuthError::NoActiveSession);
         }
-        let session = connection.query_row("SELECT s.user_id, s.last_active_at, a.roles_json FROM local_session s JOIN local_accounts a ON a.id = s.user_id", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))).optional().map_err(|_| AuthError::Database)?;
+        let password_change_required: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM local_session s JOIN local_accounts a ON a.id=s.user_id WHERE a.requires_password_change=1 OR a.enabled=0)", [], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if password_change_required {
+            return Err(AuthError::Forbidden);
+        }
+        let session = connection.query_row("SELECT s.user_id, s.last_active_at, a.roles_json FROM local_session s JOIN local_accounts a ON a.id = s.user_id WHERE a.enabled = 1 AND a.requires_password_change = 0", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))).optional().map_err(|_| AuthError::Database)?;
         let Some((user_id, last_active_at, roles_json)) = session else {
             return Err(AuthError::NoActiveSession);
         };
@@ -2198,9 +2203,13 @@ impl LocalAuthService {
         if connection.session_invalidated {
             return Err(AuthError::NoActiveSession);
         }
+        let password_change_required: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM local_session s JOIN local_accounts a ON a.id=s.user_id WHERE a.requires_password_change=1)", [], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if password_change_required {
+            return Err(AuthError::Forbidden);
+        }
         // Authorize the account and role under the same lock as conflict access.
         let session: Option<(String, i64, String, bool)> = connection.query_row(
-            "SELECT s.user_id, s.last_active_at, a.roles_json, a.enabled FROM local_session s JOIN local_accounts a ON a.id = s.user_id",
+            "SELECT s.user_id, s.last_active_at, a.roles_json, a.enabled FROM local_session s JOIN local_accounts a ON a.id = s.user_id WHERE a.requires_password_change = 0",
             [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         ).optional().map_err(|_| AuthError::Database)?;
         let (account_id, last_active_at, roles_json, enabled) =
@@ -7782,6 +7791,35 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn find_managed_accounts(
+        auth: State<'_, LocalAuthService>,
+        username: String,
+    ) -> Result<Vec<super::account_management::ManagedAccount>, CommandError> {
+        auth.find_managed_accounts(username, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+    #[tauri::command]
+    pub async fn create_managed_account(
+        auth: State<'_, LocalAuthService>,
+        input: super::account_management::CreateManagedAccount,
+    ) -> Result<super::account_management::ManagedAccount, CommandError> {
+        auth.create_managed_account(input, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+    #[tauri::command]
+    pub async fn change_account_password(
+        auth: State<'_, LocalAuthService>,
+        current: String,
+        replacement: String,
+    ) -> Result<(), CommandError> {
+        auth.change_account_password(current, replacement, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+
+    #[tauri::command]
     pub async fn list_managed_authorizations(
         auth: State<'_, LocalAuthService>,
         account_id: Uuid,
@@ -10710,11 +10748,26 @@ fn api_base_url_from(explicit: Option<&str>) -> Result<String, AuthError> {
 }
 
 fn configured_api_base_url() -> Result<String, AuthError> {
+    // Employee release builds never consult runtime endpoint overrides.
+    if !cfg!(any(
+        debug_assertions,
+        test,
+        feature = "isolated-api-override"
+    )) {
+        return api_base_url_with_policy(false, None);
+    }
     match std::env::var("HONSEN_SYNC_API_BASE_URL") {
-        Ok(value) => api_base_url_from(Some(&value)),
-        Err(std::env::VarError::NotPresent) => api_base_url_from(None),
+        Ok(value) => api_base_url_with_policy(true, Some(&value)),
+        Err(std::env::VarError::NotPresent) => api_base_url_with_policy(true, None),
         Err(_) => Err(AuthError::SyncTransport),
     }
+}
+
+fn api_base_url_with_policy(
+    allow_override: bool,
+    explicit: Option<&str>,
+) -> Result<String, AuthError> {
+    api_base_url_from(if allow_override { explicit } else { None })
 }
 
 fn require_active_api(status: reqwest::StatusCode) -> Result<(), AuthError> {
@@ -13781,6 +13834,33 @@ mod tests {
             )
             .unwrap();
         assert_eq!(sum, 400);
+    }
+
+    #[test]
+    fn employee_release_api_is_fixed_and_isolated_build_override_is_explicit() {
+        for explicit in [
+            None,
+            Some("https://test.example/custom/"),
+            Some("http://localhost:3000"),
+            Some(""),
+        ] {
+            assert_eq!(
+                api_base_url_with_policy(false, explicit).unwrap(),
+                DEFAULT_API_BASE_URL
+            );
+        }
+        assert_eq!(
+            api_base_url_with_policy(true, None).unwrap(),
+            DEFAULT_API_BASE_URL
+        );
+        assert_eq!(
+            api_base_url_with_policy(true, Some("https://test.example/custom/")).unwrap(),
+            "https://test.example/custom/"
+        );
+        assert_eq!(
+            api_base_url_with_policy(true, Some("http://localhost:3000")).unwrap_err(),
+            AuthError::SyncTransport
+        );
     }
 
     #[test]
