@@ -12,6 +12,12 @@ node --env-file=.env apps/server/dist/index.js
 
 ## 首次空库初始化
 
+仅要求 PostgreSQL 16 原生功能，不需要安装 pgcrypto 或其他额外扩展；UUID 继续使用内置 `gen_random_uuid()`，密码仍由 Node.js Argon2id 处理。
+
+若旧包首次迁移报 `extension "pgcrypto" is not available`：先备份当前数据库和配置，停止活动 API，使用本修复包对**同一个数据库**重新运行下面的受控迁移命令。失败的 001 事务会回滚，已提交迁移由 runner 识别；不要 DROP DATABASE、清表、手工删改 `schema_migrations` 或重新执行 Seed 来“修复”迁移。
+
+001 仅移除扩展声明。runner 和 Linux 已完成部署校验共用精确旧/新 SHA-256 兼容规则，已应用旧001的 checksum 与 applied_at 保留，不重新执行001，也不删除已有扩展；其他未知 checksum 或 SQL 内容变化仍拒绝。新数据库记录当前文件哈希。Manifest 列出实际 SQL 哈希和兼容校验模块哈希；SQL 迁移数量/版本不变。此兼容例外只对应本次已审查的一行删除，不能作为任意修改历史迁移的许可。
+
 以下命令在部署根目录运行，使用宝塔已安装的 `psql`。先在宝塔创建空 PostgreSQL 数据库和维护所有者；不要对业务数据库重建或清空。
 
 ```sh

@@ -29,6 +29,12 @@ const manifest = {
   deploymentDirectory: '/www/wwwroot/api-pr/v1/',
   node: '24.22.1',
   postgres: '16.15',
+  postgresRequiredExtensions: [],
+  migrationChecksumCompatibility: {
+    module: 'apps/server/dist/db/migration-checksums.js',
+    sha256: digest('apps/server/dist/db/migration-checksums.js'),
+    policy: 'EXACT_001_PGCRYPTO_DECLARATION_REMOVAL_ONLY_PRESERVE_HISTORY',
+  },
   platform: 'linux-x64',
   migrations,
   latestMigration: migrations.at(-1)?.name,

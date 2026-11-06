@@ -35,6 +35,7 @@ const fs = require('node:fs')
 const crypto = require('node:crypto')
 const { Client } = require('pg')
 async function main() {
+  const { isCompatibleMigrationChecksum } = await import(`${process.cwd()}/apps/server/dist/db/migration-checksums.js`)
   const files = fs.readdirSync('apps/server/migrations').filter(name => name.endsWith('.sql')).sort()
   const client = new Client({ connectionString: process.env.POSTGRES_URL })
   try {
@@ -43,7 +44,7 @@ async function main() {
     if (rows.length !== files.length) throw new Error('migration count differs')
     for (let i = 0; i < files.length; i++) {
       const digest = crypto.createHash('sha256').update(fs.readFileSync(`apps/server/migrations/${files[i]}`)).digest('hex')
-      if (rows[i].name !== files[i] || rows[i].checksum !== digest) throw new Error('migration history differs')
+      if (rows[i].name !== files[i] || !isCompatibleMigrationChecksum(files[i], rows[i].checksum, digest)) throw new Error('migration history differs')
     }
   } finally { await client.end() }
 }

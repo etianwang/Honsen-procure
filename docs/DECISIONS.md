@@ -48,3 +48,7 @@ User selected reuse of the existing supplier-order send action: completed child 
 ## 2026-11-06 user-approved country tax and manual stamp
 
 CI rate is configured as1800 basis points and CM as1925, per explicit user approval. Stamp duty is manually entered per document in integer currency minor units, optional/default-zero for new input, with no automatic applicability or mandatory fixed1000XOF rule. It is separately displayed and added after percentage tax; signed amounts freeze. Existing user-edited tax configuration is not overwritten. These are approved operational settings, not a claim of independently verified law.
+
+### 2026-11-06 user-authorized pgcrypto removal
+
+The deployed Baota PostgreSQL16.15 lacks pgcrypto files. User explicitly authorized removal of001's extension declaration, overriding the normal historical-migration immutability rule only for this exact repair. Audit found only native gen_random_uuid SQL; Node SHA/HMAC and Argon2 security stay unchanged. Accept only the pinned original001 checksum22d91cb12793cfacd1d1ccc69fc2ab0b5bf6bbe996b3ceb32346931910905f2d with currentbc2992a3fe39c2905d1b12527d6065626dd0858953fc8aaa3d5204ce93fcea6b. Preserve old checksum/applied_at; share comparator between runner and completed-deployment verifier. Other edits still fail. No DROP EXTENSION, UUID/key/number/data rewrite or remote database operation. Existing failed first-init database should be backed up, kept, and retried through the new runner using the same connection.

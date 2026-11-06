@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migration-runner.js'
@@ -86,6 +87,90 @@ describe.skipIf(!pool)('PostgreSQL migrations', () => {
       'user_roles',
       'users',
     ])
+  })
+
+  it('retains exact old 001 history and data, but still rejects unknown checksums', async () => {
+    const database = `migration_compat_${randomUUID().replaceAll('-', '')}`
+    const url = new URL(databaseUrl!)
+    url.pathname = `/${database}`
+    await pool!.query(`CREATE DATABASE "${database}"`)
+    const isolated = new Pool({ connectionString: url.toString() })
+    try {
+      if (process.env.TEST_PGCRYPTO_UNAVAILABLE === '1') {
+        expect(
+          (
+            await isolated.query(
+              "SELECT count(*)::int AS n FROM pg_available_extensions WHERE name='pgcrypto'",
+            )
+          ).rows[0].n,
+        ).toBe(0)
+        expect(
+          (
+            await isolated.query(
+              'SELECT pg_catalog.gen_random_uuid()::text AS id',
+            )
+          ).rows[0].id,
+        ).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        )
+        const failed = await isolated.connect()
+        try {
+          await failed.query('BEGIN')
+          await expect(
+            failed.query('CREATE EXTENSION IF NOT EXISTS pgcrypto'),
+          ).rejects.toThrow(/extension "pgcrypto" is not available/)
+          await failed.query('ROLLBACK')
+        } finally {
+          failed.release()
+        }
+      }
+      await runMigrations(isolated)
+      const id = randomUUID()
+      await isolated.query(
+        "INSERT INTO countries(id,business_code,name,time_zone) VALUES($1,'RETAIN','Retained historical row','UTC')",
+        [id],
+      )
+      await isolated.query(
+        "UPDATE schema_migrations SET checksum='22d91cb12793cfacd1d1ccc69fc2ab0b5bf6bbe996b3ceb32346931910905f2d' WHERE name='001_auth_and_master_data.sql'",
+      )
+      const before = (
+        await isolated.query('SELECT * FROM schema_migrations ORDER BY name')
+      ).rows
+      await runMigrations(isolated)
+      await runMigrations(isolated)
+      expect(
+        (await isolated.query('SELECT * FROM schema_migrations ORDER BY name'))
+          .rows,
+      ).toEqual(before)
+      expect(
+        (
+          await isolated.query('SELECT id,name FROM countries WHERE id=$1', [
+            id,
+          ])
+        ).rows,
+      ).toEqual([{ id, name: 'Retained historical row' }])
+      await isolated.query(
+        "UPDATE schema_migrations SET checksum=$1 WHERE name='001_auth_and_master_data.sql'",
+        ['0'.repeat(64)],
+      )
+      await expect(runMigrations(isolated)).rejects.toThrow(
+        'migration checksum mismatch: 001_auth_and_master_data.sql',
+      )
+      await isolated.query(
+        "UPDATE schema_migrations SET checksum=$1 WHERE name='001_auth_and_master_data.sql'",
+        [before[0]!.checksum],
+      )
+      await isolated.query(
+        "UPDATE schema_migrations SET checksum=$1 WHERE name='003_sync.sql'",
+        ['0'.repeat(64)],
+      )
+      await expect(runMigrations(isolated)).rejects.toThrow(
+        'migration checksum mismatch: 003_sync.sql',
+      )
+    } finally {
+      await isolated.end()
+      await pool!.query(`DROP DATABASE "${database}"`)
+    }
   })
 
   it('retains legacy history with null country and orphaned quote references', async () => {

@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import type { Pool } from 'pg'
+import { isCompatibleMigrationChecksum } from './migration-checksums.js'
 
 const migrationsDirectory = fileURLToPath(
   new URL('../../migrations/', import.meta.url),
@@ -41,7 +42,10 @@ export async function runMigrations(pool: Pool): Promise<void> {
       const checksum = createHash('sha256').update(sql).digest('hex')
       const prior = applied.find((migration) => migration.name === name)
       if (prior) {
-        if (prior.checksum && prior.checksum !== checksum) {
+        if (
+          prior.checksum &&
+          !isCompatibleMigrationChecksum(name, prior.checksum, checksum)
+        ) {
           throw new Error(`migration checksum mismatch: ${name}`)
         }
         if (!prior.checksum) {
