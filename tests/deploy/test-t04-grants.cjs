@@ -143,6 +143,13 @@ async function main() {
       'search_path=pg_catalog, public, pg_temp',
     ])
     const archiveRoutines = [
+      ['protect_super_administrators()', 'users', 'protected_admin_user'],
+      [
+        'deny_administrator_truncate()',
+        'users',
+        'protected_admin_user_truncate',
+      ],
+      ['audit_administrator_governance()', 'users', 'audit_admin_status'],
       [
         'preserve_procurement_expenditure()',
         'procurement_expenditures',
