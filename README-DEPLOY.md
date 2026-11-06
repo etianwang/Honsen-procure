@@ -233,7 +233,7 @@ const c=new Client({connectionString:process.env.POSTGRES_URL});try{await c.conn
 JS
 ```
 
-**成功看到：** current_user=honsen_api、current_database=honsen_procure，COS配置格式通过；秘密值不打印。`.env`拥有者root、组www、权限640，后续项目运行用户选择www。
+**成功看到：** current_user=honsen_api、current_database=honsen_procure，COS配置格式通过；秘密值不打印。`.env`拥有者root、组www、权限640，root和www可以读取；PM2实际服务账户必须具备读取权限。
 
 **失败必须停止：** 数据库连接、账号、COS参数格式或文件权限失败不启动Node；格式通过不证明COS网络/STS/对象读写可用。已有.env会由本步骤交互值重新生成，旧部署原.env保存在备份目录。
 
@@ -254,7 +254,7 @@ JS
 | 实例/模式         | 1 / fork，关闭集群和watch                                      |
 | 项目端口          | 3000；不放行防火墙3000到公网                                   |
 | 安装依赖          | 选择“不安装依赖”；ZIP已包含Linux node_modules                  |
-| 运行用户          | www                                                            |
+| 运行用户          | 沿用宝塔现有PM2服务用户，不另起其他用户的PM2守护器             |
 | 环境文件          | 入口从自身所在部署根目录加载.env；面板不再填写维护POSTGRES_URL |
 
 终端只做启动前检查，不在终端另启动API：
@@ -270,7 +270,7 @@ test -z "$(ss -ltnH 'sport = :3000')" || { echo '停止：3000仍有旧进程，
 
 在宝塔保存并启动。`start.mjs`会先加载根目录.env，再导入API；路径按入口文件位置解析，兼容当前固定目录，不依赖工作目录或Node参数栏。没有.env时明确STARTUP_FAILED并退出，不输出连接串/密码；不存在同时运行index与start两套服务的步骤。
 
-**成功看到：** 宝塔PM2唯一实例online；项目日志出现 `Honsen Procure API listening on 127.0.0.1:3000`。日志由面板管理，使用项目“日志”显示的实际路径，不猜测不同面板版本的目录。面板自动生成的内部PM2配置属于该项目管理器，不是额外创建的独立项目。
+**成功看到：** 宝塔PM2唯一实例online（文件模式的PM2实例可能显示为start，不能因此再建一套）；项目日志出现 `Honsen Procure API listening on 127.0.0.1:3000`。日志由面板管理，使用项目“日志”显示的实际路径，不猜测不同面板版本的目录。面板自动生成的内部PM2配置属于该项目管理器，不是额外创建的独立项目。
 
 **失败必须停止：** .env未加载、STARTUP_FAILED、EADDRINUSE或项目反复重启都停止该项目，不进入反代。若旧index项目仍在运行，应在宝塔停止并编辑为start.mjs，不另建第二个活动项目。不使用pkill node影响其他项目。
 
@@ -297,9 +297,10 @@ read -rp '宝塔PM2日志界面显示的实际日志绝对路径: ' API_LOG
 test -f "$API_LOG"
 tail -n 30 "$API_LOG"
 stat -c '%a %U:%G' .env
+case "$(stat -c '%a' .env)" in 600|640) ;; *) echo '停止：.env权限不符'; exit 1;; esac
 ```
 
-**成功看到：** 只有一个API监听PID，127.0.0.1:3000；进程用户www、cwd为v1目录，exe为所选Node24.22.1；探针HTTP200并有id/question/expiresAt JSON。PM2守护进程自身不等于第二个API进程。面板可能将项目目录和.env拥有者改为www；.env仍须保持640或600，不能世界可读。
+**成功看到：** 只有一个API监听PID，127.0.0.1:3000；进程账户按ps实际记录、cwd为v1目录，exe为所选Node24.22.1；探针HTTP200并有id/question/expiresAt JSON。PM2守护进程自身不等于第二个API进程。操作系统进程账户与PostgreSQL角色是两件事；数据库连接必须仍是honsen_api。面板可能调整项目和.env归属；.env仍须保持640或600，不能世界可读。
 
 当前代码没有 `/health`。实际健康活性探针是 `/api/auth/captcha`，数据库连接已在启动和.env检查中验证；验证码200不代替登录、同步与COS验收。
 
