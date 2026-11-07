@@ -44,3 +44,10 @@ BLOCKER: controlled deployment of the tested server candidate; actual administra
 DEFERRED: conditional Windows Alpha installer and prerelease after required gates; original Formal/security/Toolbox release holds. WARNING: existing frontend effect warnings and opt-in/ignored tests are not new acceptance evidence.
 
 Decision: `ALPHA_INTERNAL_TEST_BLOCKED`. This bounded identity repair does not constitute production release approval.
+
+## Pinned source and deployment-check correction
+
+Implementation checkpoint `bb6f49ea5c7d32d6beca167b7e1f5efe34c029da` was pushed to `codex/account-identity-20261107`. CI run42355482380 passed formatting, lint, typecheck, unit/PostgreSQL tests, production build and14 release tests, then failed the deployment-grant check because the restored015/new016 routines were absent from the reviewed grant policy. This is a real failed candidate, not a passing deployment artifact. The correction restores the delivered015 routine verification and registers016 with exact function body/trigger bindings and zero runtime EXECUTE grants. No migration bytes or broad runtime privileges change. Focused deployment verification and replacement artifact identity follow below.
+
+Windows standalone diagnostic built from the same application source: `.cache/remote-alpha-account-identity/HonsenProcure.exe`, SHA-256 `e21fc7240d8ef876ae867765040ce7fbe71783ef9cf08e1b12e81f49f5fe24ec`. It was not launched or installed, and is not a Windows Alpha installer. No old executable or user data was overwritten. Offline-error wording can still be generic after a failed cache refresh; the authorization denial itself is tested and preserved.
+Deployment-grant correction independently passes the actual PostgreSQL deployment check (`TMPDIR=… TEST_DATABASE_URL=… node tests/deploy/test-t04-grants.cjs`): restricted-role Push/Pull/repair and deployment trigger checks PASS. Four protection routines have no API EXECUTE privilege; a permitted column UPDATE still cannot rename an account. Formatting and JavaScript syntax checks PASS. Original failed CI remains linked above. No migration or desktop production change followed the original checkpoint.

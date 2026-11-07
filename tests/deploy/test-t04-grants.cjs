@@ -142,6 +142,43 @@ async function main() {
     assert.deepEqual(fn.rows[0].proconfig, [
       'search_path=pg_catalog, public, pg_temp',
     ])
+    for (const routine of [
+      'protect_super_administrators',
+      'deny_administrator_truncate',
+      'audit_administrator_governance',
+      'prevent_username_rename',
+    ]) {
+      const permission = await db.query(
+        "SELECT has_function_privilege($1,$2::regprocedure,'EXECUTE') AS allowed",
+        [role, `public.${routine}()`],
+      )
+      assert.equal(
+        permission.rows[0].allowed,
+        false,
+        'trigger routines must not grant API execution',
+      )
+    }
+    const identity = randomUUID()
+    await db.query(
+      "INSERT INTO users(id,business_code,username,password_hash,ui_locale) VALUES($1::uuid,$1::text,$2,'synthetic','zh-CN')",
+      [identity, 'Synthetic' + identity.replaceAll('-', '')],
+    )
+    await db.query(
+      `GRANT SELECT(id,username), UPDATE(username) ON users TO "${role}"`,
+    )
+    await db.query(`SET ROLE "${role}"`)
+    await assert.rejects(
+      db.query('UPDATE users SET username=$1 WHERE id=$2', [
+        'Changed' + identity.replaceAll('-', ''),
+        identity,
+      ]),
+      (error) => error.code === '23514',
+      'runtime updates cannot rename an existing username',
+    )
+    await db.query('RESET ROLE')
+    await db.query(
+      `REVOKE SELECT(id,username), UPDATE(username) ON users FROM "${role}"`,
+    )
     const archiveRoutines = [
       [
         'preserve_procurement_expenditure()',

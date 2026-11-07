@@ -5,6 +5,48 @@ const path = require('node:path')
 const { Client } = require('pg')
 
 const reviewedRoutines = {
+  prevent_username_rename: {
+    signature: '()',
+    returns: 'trigger',
+    language: 'plpgsql',
+    privileges: [],
+    hash: 'ebea684fb54935a83f82db139a79df65408345ac194511be0db2e6a312d5b881',
+    bindings: [['users', 'immutable_account_username', 19]],
+  },
+  protect_super_administrators: {
+    signature: '()',
+    returns: 'trigger',
+    language: 'plpgsql',
+    privileges: [],
+    hash: '349380a875ff4d213e718e2933251e15a349521d6a88ed9cc31cc56d8689ab28',
+    bindings: [
+      ['users', 'protected_admin_user', 31],
+      ['user_roles', 'protected_admin_role', 31],
+    ],
+  },
+  deny_administrator_truncate: {
+    signature: '()',
+    returns: 'trigger',
+    language: 'plpgsql',
+    privileges: [],
+    hash: '7721230b7e34880f3524377050bcabdc483264c5b40ef07cf1a005a309d4b147',
+    bindings: [
+      ['users', 'protected_admin_user_truncate', 34],
+      ['user_roles', 'protected_admin_role_truncate', 34],
+    ],
+  },
+  audit_administrator_governance: {
+    signature: '()',
+    returns: 'trigger',
+    language: 'plpgsql',
+    privileges: [],
+    hash: 'f3776be1006229ec0489a79b9225d36925fa49d8568815b262f930d4e3ecf27e',
+    bindings: [
+      ['users', 'audit_admin_status', 25],
+      ['user_roles', 'audit_admin_roles', 29],
+    ],
+  },
+
   preserve_procurement_expenditure: {
     signature: '()',
     returns: 'trigger',
@@ -195,7 +237,18 @@ async function main() {
         await client.query(
           `GRANT EXECUTE ON FUNCTION ${signature} TO "${role}"`,
         )
-      if (name !== 'canonical_procurement_payment') {
+      if (spec.bindings) {
+        for (const [table, triggerName, type] of spec.bindings) {
+          const binding = await client.query(
+            "SELECT count(*)::int AS count FROM pg_trigger WHERE tgrelid=$1::regclass AND tgname=$2 AND tgfoid=$3::regprocedure AND tgenabled='O' AND tgtype=$4 AND NOT tgisinternal",
+            ['public.' + table, triggerName, signature, type],
+          )
+          if (binding.rows[0].count !== 1)
+            throw new Error(
+              'Administrator protection trigger is missing or disabled',
+            )
+        }
+      } else if (name !== 'canonical_procurement_payment') {
         const table =
           name === 'preserve_procurement_expenditure'
             ? 'procurement_expenditures'

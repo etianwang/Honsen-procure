@@ -103,5 +103,29 @@
       "name": "canonical_procurement_payment",
       "privileges": ["EXECUTE"]
     }
+  ],
+  "016_account_identity.sql": [
+    {
+      "kind": "routine",
+      "name": "prevent_username_rename",
+      "privileges": []
+    }
+  ],
+  "015_protected_admin.sql": [
+    {
+      "name": "protect_super_administrators",
+      "privileges": [],
+      "kind": "routine"
+    },
+    {
+      "name": "deny_administrator_truncate",
+      "privileges": [],
+      "kind": "routine"
+    },
+    {
+      "name": "audit_administrator_governance",
+      "privileges": [],
+      "kind": "routine"
+    }
   ]
 }

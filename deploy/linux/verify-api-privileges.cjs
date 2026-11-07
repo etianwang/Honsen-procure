@@ -23,6 +23,10 @@ async function verifyApiPrivileges(client, policy) {
         entry.kind === 'routine' &&
         ![
           'guard_category_business_code',
+          'prevent_username_rename',
+          'protect_super_administrators',
+          'deny_administrator_truncate',
+          'audit_administrator_governance',
           'preserve_procurement_expenditure',
           'preserve_attachment_archive',
           'canonical_procurement_payment',
