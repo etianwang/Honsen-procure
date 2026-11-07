@@ -363,6 +363,7 @@ try {
   )
   const { default: argon2 } = await load('node_modules/argon2/argon2.cjs')
   const actors = []
+  stage = 'BASE_OWNER_AUTH_FIXTURE'
   for (const [username, roles] of [
     ['LegacyBuyer', ['purchaser']],
     ['历史申请人', ['engineer']],
@@ -370,7 +371,7 @@ try {
     const id = randomUUID(),
       password = randomUUID()
     await owner.query(
-      "INSERT INTO users(id,business_code,username,password_hash,ui_locale,requires_password_change) VALUES($1,$1,$2,$3,'en-US',FALSE)",
+      "INSERT INTO users(id,business_code,username,password_hash,ui_locale,requires_password_change) VALUES($1::uuid,$1::text,$2,$3,'en-US',FALSE)",
       [id, username, await argon2.hash(password, { type: argon2.argon2id })],
     )
     for (const role of roles)
@@ -568,6 +569,7 @@ try {
     dereference: false,
     verbatimSymlinks: true,
   })
+  stage = 'TARGET_FULL_CHECKSUM_BEFORE_FIELD_START'
   execFileSync('sha256sum', ['--check', 'SHA256SUMS'], {
     cwd: stageDir,
     stdio: 'pipe',
@@ -594,10 +596,19 @@ try {
       env: grantEnv,
       stdio: 'pipe',
     })
+  stage = 'GRANT_OBJECT_SNAPSHOT'
+  // Match the documented controlled upgrade: stopped API and runtime NOLOGIN
+  // are required fences. Preserve the role identity and password throughout.
+  await owner.query(`ALTER ROLE "${role}" NOLOGIN`)
   grant(['--snapshot'])
+  stage = 'TARGET_INCREMENTAL_MIGRATION'
   migrate(stageDir) // TARGET is NEVER bootstrapped or seeded.
+  stage = 'GRANT_POLICY_APPLY'
   grant([])
+  stage = 'GRANT_POLICY_CHECK'
   grant(['--check'])
+  await owner.query(`ALTER ROLE "${role}" LOGIN`)
+  stage = 'UPGRADE_HISTORY_COMPARISON'
   const migrationAfter = (
     await owner.query(
       'SELECT name,checksum FROM schema_migrations ORDER BY name',
@@ -771,6 +782,10 @@ try {
           : /^[A-Z_]+$/.test(error.message)
             ? error.message
             : error.name,
+      databaseCode: /^[A-Z0-9]{5}$/.test(error.code ?? '')
+        ? error.code
+        : undefined,
+      subprocessExit: Number.isInteger(error.status) ? error.status : undefined,
     }),
   )
   process.exitCode = 1

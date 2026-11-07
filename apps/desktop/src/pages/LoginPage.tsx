@@ -88,6 +88,9 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
   const refreshCaptcha = async (preserveMessage = false) => {
     if (!desktopInvoke) return
     if (!preserveMessage) setMessage('')
+    // Clear the previous challenge answer before awaiting network work.
+    // A response must never erase the answer typed for the new local challenge.
+    setAnswer('')
     try {
       setCaptcha(await desktopInvoke('issue_local_captcha'))
       setCloudCaptcha(null)
@@ -109,7 +112,6 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
             setCloudMessage('服务版本已停用，请升级客户端；本地数据已保留')
           else setCloudMessage('无法获取云端验证码，请检查网络后重试。')
         })
-      setAnswer('')
     } catch {
       setMessage('无法生成本地验证码。')
     }

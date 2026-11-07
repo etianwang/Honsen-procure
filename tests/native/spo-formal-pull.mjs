@@ -938,6 +938,28 @@ try {
 } catch (error) {
   report.result = 'FAIL'
   report.failedPhase = phase
+  report.failureUi = []
+  for (const browser of browsers)
+    for (const context of browser.contexts())
+      for (const page of context.pages()) {
+        report.failureUi.push(
+          await page
+            .evaluate(() => ({
+              headings: [...document.querySelectorAll('h1,h2,h3')].map(
+                (node) => node.textContent,
+              ),
+              buttons: [...document.querySelectorAll('button')].map(
+                (node) => node.textContent,
+              ),
+              alerts: [
+                ...document.querySelectorAll(
+                  '[role="alert"],.login-error,.login-message',
+                ),
+              ].map((node) => node.textContent),
+            }))
+            .catch(() => ({ unavailable: true })),
+        )
+      }
   report.error = String(error.stack ?? error)
   throw error
 } finally {

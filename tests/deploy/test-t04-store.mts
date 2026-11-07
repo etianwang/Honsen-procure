@@ -11,7 +11,7 @@ const pool = new Pool({
 })
 const actor = {
   id: process.env.TEST_ACTOR!,
-  installationId: randomUUID(),
+  installationId: process.env.TEST_INSTALLATION!,
   roles: ['administrator' as const],
 }
 const store = new PostgresSyncStore(pool)
@@ -20,11 +20,17 @@ const categoryId = process.env.TEST_CATEGORY!
 const auth = new AuthService(
   {
     async findActiveSession(token: string) {
-      if (token !== hashToken('admin') && token !== hashToken('engineer'))
+      if (
+        token !== hashToken(process.env.TEST_AUTH_TOKEN!) &&
+        token !== hashToken('engineer')
+      )
         return null
       return {
         ...actor,
-        roles: token === hashToken('admin') ? ['administrator'] : ['engineer'],
+        roles:
+          token === hashToken(process.env.TEST_AUTH_TOKEN!)
+            ? ['administrator']
+            : ['engineer'],
         isEnabled: true,
       }
     },
@@ -50,10 +56,10 @@ try {
       payload: request,
     })
   assert.equal((await call('engineer')).statusCode, 403)
-  const response = await call('admin')
+  const response = await call(process.env.TEST_AUTH_TOKEN!)
   assert.equal(response.statusCode, 200, response.body)
   assert.equal(response.json().version, 2)
-  assert.equal((await call('admin')).statusCode, 200)
+  assert.equal((await call(process.env.TEST_AUTH_TOKEN!)).statusCode, 200)
   const input = (id: string) => ({
     actorId: actor.id,
     installationId: actor.installationId,

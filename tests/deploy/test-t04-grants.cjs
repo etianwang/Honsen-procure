@@ -256,12 +256,32 @@ async function main() {
     await db.query('DROP FUNCTION public.canonical_procurement_payment()')
     result = run(['deploy/linux/grant-api.cjs'])
     assert.equal(result.status, 0, result.stderr)
+    // Match the existing runtime auth-table grants required by live authority checks.
+    await db.query(
+      `GRANT SELECT, UPDATE ON users, account_sessions TO "${role}"`,
+    )
+    await db.query(`GRANT SELECT ON user_roles TO "${role}"`)
+    const testInstallation = randomUUID(),
+      testToken = randomUUID()
     const user = randomUUID(),
       a = randomUUID(),
       b = randomUUID()
     await db.query(
-      "INSERT INTO users(id,business_code,username,password_hash,ui_locale) VALUES ($1,$2,$2,'test','en-US')",
+      "INSERT INTO users(id,business_code,username,password_hash,ui_locale,requires_password_change) VALUES ($1,$2,$2,'test','en-US',FALSE)",
       [user, `u_${user}`],
+    )
+    await db.query(
+      "INSERT INTO user_roles(user_id,role) VALUES($1,'administrator')",
+      [user],
+    )
+    await db.query(
+      "INSERT INTO account_sessions(id,user_id,token_hash,installation_id,expires_at) VALUES($1,$2,$3,$4,NOW()+interval '1 hour')",
+      [
+        randomUUID(),
+        user,
+        createHash('sha256').update(testToken).digest('hex'),
+        testInstallation,
+      ],
     )
     await db.query('BEGIN')
     await db.query("SET LOCAL session_replication_role = 'replica'")
@@ -294,7 +314,12 @@ async function main() {
     await db.query('COMMIT')
     result = run(
       ['node_modules/tsx/dist/cli.mjs', 'tests/deploy/test-t04-store.mts'],
-      { TEST_ACTOR: user, TEST_CATEGORY: b },
+      {
+        TEST_ACTOR: user,
+        TEST_CATEGORY: b,
+        TEST_INSTALLATION: testInstallation,
+        TEST_AUTH_TOKEN: testToken,
+      },
     )
     assert.equal(result.status, 0, result.stderr)
     process.stdout.write(result.stdout)

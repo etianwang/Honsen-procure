@@ -1,5 +1,40 @@
 import { expect, test } from '@playwright/test'
 
+test('a delayed cloud CAPTCHA never clears the new local answer', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    let resolveCloud: (value: object) => void
+    Object.assign(window, {
+      __TAURI_INTERNALS__: {},
+      __releaseCloud: () =>
+        resolveCloud({ id: crypto.randomUUID(), question: '2 + 2 = ?' }),
+      __TAURI__: {
+        core: {
+          invoke: async (command: string) => {
+            if (command === 'issue_local_captcha')
+              return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
+            if (command === 'issue_cloud_captcha')
+              return new Promise((resolve) => {
+                resolveCloud = resolve
+              })
+            throw new Error('Unexpected command')
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+  await expect(page.getByLabel('本地验证码：1 + 1 = ?')).toBeVisible()
+  await page.locator('#captcha').fill('2')
+  await page.evaluate(() =>
+    (window as unknown as { __releaseCloud: () => void }).__releaseCloud(),
+  )
+  await expect(page.getByLabel('云端验证码：2 + 2 = ?')).toBeVisible()
+  await expect(page.locator('#captcha')).toHaveValue('2')
+})
+
 test('cloud CAPTCHA failure explains disabled login and offers a working retry', async ({
   page,
 }) => {

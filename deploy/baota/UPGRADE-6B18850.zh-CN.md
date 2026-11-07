@@ -33,6 +33,8 @@ sha256sum --check SHA256SUMS
 
 ## 3. 增量迁移和精确授权
 
+停止 API 后，由现有 PostgreSQL 管理员仅对 Honsen 运行角色执行 `ALTER ROLE honsen_api NOLOGIN`，并确认该角色已无活动连接；不修改密码、其他角色或全局设置。受控授权器要求这个维护栅栏，不能省略或关闭检查。
+
 在完整新包目录、以原迁移所有者连接运行；维护连接只存在于当前受保护进程环境。`MIGRATION_OBJECT_SNAPSHOT` 是升级专用、绝对路径的受保护新文件，不能复用旧快照。依次执行：
 
 ```bash
@@ -45,6 +47,8 @@ export NEW_ROLE=honsen_api
 从已验证 014 基线预期仅追加 `015_protected_admin.sql` 和 `016_account_identity.sql`，不重新 Seed。015 保护永久 admin 和超级管理员治理边界；016 分离显示姓名和登录用户名、增加兼容的大小写唯一性检查。若旧账号存在大小写冲突，迁移必须失败并保留原数据，不能擅自重命名。
 
 本候选还精确增加 `DELETE ON user_roles`，用于正常账号角色替换；不授予删除 users 或其他业务表的权限。保留原 `honsen_api` 角色，不创建替代角色或扩大成数据库所有者。供应商备注保存在现有同步 JSON 中，无新增 PostgreSQL 表或迁移；桌面 SQLite 自动追加 0064。
+
+全部迁移和授权验证通过后，由同一 PostgreSQL 管理员仅执行 `ALTER ROLE honsen_api LOGIN` 恢复原角色登录能力，再进入目录切换和启动；不能改换运行角色。
 
 任一步失败即停止后续写入，保存证据，不重复运行迁移，不启动旧版 API 猜测回退，不自动恢复数据库。
 
