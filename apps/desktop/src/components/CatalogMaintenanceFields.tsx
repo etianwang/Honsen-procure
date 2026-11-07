@@ -57,6 +57,12 @@ export function SupplierFormFields({ editing }: { editing: boolean }) {
       <Form.Item label={t('交货期')} name="deliveryLeadTime">
         <Input maxLength={1000} />
       </Form.Item>
+      <Form.Item label={t('备注')} name="notes">
+        <Input.TextArea
+          maxLength={1000}
+          autoSize={{ minRows: 2, maxRows: 4 }}
+        />
+      </Form.Item>
       <Form.Item
         label={t('首选供应商')}
         name="isPreferred"

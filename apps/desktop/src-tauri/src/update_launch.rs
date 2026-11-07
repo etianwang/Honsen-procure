@@ -448,20 +448,24 @@ mod preferences {
             // Windows scanners may briefly retain a directory handle after our
             // guard closes. The held-lock denial above remains immediate; only
             // the post-release success allows a bounded sharing retry.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-            loop {
-                match fs::rename(&parent, &moved) {
-                    Ok(()) => break,
-                    Err(error)
-                        if matches!(error.raw_os_error(), Some(5 | 32))
-                            && std::time::Instant::now() < deadline =>
-                    {
-                        std::thread::sleep(std::time::Duration::from_millis(20));
+            let rename_after_release = |from: &std::path::Path, to: &std::path::Path| {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                loop {
+                    match fs::rename(from, to) {
+                        Ok(()) => break,
+                        Err(error)
+                            if matches!(error.raw_os_error(), Some(5 | 32))
+                                && std::time::Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                        }
+                        Err(error) => panic!("post-release directory rename failed: {error}"),
                     }
-                    Err(error) => panic!("post-release directory rename failed: {error}"),
                 }
-            }
-            fs::rename(&moved, &parent).unwrap();
+            };
+            rename_after_release(&parent, &moved);
+            // Renaming back has the same scanner-sharing boundary as renaming away.
+            rename_after_release(&moved, &parent);
             assert_eq!(read_at(&fixture.0).unwrap().as_deref(), Some("1.2.3"));
         }
     }

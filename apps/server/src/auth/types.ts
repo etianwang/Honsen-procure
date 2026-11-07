@@ -15,6 +15,7 @@ export type LoginAccount = {
 
 export type AuthenticatedAccount = LoginAccount & {
   installationId: string
+  sessionTokenHash?: string
 }
 
 export type AuthStore = {

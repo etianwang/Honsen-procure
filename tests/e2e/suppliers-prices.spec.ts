@@ -18,6 +18,7 @@ async function mount(page: Page, role = 'purchaser', locale = 'zh') {
         businessCode: 'SYNTH',
         name: 'Synthetic supplier',
         contactName: 'Synthetic contact',
+        notes: 'Synthetic retained notes',
         isActive: true,
         isBlacklisted: false,
         isPreferred: false,
@@ -101,7 +102,9 @@ async function mount(page: Page, role = 'purchaser', locale = 'zh') {
         addMaterialPrice: async (input: unknown) => {
           ;(window as unknown as { __priceInput: unknown }).__priceInput = input
         },
-        saveSupplier: async () => {},
+        saveSupplier: async (input: typeof supplier) => {
+          Object.assign(supplier, input)
+        },
       }
       const el = document.createElement('div')
       document.body.replaceChildren(el)
@@ -154,6 +157,58 @@ test('supplier history pages include inactive rows and comparison groups preserv
     animations: 'disabled',
   })
 })
+
+for (const [locale, edit, save, label] of [
+  ['zh', '编辑供应商', '保存供应商', '备注'],
+  ['en', 'Edit supplier', 'Save supplier', 'Notes'],
+  ['fr', 'Modifier le fournisseur', 'Enregistrer le fournisseur', 'Remarques'],
+]) {
+  test(`supplier notes can be edited and cleared in ${locale}`, async ({
+    page,
+  }) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    page.on('console', (message) => {
+      if (message.type() === 'error') errors.push(message.text())
+    })
+    await mount(page, 'purchaser', locale)
+    await page
+      .getByRole('button', { name: 'Synthetic supplier', exact: true })
+      .click()
+    await expect(
+      page
+        .locator('.supplier-contact-details')
+        .getByText('Synthetic retained notes', { exact: true }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: edit, exact: true }).click()
+    await expect(
+      page.getByRole('dialog').getByLabel(label, { exact: true }),
+    ).toHaveValue('Synthetic retained notes')
+    await page
+      .getByRole('dialog')
+      .getByLabel(label, { exact: true })
+      .fill('Synthetic revised notes')
+    await page.getByRole('button', { name: save, exact: true }).click()
+    await expect(
+      page
+        .locator('.supplier-contact-details')
+        .getByText('Synthetic revised notes', { exact: true }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: edit, exact: true }).click()
+    await page.getByRole('dialog').getByLabel(label, { exact: true }).fill('')
+    await page.getByRole('button', { name: save, exact: true }).click()
+    await expect(
+      page
+        .locator('.supplier-contact-details')
+        .getByText('Synthetic revised notes', { exact: true }),
+    ).toHaveCount(0)
+    await page.getByRole('button', { name: edit, exact: true }).click()
+    await expect(
+      page.getByRole('dialog').getByLabel(label, { exact: true }),
+    ).toHaveValue('')
+    expect(errors).toEqual([])
+  })
+}
 
 test('quote form submits XAF integer minor units without selecting a supplier implicitly', async ({
   page,

@@ -155,6 +155,7 @@ export function ProcurementExecutionPage({
             </Button>
           ) : null}
           {selected.procurementMode === 'honsen_self_purchase' &&
+          selected.children.length === 0 &&
           ['executing', 'receiving'].includes(selected.workflowStatus) ? (
             <ReceiptPanel
               key={`receipt-${selected.id}`}
@@ -203,6 +204,7 @@ export function ProcurementExecutionPage({
                   api={tauriReceiptApi}
                   orderId={child.id}
                   receiverId={receiverId}
+                  initialStatus={child.workflowStatus ?? 'sent'}
                   lines={child.lines.map((line) => ({
                     id: line.id,
                     materialName: line.materialName,
@@ -232,6 +234,7 @@ export function ProcurementExecutionPage({
           ) : ['confirmed', 'approved'].includes(selected.workflowStatus) ? (
             <>
               <SupplierAllocationPanel
+                key={`allocation-${selected.id}`}
                 api={supplierOrderApi}
                 parentOrderId={selected.id}
                 lines={selected.lines.map((line) => ({ ...line }))}

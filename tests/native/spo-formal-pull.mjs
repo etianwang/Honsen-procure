@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { chromium, expect } from '@playwright/test'
 import { Pool } from 'pg'
+import { runCatalogRoundtrip } from './catalog-roundtrip.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const root = join(repo, '.honsen-native-qa')
@@ -422,13 +423,37 @@ try {
   await ready('http://127.0.0.1:1420')
   phase = 'login'
   let receiver = await launch(0, 9241)
-  const issuer = await launch(1, 9242)
+  let issuer = await launch(1, 9242)
   await login(
     receiver,
     'engineer-a',
     process.env.HONSEN_TEST_ENGINEER_A_PASSWORD,
   )
   await login(issuer, 'purchaser', process.env.HONSEN_TEST_PURCHASER_PASSWORD)
+  if (process.env.HONSEN_NATIVE_CATALOG_ROUNDTRIP === '1') {
+    const catalog = await runCatalogRoundtrip({
+      issuer,
+      receiver,
+      call,
+      push,
+      login,
+      restartIssuer: async (app) => {
+        await call(app, 'lock_session')
+        await stop(app)
+        return launch(1, 9242)
+      },
+      readDb,
+      pool,
+      profiles,
+      scope: { countryId: ids[1], projectId: ids[2] },
+      runId,
+      setPhase: (next) => {
+        phase = next
+      },
+    })
+    issuer = catalog.issuer
+    report.catalog = catalog.evidence
+  }
   phase = 'draft'
   const zero = { kind: 'fixed_minor', minor: '0' }
   await call(receiver, 'save_requisition_draft', {

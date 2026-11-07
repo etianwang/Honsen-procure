@@ -27,8 +27,8 @@ describe.skipIf(!pool)('G1 authenticated conflict-origin boundaries', () => {
   async function account(role: 'administrator' | 'engineer') {
     const id = randomUUID()
     await pool!.query(
-      `INSERT INTO users (id, business_code, username, password_hash, ui_locale)
-       VALUES ($1, $2, $2, 'fixture-not-used-for-login', 'zh-CN')`,
+      `INSERT INTO users (id, business_code, username, password_hash, ui_locale, requires_password_change)
+       VALUES ($1, $2, $2, 'fixture-not-used-for-login', 'zh-CN', FALSE)`,
       [id, `G1-${id}`],
     )
     await pool!.query(

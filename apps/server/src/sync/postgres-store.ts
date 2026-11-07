@@ -14,6 +14,7 @@ import { formalShortCode, parseFormalIssue } from './formal-issue.js'
 import type { SyncActor, SyncStore } from './types.js'
 import { CategoryRepairError } from './service.js'
 import { catalogPayload, catalogTypes } from './catalog-payload.js'
+import { lockLiveAuthority } from './live-authority.js'
 import {
   listPaymentConflicts,
   pushPaymentResolution,
@@ -96,6 +97,16 @@ export class PostgresSyncStore implements SyncStore {
     const { request, actor } = input
     try {
       await client.query('BEGIN')
+      if (
+        !(await lockLiveAuthority(client, {
+          actorId: actor.id,
+          installationId: actor.installationId,
+          authority: actor.sessionTokenHash
+            ? { roles: actor.roles, sessionTokenHash: actor.sessionTokenHash }
+            : undefined,
+        }))
+      )
+        throw new CategoryRepairError('FORBIDDEN')
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
         request.requestId,
       ])
@@ -239,6 +250,7 @@ export class PostgresSyncStore implements SyncStore {
     installationId: string
     actorId: string
     recoveryReason?: string
+    authority?: Parameters<SyncStore['pushEvent']>[0]['authority']
   }): Promise<SyncEventResult> {
     if (input.event.entityType === 'payment_conflict_resolution')
       return pushPaymentResolution(this.pool, input)
@@ -277,6 +289,15 @@ export class PostgresSyncStore implements SyncStore {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      if (!(await lockLiveAuthority(client, input))) {
+        await client.query('ROLLBACK')
+        return {
+          eventId: input.event.eventId,
+          status: 'validation_error',
+          serverVersion: null,
+          errorCode: 'FORBIDDEN',
+        }
+      }
       if (input.recoveryReason !== undefined) {
         const administrator = await client.query(
           "SELECT 1 FROM user_roles r JOIN users u ON u.id = r.user_id AND u.is_enabled AND u.deleted_at IS NULL WHERE r.user_id = $1 AND r.role = 'administrator'",
@@ -297,9 +318,13 @@ export class PostgresSyncStore implements SyncStore {
         }
       }
       if (
-        ['material', 'material_price', 'supplier', 'purchase_order'].includes(
-          input.event.entityType,
-        )
+        [
+          'material',
+          'material_price',
+          'supplier',
+          'purchase_order',
+          'receipt',
+        ].includes(input.event.entityType)
       ) {
         await client.query(
           input.event.entityType === 'purchase_order'
@@ -320,6 +345,28 @@ export class PostgresSyncStore implements SyncStore {
         )
         const previous = stored.rows[0]?.payload_json
         const next = input.event.payload
+        if (
+          input.event.entityType === 'supplier' &&
+          input.event.operation === 'upsert' &&
+          !Object.hasOwn(next, 'notes') &&
+          previous &&
+          Object.hasOwn(previous, 'notes')
+        ) {
+          const preserved = catalogPayload('supplier', input.event.entityId, {
+            ...next,
+            notes: previous.notes,
+          })
+          if (!preserved) {
+            await client.query('ROLLBACK')
+            return {
+              eventId: input.event.eventId,
+              status: 'validation_error',
+              serverVersion: null,
+              errorCode: 'INVALID_CATALOG_PAYLOAD',
+            }
+          }
+          next.notes = preserved.notes
+        }
         let country =
           input.event.entityType === 'supplier'
             ? previous
@@ -582,6 +629,25 @@ export class PostgresSyncStore implements SyncStore {
           !!project &&
           (input.event.operation !== 'upsert' ||
             (next[field] === orderId && next.projectId === project.project_id))
+        if (
+          allowed &&
+          input.event.entityType === 'receipt' &&
+          input.event.operation === 'upsert'
+        ) {
+          const children = await client.query(
+            "SELECT 1 FROM sync_entities WHERE entity_type='purchase_order' AND NOT is_deleted AND payload_json->>'parentOrderId'=$1 LIMIT 1",
+            [orderId],
+          )
+          if (children.rowCount) {
+            await client.query('ROLLBACK')
+            return {
+              eventId: input.event.eventId,
+              status: 'validation_error',
+              serverVersion: null,
+              errorCode: 'RECEIPT_PARENT_SPLIT',
+            }
+          }
+        }
         if (allowed && input.event.entityType === 'rfq') {
           const supplierId = previous?.supplierId ?? next.supplierId
           const supplier = await client.query(

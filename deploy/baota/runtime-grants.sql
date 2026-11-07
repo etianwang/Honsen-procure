@@ -8,6 +8,8 @@ GRANT SELECT, INSERT, UPDATE ON users, user_roles, account_sessions,
   user_project_scope_bindings, sites, units, tax_templates, exchange_rates,
   project_print_defaults, sync_entities, sync_events, sync_conflicts,
   sync_origin_quarantine, formal_issue_registry TO :"runtime_role";
+-- Account role replacement only; user rows remain non-deletable.
+GRANT DELETE ON user_roles TO :"runtime_role";
 GRANT SELECT, INSERT ON audit_entries TO :"runtime_role";
 -- Later fresh-init grants below mirror api-grant-policy.json. No blanket grant.
 COMMIT;

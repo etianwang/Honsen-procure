@@ -27,6 +27,142 @@ pub struct ManagedAccount {
     pub scopes: Vec<ManagedAuthorizationBinding>,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedAccountDetails {
+    pub id: Uuid,
+    pub username: String,
+    pub display_name: String,
+    pub ui_locale: String,
+    pub roles: Vec<Role>,
+    pub is_enabled: bool,
+    pub requires_password_change: bool,
+    pub is_locked: bool,
+    pub account_version: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateManagedAccount {
+    pub expected_account_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_locale: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roles: Option<Vec<Role>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unlock: Option<bool>,
+}
+impl UpdateManagedAccount {
+    fn validate(&self) -> Result<(), AuthError> {
+        if self.expected_account_version.is_empty()
+            || self.expected_account_version.len() > 20
+            || !self
+                .expected_account_version
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+            || self
+                .display_name
+                .as_ref()
+                .is_some_and(|v| v.trim().is_empty() || v.chars().count() > 100)
+            || self
+                .ui_locale
+                .as_ref()
+                .is_some_and(|v| !["zh-CN", "fr-FR", "en-US"].contains(&v.as_str()))
+            || self.roles.as_ref().is_some_and(|v| {
+                v.is_empty() || v.len() > 4 || v.contains(&Role::SuperAdministrator)
+            })
+            || self.unlock == Some(false)
+            || (self.display_name.is_none()
+                && self.ui_locale.is_none()
+                && self.roles.is_none()
+                && self.is_enabled.is_none()
+                && self.unlock.is_none())
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        Ok(())
+    }
+}
+
+impl LocalAuthService {
+    pub async fn get_managed_account_details(
+        &self,
+        account_id: Uuid,
+        now: SystemTime,
+    ) -> Result<ManagedAccountDetails, AuthError> {
+        self.managed_account_details_request(account_id, None, now)
+            .await
+    }
+    pub async fn update_managed_account(
+        &self,
+        account_id: Uuid,
+        input: UpdateManagedAccount,
+        now: SystemTime,
+    ) -> Result<ManagedAccountDetails, AuthError> {
+        input.validate()?;
+        if input.roles.as_ref().is_some_and(|v| {
+            v.iter()
+                .any(|r| matches!(r, Role::Administrator | Role::Purchaser))
+        }) {
+            self.require_role(Role::SuperAdministrator, now)?;
+        }
+        self.managed_account_details_request(account_id, Some(input), now)
+            .await
+    }
+    async fn managed_account_details_request(
+        &self,
+        account_id: Uuid,
+        input: Option<UpdateManagedAccount>,
+        now: SystemTime,
+    ) -> Result<ManagedAccountDetails, AuthError> {
+        if account_id.is_nil() {
+            return Err(AuthError::InvalidInput);
+        }
+        let request = self.authorization_management_request(now)?;
+        let endpoint = api_endpoint_from(
+            &configured_api_base_url()?,
+            &format!("accounts/{account_id}"),
+        )?;
+        let client = self.https_client()?;
+        let builder = if let Some(input) = input {
+            client.patch(endpoint).json(&input)
+        } else {
+            client.get(endpoint)
+        };
+        let response = builder
+            .bearer_auth(&request.token)
+            .send()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        let status = response.status();
+        // Check the initiating session even for a conflict. Never retry a stale version.
+        if status == reqwest::StatusCode::CONFLICT {
+            Self::require_request_session(
+                &*self.connection.lock().map_err(|_| AuthError::Database)?,
+                request.session,
+            )?;
+            return Err(AuthError::AccountConflict);
+        }
+        self.authorization_management_response(request.session, status)?;
+        let result = response
+            .json::<ManagedAccountDetails>()
+            .await
+            .map_err(|_| AuthError::SyncTransport)?;
+        Self::require_request_session(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            request.session,
+        )?;
+        if result.id != account_id {
+            return Err(AuthError::SyncTransport);
+        }
+        Ok(result)
+    }
+}
+
 impl CreateManagedAccount {
     fn validate(&self) -> Result<(), AuthError> {
         if self.username.is_empty()
@@ -400,5 +536,47 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn managed_account_patch_rejects_empty_unknown_and_privileged_changes() {
+        let parse = |value| serde_json::from_value::<UpdateManagedAccount>(value);
+        assert!(
+            parse(serde_json::json!({"expectedAccountVersion":"1","password":"secret"})).is_err()
+        );
+        for value in [
+            serde_json::json!({"expectedAccountVersion":"1"}),
+            serde_json::json!({"expectedAccountVersion":"1","roles":["super_administrator"]}),
+            serde_json::json!({"expectedAccountVersion":"1","unlock":false}),
+            serde_json::json!({"expectedAccountVersion":"-1","displayName":"Test"}),
+            serde_json::json!({"expectedAccountVersion":"1","displayName":" "}),
+        ] {
+            assert_eq!(
+                parse(value).unwrap().validate(),
+                Err(AuthError::InvalidInput)
+            );
+        }
+        assert!(parse(serde_json::json!({"expectedAccountVersion":"123","displayName":"合成姓名","isEnabled":false})).unwrap().validate().is_ok());
+    }
+    #[test]
+    fn managed_account_details_requires_online_session_before_transport() {
+        let service = LocalAuthService::open_in_memory().unwrap();
+        tauri::async_runtime::block_on(async {
+            assert!(matches!(
+                service
+                    .get_managed_account_details(Uuid::new_v4(), SystemTime::now())
+                    .await,
+                Err(AuthError::NoActiveSession)
+            ));
+            let input = serde_json::from_value(
+                serde_json::json!({"expectedAccountVersion":"1","displayName":"Synthetic"}),
+            )
+            .unwrap();
+            assert!(matches!(
+                service
+                    .update_managed_account(Uuid::new_v4(), input, SystemTime::now())
+                    .await,
+                Err(AuthError::NoActiveSession)
+            ));
+        });
     }
 }

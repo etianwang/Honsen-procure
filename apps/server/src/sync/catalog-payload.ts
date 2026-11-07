@@ -50,6 +50,13 @@ export function catalogPayload(
       (typeof payload[key] === 'string' && !payload[key].trim())
     )
       payload[key] = null
+  // Missing notes belongs to an older client; only an explicit null clears it.
+  if (
+    type === 'supplier' &&
+    typeof payload.notes === 'string' &&
+    !payload.notes.trim()
+  )
+    payload.notes = null
   const parsed = schema.safeParse(payload)
   if (!parsed.success || parsed.data.id.toLowerCase() !== id.toLowerCase())
     return null

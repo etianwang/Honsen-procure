@@ -16,6 +16,7 @@ const optionalText = catalogText(1000).min(1).nullable()
 
 export const materialSchema = z.object({
   id: uuidSchema,
+  categoryId: uuidSchema.nullable().optional(),
   sku: catalogText(128).min(1).nullable(),
   nameZh: catalogText(255).min(1),
   nameFr: catalogText(255).min(1).nullable(),
@@ -48,6 +49,7 @@ export const supplierSchema = z.object({
     .nullable(),
   paymentTerms: optionalText,
   deliveryLeadTime: optionalText,
+  notes: optionalText.optional(),
   isPreferred: z.boolean(),
   isBlacklisted: z.boolean(),
   isActive: z.boolean(),

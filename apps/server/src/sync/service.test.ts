@@ -406,7 +406,31 @@ describe('SyncService', () => {
         { deviceId: '00000000-0000-4000-8000-000000000005', events: [event] },
       )
     expect((await push()).results[0]?.status).toBe('accepted')
+    for (const currency of ['XAF', 'ETB']) {
+      expect(
+        (
+          await service.push(
+            {
+              id: engineer.id,
+              roles: ['purchaser'],
+              installationId: randomUUID(),
+            },
+            {
+              deviceId: randomUUID(),
+              events: [
+                {
+                  ...event,
+                  eventId: randomUUID(),
+                  payload: { ...event.payload, currency },
+                },
+              ],
+            },
+          )
+        ).results[0]?.status,
+      ).toBe('accepted')
+    }
     for (const payload of [
+      { ...event.payload, currency: 'INVALID' },
       { ...event.payload, unitPriceMinor: '100' },
       {
         ...event.payload,
@@ -470,7 +494,7 @@ describe('SyncService', () => {
     expect((await push()).results[0]?.status).toBe('validation_error')
     store.order = null
     expect((await push()).results[0]?.status).toBe('validation_error')
-    expect(store.pushed).toBe(1)
+    expect(store.pushed).toBe(3)
   })
 
   it('accepts an engineer order only for the engineer and a bound project', async () => {

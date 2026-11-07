@@ -4,11 +4,11 @@ import {
   paymentConflictResolutionSchema,
   procurementExpenditureSchema,
   type PaymentConflictView,
-  type SyncEvent,
   type SyncEventResult,
 } from '@honsen/shared'
 import type { Pool, PoolClient } from 'pg'
-import type { SyncActor } from './types.js'
+import type { SyncActor, SyncStore } from './types.js'
+import { lockLiveAuthority } from './live-authority.js'
 import { CategoryRepairError } from './service.js'
 
 type ConflictRow = {
@@ -100,7 +100,7 @@ export async function listPaymentConflicts(
 
 export async function pushPaymentResolution(
   pool: Pool,
-  input: { event: SyncEvent; installationId: string; actorId: string },
+  input: Parameters<SyncStore['pushEvent']>[0],
 ): Promise<SyncEventResult> {
   const invalid = (errorCode: string): SyncEventResult => ({
     eventId: input.event.eventId,
@@ -122,6 +122,10 @@ export async function pushPaymentResolution(
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    if (!(await lockLiveAuthority(client, input))) {
+      await client.query('ROLLBACK')
+      return invalid('FORBIDDEN')
+    }
     if (!(await isAdministrator(client, input.actorId))) {
       await client.query('ROLLBACK')
       return invalid('FORBIDDEN')

@@ -1,9 +1,11 @@
+import type { Currency } from '@honsen/shared'
+
 export type CreateRfqInput = {
   id: string
   sourceOrderId: string
   supplierId: string
   displayNo: string
-  currency: 'XOF' | 'CNY' | 'USD' | 'EUR'
+  currency: Currency
 }
 
 export type RfqView = {

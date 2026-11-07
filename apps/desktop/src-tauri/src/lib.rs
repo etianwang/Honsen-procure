@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod account_identity_tests;
 #[cfg(test)]
+mod catalog_maintenance_tests;
+#[cfg(test)]
 mod fresh_conflict_tests;
 #[cfg(test)]
 mod g2_pull_tests;
@@ -239,10 +241,23 @@ pub struct SupplierInput {
     pub email: Option<String>,
     pub payment_terms: Option<String>,
     pub delivery_lead_time: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_supplier_notes",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub notes: Option<Option<String>>,
     pub is_preferred: bool,
     pub is_blacklisted: bool,
     pub is_active: bool,
     pub version: i64,
+}
+
+fn deserialize_supplier_notes<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -418,6 +433,7 @@ pub struct ProcurementExecutionChildView {
     pub id: Uuid,
     pub display_no: String,
     pub currency: String,
+    pub workflow_status: String,
     pub lines: Vec<ProcurementExecutionLineView>,
     pub payment_summary: ProcurementPaymentSummaryView,
 }
@@ -1191,6 +1207,8 @@ pub struct CatalogPriceView {
 #[serde(rename_all = "camelCase")]
 pub struct CatalogMaterialView {
     pub id: Uuid,
+    pub is_active: bool,
+    pub category_id: Option<Uuid>,
     pub sku: Option<String>,
     pub name_zh: String,
     pub name_fr: Option<String>,
@@ -1221,6 +1239,7 @@ pub struct SupplierView {
     pub email: Option<String>,
     pub payment_terms: Option<String>,
     pub delivery_lead_time: Option<String>,
+    pub notes: Option<String>,
     pub is_preferred: bool,
     pub is_blacklisted: bool,
     pub is_active: bool,
@@ -1308,6 +1327,8 @@ pub enum ReferenceMasterDataInput {
 pub enum AuthError {
     #[error("ambiguous cached account name")]
     AccountNameCollision,
+    #[error("account changed; reload before saving")]
+    AccountConflict,
     #[error("invalid credentials or captcha")]
     InvalidCredentials,
     #[error("the offline verification window has expired")]
@@ -3105,15 +3126,15 @@ impl LocalAuthService {
         }
         transaction
             .execute(
-                "INSERT INTO local_suppliers (id, business_code, name, country_id, contact_name, address, city, country, phone, whatsapp, email, payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                "INSERT INTO local_suppliers (id, business_code, name, country_id, contact_name, address, city, country, phone, whatsapp, email, payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version, notes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                  ON CONFLICT(id) DO UPDATE SET name = excluded.name, contact_name = excluded.contact_name,
                    country_id = COALESCE(local_suppliers.country_id, excluded.country_id), address = excluded.address, city = excluded.city, country = excluded.country, phone = excluded.phone,
                    whatsapp = excluded.whatsapp, email = excluded.email, payment_terms = excluded.payment_terms,
                    delivery_lead_time = excluded.delivery_lead_time, is_preferred = excluded.is_preferred,
                    is_blacklisted = excluded.is_blacklisted, is_active = excluded.is_active, version = excluded.version,
-                   deleted_at = NULL",
-                params![supplier.id.to_string(), supplier.business_code, supplier.name, country_id.to_string(), supplier.contact_name, supplier.address, supplier.city, supplier.country, supplier.phone, supplier.whatsapp, supplier.email, supplier.payment_terms, supplier.delivery_lead_time, supplier.is_preferred as i64, supplier.is_blacklisted as i64, supplier.is_active as i64, supplier.version],
+                   notes = CASE WHEN ?19 THEN excluded.notes ELSE local_suppliers.notes END, deleted_at = NULL",
+                params![supplier.id.to_string(), supplier.business_code, supplier.name, country_id.to_string(), supplier.contact_name, supplier.address, supplier.city, supplier.country, supplier.phone, supplier.whatsapp, supplier.email, supplier.payment_terms, supplier.delivery_lead_time, supplier.is_preferred as i64, supplier.is_blacklisted as i64, supplier.is_active as i64, supplier.version, supplier.notes.clone().flatten(), supplier.notes.is_some()],
             )
             .map_err(|_| AuthError::Database)?;
         insert_local_sync_outbox(&transaction, "supplier", supplier.id, &payload, now)?;
@@ -3527,14 +3548,14 @@ impl LocalAuthService {
             .into_iter()
             .map(|(id, display_no, primary_currency, procurement_mode, workflow_status, total_minor)| {
                 let children = connection
-                    .prepare("SELECT id, display_no, currency, total_minor FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
+                    .prepare("SELECT id, display_no, currency, total_minor, workflow_status FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
                     .map_err(|_| AuthError::Database)?
-                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?)))
+                    .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?, row.get::<_, String>(4)?)))
                     .map_err(|_| AuthError::Database)?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|_| AuthError::Database)?
                     .into_iter()
-                    .map(|(child_id, child_display_no, currency, child_total)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, payment_summary: payment_summary(&child_id, &currency, child_total)?, currency, lines: read_lines(&child_id)? }))
+                    .map(|(child_id, child_display_no, currency, child_total, workflow_status)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, payment_summary: payment_summary(&child_id, &currency, child_total)?, currency, workflow_status, lines: read_lines(&child_id)? }))
                     .collect::<Result<Vec<_>, AuthError>>()?;
                 Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, payment_summary: payment_summary(&id, &primary_currency, total_minor)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
             })
@@ -4719,7 +4740,8 @@ impl LocalAuthService {
         let supplier_child = is_child != 0 && status == "sent";
         let market_parent = is_child == 0
             && mode.as_deref() == Some("honsen_self_purchase")
-            && matches!(status.as_str(), "executing" | "receiving");
+            && matches!(status.as_str(), "executing" | "receiving")
+            && !transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_purchase_orders WHERE parent_order_id=?1 AND deleted_at IS NULL)",[input.order_id.to_string()],|row|row.get::<_,bool>(0)).map_err(|_|AuthError::Database)?;
         if (!supplier_child && !market_parent)
             || (!privileged && applicant_id != actor_id.to_string())
         {
@@ -5691,7 +5713,20 @@ impl LocalAuthService {
         project_id: Option<Uuid>,
         now: SystemTime,
     ) -> Result<Vec<CatalogMaterialView>, AuthError> {
+        self.search_catalog_with_inactive(query, project_id, false, now)
+    }
+
+    pub fn search_catalog_with_inactive(
+        &self,
+        query: &str,
+        project_id: Option<Uuid>,
+        include_inactive: bool,
+        now: SystemTime,
+    ) -> Result<Vec<CatalogMaterialView>, AuthError> {
         self.require_catalog_read(now)?;
+        if include_inactive {
+            self.require_material_mutation(now)?;
+        }
         let account_id = self.active_session_user_id()?;
         if query.len() > 255 {
             return Err(AuthError::InvalidInput);
@@ -5700,9 +5735,9 @@ impl LocalAuthService {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let mut materials = connection
             .prepare(
-                "SELECT id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, version
+                "SELECT id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, version, is_active, category_id
                  FROM local_materials
-                 WHERE is_active = 1 AND deleted_at IS NULL
+                 WHERE (is_active = 1 OR ?2) AND deleted_at IS NULL
                    AND (?1 = '%%' OR name_zh LIKE ?1 COLLATE NOCASE OR COALESCE(name_fr, '') LIKE ?1 COLLATE NOCASE OR COALESCE(name_en, '') LIKE ?1 COLLATE NOCASE
                      OR aliases_json LIKE ?1 COLLATE NOCASE OR model LIKE ?1 COLLATE NOCASE
                      OR specification LIKE ?1 COLLATE NOCASE OR COALESCE(sku, '') LIKE ?1 COLLATE NOCASE)
@@ -5711,7 +5746,7 @@ impl LocalAuthService {
             )
             .map_err(|_| AuthError::Database)?;
         let rows = materials
-            .query_map([pattern], |row| {
+            .query_map(params![pattern, include_inactive], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -5724,6 +5759,8 @@ impl LocalAuthService {
                     row.get::<_, String>(8)?,
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, i64>(10)?,
+                    row.get::<_, bool>(11)?,
+                    row.get::<_, Option<String>>(12)?,
                 ))
             })
             .map_err(|_| AuthError::Database)?;
@@ -5770,6 +5807,8 @@ impl LocalAuthService {
                     unit,
                     notes,
                     version,
+                    is_active,
+                    category_id,
                 )| {
                     let material_id = Uuid::parse_str(&id).map_err(|_| AuthError::Database)?;
                     let aliases =
@@ -5835,6 +5874,11 @@ impl LocalAuthService {
                         .map_err(|_| AuthError::Database)?;
                     Ok(CatalogMaterialView {
                         id: material_id,
+                        is_active,
+                        category_id: category_id
+                            .map(|id| Uuid::parse_str(&id))
+                            .transpose()
+                            .map_err(|_| AuthError::Database)?,
                         sku,
                         name_zh,
                         name_fr,
@@ -5922,7 +5966,7 @@ impl LocalAuthService {
         let mut statement = connection
             .prepare(
                 "SELECT id, business_code, name, contact_name, address, city, country, phone, whatsapp, email,
-                        payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version, country_id
+                        payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version, country_id, notes
                  FROM local_suppliers
                  WHERE deleted_at IS NULL AND country_id IS NOT NULL
                    AND EXISTS (SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 AND p.country_id = local_suppliers.country_id)
@@ -5949,6 +5993,7 @@ impl LocalAuthService {
                     row.get::<_, i64>(14)?,
                     row.get::<_, i64>(15)?,
                     row.get::<_, String>(16)?,
+                    row.get::<_, Option<String>>(17)?,
                 ))
             })
             .map_err(|_| AuthError::Database)?
@@ -5971,6 +6016,7 @@ impl LocalAuthService {
                     is_active,
                     version,
                     country_id,
+                    notes,
                 ) = row.map_err(|_| AuthError::Database)?;
                 Ok(SupplierView {
                     id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?,
@@ -5986,6 +6032,7 @@ impl LocalAuthService {
                     email,
                     payment_terms,
                     delivery_lead_time,
+                    notes,
                     is_preferred: is_preferred != 0,
                     is_blacklisted: is_blacklisted != 0,
                     is_active: is_active != 0,
@@ -7456,6 +7503,7 @@ pub mod commands {
             let code = match error {
                 AuthError::InvalidCredentials => "invalid_credentials",
                 AuthError::AccountNameCollision => "account_name_collision",
+                AuthError::AccountConflict => "account_conflict",
                 AuthError::OfflineWindowExpired => "offline_window_expired",
                 AuthError::AccountLocked => "account_locked",
                 AuthError::NoActiveSession => "reauthentication_required",
@@ -7889,6 +7937,25 @@ pub mod commands {
             .map_err(Into::into)
     }
     #[tauri::command]
+    pub async fn get_managed_account_details(
+        auth: State<'_, LocalAuthService>,
+        account_id: Uuid,
+    ) -> Result<super::account_management::ManagedAccountDetails, CommandError> {
+        auth.get_managed_account_details(account_id, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+    #[tauri::command]
+    pub async fn update_managed_account(
+        auth: State<'_, LocalAuthService>,
+        account_id: Uuid,
+        input: super::account_management::UpdateManagedAccount,
+    ) -> Result<super::account_management::ManagedAccountDetails, CommandError> {
+        auth.update_managed_account(account_id, input, SystemTime::now())
+            .await
+            .map_err(Into::into)
+    }
+    #[tauri::command]
     pub async fn create_managed_account(
         auth: State<'_, LocalAuthService>,
         input: super::account_management::CreateManagedAccount,
@@ -8117,9 +8184,15 @@ pub mod commands {
         auth: State<'_, LocalAuthService>,
         query: String,
         project_id: Option<Uuid>,
+        include_inactive: Option<bool>,
     ) -> Result<Vec<super::CatalogMaterialView>, CommandError> {
-        auth.search_catalog(&query, project_id, SystemTime::now())
-            .map_err(Into::into)
+        auth.search_catalog_with_inactive(
+            &query,
+            project_id,
+            include_inactive.unwrap_or(false),
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -8625,6 +8698,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0063_account_display_name",
             include_str!("../migrations/0063_account_display_name.sql"),
         ),
+        (
+            "0064_supplier_notes",
+            include_str!("../migrations/0064_supplier_notes.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -9058,6 +9135,7 @@ fn validate_supplier(supplier: &SupplierInput) -> Result<(), AuthError> {
             (&supplier.whatsapp, 1000),
             (&supplier.payment_terms, 1000),
             (&supplier.delivery_lead_time, 1000),
+            (&supplier.notes.clone().flatten(), 1000),
         ]
         .iter()
         .any(|(value, max)| !valid_optional_text(value, *max))
@@ -9182,16 +9260,16 @@ fn project_remote_catalog_change(
             }
             transaction
                 .execute(
-                    "INSERT INTO local_suppliers (id, business_code, name, country_id, contact_name, address, city, country, phone, whatsapp, email, payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                    "INSERT INTO local_suppliers (id, business_code, name, country_id, contact_name, address, city, country, phone, whatsapp, email, payment_terms, delivery_lead_time, is_preferred, is_blacklisted, is_active, version, notes)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                      ON CONFLICT(id) DO UPDATE SET business_code = excluded.business_code, name = excluded.name,
                        country_id = COALESCE(local_suppliers.country_id, excluded.country_id), contact_name = excluded.contact_name, address = excluded.address, city = excluded.city,
                        country = excluded.country, phone = excluded.phone, whatsapp = excluded.whatsapp,
                        email = excluded.email, payment_terms = excluded.payment_terms,
                        delivery_lead_time = excluded.delivery_lead_time, is_preferred = excluded.is_preferred,
                        is_blacklisted = excluded.is_blacklisted, is_active = excluded.is_active,
-                       version = excluded.version, deleted_at = NULL",
-                    params![supplier.id.to_string(), supplier.business_code, supplier.name, supplier.country_id.map(|value| value.to_string()), supplier.contact_name, supplier.address, supplier.city, supplier.country, supplier.phone, supplier.whatsapp, supplier.email, supplier.payment_terms, supplier.delivery_lead_time, supplier.is_preferred as i64, supplier.is_blacklisted as i64, supplier.is_active as i64, change.version],
+                       notes = CASE WHEN ?19 THEN excluded.notes ELSE local_suppliers.notes END, version = excluded.version, deleted_at = NULL",
+                    params![supplier.id.to_string(), supplier.business_code, supplier.name, supplier.country_id.map(|value| value.to_string()), supplier.contact_name, supplier.address, supplier.city, supplier.country, supplier.phone, supplier.whatsapp, supplier.email, supplier.payment_terms, supplier.delivery_lead_time, supplier.is_preferred as i64, supplier.is_blacklisted as i64, supplier.is_active as i64, change.version, supplier.notes.clone().flatten(), supplier.notes.is_some()],
                 )
                 .map_err(|_| AuthError::Database)?;
         }
@@ -14835,6 +14913,7 @@ mod tests {
             email: None,
             payment_terms: None,
             delivery_lead_time: None,
+            notes: None,
             is_preferred: false,
             is_blacklisted: false,
             is_active: true,
@@ -15250,6 +15329,7 @@ mod tests {
             email: None,
             payment_terms: None,
             delivery_lead_time: None,
+            notes: None,
             is_preferred: false,
             is_blacklisted: false,
             is_active: true,
@@ -19315,6 +19395,7 @@ mod tests {
             email: None,
             payment_terms: None,
             delivery_lead_time: None,
+            notes: None,
             is_preferred: true,
             is_blacklisted: false,
             is_active: true,
@@ -20063,6 +20144,53 @@ mod tests {
         assert_eq!(children[0].supplier_id, supplier.id);
         assert_eq!(children[0].currency, "XOF");
         assert_eq!(children[0].source_total_minor, "3125");
+        // A split parent is not a second market-receiving ledger, including
+        // historical parents already marked executing by another client.
+        let before_split_parent = {
+            let c = service.connection.lock().unwrap();
+            let status: String = c
+                .query_row(
+                    "SELECT workflow_status FROM local_purchase_orders WHERE id=?1",
+                    [requisition_id.to_string()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let counts:(i64,i64)=c.query_row("SELECT (SELECT COUNT(*) FROM local_receipts),(SELECT COUNT(*) FROM local_sync_outbox)",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+            c.execute(
+                "UPDATE local_purchase_orders SET workflow_status='executing' WHERE id=?1",
+                [requisition_id.to_string()],
+            )
+            .unwrap();
+            (status, counts)
+        };
+        assert_eq!(
+            service.record_receipt(
+                RecordReceiptInput {
+                    id: Uuid::new_v4(),
+                    order_id: requisition_id,
+                    received_at: "2026-10-11".into(),
+                    receiver_id: approver_id,
+                    over_receipt_reason: None,
+                    attachment_ids: vec![],
+                    items: vec![ReceiptItemInput {
+                        order_item_id: Uuid::parse_str(&parent_item_id).unwrap(),
+                        quantity: "1".into(),
+                        unit: "pcs".into()
+                    }]
+                },
+                now
+            ),
+            Err(AuthError::Forbidden)
+        );
+        {
+            let c = service.connection.lock().unwrap();
+            assert_eq!(c.query_row("SELECT (SELECT COUNT(*) FROM local_receipts),(SELECT COUNT(*) FROM local_sync_outbox)",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).unwrap(),before_split_parent.1);
+            c.execute(
+                "UPDATE local_purchase_orders SET workflow_status=?2 WHERE id=?1",
+                params![requisition_id.to_string(), before_split_parent.0],
+            )
+            .unwrap();
+        }
         assert_eq!(children[0].primary_total_minor, "3125");
         let connection = service.connection.lock().unwrap();
         let child: (String, String, String, String, i64) = connection
@@ -20227,6 +20355,7 @@ mod tests {
         assert_eq!(second_receipt.workflow_status, "completed");
         let execution_orders = service.list_confirmed_procurement_orders(now).unwrap();
         let execution_line = &execution_orders[0].children[0].lines[0];
+        assert_eq!(execution_orders[0].children[0].workflow_status, "completed");
         assert_eq!(execution_line.received_quantity, "2.5");
         assert_eq!(execution_line.remaining_quantity, "0");
         assert_eq!(
@@ -20264,6 +20393,10 @@ mod tests {
                 .unwrap();
             assert_eq!(status, "completed_with_conditions");
         }
+        assert_eq!(
+            service.list_confirmed_procurement_orders(now).unwrap()[0].children[0].workflow_status,
+            "completed_with_conditions"
+        );
         assert_eq!(
             service.revise_confirmed_requisition(revised, "after split".into(), now),
             Err(AuthError::InvalidInput)

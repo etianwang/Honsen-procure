@@ -4,9 +4,36 @@ import {
   newUsernameSchema,
   loginRequestSchema,
   loginResponseSchema,
+  managedAccountUpdateSchema,
 } from './auth.js'
 
 describe('account identity compatibility', () => {
+  it('validates versioned account changes without accepting credentials or username replacement', () => {
+    expect(
+      managedAccountUpdateSchema.parse({
+        expectedAccountVersion: '123',
+        displayName: ' 合成姓名 ',
+        isEnabled: false,
+      }).displayName,
+    ).toBe('合成姓名')
+    for (const value of [
+      { expectedAccountVersion: '123' },
+      { expectedAccountVersion: '123', username: 'Renamed' },
+      { expectedAccountVersion: '123', password: 'synthetic' },
+      { expectedAccountVersion: '123', roles: ['super_administrator'] },
+      { expectedAccountVersion: '123', roles: [] },
+      { expectedAccountVersion: 'invalid', unlock: true },
+      { expectedAccountVersion: '123', unlock: false },
+    ])
+      expect(managedAccountUpdateSchema.safeParse(value).success).toBe(false)
+    expect(
+      managedAccountUpdateSchema.safeParse({
+        expectedAccountVersion: '123',
+        roles: ['engineer', 'viewer'],
+        unlock: true,
+      }).success,
+    ).toBe(true)
+  })
   it('accepts only ASCII letters and digits for new usernames without changing case', () => {
     expect(newUsernameSchema.parse('Zhanghekai')).toBe('Zhanghekai')
     for (const value of [

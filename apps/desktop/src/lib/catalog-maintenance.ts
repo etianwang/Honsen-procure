@@ -13,6 +13,7 @@ export type SupplierFormValues = {
   email?: string
   paymentTerms?: string
   deliveryLeadTime?: string
+  notes?: string
   isPreferred: boolean
   isBlacklisted: boolean
   isActive: boolean
@@ -47,6 +48,7 @@ export function supplierFromForm(
     email: optionalText(values.email),
     paymentTerms: optionalText(values.paymentTerms),
     deliveryLeadTime: optionalText(values.deliveryLeadTime),
+    notes: optionalText(values.notes),
     isPreferred: values.isPreferred,
     isBlacklisted: values.isBlacklisted,
     isActive: values.isActive,

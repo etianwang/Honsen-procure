@@ -8,6 +8,27 @@ import {
 } from './catalog-fixtures.js'
 
 describe('catalog transport projection compatibility', () => {
+  it('keeps supplier notes tri-state compatible without inventing a legacy field', () => {
+    const id = randomUUID(),
+      countryId = randomUUID(),
+      base = supplierFixture(id, countryId)
+    expect(catalogPayload('supplier', id, base)).not.toHaveProperty('notes')
+    expect(
+      catalogPayload('supplier', id, { ...base, notes: ' 合成备注 ' }),
+    ).toMatchObject({ notes: '合成备注' })
+    expect(
+      catalogPayload('supplier', id, { ...base, notes: null }),
+    ).toMatchObject({ notes: null })
+    expect(
+      catalogPayload('supplier', id, { ...base, notes: ' ' }),
+    ).toMatchObject({ notes: null })
+    expect(
+      catalogPayload('supplier', id, { ...base, notes: 'x'.repeat(1001) }),
+    ).toBeNull()
+    expect(
+      catalogPayload('supplier', id, { ...base, notes: '界'.repeat(334) }),
+    ).toBeNull()
+  })
   const supplier = randomUUID()
   const material = randomUUID()
   const price = randomUUID()

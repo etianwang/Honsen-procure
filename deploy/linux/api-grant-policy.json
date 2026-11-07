@@ -1,6 +1,8 @@
 {
   "014_master_data_currencies.sql": [],
-  "001_auth_and_master_data.sql": [],
+  "001_auth_and_master_data.sql": [
+    { "kind": "table", "name": "user_roles", "privileges": ["DELETE"] }
+  ],
   "002_project_defaults_and_master_data.sql": [],
   "003_sync.sql": [
     {

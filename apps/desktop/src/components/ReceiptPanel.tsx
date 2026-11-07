@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Input } from 'antd'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useUiLocale } from '../lib/ui-locale'
 import { receiptText, type ReceiptMessage } from '../lib/receipt-messages'
 import type { ReceiptApi } from '../lib/receipt-api'
@@ -22,6 +22,18 @@ type ReceiptPanelProps = {
   onChanged?: () => void
 }
 
+function statusText(status?: string) {
+  return status === 'completed'
+    ? '已完成'
+    : status === 'completed_with_conditions'
+      ? '已完成（有条件）'
+      : status === 'executing'
+        ? '采购执行中'
+        : status === 'receiving'
+          ? '收货中'
+          : '已发送供应商'
+}
+
 export function ReceiptPanel({
   api,
   orderId,
@@ -37,17 +49,16 @@ export function ReceiptPanel({
   )
   const [overReason, setOverReason] = useState('')
   const [closeReason, setCloseReason] = useState('')
-  const [status, setStatus] = useState(
-    initialStatus === 'executing'
-      ? '采购执行中'
-      : initialStatus === 'receiving'
-        ? '收货中'
-        : '已发送供应商',
-  )
+  const [status, setStatus] = useState(statusText(initialStatus))
+  useEffect(() => setStatus(statusText(initialStatus)), [initialStatus])
+  const terminal = status === '已完成' || status === '已完成（有条件）'
   const [message, setMessage] = useState<ReceiptMessage | null>(null)
   const [receivedCount, setReceivedCount] = useState(0)
+  const submitting = useRef(false)
+  const [busy, setBusy] = useState(false)
 
   async function record() {
+    if (submitting.current || terminal) return
     const items = lines
       .filter((line) => quantities[line.id].trim())
       .map((line) => ({
@@ -59,6 +70,8 @@ export function ReceiptPanel({
       setMessage('至少填写一条实收数量。')
       return
     }
+    submitting.current = true
+    setBusy(true)
     try {
       const receipt = await api.recordReceipt({
         id: crypto.randomUUID(),
@@ -77,18 +90,25 @@ export function ReceiptPanel({
             : '已发送供应商',
       )
       setReceivedCount(receipt.receivedItemCount)
+      setQuantities(Object.fromEntries(lines.map((line) => [line.id, ''])))
       setMessage('收货已登记，共 {count} 条明细。')
       onChanged?.()
     } catch {
       setMessage('收货失败：超收必须填写原因，且订单必须处于可收货状态。')
+    } finally {
+      submitting.current = false
+      setBusy(false)
     }
   }
 
   async function closeWithConditions() {
+    if (submitting.current || terminal) return
     if (!closeReason.trim()) {
       setMessage('有条件完成原因必填。')
       return
     }
+    submitting.current = true
+    setBusy(true)
     try {
       await api.closeSupplierOrderWithConditions(orderId, closeReason.trim())
       setStatus('已完成（有条件）')
@@ -96,6 +116,9 @@ export function ReceiptPanel({
       onChanged?.()
     } catch {
       setMessage('关闭失败：订单必须处于可有条件关闭的状态。')
+    } finally {
+      submitting.current = false
+      setBusy(false)
     }
   }
 
@@ -123,6 +146,7 @@ export function ReceiptPanel({
             <Input
               aria-label={`${line.materialName} ${t('实收数量')}`}
               inputMode="decimal"
+              disabled={busy || terminal}
               value={quantities[line.id]}
               onChange={(event) =>
                 setQuantities((current) => ({
@@ -138,11 +162,16 @@ export function ReceiptPanel({
         {t('超收原因')}
         <Input
           aria-label={t('超收原因')}
+          disabled={busy || terminal}
           value={overReason}
           onChange={(event) => setOverReason(event.target.value)}
         />
       </label>
-      <Button type="primary" onClick={() => void record()}>
+      <Button
+        type="primary"
+        disabled={busy || terminal}
+        onClick={() => void record()}
+      >
         {t('登记收货')}
       </Button>
       <hr />
@@ -150,11 +179,15 @@ export function ReceiptPanel({
         {t('有条件完成原因')}
         <Input
           aria-label={t('有条件完成原因')}
+          disabled={busy || terminal}
           value={closeReason}
           onChange={(event) => setCloseReason(event.target.value)}
         />
       </label>
-      <Button onClick={() => void closeWithConditions()}>
+      <Button
+        disabled={busy || terminal}
+        onClick={() => void closeWithConditions()}
+      >
         {t('按有条件完成关闭')}
       </Button>
     </Card>

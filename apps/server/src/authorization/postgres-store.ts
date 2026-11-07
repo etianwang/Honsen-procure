@@ -8,6 +8,72 @@ import {
 export class PostgresAuthorizationStore implements AuthorizationStore {
   constructor(private readonly pool: Pool) {}
 
+  async lockManagedAccount(
+    client: PoolClient,
+    actorId: string,
+    accountId: string,
+    tokenHash: string,
+  ) {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended('honsen:super-admin-protection',0))",
+    )
+    const records = await client.query<{
+      id: string
+      username: string
+      display_name: string | null
+      ui_locale: string
+      is_enabled: boolean
+      requires_password_change: boolean
+      locked_until: Date | null
+      account_version: string
+    }>(
+      'SELECT id,username,display_name,ui_locale,is_enabled,requires_password_change,locked_until,xmin::text AS account_version FROM users WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY id FOR UPDATE',
+      [[actorId, accountId]],
+    )
+    const actor = records.rows.find((row) => row.id === actorId)
+    if (!actor?.is_enabled || actor.requires_password_change)
+      throw new AuthorizationError('FORBIDDEN')
+    const session = await client.query(
+      'SELECT 1 FROM account_sessions WHERE user_id=$1 AND token_hash=$2 AND revoked_at IS NULL AND expires_at>NOW()',
+      [actorId, tokenHash],
+    )
+    if (session.rowCount !== 1) throw new AuthorizationError('FORBIDDEN')
+    const bindings = await client.query<{ user_id: string; role: string }>(
+      'SELECT user_id,role FROM user_roles WHERE user_id=ANY($1::uuid[])',
+      [[actorId, accountId]],
+    )
+    const actorRoles = bindings.rows
+      .filter((row) => row.user_id === actorId)
+      .map((row) => row.role)
+    const privileged = actorRoles.includes('super_administrator')
+    if (!privileged && !actorRoles.includes('administrator'))
+      throw new AuthorizationError('FORBIDDEN')
+    const target = records.rows.find((row) => row.id === accountId)
+    if (!target) return null
+    const roles = bindings.rows
+      .filter((row) => row.user_id === accountId)
+      .map((row) => row.role)
+      .sort()
+    if (
+      target.username.toLowerCase() === 'admin' ||
+      roles.includes('super_administrator')
+    )
+      throw new AuthorizationError('FORBIDDEN')
+    if (!privileged) {
+      if (
+        actorId === accountId ||
+        roles.some((role) => role === 'administrator' || role === 'purchaser')
+      )
+        throw new AuthorizationError('FORBIDDEN')
+      const scopes = await client.query(
+        `SELECT EXISTS(SELECT 1 FROM user_project_scope_bindings b WHERE b.user_id=$2 AND b.deleted_at IS NULL) AND NOT EXISTS(SELECT 1 FROM user_project_scope_bindings b WHERE b.user_id=$2 AND b.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM user_project_scope_bindings own JOIN user_project_bindings pb ON pb.user_id=own.user_id AND pb.project_id=own.project_id AND pb.deleted_at IS NULL JOIN projects p ON p.id=own.project_id AND p.is_active AND p.deleted_at IS NULL JOIN countries c ON c.id=p.country_id AND c.is_active AND c.deleted_at IS NULL JOIN departments d ON d.id=own.department_id AND d.is_active AND d.deleted_at IS NULL JOIN teams t ON t.id=own.team_id AND t.department_id=d.id AND t.is_active AND t.deleted_at IS NULL WHERE own.user_id=$1 AND own.project_id=b.project_id AND own.department_id=b.department_id AND own.team_id=b.team_id AND own.deleted_at IS NULL)) AS allowed`,
+        [actorId, accountId],
+      )
+      if (!scopes.rows[0]?.allowed) throw new AuthorizationError('FORBIDDEN')
+    }
+    return { target, roles, privileged }
+  }
+
   async listManagedScopes(
     actorId: string,
     accountId: string,

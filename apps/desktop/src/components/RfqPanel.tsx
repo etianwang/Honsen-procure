@@ -1,3 +1,4 @@
+import { currencySchema, type Currency } from '@honsen/shared'
 import { useUiLocale } from '../lib/ui-locale'
 import {
   supplierText,
@@ -25,7 +26,7 @@ export function RfqPanel({
   const { locale } = useUiLocale()
   const t = (key: SupplierMessage) => supplierText(locale, key)
   const [supplierId, setSupplierId] = useState('')
-  const [currency, setCurrency] = useState<'XOF' | 'CNY' | 'USD' | 'EUR'>('XOF')
+  const [currency, setCurrency] = useState<Currency>('XOF')
   const [displayNo, setDisplayNo] = useState('')
   const [message, setMessage] = useState<SupplierNotice | null>(null)
   const [rfqs, setRfqs] = useState<RfqView[]>([])
@@ -120,7 +121,7 @@ export function RfqPanel({
             <Select
               aria-label={t('RFQ 币种')}
               value={currency}
-              options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({ value }))}
+              options={currencySchema.options.map((value) => ({ value }))}
               onChange={(value) => setCurrency(value)}
             />
           </label>

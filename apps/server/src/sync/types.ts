@@ -11,6 +11,7 @@ export type SyncActor = {
   id: string
   roles: readonly Role[]
   installationId: string
+  sessionTokenHash?: string
 }
 
 export type SyncStore = {
@@ -34,6 +35,7 @@ export type SyncStore = {
     installationId: string
     actorId: string
     recoveryReason?: string
+    authority?: { roles: readonly Role[]; sessionTokenHash: string }
   }): Promise<SyncEventResult>
   pullChanges(input: {
     actor: SyncActor

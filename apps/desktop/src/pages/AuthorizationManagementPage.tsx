@@ -1,3 +1,4 @@
+import { ManagedAccountEditor } from '../components/ManagedAccountEditor'
 import { useEffect, useState } from 'react'
 import { ManagedAccountForm } from '../components/ManagedAccountForm'
 import {
@@ -367,6 +368,11 @@ export function AuthorizationManagementPage({
             </form>
             {account && (
               <>
+                <ManagedAccountEditor
+                  key={account.id}
+                  accountId={account.id}
+                  role={role}
+                />
                 <h3>{account.displayName || account.username}</h3>
                 {account.displayName &&
                   account.displayName !== account.username && (

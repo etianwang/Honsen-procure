@@ -221,6 +221,8 @@ fn main() {
             commands::get_authorization_context,
             commands::refresh_authorization,
             commands::find_managed_accounts,
+            commands::get_managed_account_details,
+            commands::update_managed_account,
             commands::create_managed_account,
             commands::change_account_password,
             commands::list_managed_authorizations,
@@ -678,11 +680,23 @@ fn run_native_ab_sync_security_smoke(
     let account_b_status = account_b
         .sync_status(now)
         .map_err(|error| error.to_string())?;
+    // A newly authorized account receives authorization replay and incremental
+    // transport pages. Both may contain this same version; projection must remain unique.
+    let projected: (i64, i64) = observer.query_row(
+        "SELECT COUNT(*), COALESCE(MAX(server_version),0) FROM local_sync_remote_entities WHERE entity_type='purchase_order' AND entity_id=?1",
+        [order_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(|error| error.to_string())?;
+    let other_orders: i64 = observer.query_row(
+        "SELECT COUNT(*) FROM local_sync_remote_entities WHERE entity_type='purchase_order' AND entity_id<>?1",
+        [order_id.to_string()], |row| row.get(0),
+    ).map_err(|error| error.to_string())?;
     if purchaser_session.username != "purchaser"
         || conflicts.len() != 1
         || conflicts[0].entity_id != order_id
         || account_b_status.conflict_count != 1
-        || conflict_pull.applied_count != 1
+        || conflict_pull.applied_count != 2
+        || projected != (1, 1)
+        || other_orders != 0
         || conflict_pull.next_cursor == "0"
     {
         return Err(format!(

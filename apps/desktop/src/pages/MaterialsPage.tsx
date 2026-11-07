@@ -59,6 +59,7 @@ export function MaterialsPage({
   const t = (key: CatalogMessage) => catalogText(locale, key)
   const canEdit = canEditMaterials(role)
   const [query, setQuery] = useState('')
+  const [includeInactive, setIncludeInactive] = useState(false)
   const [materials, setMaterials] = useState<CatalogMaterialView[] | null>(null)
   const [loadedProject, setLoadedProject] = useState<string | undefined>()
   const [error, setError] = useState<string | null>(null)
@@ -94,7 +95,7 @@ export function MaterialsPage({
       }
     }
     api
-      .searchCatalog(query, projectId)
+      .searchCatalog(query, projectId, canEdit && includeInactive)
       .then((result) => {
         if (!isCurrent) return
         setError(null)
@@ -105,11 +106,12 @@ export function MaterialsPage({
     return () => {
       isCurrent = false
     }
-  }, [api, projectId, query, reloadKey])
+  }, [api, projectId, query, reloadKey, canEdit, includeInactive])
 
   useEffect(() => {
     if (!editor) return
     const material = editor === 'new' ? undefined : editor
+    form.resetFields()
     form.setFieldsValue(
       material
         ? {
@@ -123,7 +125,7 @@ export function MaterialsPage({
             specification: material.specification,
             unit: material.unit,
             notes: material.notes ?? undefined,
-            isActive: true,
+            isActive: material.isActive ?? true,
           }
         : { isActive: true },
     )
@@ -147,6 +149,7 @@ export function MaterialsPage({
             email: supplier.email ?? undefined,
             paymentTerms: supplier.paymentTerms ?? undefined,
             deliveryLeadTime: supplier.deliveryLeadTime ?? undefined,
+            notes: supplier.notes ?? undefined,
             isPreferred: supplier.isPreferred,
             isBlacklisted: supplier.isBlacklisted,
             isActive: supplier.isActive,
@@ -178,6 +181,7 @@ export function MaterialsPage({
     const existing = editor === 'new' ? undefined : editor
     const material: Material = {
       id: existing?.id ?? crypto.randomUUID(),
+      categoryId: existing?.categoryId ?? null,
       sku: optionalText(values.sku),
       nameZh: values.nameZh.trim(),
       nameEn: optionalText(values.nameEn),
@@ -352,6 +356,16 @@ export function MaterialsPage({
         <Button disabled icon={<SlidersHorizontal size={16} />}>
           {t('筛选')}
         </Button>
+        {canEdit && (
+          <label>
+            <Switch
+              checked={includeInactive}
+              onChange={setIncludeInactive}
+              aria-label={t('显示停用材料')}
+            />{' '}
+            {t('显示停用材料')}
+          </label>
+        )}
         {canEdit && (
           <Button onClick={openSupplierManager}>{t('供应商管理')}</Button>
         )}
@@ -668,6 +682,7 @@ function CatalogTable({
                   <div className="material-name">
                     <MaterialThumbnail api={api} materialId={material.id} />
                     <strong>{material.nameZh}</strong>
+                    {material.isActive === false && <span>{t('停用')}</span>}
                   </div>
                 </td>
                 <td>
@@ -714,7 +729,11 @@ function CatalogTable({
                       <Button type="link" onClick={() => onEdit(material)}>
                         {t('编辑材料')}
                       </Button>
-                      <Button type="link" onClick={() => onAddPrice(material)}>
+                      <Button
+                        type="link"
+                        disabled={material.isActive === false}
+                        onClick={() => onAddPrice(material)}
+                      >
                         {t('维护报价')}
                       </Button>
                     </>

@@ -46,7 +46,7 @@ const rfqPayloadSchema = z.strictObject({
   }),
   projectId: uuidSchema,
   displayNo: z.string().trim().min(1),
-  currency: z.enum(['XOF', 'CNY', 'USD', 'EUR']),
+  currency: currencySchema,
   status: z.enum(['draft', 'sent', 'closed']),
   items: z
     .array(
@@ -156,6 +156,9 @@ export class SyncService {
           event,
           installationId: actor.installationId,
           actorId: actor.id,
+          authority: actor.sessionTokenHash
+            ? { roles: actor.roles, sessionTokenHash: actor.sessionTokenHash }
+            : undefined,
         }),
       )
       results.push(result)
@@ -208,6 +211,9 @@ export class SyncService {
         actorId: actor.id,
         installationId: actor.installationId,
         recoveryReason: request.reason,
+        authority: actor.sessionTokenHash
+          ? { roles: actor.roles, sessionTokenHash: actor.sessionTokenHash }
+          : undefined,
         event: {
           eventId: request.requestId,
           entityType: request.entityType,

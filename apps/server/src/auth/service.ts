@@ -93,7 +93,7 @@ export class AuthService {
     if (!account || !account.isEnabled) {
       throw new AuthenticationError('INVALID_LOGIN')
     }
-    return account
+    return { ...account, sessionTokenHash: hashToken(accessToken) }
   }
 }
 

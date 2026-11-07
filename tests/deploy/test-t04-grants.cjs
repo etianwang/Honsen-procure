@@ -121,6 +121,12 @@ async function main() {
     )
     result = run(['deploy/linux/grant-api.cjs'])
     assert.equal(result.status, 0, result.stderr)
+    const rolePrivileges = await db.query(
+      "SELECT has_table_privilege($1, 'public.user_roles', 'DELETE') AS roles_delete, has_table_privilege($1, 'public.users', 'DELETE') AS users_delete",
+      [role],
+    )
+    assert.equal(rolePrivileges.rows[0].roles_delete, true)
+    assert.equal(rolePrivileges.rows[0].users_delete, false)
     const fn = await db.query(
       "SELECT prosecdef, proconfig, pg_get_userbyid(proowner) AS owner, EXISTS (SELECT 1 FROM aclexplode(COALESCE(proacl, acldefault('f', proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE') AS public_execute FROM pg_proc WHERE oid='public.guard_category_business_code()'::regprocedure",
     )

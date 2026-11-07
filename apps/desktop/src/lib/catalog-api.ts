@@ -22,6 +22,8 @@ export type CatalogPriceView = {
 
 export type CatalogMaterialView = {
   id: string
+  isActive?: boolean
+  categoryId?: string | null
   sku: string | null
   nameZh: string
   nameFr: string | null
@@ -50,6 +52,7 @@ export type SupplierView = {
   email: string | null
   paymentTerms: string | null
   deliveryLeadTime: string | null
+  notes?: string | null
   isPreferred: boolean
   isBlacklisted: boolean
   isActive: boolean
@@ -90,6 +93,7 @@ export type CatalogApi = {
   searchCatalog(
     query: string,
     projectId?: string,
+    includeInactive?: boolean,
   ): Promise<CatalogMaterialView[]>
   listCatalogPrices(
     materialId: string,
@@ -123,10 +127,11 @@ function tauriInvoke(): TauriInvoke {
 }
 
 export const tauriCatalogApi: CatalogApi = {
-  searchCatalog: (query, projectId) =>
+  searchCatalog: (query, projectId, includeInactive = false) =>
     tauriInvoke()<CatalogMaterialView[]>('search_catalog', {
       query,
       projectId,
+      includeInactive,
     }),
   listCatalogPrices: (
     materialId,

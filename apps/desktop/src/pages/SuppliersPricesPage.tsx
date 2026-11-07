@@ -225,6 +225,7 @@ export function SuppliersPricesPage({
             email: supplierEditor.email ?? undefined,
             paymentTerms: supplierEditor.paymentTerms ?? undefined,
             deliveryLeadTime: supplierEditor.deliveryLeadTime ?? undefined,
+            notes: supplierEditor.notes ?? undefined,
           },
     )
   }, [supplierEditor, supplierForm])
@@ -464,6 +465,7 @@ export function SuppliersPricesPage({
                   [c('邮箱'), selectedSupplier.email],
                   [c('付款条件'), selectedSupplier.paymentTerms],
                   [c('交货期'), selectedSupplier.deliveryLeadTime],
+                  [c('备注'), selectedSupplier.notes],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <dt>{label}</dt>

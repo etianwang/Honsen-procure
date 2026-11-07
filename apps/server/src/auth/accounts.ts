@@ -5,6 +5,7 @@ import type { Pool } from 'pg'
 import { z } from 'zod'
 import { newUsernameSchema, accountDisplayNameSchema } from '@honsen/shared'
 import { AuthService, AuthenticationError, hashToken } from './service.js'
+import { registerManagedAccountLifecycle } from './account-lifecycle.js'
 
 const scopeSchema = z
   .object({ projectId: z.uuid(), departmentId: z.uuid(), teamId: z.uuid() })
@@ -55,6 +56,7 @@ export function registerAccounts(
       throw error
     }
   })
+  registerManagedAccountLifecycle(app, auth, pool)
   app.route({
     method: ['GET', 'POST'],
     url: '/api/accounts',
@@ -96,6 +98,9 @@ export function registerAccounts(
         const client = await pool.connect()
         try {
           await client.query('BEGIN')
+          await client.query(
+            "SELECT pg_advisory_xact_lock(hashtextextended('honsen:super-admin-protection',0))",
+          )
           const current = await client.query<{ roles: string[] }>(
             `SELECT ARRAY(SELECT role FROM user_roles WHERE user_id=u.id) AS roles FROM users u WHERE u.id=$1 AND u.is_enabled AND u.deleted_at IS NULL AND NOT u.requires_password_change AND EXISTS(SELECT 1 FROM account_sessions s WHERE s.user_id=u.id AND s.token_hash=$2 AND s.revoked_at IS NULL AND s.expires_at>NOW()) FOR UPDATE`,
             [actor.id, hashToken(token)],

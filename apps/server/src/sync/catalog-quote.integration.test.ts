@@ -84,6 +84,39 @@ const push = (
   })
 
 describe.skipIf(!pool)('catalog quote push', () => {
+  it('preserves supplier notes on legacy writes and clears only explicit null without rewriting orders', async () => {
+    const id = randomUUID()
+    const base = supplierFixture(id, country)
+    const orders = async () =>
+      (
+        await pool!.query(
+          "SELECT entity_id,payload_json FROM sync_entities WHERE entity_type='purchase_order' ORDER BY entity_id",
+        )
+      ).rows
+    const historical = await orders()
+    expect(
+      (await push('supplier', id, { ...base, notes: '合成备注' })).status,
+    ).toBe('accepted')
+    expect((await push('supplier', id, base, 1)).status).toBe('accepted')
+    const read = async () =>
+      (
+        await pool!.query(
+          "SELECT payload_json FROM sync_entities WHERE entity_type='supplier' AND entity_id=$1",
+          [id],
+        )
+      ).rows[0]!.payload_json
+    expect((await read()).notes).toBe('合成备注')
+    expect(
+      (await push('supplier', id, { ...base, notes: '界'.repeat(334) }, 2))
+        .status,
+    ).toBe('validation_error')
+    expect((await read()).notes).toBe('合成备注')
+    expect(
+      (await push('supplier', id, { ...base, notes: null }, 2)).status,
+    ).toBe('accepted')
+    expect((await read()).notes).toBeNull()
+    expect(await orders()).toEqual(historical)
+  })
   beforeAll(async () => {
     await runMigrations(pool!)
     initialCursor = (
