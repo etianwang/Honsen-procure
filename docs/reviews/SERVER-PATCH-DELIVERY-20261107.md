@@ -4,6 +4,8 @@ Scope: existing T15 server deployment reliability, explicitly requested minimal 
 
 Current conclusion: implementation, real artifact checks and independent core business upgrade verification PASS; current-server installation remains BLOCKED pending real BASE evidence. Dedicated live COS verification is NOT RUN. No full V1/Alpha gate closes.
 
+Final delivery TARGET is green-CI `930807729d2fe48f9a4beedf093c109b08eeaa3b`, using the actual downloaded GitHub Actions Linux ZIP. The earlier6f evidence below is retained history; the final930 artifact and its separate actual CLI runtime proof are recorded in the last section.
+
 ## Implementation
 
 Full Linux build pins an exact 40-character source SHA. The existing quality workflow emits a Baota ZIP only after its original gates. Patch comparison uses verified BASE/TARGET runtime artifacts, including dependency files, SQL, metadata, type, mode, size and SHA-256; it does not use a TypeScript Git diff.
@@ -32,7 +34,7 @@ Independent Ubuntu24.04.5/Node24.22.1 focused core/helpers27PASS0SKIP; wrapper r
 
 627 actual archive verification passed after the checksum repair, but real CLI prepare failed API_RUNNING: its own --live argv was interpreted as an application process. The smallest repair excludes only process.pid; the port3000 check and every other Node process remain enforced. Two real Linux CLI regressions verify self-only exclusion and another Node live-argument denial. Independent final Ubuntu core/tools/wrapper/CLI30PASS0SKIP; Windows skips remain explicit. The final runtime harness now calls prepare/verify-target/activate from the actual extracted Patch tools, not repository functions; its database is honsen_procure only inside a newly owned disposable private Compose instance, with successful-create ownership flags before cleanup. No remote database is used. Final pinned artifacts and results follow.
 
-## Final exact artifacts and actual runtime
+## Earlier 6f exact artifacts and actual runtime
 
 | Item                   | Value                                                                                    |
 | ---------------------- | ---------------------------------------------------------------------------------------- |
@@ -58,3 +60,25 @@ Logs: `.cache/server-patch-runtime-6f3d446-builder/runtime.log`, `.cache/server-
 Initial6f CI42362638282 passed42 release cases and failed2 real CLI cases because the ordinary GitHub runner cannot inspect all global/proc entries. The production guard correctly refuses unreadable processes. CI now runs release tools under explicit maintenance visibility, matching the operator requirement; independent Ubuntu root-context44PASS validates it without weakening the tool. No production change followed6f.
 
 Subsequent CI42363061967 encountered an unrelated existing protected-admin fixture teardown race: pg-pool.end may resolve before backend sockets close, and DROP DATABASE WITH FORCE can emit unhandled57P01. A test-only repair waits up to5seconds for only the owned UUID database to drain, then ordinary DROP; timeout fails instead of force disconnecting. Independent focused PostgreSQL6PASS plus server format/type/lint/build PASS. No error swallowing, SQL migration change, production-account change or artifact rebuild. The original failure remains evidence. The next quality result is recorded separately; do not label those failed runs green. Only workflow, excluded test source and progress records differ from exact6f deployment/runtime tools.
+
+## Final green-CI GitHub artifact and delivery
+
+[Quality run42363732850](https://github.com/etianwang/Honsen-procure/actions/runs/42363732850) SUCCESS for source930807729d2fe48f9a4beedf093c109b08eeaa3b. Original formatting/lint/typecheck/unit/PostgreSQL/build, all44 release tools (maintenance visibility), deployment grants/Linux integrations, all110 renderer tests and the new Baota ZIP build/upload passed. Artifact13570439763 is named baota-server-930807729d2fe48f9a4beedf093c109b08eeaa3b. It was actually downloaded; inner ZIP SHA and Manifest were verified, not inferred from a job name. Compared with tested6f, every runtime file byte/size/type/mode and directory mode is identical except build-manifest.json/SHA256SUMS provenance. This explicit unchanged-boundary comparison is evidence, not an automatic transfer of another tree's tests.
+
+| Final item             | Identity                                                                                 |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| BASE                   | 569fac83ceb3f8f44446c34a2640b4e812dc689b, still NOT a confirmed remote version           |
+| TARGET                 | 930807729d2fe48f9a4beedf093c109b08eeaa3b                                                 |
+| TARGET Manifest SHA256 | f59a9892e11aa50f085cee493361cd0cce8f0911d9ea3c71bdd8bce8696e08b9                         |
+| GitHub full ZIP        | 3,558,104 bytes; SHA256 adf46f5a0c109a87910957d98a6e1e47a2d08516c00bc7455dfc7d060a24bc4d |
+| Final Patch ZIP        | 607,095 bytes; SHA256 e8a3ecc09933a5988d8bc417abd01a1f7300857f81a09aa18d1a4d6a9c6590a9   |
+| Diff JSON SHA256       | ca749665a907e4eef50252695134654021280b9aee710dcfe294e962908c530d                         |
+| Difference             | 4 added,6 modified,0 deleted,2591 unchanged; no new SQL; about83% lower transfer         |
+
+Final deliverables are `.cache/server-patch-delivery-9308077/`: the exact full and Patch ZIPs, complete .zip.diff.json, SHA256SUMS and Chinese operator instructions. Older6f/failed development artifacts remain evidence and are not substituted for this pair.
+
+Independent reviewer built the final Patch from the actual GitHub full ZIP (no local rebuild), guard-extracted it, verified every internal sum and real CLI verify-base/prepare/verify-target. A separate fresh owned Ubuntu24.04/Node24.22.1/PostgreSQL16.15 run then used the actual930 ZIP tools for full same-database CLI prepare/activate and repeated all core HTTPS/account/HPA/session/history/idempotency/immutability/receiving checks: PASS. Log `.cache/server-patch-runtime-9308077-C-independent/runtime.log`; artifact proof `.cache/server-patch930-artifact-verification.log`. New-migration application was not needed: the existing runner verified the unchanged recorded SQL; approval/failure guards are covered by targeted tests. This does not prove arbitrary future SQL compatibility.
+
+Owned final Compose/runtime/credentials/dump/tar/TLS/keeper resources were removed. An ownership cleanup refusal on one native temporary directory was retained; only that independently verified owned test directory was returned to its existing normal user before removal, without touching other resources. Git worktree was clean before these final records-only edits. No server SSH command completed, no remote upgrade/PM2/DB/config change, no Release/Toolbox publication.
+
+Final disposition: local mechanism and core artifact workflow VERIFIED; current remote installation BLOCKED by missing actual BASE evidence, and the requested live COS transfer/SHA case remains NOT RUN. Only the user can provide the current terminal's non-sensitive read-only receipt; passwords are neither needed nor requested. These holds do not erase the local PASS and do prevent a claim of full remote/Alpha readiness. The final containing commit changes records only; application/deployment/test source is unchanged from green930, so no unrelated application rerun is required.
