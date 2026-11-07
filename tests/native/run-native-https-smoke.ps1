@@ -285,7 +285,10 @@ try {
   }
   if ($Mode -in @('hpa-formal-pull', 'spo-formal-pull')) {
     $smoke = Get-Content -Raw $result | ConvertFrom-Json
-    if ($smoke.mode -ne $Mode -or $smoke.result -ne 'PASS' -or !$smoke.restartPreserved -or !$smoke.replayPreserved -or $smoke.fieldsMatched -ne 12 -or @($smoke.exePids).Count -ne 3 -or $smoke.installations[0] -eq $smoke.installations[1]) { throw "native HPA result invalid: $result" }
+    $catalogRoundtrip = $env:HONSEN_NATIVE_CATALOG_ROUNDTRIP -eq '1' -and $Mode -eq 'spo-formal-pull'
+    $expectedLaunches = if ($catalogRoundtrip) { 4 } else { 3 }
+    if ($catalogRoundtrip -and (@($smoke.catalog.results).Count -ne 9 -or $smoke.catalog.businessWrites -ne 'PRODUCTION_TAURI_IPC_ONLY' -or $smoke.catalog.databaseEvidence -ne 'READ_ONLY_SQL')) { throw "native catalog proof incomplete: $result" }
+    if ($smoke.mode -ne $Mode -or $smoke.result -ne 'PASS' -or !$smoke.restartPreserved -or !$smoke.replayPreserved -or $smoke.fieldsMatched -ne 12 -or @($smoke.exePids).Count -ne $expectedLaunches -or $smoke.installations[0] -eq $smoke.installations[1]) { throw "native HPA result invalid: $result" }
     if ($Mode -eq 'spo-formal-pull' -and (!$smoke.spoConverged -or !$smoke.draftUnissued -or !$smoke.spoFrozenAfterCatalogAndRestart)) { throw "native SPO proof incomplete: $result" }
     Write-Output "PASS native $Mode issue/Push/Pull/restart/replay: $result"
   } elseif ($Mode -eq 'g2-formal-pull') {
