@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { setTimeout as delay } from 'node:timers/promises'
 import argon2 from 'argon2'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -75,10 +76,28 @@ describe.skipIf(!control)('permanent administrator PostgreSQL safety', () => {
     await runtime?.end()
     await pool?.end()
     if (control) {
-      await control.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`)
-      await control.query(`DROP ROLE IF EXISTS "${role}"`)
-      await control.query(`DROP ROLE IF EXISTS "${owner}"`)
-      await control.end()
+      try {
+        // pg-pool can finish end() before its clients' backend sockets close.
+        // Never terminate those sockets: wait only for this fixture's database.
+        const deadline = Date.now() + 5000
+        let remaining: number
+        do {
+          const result = await control.query<{ count: number }>(
+            'SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1',
+            [database],
+          )
+          remaining = result.rows[0]!.count
+          if (remaining === 0) break
+          await delay(25)
+        } while (Date.now() < deadline)
+        if (remaining !== 0)
+          throw new Error('TEST_DATABASE_CONNECTIONS_NOT_DRAINED')
+        await control.query(`DROP DATABASE IF EXISTS "${database}"`)
+        await control.query(`DROP ROLE IF EXISTS "${role}"`)
+        await control.query(`DROP ROLE IF EXISTS "${owner}"`)
+      } finally {
+        await control.end()
+      }
     }
   })
   it('denies rename, disable, deletion, ID change and downgrade; permits normal password hashing', async () => {
