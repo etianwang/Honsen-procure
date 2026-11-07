@@ -203,6 +203,7 @@ function App() {
   const [session, setSession] = useState<{
     user_id: string
     username: string
+    display_name?: string | null
     roles: string[]
     password_change_recommended?: boolean
     requires_password_change: boolean
@@ -468,6 +469,7 @@ function App() {
           }
           role={session ? role : 'purchaser'}
           username={session?.username}
+          displayName={session?.display_name}
           onNavigate={setPage}
           authorizationContexts={session ? authorizationContexts : undefined}
           selectedAuthorizationContext={

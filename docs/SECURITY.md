@@ -32,3 +32,7 @@ The React renderer is untrusted. It may request actions but it may not decide au
 ## Security tests
 
 Verify that an unauthenticated renderer cannot invoke privileged mutations; wrong-password attempts are rate-limited; a disabled account or revoked session cannot push/pull; no API payload exposes a password hash or credential; SQL injection-shaped inputs are treated as data; and logs/fixtures contain no secrets or real supplier contacts.
+
+## 2026-11-07 approved account identity rules
+
+New login usernames contain only ASCII A-Z/a-z/0-9, with a maximum of100characters. Store their original spelling, but compare and enforce global uniqueness using the same ASCII case-fold expression; database uniqueness includes inactive and soft-deleted users. Display names are separate Unicode profile metadata. New account-management requests require a display name; bootstrap and legacy profiles may retain a null display name. Legacy accounts retain their exact username, UUID, password hash, roles and history, and may still authenticate using their prior non-ASCII username. No automatic rename, merge, password reset or name reuse is permitted. A migration collision stops atomically for authorized review rather than discarding an account. The protected admin remains permanent; business roles/scopes are not granted by login normalization.

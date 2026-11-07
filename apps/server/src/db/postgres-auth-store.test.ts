@@ -73,7 +73,7 @@ describe.skipIf(!pool)('PostgreSQL authentication store', () => {
 
   it('provisions an initial super administrator on the migrated store', async () => {
     const suffix = randomUUID()
-    const username = `admin-${suffix}`
+    const username = `admin${suffix.replaceAll('-', '')}`
     const businessCode = `ADMIN-${suffix}`
     const script = fileURLToPath(
       new URL('../scripts/provision-super-admin.ts', import.meta.url),

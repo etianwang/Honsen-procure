@@ -28,6 +28,8 @@
 
 ### users and master data
 
+New login usernames contain ASCII letters/digits only, are globally unique under ASCII case folding, and preserve their original spelling. `display_name TEXT nullable` carries the separate Unicode name; management creation requires it, while legacy/bootstrap records may omit it. Existing non-ASCII usernames remain valid for authentication and are never renamed. The protected `admin` identity remains permanent. Case-collision migrations stop without changing existing identities.
+
 `users`: UUID, immutable business code, username, password hash, employee photo reference, `mobile_tail_last4` nullable, `totp_enabled BOOLEAN`, `ui_locale ENUM(zh-CN,fr-FR,en-US)`, enabled state, failed-attempt/lock fields, first-login completion, timestamps. Roles are many-to-many and additive: `super_administrator`, `administrator`, `purchaser`, `engineer`, `viewer`. User-project, user-department and user-team bindings are versioned/soft-deleted. At least two enabled super administrators must remain. Mobile tail is a display-only recognition cue, never an authentication factor. TOTP secrets are encrypted and kept out of ordinary SQLite data/API responses; an enabled account requires its current code on every login.
 
 `security_policy_audit`: UUID, policy key, old value, new value, mandatory reason, actor ID and timestamp. `allow_self_approval` defaults to false and may be changed only by a super administrator. Approved orders retain `is_self_approved` and approver identity in their immutable approval/audit snapshot.

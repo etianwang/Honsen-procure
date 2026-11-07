@@ -1560,3 +1560,13 @@
     padding: 18px;
   }
 }
+.login-account-hint {
+  font-size: 12px;
+  color: #647e6e;
+  line-height: 1.6;
+  margin: 6px 0 14px;
+}
+.signed-in-username {
+  max-width: min(100%, 22rem);
+  overflow-wrap: anywhere;
+}

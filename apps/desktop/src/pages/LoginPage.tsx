@@ -7,6 +7,7 @@ import { ChevronDown, Globe, LockKeyhole, UserRound } from 'lucide-react'
 type Session = {
   user_id: string
   username: string
+  display_name?: string | null
   roles: string[]
   password_change_recommended?: boolean
   requires_password_change: boolean
@@ -176,6 +177,11 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
           prefix={<UserRound size={16} aria-hidden="true" />}
           autoComplete="username"
         />
+        <p className="login-account-hint">
+          {t(
+            '请使用用户名登录，英文字母 A–Z 不区分大小写；姓名不是登录账号。已有非英文用户名仍可使用。',
+          )}
+        </p>
         <label htmlFor="password">{t('密码')}</label>
         <Input.Password
           id="password"
@@ -232,8 +238,17 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
               },
             })
               .then((authenticated) => onLogin(authenticated, 'offline'))
-              .catch(async () => {
-                setMessage('账号、密码或验证码无效。')
+              .catch(async (error: unknown) => {
+                const collision =
+                  typeof error === 'object' &&
+                  error !== null &&
+                  'code' in error &&
+                  error.code === 'account_name_collision'
+                setMessage(
+                  collision
+                    ? '本地账号名称存在大小写冲突，请联系管理员处理；账号与历史数据已保留。'
+                    : '账号、密码或验证码无效。',
+                )
                 await refreshCaptcha(true)
               })
               .finally(() => setSubmitting(false))
@@ -275,19 +290,21 @@ export function LoginPage({ onLogin, onPreview }: LoginPageProps) {
                     ? error.code
                     : undefined
                 setMessage(
-                  code === 'invalid_credentials'
-                    ? '账号、密码或验证码无效。'
-                    : code === 'credential_storage_error'
-                      ? '无法安全保存登录凭据，请检查 Windows 凭据存储。'
-                      : code === 'local_storage_error'
-                        ? '本地数据库不可用，请检查数据目录权限。'
-                        : code === 'account_locked'
-                          ? '账号已锁定，请稍后重试或联系管理员。'
-                          : code === 'invalid_input'
-                            ? '登录输入格式无效，请检查账号与验证码。'
-                            : code === 'sync_transport_error'
-                              ? '无法完成 HTTPS 登录，请检查网络或服务器响应。'
-                              : '在线登录失败，请检查连接并重新获取验证码。',
+                  code === 'account_name_collision'
+                    ? '本地账号名称存在大小写冲突，请联系管理员处理；账号与历史数据已保留。'
+                    : code === 'invalid_credentials'
+                      ? '账号、密码或验证码无效。'
+                      : code === 'credential_storage_error'
+                        ? '无法安全保存登录凭据，请检查 Windows 凭据存储。'
+                        : code === 'local_storage_error'
+                          ? '本地数据库不可用，请检查数据目录权限。'
+                          : code === 'account_locked'
+                            ? '账号已锁定，请稍后重试或联系管理员。'
+                            : code === 'invalid_input'
+                              ? '登录输入格式无效，请检查账号与验证码。'
+                              : code === 'sync_transport_error'
+                                ? '无法完成 HTTPS 登录，请检查网络或服务器响应。'
+                                : '在线登录失败，请检查连接并重新获取验证码。',
                 )
                 await refreshCaptcha(true)
               })

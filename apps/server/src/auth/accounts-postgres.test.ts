@@ -89,11 +89,12 @@ describe.skipIf(!pool)(
       await pool!.end()
     })
     it('creates hashed first-login account atomically and never resets a duplicate', async () => {
-      const username = 'synthetic-' + randomUUID(),
+      const username = 'synthetic' + randomUUID().replaceAll('-', ''),
         password = randomUUID()
       const payload = {
         username,
         temporaryPassword: password,
+        displayName: '合成姓名',
         roles: ['administrator', 'purchaser'],
         uiLocale: 'zh-CN',
         employeePhotoKey: 'builtin:default-avatar:v1',
@@ -151,6 +152,26 @@ describe.skipIf(!pool)(
           .statusCode,
       ).toBe(401)
       const headers = { authorization: `Bearer ${token}` }
+      const concurrentName = 'Case' + randomUUID().replaceAll('-', '')
+      const concurrent = await Promise.all(
+        [concurrentName, concurrentName.toUpperCase()].map((username) =>
+          app.inject({
+            method: 'POST',
+            url: '/api/accounts',
+            headers,
+            payload: { ...payload, username },
+          }),
+        ),
+      )
+      expect(concurrent.map((r) => r.statusCode).sort()).toEqual([201, 409])
+      expect(
+        (
+          await pool!.query(
+            "SELECT id FROM users WHERE translate(username,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=$1",
+            [concurrentName.toLowerCase()],
+          )
+        ).rowCount,
+      ).toBe(1)
       const response = await app.inject({
         method: 'POST',
         url: '/api/accounts',
@@ -174,7 +195,7 @@ describe.skipIf(!pool)(
           url: '/api/auth/login',
           headers: { 'x-installation-id': randomUUID() },
           payload: {
-            username,
+            username: username.toUpperCase(),
             password: secret,
             captchaId: captcha.id,
             captchaAnswer: String(numbers[0] + numbers[1]),
@@ -266,7 +287,7 @@ describe.skipIf(!pool)(
             headers,
             payload: {
               ...payload,
-              username: randomUUID(),
+              username: randomUUID().replaceAll('-', ''),
               scope: { ...payload.scope, teamId: randomUUID() },
             },
           })
@@ -274,14 +295,25 @@ describe.skipIf(!pool)(
       ).toBe(403)
     })
     it('enforces live administrator scope and mandatory password change', async () => {
+      const actor = randomUUID(),
+        token = randomUUID()
       await pool!.query(
-        "UPDATE user_roles SET role='administrator' WHERE user_id=$1",
+        "INSERT INTO users(id,business_code,username,password_hash,ui_locale,requires_password_change) VALUES($1::uuid,$1::text,$1::text,'fixture','zh-CN',FALSE)",
         [actor],
+      )
+      await pool!.query(
+        "INSERT INTO user_roles(user_id,role) VALUES($1,'administrator')",
+        [actor],
+      )
+      await pool!.query(
+        "INSERT INTO account_sessions(id,user_id,token_hash,installation_id,expires_at) VALUES($1,$2,$3,$4,NOW()+interval '1 hour')",
+        [randomUUID(), actor, hashToken(token), randomUUID()],
       )
       const headers = { authorization: `Bearer ${token}` }
       const payload = {
-        username: randomUUID(),
+        username: randomUUID().replaceAll('-', ''),
         temporaryPassword: randomUUID(),
+        displayName: '合成姓名',
         roles: ['engineer'],
         uiLocale: 'zh-CN',
         employeePhotoKey: 'builtin:default-avatar:v1',
@@ -338,7 +370,7 @@ describe.skipIf(!pool)(
         'UPDATE user_project_scope_bindings SET deleted_at=NOW() WHERE user_id=$1',
         [actor],
       )
-      const revokedUsername = randomUUID()
+      const revokedUsername = randomUUID().replaceAll('-', '')
       expect(
         (
           await app.inject({
@@ -378,6 +410,30 @@ describe.skipIf(!pool)(
           })
         ).statusCode,
       ).toBe(403)
+    })
+    it('retains legacy Unicode accounts and their password hashes under casefold lookup', async () => {
+      const id = randomUUID(),
+        username = '测试' + randomUUID(),
+        password = randomUUID()
+      const hash = await argon2.hash(password)
+      await pool!.query(
+        "INSERT INTO users(id,business_code,username,password_hash,ui_locale) VALUES($1::uuid,$1::text,$2,$3,'zh-CN')",
+        [id, username, hash],
+      )
+      const account = await new PostgresAuthStore(
+        runtime,
+      ).findAccountByUsername(username)
+      expect(account?.id).toBe(id)
+      expect(account?.displayName).toBe(username)
+      expect(await argon2.verify(account!.passwordHash, password)).toBe(true)
+      expect(
+        (
+          await pool!.query(
+            'SELECT password_hash,username FROM users WHERE id=$1',
+            [id],
+          )
+        ).rows[0],
+      ).toEqual({ password_hash: hash, username })
     })
   },
 )

@@ -502,3 +502,9 @@ Existing T04 UI scope: user-selected category navigation plus tables, retaining 
 ### 2026-11-06 suppliers and prices desktop integration
 
 Existing T03/T04/T10 local slice: independent supplier/quote UI and trusted existing-SQLite history read, unchanged server/shared/push-pull/schema. [Scoped evidence and original supplier-notes contract gap](reviews/SUPPLIERS-PRICES-V1-20261106.md). Local checks pass; real remote two-client and original Alpha/installed/security/Formal/Toolbox gates remain open. No task dependency or parent checkbox is changed.
+
+### 2026-11-07 account identity and provisioning repair
+
+Existing T02/T04/T10 class B identity slice: ASCII-only new usernames, globally case-insensitive uniqueness preserving spelling, separate Unicode display name, legacy identity and permanent admin protection. Exact delivered 015 restored; additive PostgreSQL016/SQLite0063, no business sync schema change. Server232PASS/3liveCOS SKIP, delivered raw-ZIP SQL upgrade2PASS, shared29PASS, independent desktop identity/failure10PASS. Desktop30unit/type/lint/build PASS; renderer account/login22 are mocked proof only. Final runtime package and desktop checks are tracked in docs/reviews/ACCOUNT-IDENTITY-V1-20261107.md. Known statement/COMMIT/vault failures fail closed without deleting business/outbox. No remote deployment/account creation or native multi-client acceptance claimed.
+
+BLOCKER: tested deployment and protected admin UI login, real target account creation/roles/scopes/logins and remote multi-client acceptance; Alpha remains ALPHA_INTERNAL_TEST_BLOCKED. DEFERRED: conditional installer/prerelease and all original full release gates. WARNING: existing build/effect warnings and opt-in/ignored suites. This is a task-branch checkpoint; exact source/package SHA and final dirty state are recorded after validation. No parent checkbox or dependency is changed.

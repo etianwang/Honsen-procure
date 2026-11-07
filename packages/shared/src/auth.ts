@@ -1,6 +1,13 @@
 import { z } from 'zod'
 import { roleSchema, uiLocaleSchema, uuidSchema } from './contracts.js'
 
+export const newUsernameSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z0-9]+$/)
+export const accountDisplayNameSchema = z.string().trim().min(1).max(100)
+
 export const loginRequestSchema = z.object({
   username: z.string().trim().min(1).max(128),
   password: z.string().min(1).max(1024),
@@ -18,6 +25,7 @@ export const loginResponseSchema = z.object({
   user: z.object({
     id: uuidSchema,
     username: z.string(),
+    displayName: z.string().nullable().optional(),
     roles: z.array(roleSchema),
     locale: uiLocaleSchema,
     requiresPasswordChange: z.boolean(),

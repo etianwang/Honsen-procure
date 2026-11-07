@@ -2,7 +2,7 @@
 
 适用：Ubuntu24.04、宝塔、Node24.22.1、PostgreSQL16.15；目录 `/www/wwwroot/api-pr/v1/`；公网Base URL `https://api-pr.honsen.africa/v1`；Cloudflare Flexible，源站HTTP。数据库 `honsen_procure`，维护角色 `honsen_procure`，运行角色 `honsen_api`。用户当前两个角色已经存在，第2步只核对，不重复创建。
 
-仓库唯一编辑源为 `README-DEPLOY.md`；`deploy/baota/README.zh-CN.md` 是字节一致的受检镜像，ZIP内两个旧名称也与本文件一致。不要从旧ZIP拼接步骤。软件版本、源码SHA、17份迁移及Seed摘要在 `build-manifest.json`；软件development、活动API v1、数据库迁移版本不是同一版本号。
+仓库唯一编辑源为 `README-DEPLOY.md`；`deploy/baota/README.zh-CN.md` 是字节一致的受检镜像，ZIP内两个旧名称也与本文件一致。不要从旧ZIP拼接步骤。软件版本、源码SHA、19份迁移及Seed摘要在 `build-manifest.json`；软件development、活动API v1、数据库迁移版本不是同一版本号。
 
 以下Linux命令使用root和Bash。在同一个宝塔Linux终端依次完成第1～6步，保留该终端到第7步；不要启用 `set -x`、输出连接串、截图密码或把维护密码放入宝塔Node环境。任何标注“停止”的失败都不得继续。准备工作、Migration、Seed、授权全部在Node启动之前。没有生产Docker或npm install步骤，包已包含Linux依赖。
 
@@ -45,7 +45,7 @@ printf '%s\n' "$NODE_BIN" > .deploy-node-path
 "$NODE_BIN" -e "const m=require('./build-manifest.json');console.log({source:m.sourceSha,api:m.apiVersion,migrations:m.migrations.length,latest:m.latestMigration})"
 ```
 
-**成功看到：** ZIP校验OK、文件校验退出0，源码SHA，API为v1，迁移数量17/最新014；根目录直接有apps、deploy、node_modules，没有多套一层同名目录。
+**成功看到：** ZIP校验OK、文件校验退出0，源码SHA，API为v1，迁移数量19/最新016；根目录直接有apps、deploy、node_modules，没有多套一层同名目录。
 
 **失败必须停止：** 哈希不符、文件缺失、版本不符、旧服务未停都不能进入第2步。不执行覆盖解压、清库或删除旧ZIP。
 
@@ -115,13 +115,13 @@ JS
 "$PSQL" -X -v ON_ERROR_STOP=1 <<'SQL'
 SELECT name,checksum,applied_at FROM schema_migrations ORDER BY name;
 DO $$ BEGIN
- IF (SELECT count(*) FROM schema_migrations) <> 17 THEN RAISE EXCEPTION 'expected 17 migrations'; END IF;
+ IF (SELECT count(*) FROM schema_migrations) <> 19 THEN RAISE EXCEPTION 'expected 19 migrations'; END IF;
  IF EXISTS(SELECT 1 FROM schema_migrations WHERE checksum IS NULL OR length(checksum)<>64) THEN RAISE EXCEPTION 'invalid migration history'; END IF;
 END $$;
 SQL
 ```
 
-**成功看到：** 无扩展要求；迁移命令退出0（正常可无输出）；schema_migrations有17行、最新014、校验值有效。已应用旧001时精确旧哈希获兼容且保留原记录，不手工更新哈希。
+**成功看到：** 无扩展要求；迁移命令退出0（正常可无输出）；schema_migrations有19行、最新016、校验值有效。已应用旧001时精确旧哈希获兼容且保留原记录，不手工更新哈希。
 
 **失败必须停止：** 任何迁移异常、checksum mismatch、仍要求pgcrypto或行数不符都不进入Seed。此前首次pgcrypto失败也在原库直接重试受控runner，不能清库、删历史表或跳过001。
 
@@ -392,3 +392,27 @@ printf '\n'
 - 502查唯一项目和127.0.0.1:3000；循环跳转查源站强制HTTPS；404查/v1/末尾斜杠及实际/api/...路径。
 
 规范来源：宝塔官方 [Node项目说明](https://docs.bt.cn/practical-tutorials/nextjs-deployment/) 和 [Node/PM2说明](https://docs.bt.cn/practical-tutorials/nodejs-pm2-deployment/)。实际面板菜单以用户安装版本为准；不据此声称本机已经完成宝塔界面、公网DNS或Cloudflare操作。
+
+### 受控恢复 admin 密码（仅遗忘密码时）
+
+执行位置：经授权的 Linux 维护终端。先暂停宝塔 API 项目并完成数据库备份；不要重复 Seed、删除 admin 或重建数据库。当前数据库迁移必须成功包含 015_protected_admin.sql。维护人员先按首次部署的交互方式设置 POSTGRES_URL 为 users 表维护所有者连接；不得使用 API 的 .env 或 honsen_api 连接。执行：
+
+```bash
+cd /www/wwwroot/api-pr/v1
+"$(cat .deploy-node-path)" deploy/baota/recover-admin.mjs
+unset POSTGRES_URL
+```
+
+输入维护人员身份、恢复原因和两次新密码（至少12字符，终端不显示密码）。成功显示保留原账号与撤销全部旧会话；账号ID、角色、业务历史不变，恢复原因和维护身份写入审计。失败必须停止，不得改用SQL直接覆盖密码；恢复失败不会创建账号或修改角色。成功后通过同一宝塔项目启动并用正常密码/CAPTCHA登录。此工具仅接受已通过数据库认证的维护所有者，运行账号不能调用；没有隐藏应急密码或公共恢复接口。
+
+### 已有 V1 的账号规则升级（不重复首次 Seed）
+
+本候选补齐受认证的账号管理接口及账号身份规则。现有用户保留UUID、用户名原始大小写、密码哈希、角色、会话和历史；新用户名只允许英文大小写字母和数字，显示姓名独立。登录与用户名查询使用同一ASCII大小写折叠规则，数据库全表唯一索引防止大小写重复，包括停用和已软删除用户。
+
+先按现有宝塔流程备份数据库、配置和旧程序并验证可恢复，停唯一API项目后更新已验证的候选包；保留现有.env及原数据库连接，不新建数据库、不重新Seed、不运行密码恢复工具。由原迁移所有者使用本文第3步的受保护连接方式运行包内迁移。已部署082候选的015须与原文件校验一致；新候选新增016_account_identity.sql。成功后应有19份迁移记录，最新016。
+
+如出现USERNAME_CASE_COLLISION，迁移事务拒绝：不要删除、合并、重命名账号或改migration历史来消除冲突。保留旧服务和备份，按受控维护流程核对碰撞；须经明确批准的修复方案后才可重试。错误仅提供代码与碰撞组数，不打印密码或真实姓名。未解决冲突前不切换API或创建新账号。
+
+完成后通过原宝塔项目启动；验证验证码和管理员正常密码/CAPTCHA登录，再通过客户端账号向导创建测试账号。Zhanghekai的显示姓名为张和凯，角色管理员和采购员；ceshi1的显示姓名为测试1，角色工程申请人。只授权CI/Bethel2及实际存在的部门、班组，不虚构组织或扩大范围。先查重，已存在则不重置密码。临时密码仅在客户端受保护输入，公开文档与安装包不包含密码。
+
+客户端需使用更新后的账号版本以支持大小写别名和显示姓名；旧版客户端用原始用户名大小写的既有登录保持兼容。数据库迁移及发布回退仍须验证SQL与JSON契约并使用可恢复备份，不能通过删新迁移或直接覆盖旧文件宣称回退成功。操作员部署后须完成真实创建、改密/重登、角色及范围拒绝和两个独立客户端同步验收；本说明不是已部署或验收通过的证据。

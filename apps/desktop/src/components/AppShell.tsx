@@ -36,6 +36,7 @@ type AppShellProps = PropsWithChildren<{
   pageTitle: ShellMessage
   role: UserRole
   username?: string
+  displayName?: string | null
   onNavigate: (page: AppPage) => void
   onLock?: () => void
   onChangePassword?: () => void
@@ -62,6 +63,7 @@ export function AppShell({
   pageTitle,
   role,
   username,
+  displayName,
   onNavigate,
   onLock,
   onChangePassword,
@@ -241,7 +243,14 @@ export function AppShell({
             <span className="avatar" aria-hidden="true">
               <img src={defaultAvatar} width={32} height={32} alt="" />
             </span>
-            {username && <span className="signed-in-username">{username}</span>}
+            {username && (
+              <span className="signed-in-username">
+                {displayName || username}
+                {displayName && displayName !== username
+                  ? ` (${username})`
+                  : ''}
+              </span>
+            )}
             <span>{t(roleLabel[role])}</span>
             {onChangePassword && (
               <button

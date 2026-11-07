@@ -1,5 +1,92 @@
 import { expect, test, type Page } from '@playwright/test'
 
+test('new usernames are ASCII alphanumeric while display names accept Chinese', async ({
+  page,
+}) => {
+  await openAccounts(page)
+  await page.getByLabel('姓名', { exact: true }).fill('合成姓名')
+  await page.getByLabel('临时密码', { exact: true }).fill('synthetic-temporary')
+  for (const invalid of ['测试1', 'User Name', 'User_Name', 'User-Name']) {
+    await page.getByLabel('用户名', { exact: true }).fill(invalid)
+    await expect(
+      page.getByRole('button', { name: '检查账号是否存在', exact: true }),
+    ).toBeDisabled()
+    await expect(
+      page
+        .getByRole('alert')
+        .filter({ hasText: '新建用户名只能包含英文字母和数字' }),
+    ).toBeVisible()
+  }
+  await page.getByLabel('用户名', { exact: true }).fill('MixedCaseUser9')
+  await page
+    .getByRole('button', { name: '检查账号是否存在', exact: true })
+    .click()
+  await expect(
+    page.getByRole('button', { name: '下一步', exact: true }),
+  ).toBeEnabled()
+  await page.getByLabel('姓名', { exact: true }).fill('   ')
+  await expect(
+    page.getByRole('button', { name: '下一步', exact: true }),
+  ).toBeDisabled()
+  await page.getByRole('button', { name: '取消创建', exact: true }).click()
+  await expect(page.getByLabel('姓名', { exact: true })).toHaveValue('')
+})
+
+test('display name is presented separately from the login name', async ({
+  page,
+}) => {
+  await openAccounts(page, false, false, false, false, false, '合成工程员')
+  await expect(page.locator('.signed-in-username')).toHaveText(
+    '合成工程员 (synthetic-admin)',
+  )
+})
+
+test('legacy session without a display name falls back to its stored username', async ({
+  page,
+}) => {
+  await openAccounts(page)
+  await expect(page.locator('.signed-in-username')).toHaveText(
+    'synthetic-admin',
+  )
+})
+
+test('legacy cached name collision is explicit and does not sign in another account', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    Object.assign(window, {
+      __TAURI_INTERNALS__: {},
+      __TAURI__: {
+        core: {
+          invoke: async (command: string) => {
+            if (command === 'issue_local_captcha')
+              return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
+            if (command === 'issue_cloud_captcha')
+              throw { code: 'sync_transport_error' }
+            if (command === 'offline_login')
+              throw { code: 'account_name_collision' }
+            throw new Error('Unexpected command')
+          },
+        },
+      },
+    }),
+  )
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+  await page.getByLabel('账号', { exact: true }).fill('LegacyName')
+  await page.getByLabel('密码', { exact: true }).fill('synthetic-temporary')
+  await page.locator('#captcha').fill('2')
+  await page.getByRole('button', { name: '离线登录', exact: true }).click()
+  await expect(
+    page.getByText(
+      '本地账号名称存在大小写冲突，请联系管理员处理；账号与历史数据已保留。',
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: '登录 HONSEN Procure' }),
+  ).toBeVisible()
+})
+
 test('first-login password change blocks business effects and returns to login', async ({
   page,
 }) => {
@@ -63,9 +150,10 @@ async function openAccounts(
   recommended = false,
   online = false,
   superAdmin = false,
+  displayName?: string,
 ) {
   await page.addInitScript(
-    ({ empty, existing, recommended, superAdmin }) => {
+    ({ empty, existing, recommended, superAdmin, displayName }) => {
       const id = (n: number) =>
         `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
       const records = [
@@ -114,6 +202,7 @@ async function openAccounts(
                 return {
                   user_id: id(10),
                   username: 'synthetic-admin',
+                  display_name: displayName,
                   roles: [superAdmin ? 'super_administrator' : 'administrator'],
                   requires_password_change: false,
                   password_change_recommended: recommended,
@@ -140,7 +229,7 @@ async function openAccounts(
                 return empty ? [] : records
               if (command === 'find_managed_accounts')
                 return existing
-                  ? [{ id: id(11), username: 'synthetic-existing' }]
+                  ? [{ id: id(11), username: 'SyntheticExisting' }]
                   : []
               if (command === 'change_account_password') {
                 const e = (window as unknown as { __passwordError?: string })
@@ -153,7 +242,7 @@ async function openAccounts(
                 ;(window as unknown as { __created: unknown[] }).__created.push(
                   args?.input,
                 )
-                return { id: id(11), username: 'synthetic-new' }
+                return { id: id(11), username: 'SyntheticNew' }
               }
               throw new Error('Unavailable')
             },
@@ -161,7 +250,7 @@ async function openAccounts(
         },
       })
     },
-    { empty, existing, recommended, superAdmin },
+    { empty, existing, recommended, superAdmin, displayName },
   )
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: '获取验证码', exact: true }).click()
@@ -248,7 +337,17 @@ for (const [
     await page
       .getByRole('combobox', { name: '界面语言 / UI language / Langue' })
       .selectOption(locale)
-    await page.getByLabel(user, { exact: true }).fill('synthetic-new')
+    await page.getByLabel(user, { exact: true }).fill('SyntheticNew')
+    await page
+      .getByLabel(
+        locale === 'zh'
+          ? '姓名'
+          : locale === 'fr'
+            ? 'Nom affiché'
+            : 'Display name',
+        { exact: true },
+      )
+      .fill('合成姓名')
     await page.getByLabel(password, { exact: true }).fill('synthetic-temporary')
     if (locale === 'zh')
       await page.screenshot({ path: '.cache/account-wizard-basic-1280.png' })
@@ -323,7 +422,8 @@ for (const [
       ),
     ).toEqual([
       expect.objectContaining({
-        username: 'synthetic-new',
+        username: 'SyntheticNew',
+        displayName: '合成姓名',
         roles: ['engineer'],
         employeePhotoKey: 'builtin:default-avatar:v1',
         scope: {
@@ -340,7 +440,7 @@ test('existing account is never reset and cancellation clears the draft', async 
   page,
 }) => {
   await openAccounts(page, false, true)
-  await page.getByLabel('用户名', { exact: true }).fill('synthetic-existing')
+  await page.getByLabel('用户名', { exact: true }).fill('syntheticexisting')
   await page.getByLabel('临时密码', { exact: true }).fill('synthetic-temporary')
   await page
     .getByRole('button', { name: '检查账号是否存在', exact: true })
@@ -356,7 +456,8 @@ test('existing account is never reset and cancellation clears the draft', async 
 
 test('empty reference data cannot submit invented scope', async ({ page }) => {
   await openAccounts(page, true)
-  await page.getByLabel('用户名', { exact: true }).fill('synthetic-new')
+  await page.getByLabel('用户名', { exact: true }).fill('SyntheticNew')
+  await page.getByLabel('姓名', { exact: true }).fill('合成姓名')
   await page.getByLabel('临时密码', { exact: true }).fill('synthetic-temporary')
   await page
     .getByRole('button', { name: '检查账号是否存在', exact: true })

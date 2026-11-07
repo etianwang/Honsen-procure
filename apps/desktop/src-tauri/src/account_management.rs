@@ -5,6 +5,7 @@ use super::*;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateManagedAccount {
     pub username: String,
+    pub display_name: String,
     pub temporary_password: String,
     pub roles: Vec<Role>,
     pub ui_locale: String,
@@ -17,6 +18,8 @@ pub struct CreateManagedAccount {
 pub struct ManagedAccount {
     pub id: Uuid,
     pub username: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
     pub roles: Vec<Role>,
     pub is_enabled: bool,
     pub requires_password_change: bool,
@@ -26,7 +29,14 @@ pub struct ManagedAccount {
 
 impl CreateManagedAccount {
     fn validate(&self) -> Result<(), AuthError> {
-        if !valid_required_text(&self.username, 100)
+        if self.username.is_empty()
+            || self.username.len() > 100
+            || !self
+                .username
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric())
+            || self.display_name.trim().is_empty()
+            || self.display_name.chars().count() > 100
             || !(8..=1024).contains(&self.temporary_password.chars().count())
             || !valid_required_text(&self.employee_photo_key, 1024)
             || self.roles.is_empty()
@@ -98,11 +108,17 @@ impl LocalAuthService {
             .json::<Vec<ManagedAccount>>()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
+        if result.len() > 1 {
+            return Err(AuthError::AccountNameCollision);
+        }
         Self::require_request_session(
             &*self.connection.lock().map_err(|_| AuthError::Database)?,
             request.session,
         )?;
-        if result.iter().any(|account| account.username != username) {
+        if result
+            .iter()
+            .any(|account| !account.username.eq_ignore_ascii_case(&username))
+        {
             return Err(AuthError::SyncTransport);
         }
         Ok(result)
@@ -320,7 +336,8 @@ mod tests {
     }
     fn input() -> CreateManagedAccount {
         CreateManagedAccount {
-            username: "synthetic-account".into(),
+            username: "SyntheticAccount".into(),
+            display_name: "Synthetic name".into(),
             temporary_password: "synthetic-temporary".into(),
             roles: vec![Role::Engineer],
             ui_locale: "zh-CN".into(),

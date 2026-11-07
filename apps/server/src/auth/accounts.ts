@@ -3,6 +3,7 @@ import argon2 from 'argon2'
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import { z } from 'zod'
+import { newUsernameSchema, accountDisplayNameSchema } from '@honsen/shared'
 import { AuthService, AuthenticationError, hashToken } from './service.js'
 
 const scopeSchema = z
@@ -10,7 +11,8 @@ const scopeSchema = z
   .strict()
 const createSchema = z
   .object({
-    username: z.string().trim().min(1).max(100),
+    username: newUsernameSchema,
+    displayName: accountDisplayNameSchema,
     temporaryPassword: z.string().min(8).max(1024),
     roles: z
       .array(z.enum(['administrator', 'purchaser', 'engineer', 'viewer']))
@@ -75,7 +77,7 @@ export function registerAccounts(
             .strict()
             .parse(request.query)
           const result = await pool.query(
-            `SELECT u.id,u.username,u.is_enabled AS "isEnabled",u.requires_password_change AS "requiresPasswordChange",ARRAY(SELECT role FROM user_roles WHERE user_id=u.id ORDER BY role) AS roles FROM users u WHERE u.username=$1 AND ($2::boolean OR NOT EXISTS(SELECT 1 FROM user_roles WHERE user_id=u.id AND role IN ('super_administrator','administrator','purchaser')) AND EXISTS(SELECT 1 FROM user_project_scope_bindings target JOIN user_project_scope_bindings own ON own.project_id=target.project_id AND own.department_id=target.department_id AND own.team_id=target.team_id AND own.deleted_at IS NULL WHERE target.user_id=u.id AND own.user_id=$3 AND target.deleted_at IS NULL))`,
+            `SELECT u.id,u.username,COALESCE(u.display_name,u.username) AS "displayName",u.is_enabled AS "isEnabled",u.requires_password_change AS "requiresPasswordChange",ARRAY(SELECT role FROM user_roles WHERE user_id=u.id ORDER BY role) AS roles FROM users u WHERE translate(u.username,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') AND ($2::boolean OR NOT EXISTS(SELECT 1 FROM user_roles WHERE user_id=u.id AND role IN ('super_administrator','administrator','purchaser')) AND EXISTS(SELECT 1 FROM user_project_scope_bindings target JOIN user_project_scope_bindings own ON own.project_id=target.project_id AND own.department_id=target.department_id AND own.team_id=target.team_id AND own.deleted_at IS NULL WHERE target.user_id=u.id AND own.user_id=$3 AND target.deleted_at IS NULL))`,
             [query.username, privileged, actor.id],
           )
           return result.rows
@@ -127,7 +129,7 @@ export function registerAccounts(
           }
           const id = randomUUID()
           await client.query(
-            'INSERT INTO users(id,business_code,username,password_hash,ui_locale,employee_photo_key,requires_password_change) VALUES($1,$2,$3,$4,$5,$6,TRUE)',
+            'INSERT INTO users(id,business_code,username,password_hash,ui_locale,employee_photo_key,display_name,requires_password_change) VALUES($1,$2,$3,$4,$5,$6,$7,TRUE)',
             [
               id,
               id,
@@ -135,6 +137,7 @@ export function registerAccounts(
               hash,
               input.uiLocale,
               input.employeePhotoKey,
+              input.displayName,
             ],
           )
           for (const role of new Set(input.roles))
@@ -158,6 +161,7 @@ export function registerAccounts(
           return reply.code(201).send({
             id,
             username: input.username,
+            displayName: input.displayName,
             roles: [...new Set(input.roles)],
             isEnabled: true,
             requiresPasswordChange: true,

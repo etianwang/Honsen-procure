@@ -18,7 +18,7 @@ type Binding = {
   teamId: string
   site: string
 }
-type Account = { id: string; username: string }
+type Account = { id: string; username: string; displayName?: string | null }
 type Invoke = <T>(command: string, args?: object) => Promise<T>
 function invoke<T>(command: string, args?: object) {
   const call = (
@@ -94,8 +94,8 @@ export function AuthorizationManagementPage({
       active = false
     }
   }, [reload, role])
-  const assignAccount = (id: string, name: string) => {
-    setAccount({ id, username: name })
+  const assignAccount = (id: string, name: string, displayName?: string) => {
+    setAccount({ id, username: name, displayName })
     setUsername(name)
     setBindings([])
     setEditing(null)
@@ -367,7 +367,18 @@ export function AuthorizationManagementPage({
             </form>
             {account && (
               <>
-                <h3>{account.username}</h3>
+                <h3>{account.displayName || account.username}</h3>
+                {account.displayName &&
+                  account.displayName !== account.username && (
+                    <p>
+                      {t(
+                        '登录账号',
+                        'Login username',
+                        'Identifiant de connexion',
+                      )}{' '}
+                      : {account.username}
+                    </p>
+                  )}
                 <ul
                   className="account-binding-list"
                   aria-label={t(

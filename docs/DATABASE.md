@@ -49,3 +49,7 @@ The initial entity set is `materials`, `suppliers`, `material_prices`, `purchase
 ## 2026-11-06 stamp persistence
 
 Desktop0062 adds a nullable nonnegative integer manual stamp amount and an issued-document update guard. Existing rows, totals, snapshots and Outbox are not rewritten. Draft/terms mutation, amount, audit and Outbox remain transactional. Server JSON handles the optional field with conflict retention; PostgreSQL migration set remains17/latest014. Equal SQL migration versions alone do not prove old APIs can read/write the newer business JSON snapshots safely.
+
+### 2026-11-07 account identity compatibility
+
+PostgreSQL015 is restored byte-for-byte from the delivered082 protected-admin package. New016 adds nullable users.display_name plus a global ASCII-fold username unique index and immutable username guard. Existing usernames are not rewritten; collisions including tombstones reject the transaction. SQLite0063 adds nullable display_name only, preserving local account UUIDs, credential-vault keys, sessions, business rows and Outbox. Local alias lookup is ASCII NOCASE and refuses multiple legacy matches without deleting or choosing one. These identifiers are authentication/profile data, not order-snapshot rewrites.

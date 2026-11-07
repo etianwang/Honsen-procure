@@ -69,6 +69,9 @@ export class AuthService {
       user: {
         id: account.id,
         username: account.username,
+        ...(account.displayName != null
+          ? { displayName: account.displayName }
+          : {}),
         roles: account.roles,
         locale: account.locale,
         requiresPasswordChange: account.requiresPasswordChange,

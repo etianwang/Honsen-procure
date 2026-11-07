@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod account_identity_tests;
+#[cfg(test)]
 mod fresh_conflict_tests;
 #[cfg(test)]
 mod g2_pull_tests;
@@ -78,6 +80,7 @@ pub struct AuthenticatedSession {
     pub password_change_recommended: bool,
     pub user_id: Uuid,
     pub username: String,
+    pub display_name: Option<String>,
     pub roles: Vec<Role>,
     pub requires_password_change: bool,
 }
@@ -154,6 +157,8 @@ struct CloudLoginUser {
     password_change_recommended: bool,
     id: Uuid,
     username: String,
+    #[serde(default)]
+    display_name: Option<String>,
     roles: Vec<Role>,
     requires_password_change: bool,
 }
@@ -1301,6 +1306,8 @@ pub enum ReferenceMasterDataInput {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AuthError {
+    #[error("ambiguous cached account name")]
+    AccountNameCollision,
     #[error("invalid credentials or captcha")]
     InvalidCredentials,
     #[error("the offline verification window has expired")]
@@ -1905,18 +1912,79 @@ impl LocalAuthService {
         password: &str,
         now: SystemTime,
     ) -> Result<(), AuthError> {
+        self.cache_verified_account_profile(account, None, password, now)
+    }
+
+    fn cache_verified_account_profile(
+        &self,
+        account: CachedAccount,
+        display_name: Option<&str>,
+        password: &str,
+        now: SystemTime,
+    ) -> Result<(), AuthError> {
+        if display_name.is_some_and(|value| value.trim().is_empty() || value.chars().count() > 100)
+        {
+            return Err(AuthError::InvalidInput);
+        }
         let password_hash = hash_password(password)?;
         let roles = serde_json::to_string(&account.roles).map_err(|_| AuthError::Database)?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        // Serialize alias checks and cache writes across processes without merging legacy accounts.
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|_| AuthError::Database)?;
+        let collision: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_accounts WHERE username = ?1 COLLATE NOCASE AND id <> ?2)", params![account.username,account.id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if collision {
+            return Err(AuthError::AccountNameCollision);
+        }
+        let target_session: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM local_session WHERE user_id=?1)",
+                [account.id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| AuthError::Database)?;
+        // The vault and SQLite cannot commit atomically. Durably close the old
+        // authorization window before a vault write can replace its verifier.
+        transaction
+            .execute(
+                "UPDATE local_accounts SET cached_verified_at=0 WHERE id=?1",
+                [account.id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction
+            .execute(
+                "DELETE FROM local_session WHERE user_id=?1",
+                [account.id.to_string()],
+            )
+            .map_err(|_| AuthError::Database)?;
+        transaction.commit().map_err(|_| AuthError::Database)?;
+        if target_session
+            || connection
+                .online_session
+                .is_some_and(|session| session.account_id == account.id)
+        {
+            connection.session_invalidated = true;
+            connection.online_session = None;
+        }
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|_| AuthError::Database)?;
+        // Another process may have introduced an alias between commits. Keep
+        // the closed window on that race rather than restoring stale authority.
+        let collision: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_accounts WHERE username = ?1 COLLATE NOCASE AND id <> ?2)", params![account.username,account.id.to_string()], |row| row.get(0)).map_err(|_| AuthError::Database)?;
+        if collision {
+            return Err(AuthError::AccountNameCollision);
+        }
         self.credential_vault
             .save_verifier(account.id, &password_hash)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        connection.execute(
-            "INSERT INTO local_accounts (id, username, roles_json, enabled, requires_password_change, cached_verified_at, failed_attempts, locked_until)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL)
-             ON CONFLICT(id) DO UPDATE SET username = excluded.username, roles_json = excluded.roles_json, enabled = excluded.enabled, requires_password_change = excluded.requires_password_change, cached_verified_at = excluded.cached_verified_at, failed_attempts = 0, locked_until = NULL",
-            params![account.id.to_string(), account.username, roles, account.enabled as i64, account.requires_password_change as i64, unix_seconds(now)],
+        transaction.execute(
+            "INSERT INTO local_accounts (id, username, roles_json, enabled, requires_password_change, cached_verified_at, failed_attempts, locked_until, display_name)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7)
+             ON CONFLICT(id) DO UPDATE SET username = excluded.username, roles_json = excluded.roles_json, enabled = excluded.enabled, requires_password_change = excluded.requires_password_change, cached_verified_at = excluded.cached_verified_at, failed_attempts = 0, locked_until = NULL, display_name = excluded.display_name",
+            params![account.id.to_string(), account.username, roles, account.enabled as i64, account.requires_password_change as i64, unix_seconds(now), display_name.map(str::trim)],
         ).map_err(|_| AuthError::Database)?;
-        Ok(())
+        transaction.commit().map_err(|_| AuthError::Database)
     }
 
     pub fn bootstrap_initial_administrator(
@@ -2048,10 +2116,20 @@ impl LocalAuthService {
             .json::<CloudLoginResponse>()
             .await
             .map_err(|_| AuthError::SyncTransport)?;
-        if login.user.username != username || login.access_token.len() < 32 {
+        self.accept_cloud_login(username, password, login, now)
+    }
+
+    fn accept_cloud_login(
+        &self,
+        username: &str,
+        password: &str,
+        login: CloudLoginResponse,
+        now: SystemTime,
+    ) -> Result<AuthenticatedSession, AuthError> {
+        if !login.user.username.eq_ignore_ascii_case(username) || login.access_token.len() < 32 {
             return Err(AuthError::SyncTransport);
         }
-        self.cache_verified_account(
+        self.cache_verified_account_profile(
             CachedAccount {
                 id: login.user.id,
                 username: login.user.username.clone(),
@@ -2059,6 +2137,7 @@ impl LocalAuthService {
                 enabled: true,
                 requires_password_change: login.user.requires_password_change,
             },
+            login.user.display_name.as_deref(),
             password,
             now,
         )?;
@@ -2067,6 +2146,7 @@ impl LocalAuthService {
             password_change_recommended: login.user.password_change_recommended,
             user_id: login.user.id,
             username: login.user.username,
+            display_name: login.user.display_name,
             roles: login.user.roles,
             requires_password_change: login.user.requires_password_change,
         })
@@ -2088,11 +2168,14 @@ impl LocalAuthService {
             .map_err(|_| AuthError::Database)?;
         self.consume_captcha(captcha_id, captcha_answer, now)?;
 
-        let account = connection.query_row(
-            "SELECT id, username, roles_json, enabled, requires_password_change, cached_verified_at, failed_attempts, locked_until FROM local_accounts WHERE username = ?1",
-            [username],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?, row.get::<_, i64>(6)?, row.get::<_, Option<i64>>(7)?)),
-        ).optional().map_err(|_| AuthError::Database)?;
+        let candidates = connection.prepare("SELECT id, username, roles_json, enabled, requires_password_change, cached_verified_at, failed_attempts, locked_until, display_name FROM local_accounts WHERE username = ?1 COLLATE NOCASE LIMIT 2")
+            .map_err(|_| AuthError::Database)?
+            .query_map([username], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?, row.get::<_, i64>(6)?, row.get::<_, Option<i64>>(7)?, row.get::<_, Option<String>>(8)?)))
+            .map_err(|_| AuthError::Database)?.collect::<Result<Vec<_>, _>>().map_err(|_| AuthError::Database)?;
+        if candidates.len() > 1 {
+            return Err(AuthError::AccountNameCollision);
+        }
+        let account = candidates.into_iter().next();
         let Some((
             id,
             username,
@@ -2102,6 +2185,7 @@ impl LocalAuthService {
             cached_verified_at,
             failed_attempts,
             locked_until,
+            display_name,
         )) = account
         else {
             return Err(AuthError::InvalidCredentials);
@@ -2112,7 +2196,9 @@ impl LocalAuthService {
         if locked_until.is_some_and(|value| value > unix_seconds(now)) {
             return Err(AuthError::AccountLocked);
         }
-        if unix_seconds(now) - cached_verified_at > OFFLINE_LOGIN_WINDOW.as_secs() as i64 {
+        if cached_verified_at == 0
+            || unix_seconds(now) - cached_verified_at > OFFLINE_LOGIN_WINDOW.as_secs() as i64
+        {
             return Err(AuthError::OfflineWindowExpired);
         }
         let account_id = Uuid::parse_str(&id).map_err(|_| AuthError::Database)?;
@@ -2142,6 +2228,7 @@ impl LocalAuthService {
             password_change_recommended: false,
             user_id: account_id,
             username,
+            display_name,
             roles,
             requires_password_change: requires_password_change != 0,
         })
@@ -7368,6 +7455,7 @@ pub mod commands {
         fn from(error: AuthError) -> Self {
             let code = match error {
                 AuthError::InvalidCredentials => "invalid_credentials",
+                AuthError::AccountNameCollision => "account_name_collision",
                 AuthError::OfflineWindowExpired => "offline_window_expired",
                 AuthError::AccountLocked => "account_locked",
                 AuthError::NoActiveSession => "reauthentication_required",
@@ -8532,6 +8620,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0062_manual_stamp_duty",
             include_str!("../migrations/0062_manual_stamp_duty.sql"),
+        ),
+        (
+            "0063_account_display_name",
+            include_str!("../migrations/0063_account_display_name.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));

@@ -1,5 +1,14 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '请使用用户名登录，英文字母 A–Z 不区分大小写；姓名不是登录账号。已有非英文用户名仍可使用。':
+    [
+      'Sign in with the username; A–Z letter case is ignored. Display names are not login names. Existing non-English usernames remain supported.',
+      'Connectez-vous avec le nom utilisateur ; la casse des lettres A–Z est ignorée. Le nom affiché n’est pas un identifiant. Les noms utilisateurs non anglais existants restent acceptés.',
+    ],
+  '本地账号名称存在大小写冲突，请联系管理员处理；账号与历史数据已保留。': [
+    'Local account names differ only by letter case. Contact an administrator; accounts and history are retained.',
+    'Des comptes locaux diffèrent uniquement par la casse. Contactez un administrateur ; les comptes et l’historique sont conservés.',
+  ],
   '无法安全保存登录凭据，请检查 Windows 凭据存储。': [
     'Cannot securely save sign-in credentials. Check Windows credential storage.',
     'Impossible de stocker les identifiants en sécurité. Vérifiez le gestionnaire Windows.',

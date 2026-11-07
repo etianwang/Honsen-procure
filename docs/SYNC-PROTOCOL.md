@@ -102,3 +102,7 @@ Test duplicate delivery, timeout after server commit, restart during push, parti
 ## 2026-11-06 optional manual stamp compatibility
 
 `manualStampDutyMinor` is an optional canonical integer minor-unit string; absence preserves old payload shape. New ordinary upserts may explicitly set zero. If stored state contains the field and a legacy upsert omits it, retain both payloads as a conflict instead of silently dropping the amount. Formal snapshot comparisons include the field and reject changes/removal. Server schema remains unchanged; SQLite0062 projects and freezes the optional value.
+
+### 2026-11-07 authentication profile compatibility
+
+Login response user.displayName is additive, optional/nullable for legacy servers; clients fall back to canonical stored username. Login and account lookup use ASCII case-insensitive username identity while preserving the returned canonical original spelling. Business entity UUIDs, role/scope authorization, Push/Pull payloads, cursor/idempotency and historical snapshots remain unchanged. Updated clients validate returned username using ASCII case-insensitive comparison and cache by the existing account UUID. Old clients can retain original-case login; new case-alias behavior requires the updated desktop. Display name is not an authorization credential or a replacement for username.

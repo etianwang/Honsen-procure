@@ -29,7 +29,7 @@ export function ManagedAccountForm({
 }: {
   options: AccountScopeOptions
   canGrantPrivileged: boolean
-  onAccount: (id: string, username: string) => void
+  onAccount: (id: string, username: string, displayName?: string) => void
   onExisting: () => void
   onBusyChange: (busy: boolean) => void
 }) {
@@ -38,6 +38,10 @@ export function ManagedAccountForm({
     locale === 'zh' ? zh : locale === 'fr' ? fr : en
   const [step, setStep] = useState(0)
   const [username, setUsername] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const validUsername = /^[A-Za-z0-9]{1,100}$/.test(username)
+  const validDisplayName =
+    displayName.trim().length > 0 && displayName.trim().length <= 100
   const [password, setPassword] = useState('')
   const [accountLocale, setAccountLocale] = useState(locale)
   const [roles, setRoles] = useState<string[]>([])
@@ -63,6 +67,7 @@ export function ManagedAccountForm({
   const reset = () => {
     setPassword('')
     setUsername('')
+    setDisplayName('')
     setRoles([])
     setScope(emptyAccountScope)
     setChecked(null)
@@ -77,15 +82,18 @@ export function ManagedAccountForm({
     setMessage('')
     setExists(false)
     try {
-      const accounts = await invoke<{ id: string; username: string }[]>(
-        'find_managed_accounts',
-        { username },
-      )
+      const accounts = await invoke<
+        { id: string; username: string; displayName?: string | null }[]
+      >('find_managed_accounts', { username })
       if (accounts.length) {
         setPassword('')
         setChecked(null)
         setExists(true)
-        onAccount(accounts[0].id, accounts[0].username)
+        onAccount(
+          accounts[0].id,
+          accounts[0].username,
+          accounts[0].displayName ?? undefined,
+        )
         setMessage(
           t(
             '账号已存在；不创建或重置密码。',
@@ -120,6 +128,8 @@ export function ManagedAccountForm({
   }
   const create = async () => {
     if (
+      !validUsername ||
+      !validDisplayName ||
       checked !== username ||
       !validAccountScope(scope, options) ||
       !roles.length ||
@@ -130,26 +140,32 @@ export function ManagedAccountForm({
     onBusyChange(true)
     setMessage('')
     try {
-      const result = await invoke<{ id: string; username: string }>(
-        'create_managed_account',
-        {
-          input: {
-            username,
-            temporaryPassword: password,
-            roles,
-            uiLocale: ({ zh: 'zh-CN', en: 'en-US', fr: 'fr-FR' } as const)[
-              accountLocale
-            ],
-            employeePhotoKey: 'builtin:default-avatar:v1',
-            scope: {
-              projectId: scope.projectId,
-              departmentId: scope.departmentId,
-              teamId: scope.teamId,
-            },
+      const result = await invoke<{
+        id: string
+        username: string
+        displayName?: string | null
+      }>('create_managed_account', {
+        input: {
+          username,
+          displayName: displayName.trim(),
+          temporaryPassword: password,
+          roles,
+          uiLocale: ({ zh: 'zh-CN', en: 'en-US', fr: 'fr-FR' } as const)[
+            accountLocale
+          ],
+          employeePhotoKey: 'builtin:default-avatar:v1',
+          scope: {
+            projectId: scope.projectId,
+            departmentId: scope.departmentId,
+            teamId: scope.teamId,
           },
         },
+      })
+      onAccount(
+        result.id,
+        result.username || username,
+        result.displayName ?? displayName.trim(),
       )
-      onAccount(result.id, result.username || username)
       setCreated(true)
       setChecked(null)
       setMessage(
@@ -177,7 +193,10 @@ export function ManagedAccountForm({
   }
   const canNext =
     step === 0
-      ? checked === username && password.length >= 8
+      ? validUsername &&
+        validDisplayName &&
+        checked === username &&
+        password.length >= 8
       : step === 1
         ? roles.length > 0
         : validAccountScope(scope, options)
@@ -217,7 +236,7 @@ export function ManagedAccountForm({
             </label>
             <button
               type="button"
-              disabled={!username.trim() || username.trim() !== username}
+              disabled={!validUsername}
               onClick={() => void check()}
             >
               {t(
@@ -226,6 +245,31 @@ export function ManagedAccountForm({
                 'Vérifier le compte',
               )}
             </button>
+            <p>
+              {t(
+                '用户名仅限英文字母和数字，大小写不敏感，并保留原始大小写。姓名可使用中文，姓名不能用于登录。',
+                'Use English letters and digits for the username. Sign-in ignores letter case and preserves the original spelling. The display name may use Chinese and is not a login name.',
+                'Le nom utilisateur accepte uniquement lettres anglaises et chiffres. La connexion ignore la casse et conserve l’orthographe d’origine. Le nom affiché peut être en chinois et ne sert pas à se connecter.',
+              )}
+            </p>
+            {username && !validUsername && (
+              <p role="alert">
+                {t(
+                  '新建用户名只能包含英文字母和数字（最多100位）。',
+                  'New usernames must contain only English letters and digits (up to 100 characters).',
+                  'Un nouveau nom utilisateur ne peut contenir que des lettres anglaises et chiffres (100 caractères maximum).',
+                )}
+              </p>
+            )}
+            <label>
+              {t('姓名', 'Display name', 'Nom affiché')}
+              <input
+                value={displayName}
+                maxLength={100}
+                autoComplete="off"
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+            </label>
             <label>
               {t('临时密码', 'Temporary password', 'Mot de passe temporaire')}
               <input
@@ -327,6 +371,8 @@ export function ManagedAccountForm({
             <dl className="wizard-summary">
               <dt>{t('用户名', 'Username', 'Nom utilisateur')}</dt>
               <dd>{username}</dd>
+              <dt>{t('姓名', 'Display name', 'Nom affiché')}</dt>
+              <dd>{displayName.trim()}</dd>
               <dt>{t('角色', 'Roles', 'Rôles')}</dt>
               <dd>
                 {roleValues

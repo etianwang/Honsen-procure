@@ -3,6 +3,7 @@ import type { Role, UiLocale } from '@honsen/shared'
 export type LoginAccount = {
   id: string
   username: string
+  displayName?: string | null
   passwordHash: string
   roles: Role[]
   locale: UiLocale
