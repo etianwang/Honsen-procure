@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="${REPOSITORY_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-sha="$(git -c safe.directory="$root" -C "$root" rev-parse HEAD)"
+sha="${SOURCE_SHA:-$(git -c safe.directory="$root" -C "$root" rev-parse HEAD)}"
+[[ "$sha" =~ ^[a-f0-9]{40}$ ]] || { echo 'Exact source SHA required' >&2; exit 1; }
+test "$(git -c safe.directory="$root" -C "$root" rev-parse "$sha^{commit}")" = "$sha"
 out="${RELEASE_OUTPUT:-$root/.cache/server-release}"
 mkdir -p "$out"
 test ! -e "$out/honsen-procure-server-v1-$sha.zip"

@@ -79,6 +79,17 @@ jobs:
           retention-days: 7
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
+      - name: Build exact-SHA Baota server ZIP after quality gates
+        run: SOURCE_SHA="${{ github.sha }}" bash deploy/baota/build-zip.sh
+      - name: Preserve exact-SHA Baota server ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: baota-server-${{ github.sha }}
+          path: |
+            .cache/server-release/honsen-procure-server-v1-${{ github.sha }}.zip
+            .cache/server-release/honsen-procure-server-v1-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 90
       - if: always()
         uses: actions/upload-artifact@v4
         with:
