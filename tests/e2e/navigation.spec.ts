@@ -1866,7 +1866,12 @@ test('administrator resolves a sync conflict through the accessible control', as
   page,
 }) => {
   await page.goto('/?test=sync-conflict')
-  await expect(page.getByText('云端版本 2 · upsert')).toBeVisible()
+  await expect(page.getByText('云端版本 2 · 云端更新')).toBeVisible()
+  const comparison = page.locator(
+    '.sync-conflict-panel .conflict-record details',
+  )
+  await comparison.getByText('比较本地与云端内容', { exact: true }).click()
+  await expect(comparison.locator('code')).toHaveText('material · upsert')
   await page.getByLabel('处理原因').fill('云端材料资料已核对')
   await page.getByRole('button', { name: '采用云端' }).click()
   await expect(page.getByRole('status')).toHaveText(
@@ -1910,7 +1915,12 @@ test('cross-account conflict resolution stays visible and gives an actionable er
   await expect(page.getByRole('status')).toHaveText(
     '该冲突属于其他账户或未归属旧事件，当前账户不能处理。',
   )
-  await expect(page.getByText('云端版本 2 · upsert')).toBeVisible()
+  await expect(page.getByText('云端版本 2 · 云端更新')).toBeVisible()
+  const comparison = page.locator(
+    '.sync-conflict-panel .conflict-record details',
+  )
+  await comparison.getByText('比较本地与云端内容', { exact: true }).click()
+  await expect(comparison.locator('code')).toHaveText('material · upsert')
   expect(browserErrors).toEqual([])
 })
 
@@ -2419,88 +2429,235 @@ test('authenticated desktop switches between cached authorization scopes', async
 test('administrator queries and changes cloud-scoped bindings from desktop UI', async ({
   page,
 }) => {
+  const browserErrors: string[] = []
+  page.on('pageerror', (error) => browserErrors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
   await page.addInitScript(() => {
     const accountId = '00000000-0000-4000-8000-000000000010'
+    const actorId = '00000000-0000-4000-8000-000000000011'
+    const countryId = '00000000-0000-4000-8000-000000000001'
+    const projectId = '00000000-0000-4000-8000-000000000002'
+    const departmentId = '00000000-0000-4000-8000-000000000003'
+    const oldTeamId = '00000000-0000-4000-8000-000000000004'
+    const newTeamId = '00000000-0000-4000-8000-000000000005'
+    type Scope = { projectId: string; departmentId: string; teamId: string }
     let bindings = [
+      { projectId, departmentId, teamId: oldTeamId, site: '甲工地' },
+    ]
+    const contexts = [oldTeamId, newTeamId].map((teamId) => ({
+      countryId,
+      projectId,
+      projectName: '测试项目',
+      site: '甲工地',
+      departmentId,
+      departmentName: '测试部门',
+      teamId,
+      teamName: teamId === oldTeamId ? '原班组' : '新班组',
+      currency: 'XOF',
+      primaryCurrency: 'XOF',
+      languagePair: 'zh_fr',
+    }))
+    const records = [
+      { kind: 'country', id: countryId, name: '测试国家', is_active: true },
       {
-        projectId: '00000000-0000-4000-8000-000000000002',
-        departmentId: '00000000-0000-4000-8000-000000000003',
-        teamId: '00000000-0000-4000-8000-000000000004',
-        site: '甲工地',
+        kind: 'project',
+        id: projectId,
+        country_id: countryId,
+        name: '测试项目',
+        is_active: true,
+      },
+      {
+        kind: 'department',
+        id: departmentId,
+        name: '测试部门',
+        is_active: true,
+      },
+      {
+        kind: 'team',
+        id: oldTeamId,
+        department_id: departmentId,
+        name: '原班组',
+        is_active: true,
+      },
+      {
+        kind: 'team',
+        id: newTeamId,
+        department_id: departmentId,
+        name: '新班组',
+        is_active: true,
       },
     ]
+    const mutations: object[] = []
     Object.assign(window, {
+      __authorizationMutations: mutations,
       __TAURI_INTERNALS__: {},
       __TAURI__: {
         core: {
           invoke(
             command: string,
             args?: {
+              username?: string
               accountId?: string
-              binding?: (typeof bindings)[number]
-              replacement?: { newScope: (typeof bindings)[number] }
+              binding?: Scope
+              replacement?: { oldScope: Scope; newScope: Scope }
               revoke?: boolean
             },
           ) {
-            if (command === 'issue_local_captcha')
+            if (
+              command === 'issue_local_captcha' ||
+              command === 'issue_cloud_captcha'
+            )
               return Promise.resolve({
                 id: crypto.randomUUID(),
                 question: '1 + 1 = ?',
               })
-            if (command === 'issue_cloud_captcha')
-              return Promise.reject(new Error('offline'))
-            if (command === 'offline_login')
+            if (command === 'online_login')
               return Promise.resolve({
-                user_id: accountId,
+                user_id: actorId,
                 username: 'admin',
                 roles: ['administrator'],
                 requires_password_change: false,
               })
             if (command === 'list_authorization_contexts')
-              return Promise.resolve([])
+              return Promise.resolve(contexts)
             if (command === 'get_authorization_context')
-              return Promise.reject(new Error('no local scope'))
-            if (command === 'list_managed_authorizations')
+              return Promise.resolve(contexts[0])
+            if (command === 'refresh_authorization') return Promise.resolve()
+            if (command === 'push_pending_sync')
+              return Promise.resolve({ acceptedCount: 0, pendingCount: 0 })
+            if (command === 'pull_sync')
+              return Promise.resolve({ appliedCount: 0, nextCursor: '0' })
+            if (command === 'sync_status')
+              return Promise.resolve({
+                pendingCount: 0,
+                conflictCount: 0,
+                quarantinedCount: 0,
+                lastSuccessAt: null,
+              })
+            if (command === 'sync_attachments') return Promise.resolve({})
+            if (command === 'list_requisition_history')
+              return Promise.resolve({ records: [], nextCursor: null })
+            if (command === 'list_reference_master_data')
+              return Promise.resolve(records)
+            if (command === 'find_managed_accounts')
+              return Promise.resolve(
+                args?.username === 'FixtureUser'
+                  ? [
+                      {
+                        id: accountId,
+                        username: 'FixtureUser',
+                        displayName: '受管用户',
+                      },
+                    ]
+                  : [],
+              )
+            if (
+              command === 'list_managed_authorizations' &&
+              args?.accountId === accountId
+            )
               return Promise.resolve(bindings)
             if (
               command === 'replace_managed_authorization' &&
-              args?.replacement
+              args?.accountId === accountId &&
+              args.replacement
             ) {
+              mutations.push({ command, ...args })
               bindings = [{ ...args.replacement.newScope, site: '乙工地' }]
               return Promise.resolve()
             }
-            if (command === 'change_managed_authorization' && args?.binding) {
+            if (
+              command === 'change_managed_authorization' &&
+              args?.accountId === accountId &&
+              args.binding
+            ) {
+              mutations.push({ command, ...args })
               bindings = args.revoke
                 ? []
                 : [{ ...args.binding, site: '甲工地' }]
               return Promise.resolve()
             }
-            return Promise.reject(new Error(`unexpected command: ${command}`))
+            return Promise.reject(new Error('unexpected command: ' + command))
           },
         },
       },
     })
   })
-  await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
-  await page.getByLabel('账号').fill('admin')
-  await page.getByLabel('密码').fill('fixture-password')
-  await page.getByLabel(/本地验证码/).fill('2')
-  await page.getByRole('button', { name: '离线登录' }).click()
-  await page.getByRole('button', { name: '在线授权管理' }).click()
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+  await page.getByLabel('账号', { exact: true }).fill('admin')
+  await page.getByLabel('密码', { exact: true }).fill('fixture-password')
+  await page.locator('#captcha').fill('2')
+  await page.locator('#cloud-captcha').fill('2')
+  await page.getByRole('button', { name: '在线登录', exact: true }).click()
+  await page.getByRole('button', { name: '在线授权管理', exact: true }).click()
+  await page.getByRole('button', { name: '管理已有账号', exact: true }).click()
+  await page.getByLabel('查找用户名', { exact: true }).fill('FixtureUser')
+  await page.getByRole('button', { name: '查询账号授权', exact: true }).click()
+  await expect(
+    page.getByText('已读取云端授权范围。', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: '受管用户', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('list', { name: '已授权范围' })).toContainText(
+    '原班组',
+  )
+  await page.getByRole('button', { name: '修改', exact: true }).click()
   await page
-    .getByLabel('账户 UUID')
-    .fill('00000000-0000-4000-8000-000000000010')
-  await page.getByRole('button', { name: '查询云端授权' }).click()
-  await expect(page.getByText('已读取 1 个云端授权范围。')).toBeVisible()
-  await page.getByRole('button', { name: '修改' }).click()
-  await page
-    .getByLabel('班组 UUID')
-    .fill('00000000-0000-4000-8000-000000000005')
-  await page.getByRole('button', { name: '保存修改' }).click()
-  await expect(page.getByText('授权范围已原子修改。')).toBeVisible()
-  await page.getByRole('button', { name: '撤销' }).click()
-  await expect(page.getByText('授权已撤销。')).toBeVisible()
+    .getByRole('combobox', { name: '班组', exact: true })
+    .selectOption({ label: '新班组' })
+  await page.getByRole('button', { name: '保存修改', exact: true }).click()
+  await expect(
+    page.getByText('授权已分配或更新。', { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('list', { name: '已授权范围' })).toContainText(
+    '新班组',
+  )
+  await expect(
+    page.getByRole('list', { name: '已授权范围' }),
+  ).not.toContainText('原班组')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await expect(page.getByText('授权已撤销。', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('list', { name: '已授权范围' }).getByRole('listitem'),
+  ).toHaveCount(0)
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __authorizationMutations: object[] })
+          .__authorizationMutations,
+    ),
+  ).toEqual([
+    {
+      command: 'replace_managed_authorization',
+      accountId: '00000000-0000-4000-8000-000000000010',
+      replacement: {
+        oldScope: {
+          projectId: '00000000-0000-4000-8000-000000000002',
+          departmentId: '00000000-0000-4000-8000-000000000003',
+          teamId: '00000000-0000-4000-8000-000000000004',
+        },
+        newScope: {
+          projectId: '00000000-0000-4000-8000-000000000002',
+          departmentId: '00000000-0000-4000-8000-000000000003',
+          teamId: '00000000-0000-4000-8000-000000000005',
+        },
+      },
+    },
+    {
+      command: 'change_managed_authorization',
+      accountId: '00000000-0000-4000-8000-000000000010',
+      binding: {
+        projectId: '00000000-0000-4000-8000-000000000002',
+        departmentId: '00000000-0000-4000-8000-000000000003',
+        teamId: '00000000-0000-4000-8000-000000000005',
+      },
+      revoke: true,
+    },
+  ])
+  expect(browserErrors).toEqual([])
 })
 
 test('catalog details and Honsen draft can reach later quote pages', async ({

@@ -106,3 +106,5 @@ Test duplicate delivery, timeout after server commit, restart during push, parti
 ### 2026-11-07 authentication profile compatibility
 
 Login response user.displayName is additive, optional/nullable for legacy servers; clients fall back to canonical stored username. Login and account lookup use ASCII case-insensitive username identity while preserving the returned canonical original spelling. Business entity UUIDs, role/scope authorization, Push/Pull payloads, cursor/idempotency and historical snapshots remain unchanged. Updated clients validate returned username using ASCII case-insensitive comparison and cache by the existing account UUID. Old clients can retain original-case login; new case-alias behavior requires the updated desktop. Display name is not an authorization credential or a replacement for username.
+
+Account management creation now requires a separate displayName; use the updated management client. This request change does not alter business Push/Pull or original-spelling login compatibility.

@@ -310,12 +310,15 @@ test('failed CAPTCHA login never starts a sync cycle', async ({ page }) => {
   await page.getByLabel(/云端验证码/).fill('2')
   await page.getByRole('button', { name: '在线登录' }).click()
   await expect(
-    page.getByText('在线登录失败，请检查连接并重新获取验证码。'),
+    page.getByText('账号、密码或验证码无效。', { exact: true }),
   ).toBeVisible()
   const commands = await page.evaluate(
     () => (window as Window & { __syncCommands: string[] }).__syncCommands,
   )
+  expect(commands).toContain('online_login')
   expect(commands).not.toContain('push_pending_sync')
+  expect(commands).not.toContain('pull_sync')
+  expect(commands).not.toContain('refresh_authorization')
   expect(browserErrors).toEqual([])
 })
 
