@@ -36,3 +36,7 @@ complete employee and remaining native gates after that prerequisite is resolved
 WARNING: native accessibility snapshots can lag rendered state; refresh before claims.
 
 Decision: ALPHA_INTERNAL_TEST_READY is not achieved.
+
+## Authorized organization supplementation (2026-11-08)
+
+User supplied exact approved seed department/team definitions and authorized normal audited maintenance only. Native installed admin UI saved PRJ / 项目部 and PROC / 采购部, then PRJ-CIVIL / 土建施工组 linked to 项目部; PRJ-HVAC / 暖通施工组 submitted. UI reports saved, awaiting sync confirmation; no server acknowledgment payload or independent-client pull evidence collected. Remaining four teams and employee accounts incomplete. No project import, Bootstrap, SQL or deployment. Local save is not remote or dual-client PASS.
