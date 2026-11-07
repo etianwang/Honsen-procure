@@ -371,3 +371,7 @@ Build shared contracts and exact money/quantity helpers only:
 3. Add unit tests for XOF/CNY/USD/EUR formatting, quantity parsing and half-up rounding.
 4. Add a development-only currency preview used by a Playwright DOM click/select test.
 5. Before marking T01 done, run every quality gate and record exact commands/results in this file.
+
+### 2026-11-08 native Alpha evidence checkpoint
+
+Selected C acceptance evidence slice; branch codex/alpha-native-evidence-20261108 from origin/main5139cc8. Installed0.1.18 native launch and user-completed admin login observed. Both usernames available; neither created. ceshi1 engineer CI/Bethel2 scope blocked by empty department list; master-data Departments also empty. Remote DB absence versus sync omission unresolved. BLOCKER lawful department/team unavailable. DEFERRED employee login/business/two-client/PDF/COS/preservation gates NOT_RUN. WARNING accessibility lag corrected; project preferences do not override plugin safety. No code/schema/cloud changes. Documentation formatting/diff checks follow; application tests omitted because records-only, no application acceptance inferred. Previous report backed up under ignored .cache/alpha-native-20261108. This containing commit is checkpoint; expected dirty0 after commit. No parent gates closed.
