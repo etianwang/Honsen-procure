@@ -41,7 +41,7 @@ bash deploy/baota/build-patch.sh \
 
 ## 4. 宝塔安装：一段失败就停止
 
-以下由已授权维护操作人执行。不要把维护连接串、密码或 `.env` 内容贴入聊天、日志或 Git。命令假设已从受信任交付源取得校验工具，不能在未校验陌生 ZIP 前执行里面的工具。
+以下由已授权维护操作人执行。不要把维护连接串、密码或 `.env` 内容贴入聊天、日志或 Git。只需上传一个 Patch ZIP；其外部 SHA256 必须来自已验收交付记录。先校验整个 ZIP 的可信散列，再用 Python 标准库只读取唯一固定工具条目到新目录，不展开其他内容；随后由该工具检查整个归档后再解压。不能使用陌生 ZIP 自带的散列给自己背书。
 
 ```bash
 set -euo pipefail
@@ -55,10 +55,18 @@ test "$(realpath -e "$LIVE")" = "$LIVE"
 PATCH_ZIP=/absolute/honsen-procure-server-v1-patch-BASE-to-TARGET.zip
 EXPECTED_SHA256='<交付记录中的64位SHA256>'
 test "$(sha256sum "$PATCH_ZIP" | cut -d' ' -f1)" = "$EXPECTED_SHA256"
-# GUARD 来自已验证的完整TARGET包/本仓库固定SHA，不从未验证ZIP直接执行。
-GUARD=/absolute/trusted/deploy/baota/archive-guard.py
 WORK=$(mktemp -d /www/wwwroot/api-pr/.honsen-patch.XXXXXXXX)
-python3 "$GUARD" "$PATCH_ZIP" "$WORK/patch"
+# 此处已核验整个ZIP的外部可信SHA；只提取唯一工具文本，不按归档路径写文件。
+python3 - "$PATCH_ZIP" "$WORK" <<'PY'
+import os,sys,zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    entries=[e for e in archive.infolist() if e.filename=='tools/archive-guard.py']
+    if len(entries)!=1 or entries[0].file_size>65536:
+        raise SystemExit('UNIQUE_TRUSTED_GUARD_REQUIRED')
+    with open(os.path.join(sys.argv[2],'archive-guard.py'),'xb') as output:
+        output.write(archive.read(entries[0]))
+PY
+python3 "$WORK/archive-guard.py" "$PATCH_ZIP" "$WORK/patch"
 PATCH="$WORK/patch"
 (cd "$PATCH"; sha256sum -c SHA256SUMS)
 "$NODE_BIN" "$PATCH/tools/server-patch.mjs" verify-base --live "$LIVE" --patch "$PATCH"
