@@ -58,3 +58,7 @@ Actual UI opened new requisition REQ-6455fbe7-0916-4ad8-af47-e2e92ff05859 but ma
 ## Zhanghekai prepared through native admin UI
 
 Normal online existence check returned available. Real creation summary: Zhanghekai / 张和凯 / administrator+purchaser only / CI / Bethel2办公楼 / PRJ / PRJ-CIVIL / 中文. No super administrator selected. Protected runtime password entered without evidence output. Final creation remains pending mandatory action-time approval; no account creation PASS yet. No repeat ceshi1 creation or password reset. Current native window preserved at confirmation page.
+
+## Zhanghekai actual creation and authorized readback
+
+Following existing explicit immediate approval and user resume after Escape stop, installed native UI submitted creation and returned 已创建；首次登录必须改密. Managed-account normal remote query then returned enabled Zhanghekai, display张和凯, scope CI/Bethel2办公楼/项目部/土建施工组 and 已读取云端授权范围. Summary administrator+purchaser, no super administrator. Creation NATIVE_UI_PASS. Effective trusted role enforcement, account UUID, employee login/firstchange/relogin and independent-client tests remain NOT_RUN. User authentication handoff pending under plugin rules. No duplicate ceshi1, resets, deployment, SQL writes or product source edits. Geometry/viewport failures recovered by fresh observation and scrolling, not duplicate account creation.
