@@ -2,7 +2,7 @@
 
 Scope: existing T15 server deployment reliability, explicitly requested minimal monorepo Patch mechanism. No remote upgrade, database/business schema change, Windows installation or Toolbox contract change.
 
-Current conclusion: implementation, real artifact checks and independent core business upgrade verification PASS; current-server installation remains BLOCKED pending real BASE evidence. Dedicated live COS verification is NOT RUN. No full V1/Alpha gate closes.
+Current conclusion: implementation, real artifact checks and independent core business upgrade verification PASS. The received real6b baseline is identified, but strict file drift, a locally added starter and changed shared-contract boundary block direct Patch installation; full candidate review is required. See [received baseline assessment](SERVER-BASELINE-6B18850-20261107.md). Dedicated live COS verification is NOT RUN. No full V1/Alpha gate closes.
 
 Final delivery TARGET is green-CI `930807729d2fe48f9a4beedf093c109b08eeaa3b`, using the actual downloaded GitHub Actions Linux ZIP. The earlier6f evidence below is retained history; the final930 artifact and its separate actual CLI runtime proof are recorded in the last section.
 
@@ -20,7 +20,7 @@ BASE for local isolated verification: `569fac83ceb3f8f44446c34a2640b4e812dc689b`
 
 The initial Windows and Ubuntu results below are historical development evidence. Final independent Ubuntu release suite44PASS0SKIP includes all core, Python archive/exchange, wrapper and actual CLI regressions. Actual final ZIP runtime was separately executed twice, by builder and independent reviewer. Existing failed runs and subsequent security regressions are retained.
 
-BLOCKER: real deployed BASE Manifest and file/type/mode/link evidence. The current user SSH screenshot proves a logged-in terminal, not its running application SHA. Read-only collection has been supplied; no remote upgrade, PM2, configuration or database command was executed.
+Baseline receipt has now been received and matched to original6b Manifest/checksum identities. Strict runtime eligibility fails and the shared boundary has changed, as detailed in the received-baseline assessment. No remote upgrade, PM2, configuration or database command was executed.
 
 BLOCKER for the requested complete attachment case: dedicated COS upload/download/SHA256 proof is NOT RUN without configuration; the isolated before/after disabled-attachments503 behavior was checked instead. DEFERRED: native two-SQLite-client and full Alpha/production gates. No company-wide or stable release is authorized by this report.
 
@@ -82,3 +82,9 @@ Independent reviewer built the final Patch from the actual GitHub full ZIP (no l
 Owned final Compose/runtime/credentials/dump/tar/TLS/keeper resources were removed. An ownership cleanup refusal on one native temporary directory was retained; only that independently verified owned test directory was returned to its existing normal user before removal, without touching other resources. Git worktree was clean before these final records-only edits. No server SSH command completed, no remote upgrade/PM2/DB/config change, no Release/Toolbox publication.
 
 Final disposition: local mechanism and core artifact workflow VERIFIED; current remote installation BLOCKED by missing actual BASE evidence, and the requested live COS transfer/SHA case remains NOT RUN. Only the user can provide the current terminal's non-sensitive read-only receipt; passwords are neither needed nor requested. These holds do not erase the local PASS and do prevent a claim of full remote/Alpha readiness. The final containing commit changes records only; application/deployment/test source is unchanged from green930, so no unrelated application rerun is required.
+
+### Received real6b baseline — 2026-11-07
+
+User supplied read-only server receipt. Original6b18850ee2e426fb68ac138fef866c4e4c718954 Manifest and SHA256SUMS digests match exactly.2232 known regular rows' content/size match the original with observed0755 modes, proven by exact canonical receipt equality; original2216 were0644. One.env.example path unreadable/missing; no real.env read.13 unknown entries include locally added start.mjs, absent from the original ZIP. Latest014 is packaged migration evidence, not a queried DB ledger. Shared bundle430714…→7229e6… and new packaged015+016 exceed same-contract Patch boundary. Actual local6b→930 create exited1 INCOMPATIBLE_FULL_DEPLOYMENT_REQUIRED with no output artifact. Strict refusal is verified, not bypassed.
+
+Current direct-server Patch BLOCKED; change missing-baseline-source hold to confirmed baseline drift/legacy-entry/contract review hold. Use full930 as candidate, not automatic deployment; inspect actual DB migration ledger/owner/PM2/start and verify backups first. Earlier569→930 Patch remains isolated example and must not be used on this server. No chmod/unknown-file deletion/SQL/Seed/admin reset/remote upgrade performed. Details docs/reviews/SERVER-BASELINE-6B18850-20261107.md. Records-only continuation; source/artifacts/tests unchanged from green930, formatting/references/status consistency checked; containing checkpoint expected selected dirt0 afterCommitPush. Original COS/native/Alpha/Formal/Toolbox gates remain open.
