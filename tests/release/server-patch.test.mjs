@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   chmodSync,
   cpSync,
@@ -649,5 +649,108 @@ test(
     ])
       assert.ok(existsSync(join(extracted, 'tools', tool)))
     verifyBase({ liveDir: f.live, patchDir: extracted })
+  },
+)
+
+test(
+  'real Linux prepare CLI excludes only itself from the stopped-process check',
+  {
+    skip:
+      process.platform !== 'linux'
+        ? 'Real default-stopped CLI requires Linux /proc and Node24'
+        : false,
+  },
+  (t) => {
+    const f = fixture(t)
+    make(f)
+    const core = fileURLToPath(
+      new URL('../../deploy/baota/server-patch.mjs', import.meta.url),
+    )
+    const before = readFileSync(
+      join(f.live, 'apps/server/dist/index.js'),
+      'utf8',
+    )
+    const result = spawnSync(
+      process.execPath,
+      [
+        core,
+        'prepare',
+        '--live',
+        f.live,
+        '--patch',
+        f.patch,
+        '--stage',
+        f.stage,
+      ],
+      { encoding: 'utf8', timeout: 15000 },
+    )
+    assert.equal(result.status, 0, result.stderr + result.stdout)
+    const verification = spawnSync(
+      process.execPath,
+      [core, 'verify-target', '--stage', f.stage, '--patch', f.patch],
+      { encoding: 'utf8', timeout: 10000 },
+    )
+    assert.equal(verification.status, 0, verification.stderr)
+    assert.equal(
+      readFileSync(join(f.live, 'apps/server/dist/index.js'), 'utf8'),
+      before,
+    )
+  },
+)
+
+test(
+  'prepare CLI still refuses another Node process referencing the live directory',
+  {
+    skip:
+      process.platform !== 'linux'
+        ? 'Other-process detection requires Linux /proc'
+        : false,
+  },
+  async (t) => {
+    const f = fixture(t)
+    make(f)
+    const core = fileURLToPath(
+      new URL('../../deploy/baota/server-patch.mjs', import.meta.url),
+    )
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        "process.stdout.write('READY\\n');setInterval(()=>{},1000)",
+        '--',
+        f.live,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+    const exited = new Promise((resolve) => child.once('exit', resolve))
+    try {
+      await new Promise((resolve, reject) => {
+        child.once('error', reject)
+        child.stdout.once('data', resolve)
+        child.once('exit', () =>
+          reject(new Error('process fixture exited before readiness')),
+        )
+      })
+      const result = spawnSync(
+        process.execPath,
+        [
+          core,
+          'prepare',
+          '--live',
+          f.live,
+          '--patch',
+          f.patch,
+          '--stage',
+          f.stage,
+        ],
+        { encoding: 'utf8', timeout: 15000 },
+      )
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /API_RUNNING/)
+      assert.equal(existsSync(f.stage), false)
+    } finally {
+      child.kill('SIGTERM')
+      await exited
+    }
   },
 )

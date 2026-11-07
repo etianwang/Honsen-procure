@@ -51,7 +51,12 @@ const controlUrl =
     return url.toString()
   })()
 const control = new pg.Pool({ connectionString: controlUrl })
-const database = 'patch_' + randomUUID().replaceAll('-', '')
+// The CLI intentionally fixes the production database name. This fixture uses
+// that name ONLY in the shell's fresh private Compose network/cluster.
+assert.equal(new URL(controlUrl).hostname, 'postgres-test')
+assert.equal(new URL(controlUrl).port || '5432', '5432')
+const database = 'honsen_procure'
+assert.notEqual(new URL(controlUrl).pathname, '/' + database)
 const role = 'patchruntime' + randomUUID().replaceAll('-', '')
 const ownerUrl = new URL(controlUrl)
 ownerUrl.pathname = '/' + database
@@ -63,11 +68,29 @@ const results = []
 let owner,
   app,
   proxy,
+  databaseCreated = false,
+  roleCreated = false,
   stage = 'setup'
 const liveDir = join(workDir, 'live'),
   stageDir = join(workDir, 'prepared'),
   patchDir = suppliedPatchDir ?? join(workDir, 'patch')
 const digest = (b) => createHash('sha256').update(b).digest('hex')
+const patchCli = (command, extra = [], env = process.env) =>
+  execFileSync(
+    process.execPath,
+    [
+      join(suppliedPatchDir, 'tools/server-patch.mjs'),
+      command,
+      '--live',
+      liveDir,
+      '--patch',
+      patchDir,
+      '--stage',
+      stageDir,
+      ...extra,
+    ],
+    { env, stdio: 'pipe' },
+  )
 async function stop() {
   if (!app) return
   const child = app
@@ -114,6 +137,7 @@ try {
     verbatimSymlinks: true,
   })
   await control.query('CREATE DATABASE ' + database)
+  databaseCreated = true
   owner = new pg.Pool({ connectionString: ownerUrl.toString() })
   const postgresVersion = (await owner.query('SHOW server_version')).rows[0]
     .server_version
@@ -133,6 +157,7 @@ try {
   await owner.query(
     `CREATE ROLE ${role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD '${runtimeUrl.password}'`,
   )
+  roleCreated = true
   await owner.query(
     readFileSync(
       join(liveDir, 'deploy/baota/runtime-grants.sql'),
@@ -427,14 +452,26 @@ try {
       'SELECT name,checksum FROM schema_migrations ORDER BY name',
     )
   ).rows
-  await assert.rejects(
-    preparePatch({ liveDir, patchDir, stageDir, checkStopped: true }),
-    { message: 'API_RUNNING' },
-  )
+  if (suppliedPatchDir)
+    assert.throws(
+      () => patchCli('prepare'),
+      (error) =>
+        error.status === 1 && error.stderr.toString().trim() === 'API_RUNNING',
+    )
+  else
+    await assert.rejects(
+      preparePatch({ liveDir, patchDir, stageDir, checkStopped: true }),
+      { message: 'API_RUNNING' },
+    )
   await stop()
   stage = 'prepare-patch-stopped'
-  await preparePatch({ liveDir, patchDir, stageDir, checkStopped: true })
-  verifyPrepared({ stageDir, patchDir })
+  if (suppliedPatchDir) {
+    assert.equal(JSON.parse(patchCli('prepare')).status, 'PASS')
+    assert.equal(JSON.parse(patchCli('verify-target')).status, 'PASS')
+  } else {
+    await preparePatch({ liveDir, patchDir, stageDir, checkStopped: true })
+    verifyPrepared({ stageDir, patchDir })
+  }
   assert.equal(digest(readFileSync(join(stageDir, '.env'))), envHash)
   assert.equal(
     readFileSync(join(stageDir, 'local-preserved-marker'), 'utf8'),
@@ -484,13 +521,24 @@ try {
   const oldPostgresUrl = process.env.POSTGRES_URL
   try {
     process.env.POSTGRES_URL = ownerUrl.toString()
-    await activatePatch({
-      liveDir,
-      stageDir,
-      patchDir,
-      backupDir,
-      expectedDatabase: database,
-    })
+    if (suppliedPatchDir)
+      assert.equal(
+        JSON.parse(
+          patchCli('activate', ['--backup', backupDir], {
+            ...process.env,
+            POSTGRES_URL: ownerUrl.toString(),
+          }),
+        ).status,
+        'PASS',
+      )
+    else
+      await activatePatch({
+        liveDir,
+        stageDir,
+        patchDir,
+        backupDir,
+        expectedDatabase: database,
+      })
   } finally {
     if (oldPostgresUrl === undefined) delete process.env.POSTGRES_URL
     else process.env.POSTGRES_URL = oldPostgresUrl
@@ -559,7 +607,7 @@ try {
       node: process.version,
       postgres: postgresVersion,
       patchSource: suppliedPatchDir
-        ? 'EXTRACTED_PATCH_ZIP'
+        ? 'EXTRACTED_PATCH_ZIP_CLI_PREPARE_ACTIVATE'
         : 'DIRECT_CORE_API_NOT_ARCHIVE_ACCEPTANCE',
       baseSha: JSON.parse(readFileSync(join(baseDir, 'build-manifest.json')))
         .sourceSha,
@@ -590,8 +638,9 @@ try {
   await stop()
   if (proxy) await new Promise((r) => proxy.close(r))
   if (owner) await owner.end()
-  await control.query('DROP DATABASE IF EXISTS ' + database + ' WITH (FORCE)')
-  await control.query('DROP ROLE IF EXISTS ' + role)
+  if (databaseCreated)
+    await control.query('DROP DATABASE ' + database + ' WITH (FORCE)')
+  if (roleCreated) await control.query('DROP ROLE ' + role)
   await control.end()
   // Remove only files this run created. Retain packages and test evidence.
   for (const file of [

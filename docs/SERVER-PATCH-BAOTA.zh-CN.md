@@ -43,6 +43,8 @@ bash deploy/baota/build-patch.sh \
 
 以下由已授权维护操作人执行。不要把维护连接串、密码或 `.env` 内容贴入聊天、日志或 Git。只需上传一个 Patch ZIP；其外部 SHA256 必须来自已验收交付记录。先校验整个 ZIP 的可信散列，再用 Python 标准库只读取唯一固定工具条目到新目录，不展开其他内容；随后由该工具检查整个归档后再解压。不能使用陌生 ZIP 自带的散列给自己背书。
 
+先确认现有 python3、unzip、GNU tar 和 PostgreSQL16 的 psql/pg_dump/pg_restore 可用；若宝塔客户端不在 PATH，只为当前维护终端指定已安装工具的真实路径。缺工具则停止，不自动安装、重装或改变全局配置。
+
 ```bash
 set -euo pipefail
 umask 077

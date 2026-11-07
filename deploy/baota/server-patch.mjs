@@ -582,6 +582,8 @@ export async function assertStopped(liveDir) {
   if (listening) fail('API_RUNNING')
   const root = realpathSync(liveDir)
   for (const pid of readdirSync('/proc').filter((p) => /^\d+$/.test(p))) {
+    // The updater's own --live argument identifies its target, not a running API.
+    if (pid === String(process.pid)) continue
     let executable
     try {
       executable = readlinkSync(`/proc/${pid}/exe`)
