@@ -34,7 +34,7 @@ assert.match(
 )
 execFileSync('python3', ['--version'], { stdio: 'pipe' })
 execFileSync('tar', ['--version'], { stdio: 'pipe' })
-const [baseDir, targetDir, workDir] = process.argv
+const [baseDir, targetDir, workDir, suppliedPatchDir] = process.argv
   .slice(2)
   .map((p) => resolve(p))
 assert.ok(baseDir && targetDir && workDir)
@@ -66,7 +66,7 @@ let owner,
   stage = 'setup'
 const liveDir = join(workDir, 'live'),
   stageDir = join(workDir, 'prepared'),
-  patchDir = join(workDir, 'patch')
+  patchDir = suppliedPatchDir ?? join(workDir, 'patch')
 const digest = (b) => createHash('sha256').update(b).digest('hex')
 async function stop() {
   if (!app) return
@@ -95,7 +95,7 @@ async function start(dir) {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (app.exitCode !== null) throw Error('API_START_FAILED')
     try {
-      const response = await fetch('http://127.0.0.1:3000/health')
+      const response = await fetch('http://127.0.0.1:3000/api/auth/captcha')
       if (response.ok) return
     } catch {
       /* bounded readiness retry */
@@ -106,10 +106,17 @@ async function start(dir) {
 }
 try {
   mkdirSync(workDir, { recursive: true })
-  createPatch({ baseDir, targetDir, patchDir })
-  cpSync(baseDir, liveDir, { recursive: true, preserveTimestamps: true })
+  if (!suppliedPatchDir) createPatch({ baseDir, targetDir, patchDir })
+  cpSync(baseDir, liveDir, {
+    recursive: true,
+    preserveTimestamps: true,
+    dereference: false,
+    verbatimSymlinks: true,
+  })
   await control.query('CREATE DATABASE ' + database)
   owner = new pg.Pool({ connectionString: ownerUrl.toString() })
+  const postgresVersion = (await owner.query('SHOW server_version')).rows[0]
+    .server_version
   const migrate = (dir) =>
     execFileSync(process.execPath, ['apps/server/dist/db/migrate.js'], {
       cwd: dir,
@@ -550,6 +557,10 @@ try {
     JSON.stringify({
       scope: 'ISOLATED_UBUNTU24_PACKAGED_RUNTIME_NOT_STAGING',
       node: process.version,
+      postgres: postgresVersion,
+      patchSource: suppliedPatchDir
+        ? 'EXTRACTED_PATCH_ZIP'
+        : 'DIRECT_CORE_API_NOT_ARCHIVE_ACCEPTANCE',
       baseSha: JSON.parse(readFileSync(join(baseDir, 'build-manifest.json')))
         .sourceSha,
       targetSha: JSON.parse(

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   cpSync,
@@ -15,6 +16,7 @@ import {
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import {
   createPatch,
@@ -574,5 +576,78 @@ test(
       'external sentinel',
     )
     assert.throws(() => inventory(f.base), code('UNSAFE_PATH'))
+  },
+)
+
+test(
+  'complete Linux wrapper archive checksums include the changed payload SHA256SUMS',
+  {
+    skip:
+      process.platform !== 'linux'
+        ? 'Requires Ubuntu bash/zip/unzip/Python3 and Node24'
+        : false,
+  },
+  (t) => {
+    const f = fixture(t)
+    const baseZip = join(f.root, 'base.zip'),
+      targetZip = join(f.root, 'target.zip')
+    for (const [root, destination] of [
+      [f.base, baseZip],
+      [f.target, targetZip],
+    ]) {
+      const result = spawnSync('zip', ['-qry', destination, '.'], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 10000,
+      })
+      assert.equal(result.status, 0, result.stderr || String(result.error))
+    }
+    const wrapper = fileURLToPath(
+      new URL('../../deploy/baota/build-patch.sh', import.meta.url),
+    )
+    const output = join(f.root, 'output')
+    const result = spawnSync(
+      'bash',
+      [
+        wrapper,
+        baseZip,
+        sha(readFileSync(baseZip)),
+        targetZip,
+        sha(readFileSync(targetZip)),
+        output,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, TMPDIR: f.root },
+        timeout: 30000,
+      },
+    )
+    assert.equal(result.status, 0, result.stderr + result.stdout)
+    const artifacts = readdirSync(output).filter((name) =>
+      name.endsWith('.zip'),
+    )
+    assert.equal(artifacts.length, 1)
+    const extracted = join(f.root, 'verified-wrapper-artifact')
+    const guard = fileURLToPath(
+      new URL('../../deploy/baota/archive-guard.py', import.meta.url),
+    )
+    const validation = spawnSync(
+      'python3',
+      [guard, join(output, artifacts[0]), extracted],
+      { encoding: 'utf8', timeout: 10000 },
+    )
+    assert.equal(validation.status, 0, validation.stderr)
+    assert.ok(existsSync(join(extracted, 'payload/SHA256SUMS')))
+    assert.match(
+      readFileSync(join(extracted, 'SHA256SUMS'), 'utf8'),
+      /^[a-f0-9]{64}  (?:\.\/)?payload\/SHA256SUMS$/m,
+    )
+    for (const tool of [
+      'server-patch.mjs',
+      'archive-guard.py',
+      'exchange-dirs.py',
+    ])
+      assert.ok(existsSync(join(extracted, 'tools', tool)))
+    verifyBase({ liveDir: f.live, patchDir: extracted })
   },
 )

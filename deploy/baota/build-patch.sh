@@ -27,7 +27,7 @@ test ! -e "$out/$name"; test ! -e "$out/$name.sha256"
 mkdir "$work/patch/tools"
 cp "$root/deploy/baota/server-patch.mjs" "$root/deploy/baota/archive-guard.py" "$root/deploy/baota/exchange-dirs.py" "$work/patch/tools/"
 cp "$root/docs/SERVER-PATCH-BAOTA.zh-CN.md" "$work/patch/README.zh-CN.md"
-(cd "$work/patch"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS; zip -qry "$out/$name" .)
+(cd "$work/patch"; find . -type f ! -path ./SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS; zip -qry "$out/$name" .)
 python3 "$root/deploy/baota/archive-guard.py" "$out/$name"
 sha256sum "$out/$name" > "$out/$name.sha256"
 cp "$work/patch/DIFF.json" "$out/$name.diff.json"
