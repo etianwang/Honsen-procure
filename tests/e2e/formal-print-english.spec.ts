@@ -76,7 +76,9 @@ test('formal bilingual preview rejects failures then renders trusted escaped sna
   await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
   await expect(page.getByRole('alert')).toBeVisible()
   await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
-  await expect(page.getByText('SPO · CI-P1-20261104-SPO-TEST-1')).toBeVisible()
+  await expect(
+    page.getByText('SPO · CI-P1-20261104-SPO-TEST-1', { exact: true }),
+  ).toBeVisible()
   await expect(page.getByText('Matériau électrique accentué')).toBeVisible()
   await expect(page.getByText('123.45 EUR').first()).toBeVisible()
   await expect(page.locator('article script')).toHaveCount(0)

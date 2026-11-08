@@ -153,7 +153,7 @@ test('only the selected frozen document prints in body flow without hidden shell
   expect(printedText).not.toContain('SYNTHETIC-SPO-B')
   expect(printedText).toContain('Câble synthétique 1')
   expect(printedText).toContain('Câble synthétique 2')
-  expect(printedText).toContain('Total: 200 XOF')
+  expect(printedText).toMatch(/TOTAL TTC\s+200 XOF/)
   await loadingTask.destroy()
   await page.emulateMedia({ media: 'screen' })
   await page.evaluate(() => window.dispatchEvent(new Event('afterprint')))

@@ -183,3 +183,110 @@ Built publicendpoint-only examples/captcha_transport_probe.rs usingexactreqwest0
 Nativeissue_cloud_captcha currentlycollapsesbuild/send/non2xx/decodeerrors toSyncTransport; no phaseevidencefromfailedUIrequestexists. HandedoffsingleuserretryoncurrentloginUI underguidance.md mandatoryauthenticationautomationdeny; pendingreply mayestablishwhetherfailuretransient. Ifstillfails,nextsafeactionaddsanitizedstageinstrumentationbeforeanotherrepair, notdeclarePASS. BLOCKER independentceshi1nativeauth andvalidTESTapproval/PDFremain. HPA/SPO/multipage nativePDF notgenerated. HostZhangsessionpreserved. DEFERRED otherfeaturespaused.
 
 Diagnosticexample releasebuildPASS/cargofmt/diffPASS; productionRust/renderer/Cargo unchanged against3af38f0 (emptydiff), so exactunchangedbusinessboundary reuses189RustPASS/desktop34/browserPDF7 candidateevidence, notnativeacceptance. No extraunrelatedtests needed for standalonepublicGETdiagnostic. Existinginstalled0.1.20EXE unaffected. Lastcheckpointa946422; containingdiagnosticcheckpointpartial, expectedclean aftercommitpush.
+
+
+### 2026-11-08 unified Print Engine candidate 0.1.21 — PARTIAL, native upgrade pending
+
+Scope A/D: approved T12 French/Chinese/English primary-secondary presentation,
+integer amount words and measured single-page-first A4 engine. Continued task
+branch codex/t12-native-export-20261108 from a2f9edf; origin/main fetched, prior
+work preserved. No database schema, Rust business/API contract, cloud deployment
+or immutable historical snapshot change.
+
+Production FormalPrintPreview now uses one PrintEngine component and
+print-engine.ts policy for HPA/SPO/OPA. Central tokens own A4 margins, reserved
+header/footer, readable fonts, summary ratio, spacing and page policy.
+Font-loaded actual DOM measurements choose standard, whitespace-dense then
+compact 9pt (secondary minimum 8pt), then allocate whole material rows;
+identical calculated pages feed preview and native window.print. Each page
+repeats company/legal identity, type/number, table header where applicable, and
+Page X / Y in both header and footer. Two-column metadata omits internal UUIDs;
+full-width materials, right summary with all eight items including zero stamp
+duty, paired amount words and horizontal signatures remain together. Logo
+remains checksum-verified approved asset. No screenshot-to-PDF generator
+introduced.
+
+Print selection stays inside frozen zh_fr or zh_en; selected language and
+document are captured together for print. CI-/CM- immutable formal-number
+prefixes default zh_fr presentation to French; other zh_fr documents preserve
+Chinese default, zh_en English. This is a presentation default, NOT a persisted
+project language setting or mutation of old snapshots. The old deployed
+server/clients reject extra profile fields, so no incompatible primaryLanguage
+field was pushed.
+
+Independent amount module uses BigInt signed-i64 minor units: XOF/BCEAO and
+XAF/BEAC zero decimals; CNY/USD/EUR/approved ETB two decimals. Chinese financial
+words, French hyphenation/plurals/de at exact millions and English words tested
+with zero, negatives, cents, grouping gaps and limits. XLSX keeps existing
+sheets/values and appends issuer, primary language and all three amount-word
+columns to formal terms, with real XLSX write/read regression. Existing native
+Excel evidence is not re-labelled for changed export.
+
+Evidence/root causes retained: previous top=-94 was viewport scroll, not PDF
+page loss (historical independent review). Initial new-engine tests counted
+eight summary rows as material rows: narrowed selector preserves exact
+64-material assertion. Hidden print portal initially measured zero: now screen
+measurement is offscreen visible layout, while actual print is normal body flow.
+Inline variables initially prevented compact measurement matching output:
+removed. Five-row tests exposed about 5px overflow; measured compact summary
+whitespace reduced without shrinking below readable limits. Independent review
+caught capacity including top padding and live-language race; both fixed and
+rechecked. Font loading explicitly requested before metrics. Skia embeds
+searchable Type3 glyph programs with CharProcs/ToUnicode for this font; tests
+accept those or FontFile embedded programs, and still require text/font
+operators. No claim that FontFile is always present.
+
+Validation: desktop Unit 71 PASS; strict Typecheck PASS; Lint exit0 with
+existing warnings plus PrintEngine set-state-in-effect warning; Vite production
+Build PASS. Generator matrix 18 PASS (1/5/10/20/50 rows, three primary modes,
+five currencies, maximum EUR signed-i64), plus original seven PDF/file/lifecycle
+cases PASS. Initial combined run 25 PASS/3 label-locator failures retained;
+three updated visual-contract tests and print lifecycle rerun 4 PASS. Assertions
+retain material/amount/security checks, scope exact repeated number and new
+hierarchical headings. Full 18 matrix repeated after final density change PASS
+in combined run. Independent source recheck found no further confirmed defect;
+five-row French XAF PDF rendered with Poppler and visually inspected. These are
+GENERATOR PASS, not NATIVE_UI_PASS. Exact files/hashes/pages:
+reviews/evidence/T12-PRINT-ENGINE-20261108.json. No unrelated
+Rust/server/migration suites rerun: unchanged against a2f9edf, release Rust
+compilation performed; no new cloud acceptance inferred.
+
+Actual prior 0.1.20 native workflow completed: independent Sandbox ceshi1
+created REQ-57b87743-ef4c-442c-b8ee-a4435d57658e, Push; host Zhanghekai
+Pull/approval/formal HPA issue CI-BETHEL2-20261108-HPA-4NM1JMPR-2 total1100XOF.
+Guest home freshly reads executing/pending0, preserving separate SQLite;
+screenshot .cache/native-pdf-020/ceshi1-independent-approved-pull.png. This
+bounds two-way independent-client propagation, not
+restart/offline/revocation/full-sync acceptance. Editor retained stale pending
+status until navigation; nonblocking stale-view finding, not sync-data failure.
+
+Native0.1.20 HPA preview/save/searchable-file read/reopen observed:
+.cache/native-pdf-020/TEST-HPA-CI-BETHEL2-20261108-2-searchable.pdf, 369485
+bytes, SHA256 afb8e6ef9af238ec951628dd9a7b7c79ebee289a8d2b84324ac129c464e42dfa,
+A4 one page, legal issuer, bilingual material, formal number and1100XOF.
+Separate PDF reader actual window opened/reviewed; bounded screenshot
+HPA-reader-open.png. Earlier browser-URL confidence tool stop retained,
+recovered only in a later user turn. Microsoft Print to PDF driver file is a
+full-page raster (SHA
+ecef4ffc73208b7ee6157effed9818df45489ca3da4eee948952ae1568c51597): FAIL
+searchable requirement. Built-in Save as PDF succeeds; do not conflate outputs.
+This old template does NOT pass the new layout specification.
+
+Existing Windows release builder produced0.1.21 at
+H:/Honsen/Honsen-Procure/.cache/alpha-candidate-v1closure-018/release/bundle/nsis/Honsen-Procure-0.1.21-Setup.exe,
+SHA2561bfd81934f559449b4c3849a916a50333a6d2520c823318c613cd3abb98e6dbf,
+unsigned. Not installed yet: action-time computer-use installation confirmation
+is required. Ordered upstream Toolbox preflight read from current clone after
+curl reset; existing integration gaps remain, no
+appId/EXE/manifest/Runner/registry/uninstall contract change.
+
+BLOCKER for completing requested T12: native0.1.21 upgrade/save/reopen/Windows
+print and native SPO/OPA/multipage files; REQ parent dedicated trusted adapter;
+HPA payment/reversal/receiving modules; persisted project print-language
+configuration. Existing formal projector lacks those business modules, so engine
+does not invent data. Full Alpha gates remain OPEN. BLOCKER legacy old HPA
+missing frozen translation still strict. DEFERRED explicitly paused
+payment-channel expansion. WARNING driver raster output, new lint warning, stale
+editor status; no history, original3300XOF payment/reversal or formal numbers
+altered. No cloud changes. Selected tracked source/tests/docs form this
+checkpoint; ignored artifacts retained. No PR merge or release publish.

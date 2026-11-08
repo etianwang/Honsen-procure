@@ -93,19 +93,20 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
       await page
         .getByRole('button', { name: '正式单据预览 / Aperçu', exact: true })
         .click()
-      await expect(page.locator('tbody tr')).toHaveCount(64)
-      await expect(page.locator('.formal-company-name')).toHaveText(
+      await expect(page.locator('.print-materials tbody tr')).toHaveCount(64)
+      await expect(page.locator('.formal-company-name').first()).toHaveText(
         '深圳市弘盛优创机电工程设计有限公司',
       )
-      await expect(page.locator('.formal-company-logo')).toHaveAttribute(
-        'src',
-        '/print/honsen-approved-logo-v1.png',
-      )
+      await expect(
+        page.locator('.formal-company-logo').first(),
+      ).toHaveAttribute('src', '/print/honsen-approved-logo-v1.png')
       await page
         .getByRole('button', { name: '打印 / Imprimer · PDF', exact: true })
         .click()
       await expect(page.locator('body > .honsen-print-root')).toHaveCount(1)
-      await page.evaluate(() => document.fonts.ready)
+      await expect(
+        page.locator('.honsen-print-root [data-layout-ready]'),
+      ).toHaveCount(1)
       const output = resolve(
         '.cache/t12-print-matrix',
         `${kind}-${languagePair}`,
@@ -145,7 +146,8 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
           ? 'TEST Matériau électrique accentué numéro 64'
           : 'TEST long electrical material number 64',
       )
-      expect(text).toContain('Total: 6400 XOF')
+      expect(text).toMatch(/(?:TOTAL TTC|TOTAL)[\s\S]{0,40}6400 XOF/)
+      expect(text).toContain('6400 XOF')
       expect(text).not.toContain('NaN')
       await loadingTask.destroy()
       writeFileSync(

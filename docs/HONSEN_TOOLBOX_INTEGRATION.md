@@ -241,3 +241,12 @@ OriginalSandbox283a80d3-ca0e-4799-963f-8d2a9eaa74d5 unexpectedlyterminated0x8037
 Read-onlyguestmetadata independentlyconfirms WDAGUtilityAccount, installed0.1.20 andEXESHA256 exactlyequalhost. Public HTTPS GET/v1/api/auth/captcha insideguestreturns200 (body/challengeanswer notlogged); receipt.cache/native-sandbox-evidence/client020-health.json. UIonlinechallenge appearsafternormalGetCAPTCHA succeeds, codeLoginPage.refreshCaptcha callsbothlocal/cloud; HTTP200 alone isnotnativechallenge/loginPASS. Login/captchaGUIautomationforbiddenbyplugin, so handedoffonceshi1login nowcorrectversion. HostZhangworkbenchpreserved. BLOCKERnativeHPA/SPO/multipagePDF remains normalapplicantlogin/validfixture; noPDFaccepted yet.
 
 Server-only immutableprintProfilecandidate additionallyrejectsdrop/replace inserviceandunderPGrowlock, semanticJSONequalpermitkeyreordering, historicalabsent+childinheritanceallowed. Focusedservice23PASS; actualdisposablePG16test1PASS (42unrelatedfiltered); fullserver111PASS/144explicitPGoroptinskips withoutDBenv; typecheck/lint/build/format/diffPASS. InitialWSLlifetimeECONNREFUSED andfixtureUUIDcastfailure retainedthenfixed; ownedWSLkeeper/disposableCompose volumes/network/testcredentials cleaned. NoPGmigration/serverdeployment. Deployedoldserver remainswithoutthisnewguard; candidatemustnotbeclaimedcloudPASS. Desktoppackage3af38f0 unaffectedbyserver-onlyguard. Containingcheckpointpartial, noAlpha/T12closure. DEFERREDotherfeaturespaused; currentselectedfiles4server+progressdocs untilcheckpoint, expectedclean afterward.
+
+
+2026-11-08 T12-only0.1.21 candidate: ordered five upstream preflight read from
+.cache/toolbox-preflight current main clone (direct curl failed connection
+reset). Existing release builder produced unsigned
+Honsen-Procure-0.1.21-Setup.exe
+SHA2561bfd81934f559449b4c3849a916a50333a6d2520c823318c613cd3abb98e6dbf. No
+installer/Runner/manifest/registry/identity/uninstall logic changed. Native
+installation pending fresh confirmation; existing integration holds not closed.

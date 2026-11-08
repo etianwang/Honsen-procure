@@ -75,10 +75,12 @@ test('formal bilingual preview rejects failures then renders trusted escaped sna
   await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
   await expect(page.getByRole('alert')).toBeVisible()
   await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
-  await expect(page.getByText('SPO · CI-P1-20261104-SPO-TEST-1')).toBeVisible()
+  await expect(
+    page.getByText('SPO · CI-P1-20261104-SPO-TEST-1', { exact: true }),
+  ).toBeVisible()
   await expect(page.getByText('Matériau électrique accentué')).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: '采购订单 / Bon de commande' }),
+    page.getByRole('heading', { name: 'BON DE COMMANDE 采购订单' }),
   ).toBeVisible()
   await expect(page.locator('.formal-document-brand')).toHaveText(
     'HONSEN Procure',
@@ -86,7 +88,10 @@ test('formal bilingual preview rejects failures then renders trusted escaped sna
   await expect(page.locator('.formal-document-footer')).toContainText(
     'CI-P1-20261104-SPO-TEST-1',
   )
-  await expect(page.locator('tbody td').last()).toHaveCSS('text-align', 'right')
+  await expect(page.locator('.print-materials tbody td').last()).toHaveCSS(
+    'text-align',
+    'right',
+  )
   await expect(page.getByText('123.45 EUR').first()).toBeVisible()
   await expect(page.locator('article script')).toHaveCount(0)
   expect(errors).toEqual([])

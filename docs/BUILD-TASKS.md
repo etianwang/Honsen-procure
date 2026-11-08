@@ -588,3 +588,15 @@ BLOCKER: native new-package installation, actual Windows preview/save/reopen/Pri
 2026-11-08 actualhost+freshSandbox0.1.20verifiedsameEXE; guestold0.1.13couldnotbeusedforcurrentUI. NativeSandboxinstallPASS; actualguestCAPTCHAHTTP200 onlyAPIreachability, ceshi1normalGUIloginpending. MinimalserverprintProfileimmutabilitycandidate PG1PASS/service23PASS, notdeployed. T12nativePDFstillOPEN.
 
 2026-11-08 actualSandbox0.1.20cloudCAPTCHAUI failure remainsBLOCKER; sameRustpublicGETprobe200 nowdoesnotacceptnativeauth. Oneuserretryhandoffpending, failedrequestrootcauseunknown. PDFfixtures/nativefilesstillNOTRUN; noTLS/securitybypass.
+
+
+2026-11-08 T12 unified Print Engine partial candidate0.1.21: shared measured A4
+HPA/SPO/OPA pages, bilingual hierarchy, signed BigInt trilingual amount words
+and eight-item summary implemented. Unit71/generator18+7+visual-contract3 PASS;
+native0.1.20 HPA actual searchable save/read/reopen boundedPASS, independent
+applicant→approver→applicant propagation observed. New0.1.21 native
+install/print pending; parent REQ adapter, HPA payment modules and persisted
+project-language setting remain BLOCKER to full requested scope. Driver raster
+output FAIL retained. No parent/milestone/Alpha closure; details and exact
+artifact hashes in V1-REMOTE-ALPHA-ACCEPTANCE.md and
+reviews/evidence/T12-PRINT-ENGINE-20261108.json.

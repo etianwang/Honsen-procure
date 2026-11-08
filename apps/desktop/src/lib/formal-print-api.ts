@@ -2,6 +2,42 @@ import { z } from 'zod'
 import { currencySchema } from '@honsen/shared'
 export type FormalPrintDocument = z.infer<typeof documentSchema>
 
+export type PrintPrimaryLanguage = 'zh' | 'fr' | 'en'
+
+// Presentation order may change only inside the languages already frozen in
+// the document. This never supplies a translation from today's material catalog.
+export function permittedPrintLanguages(
+  pair: FormalPrintDocument['languagePair'],
+): readonly PrintPrimaryLanguage[] {
+  return pair === 'zh_fr' ? ['zh', 'fr'] : ['en']
+}
+
+export function validatePrintLanguage(
+  pair: FormalPrintDocument['languagePair'],
+  primary: PrintPrimaryLanguage,
+): PrintPrimaryLanguage {
+  if (!permittedPrintLanguages(pair).includes(primary))
+    throw new Error('Print language is outside the frozen language pair')
+  return primary
+}
+
+export function legacyPrintLanguage(
+  pair: FormalPrintDocument['languagePair'],
+): PrintPrimaryLanguage {
+  return pair === 'zh_fr' ? 'zh' : 'en'
+}
+
+/** Country prefix is part of the immutable formal number, never a current catalog lookup. */
+export function defaultPrintLanguage(
+  document: Pick<FormalPrintDocument, 'formalDocumentNo' | 'languagePair'>,
+): PrintPrimaryLanguage {
+  if (
+    document.languagePair === 'zh_fr' &&
+    /^(CI|CM)-/.test(document.formalDocumentNo)
+  )
+    return 'fr'
+  return legacyPrintLanguage(document.languagePair)
+}
 const minor = z.string().regex(/^-?\d+$/)
 export const approvedPrintLogo = {
   assetId: 'honsen-approved-logo-v1',

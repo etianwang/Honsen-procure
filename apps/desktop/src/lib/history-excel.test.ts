@@ -110,6 +110,15 @@ describe('authorized XLSX history export', () => {
       'TEST-HPA-1',
     )
     expect(book.getWorksheet('Commandes')?.getCell('G2').value).toBe('2.50 CNY')
+    expect(book.getWorksheet('Conditions')?.getCell('P2').value).toBe(
+      '人民币贰元伍角',
+    )
+    expect(book.getWorksheet('Conditions')?.getCell('Q2').value).toBe(
+      'deux yuans chinois et cinquante fen',
+    )
+    expect(book.getWorksheet('Conditions')?.getCell('R2').value).toBe(
+      'two Chinese yuan and fifty fen',
+    )
     expect(book.getWorksheet('Commandes')?.getCell('I2').value).toBe('')
     expect(book.getWorksheet('Conditions')?.getCell('M2').value).toBe('37')
     expect(book.getWorksheet('Lignes')?.getCell('C2').value).toBe('冻结材料')

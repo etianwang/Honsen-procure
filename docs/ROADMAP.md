@@ -468,3 +468,15 @@ BLOCKER Alpha: installed fresh/online login, upgrade/uninstall data preservation
 2026-11-08 twoactualWindowsenvironmentsnow0.1.20sameEXE; nativePDFawaitsvalidnormalemployeeapplication/approval. NeitherCAPTCHAHTTP200norbuildgatescloseT12/Alpha.
 
 2026-11-08 nativeSandboxauthblocked despitepublicRustprobe200; retainT12/AlphaOPEN pendingrealGUIlogin andPDFfiles. NoPDFPASS transferredfromprobes.
+
+
+2026-11-08 T12 unified Print Engine partial candidate0.1.21: shared measured A4
+HPA/SPO/OPA pages, bilingual hierarchy, signed BigInt trilingual amount words
+and eight-item summary implemented. Unit71/generator18+7+visual-contract3 PASS;
+native0.1.20 HPA actual searchable save/read/reopen boundedPASS, independent
+applicant→approver→applicant propagation observed. New0.1.21 native
+install/print pending; parent REQ adapter, HPA payment modules and persisted
+project-language setting remain BLOCKER to full requested scope. Driver raster
+output FAIL retained. No parent/milestone/Alpha closure; details and exact
+artifact hashes in V1-REMOTE-ALPHA-ACCEPTANCE.md and
+reviews/evidence/T12-PRINT-ENGINE-20261108.json.

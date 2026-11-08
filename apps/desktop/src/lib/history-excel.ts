@@ -1,3 +1,5 @@
+import { amountInWords } from './amount-words'
+import { defaultPrintLanguage } from './formal-print-api'
 import {
   internalExportDocumentSchema,
   formatPrintMoney,
@@ -261,7 +263,16 @@ export async function buildHistoryWorkbook(
     words.reason,
     words.date,
   ])
-  textRow(terms, [words.ID, words.number, ...termNames])
+  textRow(terms, [
+    words.ID,
+    words.number,
+    ...termNames,
+    'Legal issuer / 法定名称',
+    'Primary language / 主语言',
+    '金额大写',
+    'Montant en lettres',
+    'Amount in words',
+  ])
   const seen = new Set<string>()
   const cursors = new Set<string>()
   let cursor: Parameters<ExportApi['listRequisitionHistory']>[0]
@@ -314,7 +325,12 @@ export async function buildHistoryWorkbook(
           formal.freightMinor,
           formal.taxMinor,
           String(formal.taxRateBasisPoints),
-          formal.manualStampDutyMinor ?? '',
+          formal.manualStampDutyMinor ?? '0',
+          formal.printProfile?.legalNameZh ?? '',
+          defaultPrintLanguage(formal),
+          amountInWords(formal.totalMinor, formal.currency, 'zh'),
+          amountInWords(formal.totalMinor, formal.currency, 'fr'),
+          amountInWords(formal.totalMinor, formal.currency, 'en'),
         ])
       for (const line of formal?.lines ?? detail.lines) {
         textRow(lines, [
