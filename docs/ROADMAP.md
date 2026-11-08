@@ -466,3 +466,5 @@ BLOCKER Alpha: installed fresh/online login, upgrade/uninstall data preservation
 2026-11-08 PDFonly: approvedcompanyname/logo frozenprofile candidate0.1.20 built, actualindependentWindowsSandboxidentified; installedtwo-endnativePDF/print acceptance stillpending. T12/AlphastayOPEN.
 
 2026-11-08 twoactualWindowsenvironmentsnow0.1.20sameEXE; nativePDFawaitsvalidnormalemployeeapplication/approval. NeitherCAPTCHAHTTP200norbuildgatescloseT12/Alpha.
+
+2026-11-08 nativeSandboxauthblocked despitepublicRustprobe200; retainT12/AlphaOPEN pendingrealGUIlogin andPDFfiles. NoPDFPASS transferredfromprobes.
