@@ -1,5 +1,9 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  请选择有效的授权范围后再维护报价: [
+    'Select a valid authorized scope before maintaining quotes',
+    'Sélectionnez un périmètre autorisé avant de gérer les devis',
+  ],
   '供应商表格，可横向滚动': [
     'Suppliers table; scroll horizontally',
     'Tableau des fournisseurs ; défilement horizontal',

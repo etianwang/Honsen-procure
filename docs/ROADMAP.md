@@ -528,3 +528,5 @@ IN PROGRESS: specifications, shared tokens/theme, initial history and account-fe
 UI phase2 batch2 remains PARTIAL: scoped automation verified; current-source Windows native acceptance BLOCKED_AUTH_INTERACTION. Original milestone gates unchanged; see design rollout.
 
 UI phase2 batch3: bounded supplier search, scope account-generation guard, history date fields and pending-state fixes checkpointed as PARTIAL; final functional/native UX acceptance remains open (see rollout).
+
+UI phase2 batch4 remains PARTIAL with automated scope evidence; no current-build native acceptance or parent closure. See design rollout.

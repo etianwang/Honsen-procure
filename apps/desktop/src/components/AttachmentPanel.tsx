@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Empty, Modal, Select, Space } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UiLocale } from '@honsen/shared'
 import {
   attachmentApi,
@@ -20,7 +20,15 @@ export function AttachmentPanel({
   const [files, setFiles] = useState<AttachmentView[]>([])
   const [targets, setTargets] = useState<AttachmentTarget[]>([])
   const [targetId, setTargetId] = useState(orderId)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState<'saved' | 'error' | ''>('')
+  const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [localPending, setLocalPending] = useState(false)
+  const mounted = useRef(false)
+  const generation = useRef(0)
+  const operation = useRef(0)
+  const pending = useRef(false)
+  const importedId = useRef<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [syncState, setSyncState] = useState('')
   const [preview, setPreview] = useState<{
@@ -29,22 +37,46 @@ export function AttachmentPanel({
     data: string
   } | null>(null)
   const refresh = useCallback(async () => {
+    const request = ++generation.current
+    setLoading(true)
     try {
       const [files, targets] = await Promise.all([
         attachmentApi.list(orderId),
         attachmentApi.targets(orderId),
       ])
+      if (!mounted.current || request !== generation.current) return false
       setFiles(files)
       setTargets(targets)
+      setLoadFailed(false)
+      if (
+        importedId.current &&
+        files.some(
+          (file) =>
+            file.id === importedId.current && file.uploadState === 'uploaded',
+        )
+      ) {
+        importedId.current = null
+        setLocalPending(false)
+      }
+      return true
     } catch {
-      setMessage(t.error)
+      if (mounted.current && request === generation.current) setLoadFailed(true)
+      return false
+    } finally {
+      if (mounted.current && request === generation.current) setLoading(false)
     }
-  }, [orderId, t.error])
+  }, [orderId])
   useEffect(() => {
+    mounted.current = true
     void refresh()
     const update = () => void refresh()
     window.addEventListener('honsen-procurement-synced', update)
-    return () => window.removeEventListener('honsen-procurement-synced', update)
+    return () => {
+      mounted.current = false
+      generation.current++
+      operation.current++
+      window.removeEventListener('honsen-procurement-synced', update)
+    }
   }, [refresh])
   useEffect(() => {
     const update = (event: Event) =>
@@ -53,32 +85,48 @@ export function AttachmentPanel({
     return () => window.removeEventListener('honsen-procurement-status', update)
   }, [])
   async function importFile(file: File) {
+    if (pending.current) return
     const target = targets.find((v) => v.ownerId === targetId)
     if (!target) return
+    pending.current = true
+    const request = ++operation.current
     setBusy(true)
+    setMessage('')
+    setSyncState('pending')
     try {
-      await attachmentApi.import(orderId, target, file)
-      setMessage(t.saved)
+      const id = await attachmentApi.import(orderId, target, file)
+      if (!mounted.current || request !== operation.current) return
+      importedId.current = id
+      setLocalPending(true)
+      setMessage('saved')
       await refresh()
     } catch {
-      setMessage(t.error)
+      if (mounted.current && request === operation.current) setMessage('error')
     } finally {
-      setBusy(false)
+      if (mounted.current && request === operation.current) {
+        pending.current = false
+        setBusy(false)
+      }
     }
   }
   async function view(file: AttachmentView) {
+    if (pending.current) return
+    pending.current = true
+    const request = ++operation.current
     setBusy(true)
+    setMessage('')
     try {
-      setPreview({
-        name: file.originalName,
-        type: file.contentType,
-        data: await attachmentApi.read(file.id),
-      })
+      const data = await attachmentApi.read(file.id)
+      if (!mounted.current || request !== operation.current) return
+      setPreview({ name: file.originalName, type: file.contentType, data })
       await refresh()
     } catch {
-      setMessage(t.error)
+      if (mounted.current && request === operation.current) setMessage('error')
     } finally {
-      setBusy(false)
+      if (mounted.current && request === operation.current) {
+        pending.current = false
+        setBusy(false)
+      }
     }
   }
   return (
@@ -89,6 +137,7 @@ export function AttachmentPanel({
           {t.target}
           <Select
             aria-label={t.target}
+            disabled={busy || loading}
             value={targetId}
             onChange={setTargetId}
             style={{ minWidth: 200, maxWidth: '100%' }}
@@ -103,7 +152,7 @@ export function AttachmentPanel({
           <input
             aria-label={t.file}
             type="file"
-            disabled={busy || !targets.length}
+            disabled={busy || loading || loadFailed || !targets.length}
             accept={
               targetId === orderId
                 ? '.pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.heic,.dwg,.zip'
@@ -119,14 +168,25 @@ export function AttachmentPanel({
             }}
           />
         </label>
-        <Button loading={busy} onClick={procurementMutation}>
+        <Button
+          disabled={busy || loading}
+          onClick={() => {
+            void refresh()
+            procurementMutation()
+          }}
+        >
           {t.retry}
         </Button>
         <span role="status">
           {syncState === 'syncing'
             ? t.syncing
             : syncState === 'synced'
-              ? t.synced
+              ? localPending ||
+                files.some(
+                  (file) => file.uploadState !== 'uploaded' || !!file.lastError,
+                )
+                ? t.pending
+                : t.lastSynced
               : syncState === 'conflict'
                 ? t.conflict
                 : syncState === 'error'
@@ -136,9 +196,27 @@ export function AttachmentPanel({
                     : ''}
         </span>
       </Space>
-      {message ? (
-        <Alert role="status" title={message} type="info" showIcon />
-      ) : null}
+      {busy && <Alert role="status" title={t.working} type="info" showIcon />}
+      {loading && (
+        <Alert role="status" title={t.loading} type="info" showIcon />
+      )}
+      {loadFailed && (
+        <Alert role="alert" title={t.loadFailed} type="error" showIcon />
+      )}
+      {message && (
+        <Alert
+          role={message === 'error' ? 'alert' : 'status'}
+          title={
+            message === 'saved' && loadFailed
+              ? t.savedRefreshFailed
+              : t[message]
+          }
+          type={
+            message === 'error' ? 'error' : loadFailed ? 'warning' : 'success'
+          }
+          showIcon
+        />
+      )}
       {files.length ? (
         <ul>
           {files.map((file) => (
@@ -166,9 +244,9 @@ export function AttachmentPanel({
             </li>
           ))}
         </ul>
-      ) : (
+      ) : !loading && !loadFailed ? (
         <Empty description={t.empty} />
-      )}
+      ) : null}
       <Modal
         title={preview?.name}
         open={preview !== null}

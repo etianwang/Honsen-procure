@@ -1,5 +1,11 @@
 export const attachmentMessages = {
   'zh-CN': {
+    working: '正在处理附件，请稍候…',
+    loading: '正在读取附件…',
+    loadFailed: '无法读取附件列表；已加载的文件已保留，请重试。',
+    savedRefreshFailed:
+      '附件已保存在本机，但列表刷新失败；请刷新列表，不要重复导入。',
+    lastSynced: '上次同步已获服务端确认',
     title: '附件与凭证',
     original: 'HEIC 原件',
     derived: 'JPEG 预览（关联 HEIC 原件）',
@@ -27,6 +33,13 @@ export const attachmentMessages = {
     syncError: '离线或同步失败，数据保留在本机',
   },
   'fr-FR': {
+    working: 'Traitement de la pièce jointe…',
+    loading: 'Chargement des pièces jointes…',
+    loadFailed:
+      'Chargement impossible. Les fichiers déjà chargés sont conservés. Réessayez.',
+    savedRefreshFailed:
+      'Fichier conservé localement, mais actualisation impossible. Actualisez la liste sans réimporter.',
+    lastSynced: 'Dernière synchronisation confirmée par le serveur',
     title: 'Pièces jointes et justificatifs',
     original: 'Original HEIC',
     derived: 'Aperçu JPEG (original HEIC associé)',
@@ -54,6 +67,13 @@ export const attachmentMessages = {
     syncError: 'Hors ligne ou échec ; données conservées localement',
   },
   'en-US': {
+    working: 'Processing attachment, please wait…',
+    loading: 'Loading attachments…',
+    loadFailed:
+      'Cannot load attachments. Previously loaded files are retained. Retry.',
+    savedRefreshFailed:
+      'File saved locally, but list refresh failed. Refresh the list; do not import again.',
+    lastSynced: 'Last sync was acknowledged by the server',
     title: 'Attachments and vouchers',
     original: 'HEIC original',
     derived: 'JPEG preview (linked HEIC original)',

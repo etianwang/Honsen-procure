@@ -1,0 +1,49 @@
+{
+  "base": "5e8616c",
+  "candidateSha256": "8A9899B5B3DF8215A640D53CABB06357A79B3CEC5E29D4F60D939D7676623CB8",
+  "candidatePath": ".cache/ui-native-build-batch1/debug/HonsenProcure.exe",
+  "native": "BLOCKED_AUTH_INTERACTION",
+  "checks": [
+    "desktop lint/typecheck/build PASS; unit74 PASS",
+    "DOM24 initially21PASS/3policy label FAIL; policy3 repaired PASS",
+    "navigation7 initially6PASS/1strict duplicate label FAIL; country focused1 repaired PASS"
+  ],
+  "sourceHashes": [
+    {
+      "path": "apps/desktop/src/components/ApprovalPolicyPanel.tsx",
+      "sha256": "BF494D0ACCBEAE9046595446CBB7C80BA866A5240E1AD8DE7A349F917DBF4356"
+    },
+    {
+      "path": "apps/desktop/src/components/AttachmentPanel.tsx",
+      "sha256": "D98525A3B388491D0E4C8E33DB84393B3393D8CAA1BA2787A66914AA173F7670"
+    },
+    {
+      "path": "apps/desktop/src/components/MasterDataManager.tsx",
+      "sha256": "32A86E231032B399722FD2230E73C96AA3956CC415D71BC82832C5618BAB14B7"
+    },
+    {
+      "path": "apps/desktop/src/lib/attachment-messages.ts",
+      "sha256": "6F39C51B71F2AE8CF2246BAAF58FEC09F3C95F3710579CD15E576BFE6EF2BD9F"
+    },
+    {
+      "path": "apps/desktop/src/lib/catalog-messages.ts",
+      "sha256": "1AAE840EEA87D66337F474A99AB3D99E41BC131F63357559773FC40F8BE6B3B4"
+    },
+    {
+      "path": "apps/desktop/src/lib/governance-messages.ts",
+      "sha256": "F328ADD92F8A78ED447C29ACE68EE27C9FDA4BAEE075AD787D3D80DF868EED91"
+    },
+    {
+      "path": "apps/desktop/src/pages/MaterialsPage.tsx",
+      "sha256": "9055C3E6BC5E1F8EBCBF59601A805775CD84B0C7E5FF2E4A8126221E3CCA77D7"
+    },
+    {
+      "path": "apps/desktop/src/components/ReferenceDataTable.tsx",
+      "sha256": "61D01049C3F03DAA7DA0F0A1DC3C6F763B3CB03923A5E2EB118AC38219C8DB3E"
+    },
+    {
+      "path": "apps/desktop/src/lib/catalog-price-payload.test.ts",
+      "sha256": "AFE25791EEE034A8805A27310C6C507C12A5B4A7520D9037F395BF683EFDA557"
+    }
+  ]
+}

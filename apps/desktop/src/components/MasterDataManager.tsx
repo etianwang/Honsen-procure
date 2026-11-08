@@ -1,16 +1,7 @@
 import { useMasterText } from '../lib/master-data-messages'
-import {
-  Alert,
-  Button,
-  Card,
-  Input,
-  Select,
-  Space,
-  Table,
-  Tabs,
-  Modal,
-} from 'antd'
+import { Alert, Button, Card, Input, Select, Space, Tabs, Modal } from 'antd'
 import { FormField } from './FormField'
+import { ReferenceDataTable } from './ReferenceDataTable'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   MasterDataApi,
@@ -355,7 +346,7 @@ function MaterialCategoryEditor({
           </Button>
         </div>
       </Modal>
-      <Table
+      <ReferenceDataTable
         rowKey="id"
         pagination={false}
         dataSource={categories}
@@ -507,7 +498,7 @@ function DepartmentEditor({
           </Button>
         </div>
       </Modal>
-      <Table
+      <ReferenceDataTable
         rowKey="id"
         pagination={false}
         dataSource={departments}
@@ -681,7 +672,7 @@ function TeamEditor({
           </Button>
         </div>
       </Modal>
-      <Table
+      <ReferenceDataTable
         rowKey="id"
         pagination={false}
         dataSource={teams}
@@ -837,7 +828,7 @@ function UnitEditor({
           </Button>
         </div>
       </Modal>
-      <Table
+      <ReferenceDataTable
         rowKey="id"
         pagination={false}
         dataSource={units}
@@ -1009,7 +1000,7 @@ function CountryEditor({
         </Button>
       </Space>
       <ReferenceCreateNotice state={creation.state} />
-      <Table
+      <ReferenceDataTable
         rowKey="id"
         pagination={false}
         dataSource={countries}
@@ -1225,7 +1216,7 @@ function ProjectEditor({
         </Button>
       </Space>
       <ReferenceCreateNotice state={creation.state} />
-      <Table
+      <ReferenceDataTable
         rowKey="id"
         pagination={false}
         dataSource={projects}
@@ -1432,7 +1423,7 @@ function SiteEditor({
         </Button>
       </Space>
       <ReferenceCreateNotice state={creation.state} />
-      <Table
+      <ReferenceDataTable
         rowKey="id"
         pagination={false}
         dataSource={sites}

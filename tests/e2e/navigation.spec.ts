@@ -653,7 +653,11 @@ test('administrator master-data fixture adds a country', async ({ page }) => {
   await page.getByLabel('国家名称', { exact: true }).fill('塞内加尔')
   await page.getByLabel('国家时区', { exact: true }).fill('Africa/Dakar')
   await page.getByRole('button', { name: '新增国家' }).click()
-  await expect(page.getByText('基础资料已保存；等待同步确认')).toBeVisible()
+  await expect(
+    page
+      .getByRole('tabpanel', { name: '国家', exact: true })
+      .getByText('基础资料已保存；等待同步确认', { exact: true }),
+  ).toBeVisible()
   await expect(page.getByLabel('编辑国家名称-SN')).toHaveValue('塞内加尔')
   await expect(browserErrors).toEqual([])
 })
@@ -1056,7 +1060,7 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
     const supplier = {
       id: '00000000-0000-4000-8000-000000000002',
       businessCode: 'SUP-001',
-      countryId: '00000000-0000-4000-8000-000000000103',
+      countryId: '00000000-0000-4000-8000-000000000101',
       name: 'fixture active supplier',
       contactName: null,
       address: null,
@@ -1080,11 +1084,18 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
             args?: {
               supplier?: { name?: string; countryId?: string }
               price?: { unitPriceMinor?: string }
+              countryId?: string
             },
           ) {
             if (command === 'search_catalog_page')
               return Promise.resolve({ records: [material], nextCursor: null })
             if (command === 'search_catalog') return Promise.resolve([material])
+            if (command === 'search_suppliers_page')
+              return Promise.resolve({
+                records:
+                  supplier.countryId === args?.countryId ? [supplier] : [],
+                nextCursor: null,
+              })
             if (command === 'list_suppliers') return Promise.resolve([supplier])
             if (command === 'save_supplier') {
               Object.assign(window, {
@@ -1144,7 +1155,7 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
         (window as Window & { __supplierSaveCountry?: string })
           .__supplierSaveCountry,
     ),
-  ).resolves.toBe('00000000-0000-4000-8000-000000000103')
+  ).resolves.toBe('00000000-0000-4000-8000-000000000101')
   await page.getByRole('button', { name: '关闭供应商管理' }).click()
 
   await page.getByRole('button', { name: '维护报价' }).click()

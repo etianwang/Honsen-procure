@@ -16,6 +16,22 @@ const messages = {
     'Motif de modification de la politique',
   ],
   保存策略: ['Save policy', 'Enregistrer la politique'],
+  '正在读取审批策略…': [
+    'Loading approval policy…',
+    'Chargement de la politique d’approbation…',
+  ],
+  重新读取审批策略: [
+    'Reload approval policy',
+    'Recharger la politique d’approbation',
+  ],
+  '正在保存审批策略…': [
+    'Saving approval policy…',
+    'Enregistrement de la politique d’approbation…',
+  ],
+  '当前账号不可修改审批策略。': [
+    'This account cannot change approval policy.',
+    'Ce compte ne peut pas modifier la politique d’approbation.',
+  ],
   '无法读取审批策略。': [
     'Unable to read approval policy.',
     'Impossible de lire la politique d’approbation.',

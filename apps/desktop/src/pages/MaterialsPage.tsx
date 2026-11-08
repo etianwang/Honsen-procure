@@ -1,3 +1,4 @@
+import { SupplierPicker } from '../components/SupplierPicker'
 import './MaterialsPage.css'
 import {
   SupplierFormFields,
@@ -92,6 +93,8 @@ export function MaterialsPage({
   const [supplierEditor, setSupplierEditor] = useState<
     SupplierView | 'new' | null
   >(null)
+  const [quoteContext, setQuoteContext] = useState('')
+  const currentQuoteContext = JSON.stringify([countryId, projectId])
   const [quoteMaterial, setQuoteMaterial] =
     useState<CatalogMaterialView | null>(null)
   const [detailMaterial, setDetailMaterial] =
@@ -108,6 +111,10 @@ export function MaterialsPage({
   const [form] = Form.useForm<MaterialFormValues>()
   const [supplierForm] = Form.useForm<SupplierFormValues>()
   const [priceForm] = Form.useForm<PriceFormValues>()
+  const selectedQuoteSupplierId = Form.useWatch<string>('supplierId', priceForm)
+  const knownQuoteSupplier = suppliers.find(
+    (supplier) => supplier.id === selectedQuoteSupplierId,
+  )
 
   useEffect(() => {
     let isCurrent = true
@@ -319,9 +326,13 @@ export function MaterialsPage({
     }
   }
 
-  async function openPriceEditor(material: CatalogMaterialView) {
+  function openPriceEditor(material: CatalogMaterialView) {
+    if (!countryId || !projectId) {
+      setError('请选择有效的授权范围后再维护报价')
+      return
+    }
+    setQuoteContext(currentQuoteContext)
     setQuoteMaterial(material)
-    await loadSuppliers()
   }
 
   async function loadDetailPrices(
@@ -351,7 +362,14 @@ export function MaterialsPage({
   }
 
   async function savePrice(values: PriceFormValues) {
-    if (!quoteMaterial) return
+    if (
+      !quoteMaterial ||
+      !countryId ||
+      !projectId ||
+      quoteContext !== currentQuoteContext ||
+      saving
+    )
+      return
     const price = priceFromForm(values, quoteMaterial.id)
     setSaving(true)
     try {
@@ -735,19 +753,41 @@ export function MaterialsPage({
       <Modal
         title={
           quoteMaterial
-            ? `${t('维护报价')}：${quoteMaterial.nameZh}`
+            ? `${t('维护报价')}：${locale === 'fr' ? quoteMaterial.nameFr || quoteMaterial.nameZh : locale === 'en' ? quoteMaterial.nameEn || quoteMaterial.nameZh : quoteMaterial.nameZh}`
             : t('维护报价')
         }
-        open={quoteMaterial !== null}
-        onCancel={() => setQuoteMaterial(null)}
+        open={quoteMaterial !== null && quoteContext === currentQuoteContext}
+        onCancel={() => {
+          if (!saving) setQuoteMaterial(null)
+        }}
         onOk={() => priceForm.submit()}
         okText={t('保存报价')}
         cancelText={t('取消')}
         confirmLoading={saving}
+        closable={!saving}
+        keyboard={!saving}
+        mask={{ closable: !saving }}
         destroyOnHidden
       >
-        <Form form={priceForm} layout="vertical" onFinish={savePrice}>
-          <PriceFormFields suppliers={suppliers} />
+        <Form
+          form={priceForm}
+          layout="vertical"
+          onFinish={savePrice}
+          disabled={saving}
+        >
+          <PriceFormFields
+            suppliers={suppliers}
+            supplierControl={
+              countryId ? (
+                <SupplierPicker
+                  api={api}
+                  countryId={countryId}
+                  knownSupplier={knownQuoteSupplier}
+                  disabled={saving}
+                />
+              ) : undefined
+            }
+          />
         </Form>
       </Modal>
     </>
