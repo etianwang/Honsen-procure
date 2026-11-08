@@ -370,3 +370,45 @@ repair installer/Runner. No cloud/server/migration/order/payment/reversal
 mutation this continuation. T12/Alpha gates remain open. Last code
 checkpoint838fcaf, prior evidencea8924be; containing minimal fix checkpoint to
 be committed/pushed, expected tracked tree clean afterward.
+
+
+### 2026-11-08 user-approved left amount words and balanced settlement
+
+Continued from2410121. User approved0.1.22 installation, then before it was
+launched requested amount words on left and shorter/balanced summary; old0.1.22
+was intentionally not installed. Production Settlement now places notes+paired
+words left and complete8-item summary right. Central summary width52%, standard
+vertical cellpadding0.55mm and lineheight1.2; fonts/minimum8pt, zeros, frozen
+total/number/snapshot and immutable financial records unchanged. Uses existing
+measured engine, so the whole settlement/signatures pagination remains shared.
+
+Targeted matrix18PASS with actual PDF readback, three languages/five
+currencies/1/5/10/20/50 rows/maxwords, new geometric assertions words left of
+summary and no duplicate right word block, browser decoration suppression.
+Unit71PASS; Format/Lint(exit0existingwarnings)/Typecheck/ViteBuildPASS. Actual
+generated .cache/print-engine-layout/HPA-fr-XOF-1-false.pdf rendered through
+Poppler to .cache/print-engine-balanced-preview.png and visually inspected: left
+words, allzero fees, balanced columns, nooverlap; GENERATOR_ONLY. Native new
+arrangement NOT_RUN; no new candidate package built/installed in this bounded
+continuation. Existing0.1.21 native files remain exact prior evidence, not
+reused as this layout PASS.
+
+Latest user asked for a login-flow proposal first. Read actual
+LoginPage.refreshCaptcha creates local then cloud challenge; Rust online_login
+consumes local before posting cloud challenge. Therefore removing one visible
+input requires trusted Rust flow change, not hiding a field. No login/auth code,
+PRD/security rules or server changed. Proposed (UNAPPROVED): online-first one
+cloud CAPTCHA; transport failure asks offline vs retry; offline only cached
+enabled <=24h account with local CAPTCHA; known auth failure/lock/disable never
+triggers offline fallback. Existing mandatory local-CAPTCHA-every-launch rule
+needs explicit narrow approved revision before implementation. Keep fresh retry
+available, no password persistence. Login proposal does not waive T12 gates.
+
+BLOCKER: updated native layout and clean browser-decoration check plus remaining
+T12 document adapters/modules/config. DEFERRED: login implementation pending
+user's proposal review, payment expansion stillpaused. WARNING: existing lint
+warnings and prior installer warnings retained. No
+cloud/deployment/migration/order/payment writes. Lastsource2410121; this
+selected PDF layout checkpoint is partial, expected clean tracked tree after
+commit/push. No further native actions until matching candidate is built and
+action-time approved.

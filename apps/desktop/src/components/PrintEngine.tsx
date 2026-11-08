@@ -239,6 +239,15 @@ function Settlement({
         <div className="print-notes">
           <Pair text={labels.notes} language={language} />
           <p>{doc.notes ?? '—'}</p>
+          <div className="print-amount-words">
+            <Pair text={labels.words} language={language} />
+            <p className="print-primary">
+              {amountInWords(doc.totalMinor, doc.currency, language)}
+            </p>
+            <p className="print-secondary">
+              {amountInWords(doc.totalMinor, doc.currency, auxiliary)}
+            </p>
+          </div>
         </div>
         <div className="print-summary">
           <table>
@@ -253,15 +262,6 @@ function Settlement({
               ))}
             </tbody>
           </table>
-          <div className="print-amount-words">
-            <Pair text={labels.words} language={language} />
-            <p className="print-primary">
-              {amountInWords(doc.totalMinor, doc.currency, language)}
-            </p>
-            <p className="print-secondary">
-              {amountInWords(doc.totalMinor, doc.currency, auxiliary)}
-            </p>
-          </div>
         </div>
       </div>
       <div className="print-signatures">
@@ -289,6 +289,8 @@ const variables = {
   '--print-line-height': tokens.lineHeight,
   '--print-padding': `${tokens.tableCellPadding}mm`,
   '--print-gap': `${tokens.sectionGap}mm`,
+  '--print-summary-padding': `${tokens.summaryCellPadding}mm`,
+  '--print-summary-line-height': tokens.summaryLineHeight,
   '--print-summary': `${tokens.summaryWidthRatio * 100}%`,
 } as CSSProperties
 /** Shared production engine: font-loaded measurement, page composition and native print use identical DOM. */

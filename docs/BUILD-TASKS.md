@@ -610,3 +610,11 @@ build ready awaiting immediate installation approval. Native fixed
 output/SPO/OPA/multipage and listed adapters remain BLOCKER. No T12/Alpha
 closure or cloud/history mutation. See V1-REMOTE-ALPHA-ACCEPTANCE.md and
 evidence/T12-NATIVE-021-20261108.json.
+
+
+2026-11-08 T12 user requested left amount words/balanced shorter summary:
+production shared layout updated, generator18/Unit71/Typecheck/Lint/Build PASS;
+Poppler visual review PASS within generator scope. New native layout
+NOT_RUN;0.1.22 not installed because user changed layout before launch. Login
+online-first/single-CAPTCHA proposal requested, no authentication implementation
+or policy change approved/performed. Parent T12/Alpha stays OPEN.

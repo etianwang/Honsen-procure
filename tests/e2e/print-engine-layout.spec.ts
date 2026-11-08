@@ -97,6 +97,16 @@ for (const [li, language] of (['fr', 'zh', 'en'] as const).entries()) {
         count,
       )
       expect(await page.locator('.print-summary tr').count()).toBe(8)
+      await expect(
+        page.locator('.print-notes .print-amount-words'),
+      ).toHaveCount(1)
+      await expect(
+        page.locator('.print-summary .print-amount-words'),
+      ).toHaveCount(0)
+      const leftWords = await page.locator('.print-amount-words').boundingBox()
+      const rightSummary = await page.locator('.print-summary').boundingBox()
+      expect(leftWords!.x + leftWords!.width).toBeLessThan(rightSummary!.x)
+      expect(Math.abs(leftWords!.y - rightSummary!.y)).toBeLessThan(90)
       const geometry = await page
         .locator('.formal-page-content')
         .evaluateAll((nodes) =>
