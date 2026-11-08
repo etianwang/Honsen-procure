@@ -1,5 +1,9 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '正在保存或提交，请稍候…': [
+    'Saving or submitting, please wait…',
+    'Enregistrement ou soumission en cours…',
+  ],
   '印花税（手填，单据币种最小单位）': [
     'Stamp duty (manual, document currency minor units)',
     'Droit de timbre (manuel, unités minimales de la devise du document)',

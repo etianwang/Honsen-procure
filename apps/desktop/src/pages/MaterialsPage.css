@@ -61,3 +61,15 @@
   gap: var(--honsen-space-2, 8px);
   margin-block: var(--honsen-space-3, 12px);
 }
+
+.materials-supplier-table {
+  min-width: 760px;
+}
+
+.materials-supplier-table th:nth-child(2) {
+  min-width: 180px;
+}
+
+.materials-supplier-table th:last-child {
+  min-width: 100px;
+}

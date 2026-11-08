@@ -650,3 +650,5 @@ UI batch2: bounded material-library pagination, reference-create pending and acc
 UI batch3 PARTIAL: scope/history/workflow/receipt-payment scoped DOM51 + supplier layout3 PASS, desktop unit73, Rust195PASS/7ignored; supplier selected-item assertions remain BLOCKER and current-build native BLOCKED_AUTH_INTERACTION. See design rollout and build fingerprint. No parent gate closed.
 
 UI batch4 PARTIAL: attachment state/duplicate guards, small dictionary search/pagination, bounded material quote supplier picker and unread-policy write gate implemented; scoped DOM checks passed after retained narrow failures. unit74/build PASS; native BLOCKED_AUTH_INTERACTION and parent gates open. See rollout/evidence.
+
+UI batch5 PARTIAL: execution/RFQ state, paged supplier manager and serialized requisition pending flows implemented; targeted write18/RFQ9/manager3/execution5 plus navigation scoped repairs PASS. Native gate BLOCKED_AUTH_INTERACTION; original parents open. See rollout/build fingerprint.

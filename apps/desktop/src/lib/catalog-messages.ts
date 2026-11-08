@@ -1,5 +1,23 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  请选择有效的授权范围后再管理供应商: [
+    'Select a valid authorized scope before managing suppliers',
+    'Sélectionnez un périmètre autorisé avant de gérer les fournisseurs',
+  ],
+  '搜索供应商名称、编码或联系人': [
+    'Search supplier name, code or contact',
+    'Rechercher un fournisseur, code ou contact',
+  ],
+  正在读取供应商: ['Loading suppliers', 'Chargement des fournisseurs'],
+  供应商分页: ['Supplier pages', 'Pages des fournisseurs'],
+  '供应商已保存；等待同步确认': [
+    'Supplier saved; awaiting synchronization acknowledgement',
+    'Fournisseur enregistré ; synchronisation en attente',
+  ],
+  '供应商已保存，但列表刷新失败；请重试读取，不要重复保存': [
+    'Supplier saved, but the list refresh failed. Retry reading; do not save again.',
+    'Fournisseur enregistré, mais actualisation échouée. Réessayez la lecture, pas l’enregistrement.',
+  ],
   请选择有效的授权范围后再维护报价: [
     'Select a valid authorized scope before maintaining quotes',
     'Sélectionnez un périmètre autorisé avant de gérer les devis',

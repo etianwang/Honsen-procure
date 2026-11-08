@@ -1,4 +1,5 @@
 import { useUiLocale } from '../lib/ui-locale'
+import { documentNumber } from '../lib/document-number'
 import {
   executionText,
   executionStatus,
@@ -44,7 +45,12 @@ export function ProcurementExecutionPage({
   const [orders, setOrders] = useState<ProcurementExecutionOrder[]>([])
   const [suppliers, setSuppliers] = useState<SupplierView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [message, setMessage] = useState<ExecutionMessage | null>(null)
+  const [ordersLoading, setOrdersLoading] = useState(true)
+  const [ordersError, setOrdersError] = useState(false)
+  const [suppliersLoading, setSuppliersLoading] = useState(true)
+  const [suppliersError, setSuppliersError] = useState(false)
+  const ordersRead = useRef(0)
+  const suppliersRead = useRef(0)
   const [startNotice, setStartNotice] = useState<{
     orderId: string
     message: ExecutionMessage
@@ -77,21 +83,43 @@ export function ProcurementExecutionPage({
     }
   }
   const selected = orders.find((order) => order.id === selectedId)
-  const refresh = useCallback(
-    () =>
-      api
-        .listConfirmedProcurementOrders()
-        .then((value) => {
-          setOrders(value)
-          setSelectedId((current) =>
-            value.some((order) => order.id === current)
-              ? current
-              : (value[0]?.id ?? null),
-          )
-        })
-        .catch(() => setMessage('无法读取已确认采购申请，请重新登录后重试。')),
-    [api],
-  )
+  const refresh = useCallback(async () => {
+    const request = ++ordersRead.current
+    setOrdersLoading(true)
+    setOrdersError(false)
+    try {
+      const value = await api.listConfirmedProcurementOrders()
+      if (request !== ordersRead.current) return
+      setOrders(value)
+      setSelectedId((current) =>
+        value.some((order) => order.id === current)
+          ? current
+          : (value[0]?.id ?? null),
+      )
+    } catch {
+      if (request === ordersRead.current) setOrdersError(true)
+    } finally {
+      if (request === ordersRead.current) setOrdersLoading(false)
+    }
+  }, [api])
+  const refreshSuppliers = useCallback(async () => {
+    const request = ++suppliersRead.current
+    setSuppliersLoading(true)
+    setSuppliersError(false)
+    try {
+      const value = await supplierApi.listSuppliers()
+      if (request !== suppliersRead.current) return
+      setSuppliers(
+        value.filter(
+          (supplier) => supplier.isActive && !supplier.isBlacklisted,
+        ),
+      )
+    } catch {
+      if (request === suppliersRead.current) setSuppliersError(true)
+    } finally {
+      if (request === suppliersRead.current) setSuppliersLoading(false)
+    }
+  }, [supplierApi])
 
   useEffect(() => {
     const update = () => void refresh()
@@ -101,17 +129,12 @@ export function ProcurementExecutionPage({
 
   useEffect(() => {
     void refresh()
-    supplierApi
-      .listSuppliers()
-      .then((value) =>
-        setSuppliers(
-          value.filter(
-            (supplier) => supplier.isActive && !supplier.isBlacklisted,
-          ),
-        ),
-      )
-      .catch(() => setMessage('无法读取可用供应商。'))
-  }, [refresh, supplierApi])
+    void refreshSuppliers()
+    return () => {
+      ordersRead.current += 1
+      suppliersRead.current += 1
+    }
+  }, [refresh, refreshSuppliers])
 
   return (
     <>
@@ -125,8 +148,38 @@ export function ProcurementExecutionPage({
           </p>
         </div>
       </section>
-      {message ? <Alert type="error" title={t(message)} showIcon /> : null}
+      {suppliersLoading && <p role="status">{t('正在读取可用供应商…')}</p>}
+      {suppliersError && (
+        <Alert
+          role="alert"
+          type="error"
+          title={t('无法读取可用供应商。')}
+          showIcon
+          action={
+            <Button
+              disabled={suppliersLoading}
+              onClick={() => void refreshSuppliers()}
+            >
+              {t('重新读取供应商')}
+            </Button>
+          }
+        />
+      )}
       <Card className="card" title={t('已确认采购申请')}>
+        {ordersLoading && <p role="status">{t('正在读取已确认采购申请…')}</p>}
+        {ordersError && (
+          <Alert
+            role="alert"
+            type="error"
+            title={t('无法读取已确认采购申请，请重新登录后重试。')}
+            showIcon
+            action={
+              <Button disabled={ordersLoading} onClick={() => void refresh()}>
+                {t('重新读取采购申请')}
+              </Button>
+            }
+          />
+        )}
         {orders.length ? (
           <Space wrap>
             {orders.map((order) => (
@@ -135,19 +188,19 @@ export function ProcurementExecutionPage({
                 type={order.id === selectedId ? 'primary' : 'default'}
                 onClick={() => setSelectedId(order.id)}
               >
-                {order.displayNo}
+                {documentNumber(order.displayNo, t('未正式编号'))}
               </Button>
             ))}
           </Space>
-        ) : (
+        ) : !ordersLoading && !ordersError ? (
           <Empty description={t('没有可执行的已确认采购申请')} />
-        )}
+        ) : null}
       </Card>
       {selected ? (
         <section aria-label={t('采购执行详情')}>
           <Card
             className="card"
-            title={`${t('父单详情')} · ${selected.displayNo}`}
+            title={`${t('父单详情')} · ${documentNumber(selected.displayNo, t('未正式编号'))}`}
           >
             <p className="muted">
               {t('状态')}：{executionStatus(locale, selected.workflowStatus)} ·{' '}
@@ -218,7 +271,7 @@ export function ProcurementExecutionPage({
             selected.children.map((child) => (
               <section
                 key={child.id}
-                aria-label={`${t('供应商子订单')} ${child.displayNo}`}
+                aria-label={`${t('供应商子订单')} ${documentNumber(child.displayNo, t('未正式编号'))}`}
               >
                 <SupplierChildTermsPanel
                   api={supplierOrderApi}

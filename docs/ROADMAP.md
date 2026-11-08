@@ -530,3 +530,5 @@ UI phase2 batch2 remains PARTIAL: scoped automation verified; current-source Win
 UI phase2 batch3: bounded supplier search, scope account-generation guard, history date fields and pending-state fixes checkpointed as PARTIAL; final functional/native UX acceptance remains open (see rollout).
 
 UI phase2 batch4 remains PARTIAL with automated scope evidence; no current-build native acceptance or parent closure. See design rollout.
+
+UI phase2 batch5 remains PARTIAL; direct automation verified, original functional/native UX gates and stopped supplier assertion evidence remain open. See design rollout.

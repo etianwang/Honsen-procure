@@ -23,6 +23,8 @@ import {
   type CatalogPriceView,
   type CatalogSearchCursor,
   type CatalogSearchPage,
+  type SupplierSearchCursor,
+  type SupplierSearchPage,
   type SupplierView,
 } from '../lib/catalog-api'
 import {
@@ -90,11 +92,31 @@ export function MaterialsPage({
   const [notice, setNotice] = useState<string | null>(null)
   const [editor, setEditor] = useState<CatalogMaterialView | 'new' | null>(null)
   const [supplierManagerOpen, setSupplierManagerOpen] = useState(false)
+  const [supplierManagerContext, setSupplierManagerContext] = useState('')
+  const [supplierQuery, setSupplierQuery] = useState('')
+  const [supplierReload, setSupplierReload] = useState(0)
+  const [supplierPagination, setSupplierPagination] = useState<{
+    key: string
+    cursors: (SupplierSearchCursor | null)[]
+    page: number
+  }>({ key: '', cursors: [null], page: 0 })
+  const [supplierResult, setSupplierResult] = useState<
+    (SupplierSearchPage & { key: string; failed?: boolean }) | null
+  >(null)
+  const [supplierCache, setSupplierCache] = useState<{
+    scope: string
+    records: Record<string, SupplierView>
+  }>({ scope: '', records: {} })
+  const [supplierEditorContext, setSupplierEditorContext] = useState('')
+  const [supplierSaveError, setSupplierSaveError] = useState(false)
+  const [supplierSavedContext, setSupplierSavedContext] = useState('')
+  const supplierSubmitting = useRef(false)
   const [supplierEditor, setSupplierEditor] = useState<
     SupplierView | 'new' | null
   >(null)
   const [quoteContext, setQuoteContext] = useState('')
   const currentQuoteContext = JSON.stringify([countryId, projectId])
+  const supplierSaved = supplierSavedContext === currentQuoteContext
   const [quoteMaterial, setQuoteMaterial] =
     useState<CatalogMaterialView | null>(null)
   const [detailMaterial, setDetailMaterial] =
@@ -106,15 +128,105 @@ export function MaterialsPage({
   const [detailBusy, setDetailBusy] = useState(false)
   const detailRequest = useRef(0)
   const [imageDraft, setImageDraft] = useState<MaterialImageDraft | null>(null)
-  const [suppliers, setSuppliers] = useState<SupplierView[]>([])
+
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<MaterialFormValues>()
   const [supplierForm] = Form.useForm<SupplierFormValues>()
   const [priceForm] = Form.useForm<PriceFormValues>()
   const selectedQuoteSupplierId = Form.useWatch<string>('supplierId', priceForm)
-  const knownQuoteSupplier = suppliers.find(
-    (supplier) => supplier.id === selectedQuoteSupplierId,
-  )
+  const supplierFilterKey = JSON.stringify([currentQuoteContext, supplierQuery])
+  const supplierPage =
+    supplierPagination.key === supplierFilterKey ? supplierPagination.page : 0
+  const supplierCursors =
+    supplierPagination.key === supplierFilterKey
+      ? supplierPagination.cursors
+      : [null]
+  const supplierCursor = supplierCursors[supplierPage] ?? null
+  const supplierRequestKey = JSON.stringify([
+    supplierFilterKey,
+    supplierCursor,
+    supplierReload,
+  ])
+  const currentSuppliers =
+    supplierResult?.key === supplierRequestKey ? supplierResult : null
+  const suppliers = currentSuppliers?.records ?? []
+  const supplierLoading = supplierManagerOpen && !currentSuppliers
+  const knownQuoteSupplier =
+    supplierCache.scope === currentQuoteContext
+      ? (supplierCache.records[selectedQuoteSupplierId] ??
+        suppliers.find((supplier) => supplier.id === selectedQuoteSupplierId))
+      : suppliers.find((supplier) => supplier.id === selectedQuoteSupplierId)
+
+  useEffect(() => {
+    let active = true
+    if (
+      !supplierManagerOpen ||
+      !countryId ||
+      !projectId ||
+      supplierManagerContext !== currentQuoteContext
+    )
+      return
+    const timer = window.setTimeout(() => {
+      void Promise.resolve()
+        .then(async () => {
+          if (api.searchSuppliersPage)
+            return api.searchSuppliersPage(
+              supplierQuery.trim(),
+              countryId,
+              supplierCursor,
+              false,
+            )
+          const rows = await api.listSuppliers()
+          const terms = supplierQuery
+            .trim()
+            .toLocaleLowerCase()
+            .split(/\s+/)
+            .filter(Boolean)
+          return {
+            records: rows.filter(
+              (row) =>
+                row.countryId === countryId &&
+                terms.every((term) =>
+                  [
+                    row.name,
+                    row.businessCode,
+                    row.contactName,
+                    row.address,
+                    row.city,
+                  ].some((field) => field?.toLocaleLowerCase().includes(term)),
+                ),
+            ),
+            nextCursor: null,
+          }
+        })
+        .then((page) => {
+          if (active) setSupplierResult({ ...page, key: supplierRequestKey })
+        })
+        .catch(() => {
+          if (active)
+            setSupplierResult({
+              records: [],
+              nextCursor: null,
+              key: supplierRequestKey,
+              failed: true,
+            })
+        })
+    }, 250)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [
+    api,
+    countryId,
+    projectId,
+    supplierQuery,
+    supplierCursor,
+    supplierRequestKey,
+    supplierManagerOpen,
+    supplierManagerContext,
+    currentQuoteContext,
+  ])
 
   useEffect(() => {
     let isCurrent = true
@@ -280,50 +392,74 @@ export function MaterialsPage({
     }
   }
 
-  async function loadSuppliers() {
-    try {
-      const result = await api.listSuppliers()
-      setSuppliers(result)
-      return result
-    } catch {
-      setError('无法读取供应商')
-      return []
+  function openSupplierManager() {
+    if (!countryId || !projectId) {
+      setError('请选择有效的授权范围后再管理供应商')
+      return
     }
+    setSupplierManagerContext(currentQuoteContext)
+    setSupplierQuery('')
+    setSupplierPagination({ key: '', cursors: [null], page: 0 })
+    setSupplierReload((value) => value + 1)
+    setSupplierSavedContext('')
+    setSupplierManagerOpen(true)
   }
 
-  async function openSupplierManager() {
-    setSupplierManagerOpen(true)
-    await loadSuppliers()
+  function cacheSupplier(record: SupplierView) {
+    setSupplierCache((current) => ({
+      scope: currentQuoteContext,
+      records: {
+        ...(current.scope === currentQuoteContext ? current.records : {}),
+        [record.id]: record,
+      },
+    }))
   }
 
   function openSupplierEditor(supplier?: SupplierView) {
+    if (!canEdit || saving) return
+    if (supplier) cacheSupplier(supplier)
+    setSupplierEditorContext(currentQuoteContext)
+    setSupplierSavedContext('')
+    setSupplierSaveError(false)
     setSupplierEditor(supplier ?? 'new')
   }
 
   async function saveSupplier(values: SupplierFormValues) {
-    const existing = supplierEditor === 'new' ? undefined : supplierEditor
-    const supplierCountryId = existing?.countryId ?? countryId
-    if (!supplierCountryId) {
-      setError('请选择有效的授权范围后再新增供应商')
+    if (
+      !canEdit ||
+      !supplierEditor ||
+      supplierSubmitting.current ||
+      supplierEditorContext !== currentQuoteContext ||
+      !countryId ||
+      !projectId
+    )
       return
-    }
+    const existing = supplierEditor === 'new' ? undefined : supplierEditor
     const supplier = supplierFromForm(
       values,
-      existing ?? undefined,
-      supplierCountryId,
+      existing,
+      existing?.countryId ?? countryId,
     )
+    supplierSubmitting.current = true
     setSaving(true)
+    setSupplierSaveError(false)
+    let saved = false
     try {
       await api.saveSupplier(supplier)
-      setNotice('供应商已保存')
-      setSupplierEditor(null)
-      supplierForm.resetFields()
-      await loadSuppliers()
+      saved = true
     } catch {
-      setError('无法保存供应商')
+      setSupplierSaveError(true)
     } finally {
+      supplierSubmitting.current = false
       setSaving(false)
     }
+    if (!saved) return
+    cacheSupplier(supplier)
+    setNotice('供应商已保存')
+    setSupplierSavedContext(currentQuoteContext)
+    setSupplierEditor(null)
+    supplierForm.resetFields()
+    setSupplierReload((value) => value + 1)
   }
 
   function openPriceEditor(material: CatalogMaterialView) {
@@ -672,24 +808,75 @@ export function MaterialsPage({
       </Modal>
       <Modal
         title={t('供应商管理')}
-        open={supplierManagerOpen}
-        onCancel={() => setSupplierManagerOpen(false)}
+        open={
+          supplierManagerOpen && supplierManagerContext === currentQuoteContext
+        }
+        onCancel={() => {
+          if (!saving) setSupplierManagerOpen(false)
+        }}
         footer={
           <>
             <Button
               aria-label={t('关闭供应商管理')}
+              disabled={saving}
               onClick={() => setSupplierManagerOpen(false)}
             >
               {t('关闭')}
             </Button>
-            <Button type="primary" onClick={() => openSupplierEditor()}>
+            <Button
+              type="primary"
+              disabled={saving}
+              onClick={() => openSupplierEditor()}
+            >
               {t('新增供应商')}
             </Button>
           </>
         }
         width={820}
       >
-        {suppliers.length === 0 ? (
+        <label className="materials-search" htmlFor="materials-supplier-search">
+          <span>{t('搜索供应商名称、编码或联系人')}</span>
+          <Input
+            id="materials-supplier-search"
+            aria-label={t('搜索供应商名称、编码或联系人')}
+            value={supplierQuery}
+            disabled={saving}
+            onChange={(event) => {
+              setSupplierQuery(event.target.value)
+              setSupplierPagination({ key: '', cursors: [null], page: 0 })
+            }}
+          />
+        </label>
+        {supplierSaved && (
+          <Alert
+            type="success"
+            role="status"
+            showIcon
+            title={t('供应商已保存；等待同步确认')}
+          />
+        )}
+        {currentSuppliers?.failed ? (
+          <Alert
+            type={supplierSaved ? 'warning' : 'error'}
+            role="alert"
+            showIcon
+            title={t(
+              supplierSaved
+                ? '供应商已保存，但列表刷新失败；请重试读取，不要重复保存'
+                : '无法读取供应商',
+            )}
+            action={
+              <Button
+                disabled={saving}
+                onClick={() => setSupplierReload((value) => value + 1)}
+              >
+                {t('重试')}
+              </Button>
+            }
+          />
+        ) : supplierLoading ? (
+          <Spin aria-label={t('正在读取供应商')} />
+        ) : suppliers.length === 0 ? (
           <p role="status">{t('暂无供应商')}</p>
         ) : (
           <div
@@ -698,7 +885,7 @@ export function MaterialsPage({
             aria-label={t('供应商表格，可横向滚动')}
             tabIndex={0}
           >
-            <table className="data-table">
+            <table className="data-table materials-supplier-table">
               <thead>
                 <tr>
                   <th>{t('编码')}</th>
@@ -735,18 +922,82 @@ export function MaterialsPage({
             </table>
           </div>
         )}
+        <nav className="materials-pagination" aria-label={t('供应商分页')}>
+          <Button
+            disabled={saving || supplierLoading || supplierPage === 0}
+            onClick={() =>
+              setSupplierPagination({
+                key: supplierFilterKey,
+                cursors: supplierCursors,
+                page: supplierPage - 1,
+              })
+            }
+          >
+            {t('上一页')}
+          </Button>
+          <span role="status">
+            {t('当前页')} {supplierPage + 1} ·{' '}
+            {supplierLoading
+              ? t('正在读取供应商')
+              : String(suppliers.length) + ' ' + t('项')}
+          </span>
+          <Button
+            disabled={
+              saving || supplierLoading || !currentSuppliers?.nextCursor
+            }
+            onClick={() => {
+              if (currentSuppliers?.nextCursor)
+                setSupplierPagination({
+                  key: supplierFilterKey,
+                  cursors: [
+                    ...supplierCursors.slice(0, supplierPage + 1),
+                    currentSuppliers.nextCursor,
+                  ],
+                  page: supplierPage + 1,
+                })
+            }}
+          >
+            {t('下一页')}
+          </Button>
+        </nav>
       </Modal>
       <Modal
         title={supplierEditor === 'new' ? t('新增供应商') : t('编辑供应商')}
-        open={supplierEditor !== null}
-        onCancel={() => setSupplierEditor(null)}
+        open={
+          supplierEditor !== null &&
+          supplierEditorContext === currentQuoteContext
+        }
+        onCancel={() => {
+          if (!saving) setSupplierEditor(null)
+        }}
         onOk={() => supplierForm.submit()}
         okText={t('保存供应商')}
+        okButtonProps={{
+          'aria-label': t('保存供应商'),
+          'aria-busy': saving,
+          disabled: saving,
+        }}
         cancelText={t('取消')}
         confirmLoading={saving}
+        closable={!saving}
+        keyboard={!saving}
+        mask={{ closable: !saving }}
         destroyOnHidden
       >
-        <Form form={supplierForm} layout="vertical" onFinish={saveSupplier}>
+        {supplierSaveError && (
+          <Alert
+            type="error"
+            role="alert"
+            showIcon
+            title={t('无法保存供应商')}
+          />
+        )}
+        <Form
+          form={supplierForm}
+          layout="vertical"
+          onFinish={saveSupplier}
+          disabled={saving}
+        >
           <SupplierFormFields editing={supplierEditor !== 'new'} />
         </Form>
       </Modal>
@@ -762,6 +1013,11 @@ export function MaterialsPage({
         }}
         onOk={() => priceForm.submit()}
         okText={t('保存报价')}
+        okButtonProps={{
+          'aria-label': t('保存报价'),
+          'aria-busy': saving,
+          disabled: saving,
+        }}
         cancelText={t('取消')}
         confirmLoading={saving}
         closable={!saving}

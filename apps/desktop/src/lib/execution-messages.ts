@@ -14,6 +14,17 @@ const messages = {
     'Impossible de lire les fournisseurs disponibles.',
   ],
   已确认采购申请: ['Approved requisitions', 'Demandes approuvées'],
+  未正式编号: ['Not formally numbered', 'Sans numéro officiel'],
+  '正在读取已确认采购申请…': [
+    'Loading approved requisitions…',
+    'Chargement des demandes approuvées…',
+  ],
+  重新读取采购申请: ['Reload requisitions', 'Recharger les demandes'],
+  '正在读取可用供应商…': [
+    'Loading available suppliers…',
+    'Chargement des fournisseurs disponibles…',
+  ],
+  重新读取供应商: ['Reload suppliers', 'Recharger les fournisseurs'],
   没有可执行的已确认采购申请: [
     'No approved requisitions available for execution',
     'Aucune demande approuvée à exécuter',

@@ -1,0 +1,63 @@
+{
+  "base": "195145d",
+  "candidateSha256": "678E1F52FF01E3DC79FD60DDA51CA0F2E6AE63D0E4FFC8D9FEB545DC619F8B0B",
+  "candidatePath": ".cache/ui-native-build-batch1/debug/HonsenProcure.exe",
+  "native": "BLOCKED_AUTH_INTERACTION",
+  "checks": [
+    "desktop lint/typecheck/build PASS; unit76 PASS",
+    "Requisition write18 and RFQ9 PASS",
+    "supplier manager3 PASS after accessible-name fix",
+    "execution read/locale/market5 PASS",
+    "navigation35 initial32PASS/3strict FAIL; scoped repairs3PASS"
+  ],
+  "sourceHashes": [
+    {
+      "path": "apps/desktop/src/components/RequisitionHistoryPanel.tsx",
+      "sha256": "2296D72778418F74C2C25FED0491358EFAF4DC3A0469DCF8110AC5672FB7EB9C"
+    },
+    {
+      "path": "apps/desktop/src/components/RfqPanel.tsx",
+      "sha256": "2183B93AA8D211910CAF683529663BF15C7059DE1BC61E5B2069420B38A64753"
+    },
+    {
+      "path": "apps/desktop/src/lib/catalog-messages.ts",
+      "sha256": "F0245579293E91338CD04FC69CAD0DBED61FDAE66F84BE53662D40F93893DF8C"
+    },
+    {
+      "path": "apps/desktop/src/lib/execution-messages.ts",
+      "sha256": "6901FA9A979F952E58C9EA39EB47929C8B545B83698B44156C8051885A1203DE"
+    },
+    {
+      "path": "apps/desktop/src/lib/requisition-messages.ts",
+      "sha256": "0518EE2B7548B06193BF56AF8E37D5F24F9FB8E492DB966EB869C6AEC779EBAD"
+    },
+    {
+      "path": "apps/desktop/src/pages/MaterialsPage.css",
+      "sha256": "F5B52A03CD899C9B72ECAD130161CDDF8A857C4685DE67B90C6E5E1ABAD6B164"
+    },
+    {
+      "path": "apps/desktop/src/pages/MaterialsPage.tsx",
+      "sha256": "66422F2940CF405102DA71889464225DD1A2A93803AF38A458EC8670D7C319D0"
+    },
+    {
+      "path": "apps/desktop/src/pages/ProcurementExecutionPage.tsx",
+      "sha256": "F0C98AE15B9AD893FE487F60A4616530656CDB67668998DB2930F5141232F420"
+    },
+    {
+      "path": "apps/desktop/src/pages/RequisitionPage.tsx",
+      "sha256": "B4A86AB0640BD1140E2823A34139FC39B39F8917B4E9232CC55A7B7EA53EA795"
+    },
+    {
+      "path": "apps/desktop/src/lib/document-number.test.ts",
+      "sha256": "25442F74A3CF5A3CE677BC83CDB9B2D0D5583414F44E3761D2C1C48AF0A08A50"
+    },
+    {
+      "path": "apps/desktop/src/lib/document-number.ts",
+      "sha256": "AC089A454F4B94151570FC740A2E4CE07EAD1C1F2B2F38F3808FCF138DC46962"
+    },
+    {
+      "path": "apps/desktop/src/lib/rfq-messages.ts",
+      "sha256": "F253343F6669309314FDB2DC96F484052364A69D18E62D98FEBE08AEF96374D4"
+    }
+  ]
+}

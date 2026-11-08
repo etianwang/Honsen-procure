@@ -943,7 +943,9 @@ test('engineer can search local catalog quotes but has no material mutation cont
   await page.getByLabel('搜索材料').fill('FX-01')
   await expect(page.getByText('测试电缆')).toBeVisible()
   await page.getByLabel('搜索材料').fill('不存在的材料')
-  await expect(page.getByRole('status')).toHaveText('未找到匹配材料')
+  await expect(
+    page.getByRole('status').filter({ hasText: /^未找到匹配材料$/ }),
+  ).toHaveText('未找到匹配材料')
   await expect(page.getByRole('button', { name: '新增材料' })).toHaveCount(0)
   await expect(
     page.getByText('工程师与查看者仅可搜索和查看材料及供应商价格。'),
@@ -1123,9 +1125,9 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
   await page.getByRole('button', { name: '供应商管理' }).click()
   await page.getByRole('button', { name: '新增供应商' }).click()
   await page.getByLabel('供应商编码').fill('SUP-NEW')
-  await page.getByLabel('供应商名称').fill('新建测试供应商')
+  await page.getByLabel('供应商名称', { exact: true }).fill('新建测试供应商')
   await page.getByRole('button', { name: '保存供应商' }).click()
-  await expect(page.getByText('供应商已保存')).toBeVisible()
+  await expect(page.getByText('供应商已保存', { exact: true })).toBeVisible()
   await expect(
     page.evaluate(
       () =>
@@ -2870,9 +2872,15 @@ test('catalog details and Honsen draft can reach later quote pages', async ({
   await page.getByRole('button', { name: '材料库', exact: true }).click()
   await page.getByRole('button', { name: '查看全部报价' }).click()
   await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
-  await page.getByRole('button', { name: '下一页' }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '下一页', exact: true })
+    .click()
   await expect(page.getByText(/Vendor 25 ·/)).toBeVisible()
-  await page.getByRole('button', { name: '上一页' }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '上一页', exact: true })
+    .click()
   await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
   await page.getByRole('button', { name: '关闭', exact: true }).click()
   await page.getByRole('button', { name: '采购申请单' }).click()

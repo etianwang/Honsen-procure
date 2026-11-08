@@ -1,4 +1,5 @@
 import { useUiLocale } from '../lib/ui-locale'
+import { documentNumber } from '../lib/document-number'
 import {
   requisitionText,
   type RequisitionMessage,
@@ -11,7 +12,7 @@ import {
 } from '@honsen/shared'
 import { Alert, Button, Card, Input, Select, Space } from 'antd'
 import { Minus, Plus, Send } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MaterialPicker } from '../components/MaterialPicker'
 import { OrderWorkflowPanel } from '../components/OrderWorkflowPanel'
 import {
@@ -378,6 +379,45 @@ export function RequisitionPage({
   const [pricingIncomplete, setPricingIncomplete] = useState(false)
   const [status, setStatus] = useState<'draft' | 'pending'>('draft')
   const [message, setMessage] = useState<RequisitionMessage | null>(null)
+  const messageType =
+    message &&
+    [
+      '已复制材料和数量到未保存的新草稿；请重新选择现行材料、报价、税率及其他费用后保存。',
+      '申请已驳回，可修改报价并重新提交。',
+    ].includes(message)
+      ? 'info'
+      : message &&
+          [
+            '草稿已自动保存到本机',
+            '采购申请已提交，状态：待确认',
+            '申请已撤回为草稿，审计记录已保留。',
+          ].includes(message)
+        ? 'success'
+        : 'error'
+  const manualPending = useRef(false)
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const writeGeneration = useRef(0)
+  const autosaveGeneration = useRef(0)
+  const lastSavedDraft = useRef('')
+  const [busy, setBusy] = useState(false)
+  useEffect(
+    () => () => {
+      writeGeneration.current += 1
+      autosaveGeneration.current += 1
+    },
+    [],
+  )
+  function serializeWrite<T>(work: () => Promise<T>): Promise<T> {
+    const generation = writeGeneration.current
+    const guarded = () => {
+      if (generation !== writeGeneration.current)
+        throw Error('Stale requisition action')
+      return work()
+    }
+    const result = writeQueue.current.then(guarded, guarded)
+    writeQueue.current = result.catch(() => undefined)
+    return result
+  }
 
   const draft = useMemo(
     () =>
@@ -397,17 +437,46 @@ export function RequisitionPage({
       return null
     }
   }, [draft])
+  const persistDraft = useCallback(async () => {
+    const generation = writeGeneration.current
+    const result = await api.saveRequisitionDraft(draft)
+    if (generation !== writeGeneration.current)
+      throw Error('Stale requisition action')
+    lastSavedDraft.current = JSON.stringify(draft)
+    return result
+  }, [api, draft])
 
   useEffect(() => {
-    if (mode === 'owner_self_purchase' || status === 'pending' || !totals)
+    if (
+      mode === 'owner_self_purchase' ||
+      status === 'pending' ||
+      busy ||
+      !totals
+    )
       return
+    if (lastSavedDraft.current === JSON.stringify(draft)) return
+    const generation = ++autosaveGeneration.current
     const timer = window.setTimeout(() => {
-      void api.saveRequisitionDraft(draft).catch(() => {
-        setMessage('自动保存失败；请检查授权、材料和订单内容后手动保存。')
-      })
+      if (manualPending.current) return
+      void serializeWrite(persistDraft)
+        .then(() => {
+          if (generation === autosaveGeneration.current)
+            setMessage((current) =>
+              current === '自动保存失败；请检查授权、材料和订单内容后手动保存。'
+                ? null
+                : current,
+            )
+        })
+        .catch(() => {
+          if (generation === autosaveGeneration.current)
+            setMessage('自动保存失败；请检查授权、材料和订单内容后手动保存。')
+        })
     }, 600)
-    return () => window.clearTimeout(timer)
-  }, [api, draft, mode, status, totals])
+    return () => {
+      window.clearTimeout(timer)
+      autosaveGeneration.current += 1
+    }
+  }, [persistDraft, draft, mode, status, totals, busy])
 
   function updateLine(index: number, update: Partial<EditorLine>) {
     setLines((current) =>
@@ -453,6 +522,7 @@ export function RequisitionPage({
   }
 
   function copyFromHistory(detail: RequisitionDetail) {
+    if (manualPending.current) return
     if (
       detail.projectId !== context.projectId ||
       !detail.procurementMode ||
@@ -546,8 +616,13 @@ export function RequisitionPage({
   }
 
   async function saveOwnerPricing() {
-    await api.saveRequisitionDraft(draft)
+    const generation = writeGeneration.current
+    await persistDraft()
+    if (generation !== writeGeneration.current)
+      throw Error('Stale requisition action')
     await api.setProcurementMode(orderId, mode)
+    if (generation !== writeGeneration.current)
+      throw Error('Stale requisition action')
     let result
     try {
       result = await api.saveOwnerPurchasePricing({
@@ -555,8 +630,10 @@ export function RequisitionPage({
         lines: ownerPricingInputs(),
         revisionReason: pricingRevisionReason || null,
       })
+      if (generation !== writeGeneration.current)
+        throw Error('Stale requisition action')
     } catch (error) {
-      setPricingIncomplete(true)
+      if (generation === writeGeneration.current) setPricingIncomplete(true)
       throw error
     }
     setOwnerPricing((current) => ({
@@ -577,52 +654,95 @@ export function RequisitionPage({
   }
 
   async function saveDraft() {
+    if (manualPending.current || status === 'pending') return
+    manualPending.current = true
+    autosaveGeneration.current += 1
+    setBusy(true)
+    setMessage(null)
+    const generation = writeGeneration.current
     try {
-      if (mode === 'owner_self_purchase') await saveOwnerPricing()
-      else {
-        await api.saveRequisitionDraft(draft)
-        await api.setProcurementMode(orderId, mode)
-      }
+      await serializeWrite(async () => {
+        if (mode === 'owner_self_purchase') await saveOwnerPricing()
+        else {
+          await persistDraft()
+          if (generation !== writeGeneration.current)
+            throw Error('Stale requisition action')
+          await api.setProcurementMode(orderId, mode)
+        }
+      })
+      if (generation !== writeGeneration.current) return
       setMessage('草稿已自动保存到本机')
     } catch (error) {
+      if (generation !== writeGeneration.current) return
       setMessage(
         isQuoteUnavailable(error)
           ? '所选报价已失效或不可用，请重新选择；原草稿已保留。'
           : '保存失败，请检查订单内容；原草稿已保留。',
       )
+    } finally {
+      manualPending.current = false
+      setBusy(false)
     }
   }
 
   async function submit() {
+    if (manualPending.current || status === 'pending') return
     if (!totals) {
       setMessage('请完成材料、数量和金额后再提交。')
       return
     }
+    manualPending.current = true
+    autosaveGeneration.current += 1
+    setBusy(true)
+    setMessage(null)
+    const generation = writeGeneration.current
     try {
-      if (mode === 'owner_self_purchase') await saveOwnerPricing()
-      else {
-        await api.saveRequisitionDraft(draft)
-        await api.setProcurementMode(orderId, mode)
-      }
-      await api.submitRequisitionDraft(draft.id)
+      await serializeWrite(async () => {
+        if (mode === 'owner_self_purchase') await saveOwnerPricing()
+        else {
+          await persistDraft()
+          if (generation !== writeGeneration.current)
+            throw Error('Stale requisition action')
+          await api.setProcurementMode(orderId, mode)
+        }
+        if (generation !== writeGeneration.current)
+          throw Error('Stale requisition action')
+        await api.submitRequisitionDraft(draft.id)
+      })
+      if (generation !== writeGeneration.current) return
       setStatus('pending')
       setMessage('采购申请已提交，状态：待确认')
     } catch (error) {
+      if (generation !== writeGeneration.current) return
       setMessage(
         isQuoteUnavailable(error)
           ? '所选报价已失效或不可用，请重新选择；原草稿已保留。'
           : '提交失败，请检查订单内容。',
       )
+    } finally {
+      manualPending.current = false
+      setBusy(false)
     }
   }
 
   async function withdraw() {
+    if (manualPending.current || status !== 'pending') return
+    manualPending.current = true
+    autosaveGeneration.current += 1
+    setBusy(true)
+    setMessage(null)
+    const generation = writeGeneration.current
     try {
-      await api.withdrawRequisition(orderId)
+      await serializeWrite(() => api.withdrawRequisition(orderId))
+      if (generation !== writeGeneration.current) return
       setStatus('draft')
       setMessage('申请已撤回为草稿，审计记录已保留。')
     } catch {
+      if (generation !== writeGeneration.current) return
       setMessage('撤回失败：仅申请人可撤回待确认且授权有效的请购。')
+    } finally {
+      manualPending.current = false
+      setBusy(false)
     }
   }
 
@@ -632,18 +752,22 @@ export function RequisitionPage({
         <div>
           <h2>{t('新建采购申请')}</h2>
           <p>
-            {editorContext.displayNo} · {editorContext.site} ·
-            {t('草稿仅保存在本机，联网后再同步。')}
+            {documentNumber(
+              editorContext.displayNo,
+              t(status === 'pending' ? '待确认' : '草稿'),
+            )}{' '}
+            · {editorContext.site} ·{t('草稿仅保存在本机，联网后再同步。')}
           </p>
         </div>
         <span className={`status ${status === 'pending' ? 'blue' : 'yellow'}`}>
           {status === 'pending' ? t('待确认') : t('草稿')}
         </span>
       </section>
-      {message ? (
+      {message === '无法读取供应商报价。' ? (
         <Alert
           className="requisition-alert"
-          type="info"
+          type="error"
+          role="alert"
           title={t(message)}
           showIcon
         />
@@ -653,7 +777,7 @@ export function RequisitionPage({
           {t('采购模式')}
           <Select
             aria-label={t('采购模式')}
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
             value={mode}
             options={[
               { value: 'owner_self_purchase', label: t('业主自行采购') },
@@ -667,7 +791,7 @@ export function RequisitionPage({
           <Input
             aria-label={t('税率（基点）')}
             inputMode="numeric"
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
             value={taxRateBasisPoints}
             onChange={(event) => setTaxRateBasisPoints(event.target.value)}
           />
@@ -677,7 +801,7 @@ export function RequisitionPage({
           <Input
             aria-label={t('印花税（手填，单据币种最小单位）')}
             inputMode="numeric"
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
             value={manualStampDutyMinor}
             onChange={(event) => setManualStampDutyMinor(event.target.value)}
           />
@@ -687,7 +811,7 @@ export function RequisitionPage({
             {t('价格修订原因（已有定价时必填）')}
             <Input
               aria-label={t('价格修订原因')}
-              disabled={status === 'pending'}
+              disabled={status === 'pending' || busy}
               value={pricingRevisionReason}
               onChange={(event) => setPricingRevisionReason(event.target.value)}
             />
@@ -724,7 +848,7 @@ export function RequisitionPage({
                         ? 'Delete line ' + (index + 1)
                         : 'Supprimer la ligne ' + (index + 1)
                   }
-                  disabled={lines.length === 1 || status === 'pending'}
+                  disabled={lines.length === 1 || status === 'pending' || busy}
                   icon={<Minus size={15} />}
                   onClick={() =>
                     setLines((current) => current.filter((_, i) => i !== index))
@@ -739,7 +863,7 @@ export function RequisitionPage({
                   <MaterialPicker
                     api={catalogApi}
                     projectId={context.projectId}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     value={line.materialId ?? undefined}
                     valueLabel={
                       line.materialId
@@ -776,7 +900,7 @@ export function RequisitionPage({
                   {t('币种')}
                   <Select
                     aria-label={t('行币种')}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     value={line.currency}
                     options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
                       value,
@@ -808,7 +932,7 @@ export function RequisitionPage({
                     })()}
                     primaryCurrency={editorContext.primaryCurrency}
                     pricing={ownerPricing[line.id] ?? newOwnerPricing()}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     onChange={(update) => updateOwnerPricing(line.id, update)}
                     onCurrencyChange={(currency) =>
                       updateLine(index, { currency })
@@ -825,7 +949,7 @@ export function RequisitionPage({
                     <Select
                       aria-label={t('选择供应商报价')}
                       virtual={false}
-                      disabled={status === 'pending'}
+                      disabled={status === 'pending' || busy}
                       value={line.catalogPriceId ?? undefined}
                       placeholder={t('选择供应商报价')}
                       options={(
@@ -860,7 +984,7 @@ export function RequisitionPage({
                 ) : null}
                 {line.materialId && quotePages[line.materialId]?.more ? (
                   <Button
-                    disabled={loadingQuotes}
+                    disabled={loadingQuotes || busy}
                     onClick={() =>
                       void loadQuotes(
                         line.materialId!,
@@ -875,7 +999,7 @@ export function RequisitionPage({
                   {t('数量')}
                   <Input
                     aria-label={t('数量')}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     value={line.quantity}
                     inputMode="decimal"
                     onChange={(event) =>
@@ -887,7 +1011,7 @@ export function RequisitionPage({
                   {t('单位')}
                   <Input
                     aria-label={t('单位')}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     value={line.unit}
                     onChange={(event) =>
                       updateLine(index, {
@@ -903,7 +1027,7 @@ export function RequisitionPage({
                   {t('单价（最小货币单位）')}
                   <Input
                     aria-label={t('单价（最小货币单位）')}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     value={line.unitPriceMinor}
                     inputMode="numeric"
                     onChange={(event) =>
@@ -920,7 +1044,7 @@ export function RequisitionPage({
                   {t('行折扣（最小货币单位）')}
                   <Input
                     aria-label={t('行折扣（最小货币单位）')}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     value={
                       line.lineDiscount.kind === 'fixed_minor'
                         ? line.lineDiscount.minor
@@ -941,7 +1065,7 @@ export function RequisitionPage({
                   {t('行运费（最小货币单位）')}
                   <Input
                     aria-label={t('行运费（最小货币单位）')}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     value={
                       line.lineFreight.kind === 'fixed_minor'
                         ? line.lineFreight.minor
@@ -964,7 +1088,7 @@ export function RequisitionPage({
         </div>
         <Space className="requisition-actions" wrap>
           <Button
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
             icon={<Plus size={16} />}
             onClick={() =>
               setLines((current) => [
@@ -976,20 +1100,37 @@ export function RequisitionPage({
             {t('新增材料行')}
           </Button>
           <Button
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
+            loading={busy}
+            aria-label={t('保存草稿')}
             onClick={() => void saveDraft()}
           >
             {t('保存草稿')}
           </Button>
           <Button
             type="primary"
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
             icon={<Send size={16} />}
+            loading={busy}
+            aria-label={t('提交确认')}
             onClick={() => void submit()}
           >
             {t('提交确认')}
           </Button>
         </Space>
+        {busy ? (
+          <p role="status" aria-live="polite">
+            {t('正在保存或提交，请稍候…')}
+          </p>
+        ) : null}
+        {message && message !== '无法读取供应商报价。' ? (
+          <Alert
+            role={messageType === 'error' ? 'alert' : 'status'}
+            type={messageType}
+            title={t(message)}
+            showIcon
+          />
+        ) : null}
       </Card>
       {status === 'pending' && workflowApi ? (
         <OrderWorkflowPanel
@@ -1003,7 +1144,14 @@ export function RequisitionPage({
         />
       ) : null}
       {status === 'pending' ? (
-        <Button onClick={() => void withdraw()}>{t('撤回申请')}</Button>
+        <Button
+          disabled={busy}
+          loading={busy}
+          aria-label={t('撤回申请')}
+          onClick={() => void withdraw()}
+        >
+          {t('撤回申请')}
+        </Button>
       ) : null}
       <Card className="card" title={t('金额汇总')}>
         <output aria-label={t('订单总金额')} className="requisition-total">
@@ -1036,6 +1184,7 @@ export function RequisitionPage({
         projectId={context.projectId}
         applicantId={context.applicantId}
         onCopy={copyFromHistory}
+        copyDisabled={busy}
         workflowApi={workflowApi}
         canApprove={canApprove}
       />

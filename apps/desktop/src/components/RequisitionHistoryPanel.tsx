@@ -37,6 +37,7 @@ type Props = {
   projectId: string
   applicantId: string
   onCopy: (detail: RequisitionDetail) => void
+  copyDisabled?: boolean
   workflowApi?: WorkflowApi
   canApprove: boolean
 }
@@ -48,6 +49,7 @@ export function RequisitionHistoryPanel({
   projectId,
   applicantId,
   onCopy,
+  copyDisabled = false,
   workflowApi,
   canApprove,
 }: Props) {
@@ -590,7 +592,9 @@ export function RequisitionHistoryPanel({
           {detail.projectId === projectId &&
           detail.procurementMode &&
           detail.lines.length > 0 ? (
-            <Button onClick={() => onCopy(detail)}>{t('复制为新草稿')}</Button>
+            <Button disabled={copyDisabled} onClick={() => onCopy(detail)}>
+              {t('复制为新草稿')}
+            </Button>
           ) : (
             <p>{t('仅当前项目中已记录采购模式且包含材料的请购可复制。')}</p>
           )}
