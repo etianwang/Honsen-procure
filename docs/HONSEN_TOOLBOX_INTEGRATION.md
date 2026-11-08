@@ -274,3 +274,9 @@ one cloud CAPTCHA; no local challenge in connected state. Authenticated login
 and new PDF output BLOCKED pending mandatory user authentication handoff;
 network/offline/reconnect NOT_RUN. Receipt ONLINE-FIRST-LOGIN-20261108.json.
 T12/T14/Alpha remain OPEN; no cloud/data changes. Toolbox identity unchanged.
+
+
+2026-11-08 0.1.23 bounded French HPA NATIVE_UI_PASS: normal preview, actual PDF
+save and reader reopen; left words/compact fees/clean headers, one A4 page,
+1100 XOF and immutable formal number verified. Receipt T12-NATIVE-023-20261108.json.
+No cloud/contract/data mutation; full T12/T14/Alpha and other native gates OPEN.

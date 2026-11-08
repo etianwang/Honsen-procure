@@ -1,0 +1,30 @@
+{
+  "source": "233c500",
+  "installedVersion": "0.1.23",
+  "file": ".cache/native-pdf-023/TEST-HPA-023-fr.pdf",
+  "bytes": 390099,
+  "sha256": "ebd5b7a6f97dd6e32e764ae97f0603475aa1b050c19646b4f4ab22ae748d46ce",
+  "pages": 1,
+  "mediaBox": [0, 0, 594.95996, 841.91998],
+  "checks": {
+    "onePage": true,
+    "A4": true,
+    "required": true,
+    "pageLabels": true,
+    "noBrowserDecoration": true,
+    "noUuid": true,
+    "wordsLeft": true
+  },
+  "nativeSave": true,
+  "nativeReaderReopen": true,
+  "textNormalization": "NFKC and whitespace removal: embedded CJK extraction yields compatibility radicals separated by font runs",
+  "initialReadback": "FAIL raw-string comparison for CJK compatibility radical; initial cleanup used wrong PDFJS destroy object. Corrected file inspection without modifying PDF.",
+  "positions": {
+    "wordsX": 48.41015423291016,
+    "summaryX": 294.08202274658186
+  },
+  "status": "NATIVE_UI_PASS: existing valid TEST HPA French-primary preview/save/reader reopen, left words and clean header only",
+  "visual": "Poppler full-page rendering inspected: no clipping/overlap/missing glyphs; fees and signatures visible; footer Page 1 / 1",
+  "screenshot": ".cache/native-pdf-023/HPA-fr-reader.png",
+  "remaining": "NOT_RUN in 0.1.23: native offline/reconnect, Chinese/English PDF, SPO/OPA/multipage, physical printing and full independent client lifecycle"
+}

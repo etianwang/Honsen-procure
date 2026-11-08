@@ -516,3 +516,37 @@ DEFERRED: paused payment extension. WARNING: existing lint/Markdown debt and
 historical installer warning retained; no such warning observed in this install.
 T12/T14/Alpha remain OPEN. Evidence-only JSON/reference/status/diff checks;
 unchanged application suites not rerun. Task branch checkpoint, no merge/release.
+
+
+### 2026-11-08 — 0.1.23 French HPA native output accepted
+
+After user authentication handoff, real workspace showed Zhanghekai and
+acknowledged synchronization with zero pending events. Used normal history,
+existing valid TEST HPA preview, native Save as PDF/file dialog, and download
+card keyboard navigation to reopen the saved file in the actual PDF reader.
+NATIVE_UI_PASS for this bounded French-primary HPA flow, left amount words,
+compact right fees and clean browser decorations. No business writes performed.
+
+File: H:/Honsen/Honsen-Procure-t12/.cache/native-pdf-023/TEST-HPA-023-fr.pdf
+SHA256: ebd5b7a6f97dd6e32e764ae97f0603475aa1b050c19646b4f4ab22ae748d46ce
+390099 bytes, one A4 page 594.95996 x 841.91998 pt. Formal number
+CI-BETHEL2-20261108-HPA-4NM1JMPR-2, quantity 1 PCS, total 1100 XOF,
+mille-cent francs CFA BCEAO / 西非法郎壹仟壹佰整. All eight fees including
+zero amounts, header/footer Page 1 / 1, no internal UUID/browser URL/date header.
+Words x=48.41 pt, right summary x=294.08 pt. PDFJS readback and full-page
+Poppler rendering independently checked; real reader screenshot retained.
+Initial raw CJK string check failed because extracted compatibility radicals
+were separated by font runs; NFKC/whitespace canonicalization confirmed the
+unchanged text. Initial PDFJS cleanup used wrong destroy object, corrected to
+loadingTask.destroy; no PDF alteration or business-rule change.
+
+Receipt: docs/reviews/evidence/T12-NATIVE-023-20261108.json. Source 233c500;
+this evidence checkpoint contains documentation only. JSON formatting and
+git diff --check pass; unchanged application suites not rerun.
+BLOCKER for full T12 remains other native language/type/multipage gates,
+REQ/payment modules and project language setting. Native network/offline retry,
+physical printing and full dual-client lifecycle NOT_RUN in this checkpoint.
+DEFERRED payment extensions remain paused. WARNING historical lint/format debt.
+T12/T14/Alpha remain OPEN, no ALPHA_INTERNAL_TEST_READY claim. No cloud,
+migration, financial, frozen snapshot or formal number mutation. Task branch
+checkpoint committed/pushed; tracked tree clean after commit.

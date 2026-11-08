@@ -32,9 +32,9 @@
     "lint": "PASS with warnings",
     "rustClippy": "PASS with warnings",
     "build": "PASS",
-    "native": "PARTIAL: real installer completed and launched; automatic cloud CAPTCHA, exactly one cloud challenge, no local challenge in connected state; authenticated login pending mandatory user handoff",
+    "native": "PARTIAL: user completed normal Zhanghekai online login; agent observed authenticated workspace and acknowledged sync, plus one-cloud-CAPTCHA startup. Native offline/reconnect NOT_RUN",
     "elapsedTimeout": "NOT_RUN",
-    "nativePdf023": "NOT_RUN: pending authenticated session"
+    "nativePdf023": "NATIVE_UI_PASS bounded French HPA preview/save/reader reopen; see T12-NATIVE-023-20261108.json"
   },
   "dataEffects": "No migrations, cloud deployment or historical/financial mutations"
 }
