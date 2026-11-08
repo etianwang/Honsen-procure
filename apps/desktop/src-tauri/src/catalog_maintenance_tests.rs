@@ -67,6 +67,81 @@ fn country(service: &LocalAuthService) -> Uuid {
 }
 
 #[test]
+fn comparison_pages_keep_integer_order_and_active_project_scope() {
+    let (service, _, now) = fixture(Role::Engineer);
+    let context = service.authorization_context(now).unwrap();
+    let material = Uuid::new_v4();
+    let other_country = Uuid::new_v4();
+    let mut db = service.connection.lock().unwrap();
+    let tx = db.transaction().unwrap();
+    tx.execute("INSERT INTO local_materials(id,name_zh,aliases_json,model,specification,unit,is_active,version) VALUES(?1,'Synthetic material','[]','M','S','m',1,1)", [material.to_string()]).unwrap();
+    tx.execute("INSERT INTO local_countries(id,business_code,name,time_zone,is_active,version) VALUES(?1,'OTHER','Other synthetic country','UTC',1,1)", [other_country.to_string()]).unwrap();
+    let mut expected = Vec::new();
+    for index in (0..53).rev() {
+        let supplier = Uuid::new_v4();
+        let price = Uuid::new_v4();
+        let currency = if index == 0 { "USD" } else { "XAF" };
+        let unit = if index == 1 { "kg" } else { "m" };
+        let amount = 9_007_199_254_740_968_i64 + index / 2;
+        let country = if index == 52 {
+            other_country
+        } else {
+            context.country_id
+        };
+        tx.execute("INSERT INTO local_suppliers(id,country_id,business_code,name,is_active,is_blacklisted,version) VALUES(?1,?2,?3,'Synthetic supplier',1,?4,1)", params![supplier.to_string(), country.to_string(), format!("COMPARE-{index}"), index == 5]).unwrap();
+        tx.execute("INSERT INTO local_material_prices(id,material_id,supplier_id,currency,unit_price_minor,unit,effective_at,is_active,version) VALUES(?1,?2,?3,?4,?5,?6,'2026-11-09',?7,1)", params![price.to_string(), material.to_string(), supplier.to_string(), currency, amount, unit, index != 51]).unwrap();
+        if index < 51 {
+            expected.push((currency.to_string(), unit.to_string(), amount, price));
+        }
+    }
+    tx.commit().unwrap();
+    drop(db);
+    expected.sort();
+    let before = service.pending_sync_events(100, now).unwrap();
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    for size in [25, 25, 1] {
+        let page = service
+            .list_catalog_comparison_page(material, context.project_id, cursor, now)
+            .unwrap();
+        assert_eq!(page.records.len(), size);
+        seen.extend(page.records.into_iter().map(|row| {
+            (
+                row.currency,
+                row.unit,
+                row.unit_price_minor.parse::<i64>().unwrap(),
+                row.price_id,
+            )
+        }));
+        cursor = page.next_cursor;
+    }
+    assert!(cursor.is_none());
+    assert_eq!(seen, expected);
+    assert!(
+        service
+            .list_catalog_comparison_page(material, Uuid::new_v4(), None, now)
+            .unwrap()
+            .records
+            .is_empty()
+    );
+    assert!(matches!(
+        service.list_catalog_comparison_page(
+            material,
+            context.project_id,
+            Some(CatalogComparisonCursor {
+                currency: "XAF".into(),
+                unit: "m".into(),
+                unit_price_minor: "9223372036854775808".into(),
+                price_id: Uuid::new_v4()
+            }),
+            now
+        ),
+        Err(AuthError::InvalidInput)
+    ));
+    assert_eq!(service.pending_sync_events(100, now).unwrap(), before);
+}
+
+#[test]
 fn supplier_notes_migration_preserves_existing_rows_and_legacy_payload_shape() {
     let database = Connection::open_in_memory().unwrap();
     database

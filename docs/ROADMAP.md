@@ -536,3 +536,5 @@ UI phase2 batch5 remains PARTIAL; direct automation verified, original functiona
 UI phase2 batch6 stays PARTIAL; automated scope verified, existing native and parent gates remain open. See design rollout.
 
 UI phase 2 batch 7: affected browser rechecks, unit tests and Windows build verified. Current native UI remains `BLOCKED_NATIVE_CONTROL`. See design rollout.
+
+UI phase 2 batch 8: bounded material quote comparison and the button animation exception were verified in affected browser and unit tests. The new Windows build awaits native verification under `BLOCKED_NATIVE_CONTROL`.

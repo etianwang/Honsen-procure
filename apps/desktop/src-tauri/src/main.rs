@@ -251,6 +251,7 @@ fn main() {
             commands::search_catalog,
             commands::search_catalog_page,
             commands::list_catalog_prices,
+            commands::list_catalog_comparison_page,
             commands::list_suppliers,
             commands::search_suppliers_page,
             commands::list_supplier_prices,

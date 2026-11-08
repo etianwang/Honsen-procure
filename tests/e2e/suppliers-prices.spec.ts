@@ -1,10 +1,15 @@
 import { expect, test, type Page } from '@playwright/test'
 
-async function mount(page: Page, role = 'purchaser', locale = 'zh') {
+async function mount(
+  page: Page,
+  role = 'purchaser',
+  locale = 'zh',
+  paged = false,
+) {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('button', { name: '打开界面预览' })).toBeVisible()
   await page.evaluate(
-    async ({ role, locale }) => {
+    async ({ role, locale, paged }) => {
       const load = (p: string) => import(/* @vite-ignore */ p)
       const React = await load('/node_modules/.vite/deps/react.js'),
         ReactDOM = await load('/node_modules/.vite/deps/react-dom_client.js')
@@ -45,7 +50,13 @@ async function mount(page: Page, role = 'purchaser', locale = 'zh') {
         effectiveAt: '2026-11-06',
         isActive: true,
       }
-      Object.assign(window, { __priceInput: null, __historyFail: false })
+      const comparisonReads: (string | null)[] = []
+      Object.assign(window, {
+        __priceInput: null,
+        __historyFail: false,
+        __comparisonReads: comparisonReads,
+      })
+      let rejectNext = true
       const api = {
         listSuppliers: async () => [supplier],
         searchMaterials: async () => [material],
@@ -100,6 +111,45 @@ async function mount(page: Page, role = 'purchaser', locale = 'zh') {
             unitPriceMinor: '1',
           },
         ],
+        ...(paged && {
+          listCatalogComparisonPage: async (
+            _material: string,
+            _project: string,
+            after: { priceId: string } | null,
+          ) => {
+            comparisonReads.push(after?.priceId ?? null)
+            if (after && rejectNext) {
+              rejectNext = false
+              throw Error('Synthetic comparison read failure')
+            }
+            const records = Array.from(
+              { length: after ? 1 : 25 },
+              (_, offset) => {
+                const index = after ? 25 : offset
+                return {
+                  ...base,
+                  priceId: `comparison-${index}`,
+                  supplierName: `Synthetic comparison ${index}`,
+                  unitPriceMinor: (
+                    9007199254740968n + BigInt(index)
+                  ).toString(),
+                }
+              },
+            )
+            const last = records.at(-1)!
+            return {
+              records,
+              nextCursor: after
+                ? null
+                : {
+                    currency: last.currency,
+                    unit: last.unit,
+                    priceId: last.priceId,
+                    unitPriceMinor: last.unitPriceMinor,
+                  },
+            }
+          },
+        }),
         addMaterialPrice: async (input: unknown) => {
           ;(window as unknown as { __priceInput: unknown }).__priceInput = input
         },
@@ -124,9 +174,62 @@ async function mount(page: Page, role = 'purchaser', locale = 'zh') {
         ),
       )
     },
-    { role, locale },
+    { role, locale, paged },
   )
 }
+
+test('material comparison shows one ordered page and retries the same cursor', async ({
+  page,
+}) => {
+  await mount(page, 'purchaser', 'zh', true)
+  const material = page.getByRole('combobox', { name: '选择材料', exact: true })
+  await material.click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('合成材料 · M', { exact: true }),
+  ).toBeVisible()
+  await material.press('ArrowDown')
+  await material.press('Enter')
+
+  const comparison = page.locator('.supplier-material-comparison')
+  const pager = comparison.getByRole('navigation', {
+    name: '比价分页',
+    exact: true,
+  })
+  const readCursors = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __comparisonReads: (string | null)[] })
+          .__comparisonReads,
+    )
+  await expect(comparison.locator('tbody tr')).toHaveCount(25)
+  await expect(
+    comparison.getByText('Synthetic comparison 25', { exact: true }),
+  ).toHaveCount(0)
+  expect(await readCursors()).toEqual([null])
+  await pager.getByRole('button', { name: '下一页', exact: true }).click()
+  await expect(comparison.getByRole('alert')).toContainText('无法读取报价')
+  await comparison
+    .getByRole('button', { name: '重试报价', exact: true })
+    .click()
+  await expect(comparison.locator('tbody tr')).toHaveCount(1)
+  await expect(comparison.locator('tbody tr')).toContainText(
+    '9,007,199,254,740,993',
+  )
+  await expect(
+    pager.getByRole('button', { name: '下一页', exact: true }),
+  ).toBeDisabled()
+  expect(await readCursors()).toEqual([null, 'comparison-24', 'comparison-24'])
+  await pager.getByRole('button', { name: '上一页', exact: true }).click()
+  await expect(comparison.locator('tbody tr')).toHaveCount(25)
+  expect(await readCursors()).toEqual([
+    null,
+    'comparison-24',
+    'comparison-24',
+    null,
+  ])
+})
 
 test('supplier history pages include inactive rows and comparison groups preserve integer precision', async ({
   page,

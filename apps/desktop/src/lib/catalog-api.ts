@@ -20,6 +20,16 @@ export type CatalogPriceView = {
   sourceNote?: string | null
 }
 
+export type CatalogComparisonCursor = Pick<
+  CatalogPriceView,
+  'currency' | 'unit' | 'unitPriceMinor' | 'priceId'
+>
+
+export type CatalogComparisonPage = {
+  records: CatalogPriceView[]
+  nextCursor: CatalogComparisonCursor | null
+}
+
 export type CatalogMaterialView = {
   id: string
   isActive?: boolean
@@ -129,6 +139,11 @@ export type CatalogApi = {
     after: string | null,
     includeBlacklisted?: boolean,
   ): Promise<CatalogPriceView[]>
+  listCatalogComparisonPage?(
+    materialId: string,
+    projectId: string,
+    after: CatalogComparisonCursor | null,
+  ): Promise<CatalogComparisonPage>
   saveMaterial(material: Material): Promise<void>
   listSuppliers(): Promise<SupplierView[]>
   listSupplierPrices?(
@@ -186,6 +201,12 @@ export const tauriCatalogApi: CatalogApi = {
       projectId,
       after,
       includeBlacklisted,
+    }),
+  listCatalogComparisonPage: (materialId, projectId, after) =>
+    tauriInvoke()<CatalogComparisonPage>('list_catalog_comparison_page', {
+      materialId,
+      projectId,
+      after,
     }),
   saveMaterial: (material) =>
     tauriInvoke()<void>('save_material', { material }),

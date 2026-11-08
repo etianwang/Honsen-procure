@@ -656,3 +656,5 @@ UI batch5 PARTIAL: execution/RFQ state, paged supplier manager and serialized re
 UI batch6 PARTIAL: history/export guard, workflow reads/password busy, name edits and parent-country supplier search implemented. History27/workflow16/reference independent10/execution scoped10 PASS; Rust196PASS/7ignored; native BLOCKED_AUTH_INTERACTION. See rollout and build fingerprint, no parent closure.
 
 UI phase 2 batch 7: French search, scope labels, child workflow states and recovery rechecks are recorded in the design rollout. Parent gates remain open under `BLOCKED_NATIVE_CONTROL`.
+
+UI phase 2 batch 8: the quote comparison and affected supplier regression have scoped `BROWSER_PASS`, `UNIT_PASS` and `BUILD_PASS`. The design rollout records evidence and the open `NATIVE_UI_PASS` gate under `BLOCKED_NATIVE_CONTROL`.

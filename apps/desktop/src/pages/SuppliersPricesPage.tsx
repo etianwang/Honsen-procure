@@ -13,6 +13,8 @@ import {
   type CatalogApi,
   type CatalogMaterialView,
   type CatalogPriceView,
+  type CatalogComparisonCursor,
+  type CatalogComparisonPage,
   type SupplierView,
   type SupplierPriceHistoryView,
   type SupplierSearchCursor,
@@ -83,8 +85,15 @@ export function SuppliersPricesPage({
   const [comparisonResult, setComparisonResult] = useState<{
     key: string
     rows: CatalogPriceView[]
+    nextCursor: CatalogComparisonCursor | null
     failed?: boolean
   } | null>(null)
+  const [comparisonPagination, setComparisonPagination] = useState<{
+    key: string
+    cursors: (CatalogComparisonCursor | null)[]
+    page: number
+  }>({ key: '', cursors: [null], page: 0 })
+  const [comparisonRetry, setComparisonRetry] = useState(0)
   const [supplierEditor, setSupplierEditor] = useState<
     SupplierView | 'new' | null
   >(null)
@@ -131,7 +140,25 @@ export function SuppliersPricesPage({
     materialSelection?.key === contextKey ? materialSelection.record : undefined
   const historyCursor = historyCursors[historyPage]
   const historyKey = `${contextKey}:${selectedSupplier?.id ?? ''}:${historyCursor ?? ''}:${reload}`
-  const comparisonKey = `${contextKey}:${selectedMaterial?.id ?? ''}:${reload}`
+  const comparisonFilterKey = JSON.stringify([
+    contextKey,
+    selectedMaterial?.id,
+    reload,
+  ])
+  const comparisonPage =
+    comparisonPagination.key === comparisonFilterKey
+      ? comparisonPagination.page
+      : 0
+  const comparisonCursors =
+    comparisonPagination.key === comparisonFilterKey
+      ? comparisonPagination.cursors
+      : [null]
+  const comparisonCursor = comparisonCursors[comparisonPage] ?? null
+  const comparisonKey = JSON.stringify([
+    comparisonFilterKey,
+    comparisonCursor,
+    comparisonRetry,
+  ])
   const history = historyResult?.key === historyKey ? historyResult : null
   const comparison =
     comparisonResult?.key === comparisonKey ? comparisonResult : null
@@ -230,36 +257,44 @@ export function SuppliersPricesPage({
   useEffect(() => {
     let active = true
     if (selectedMaterial && projectId)
-      void (async () => {
-        const rows: CatalogPriceView[] = []
-        let cursor: string | null = null
-        const seen = new Set<string>()
-        for (;;) {
-          const page = await api.listCatalogPrices(
+      void Promise.resolve()
+        .then(async (): Promise<CatalogComparisonPage> => {
+          if (api.listCatalogComparisonPage)
+            return api.listCatalogComparisonPage(
+              selectedMaterial.id,
+              projectId,
+              comparisonCursor,
+            )
+          // Small injected preview adapters provide the comparison rows directly.
+          const records = await api.listCatalogPrices(
             selectedMaterial.id,
             projectId,
-            cursor,
+            null,
             true,
           )
-          if (!active) return
-          for (const row of page) {
-            if (seen.has(row.priceId))
-              throw new Error('Non-progressing quote cursor')
-            seen.add(row.priceId)
-            rows.push(row)
-          }
-          if (page.length < 25) break
-          cursor = page[page.length - 1].priceId
-        }
-        if (active) setComparisonResult({ key: comparisonKey, rows })
-      })().catch(() => {
-        if (active)
-          setComparisonResult({ key: comparisonKey, rows: [], failed: true })
-      })
+          return { records, nextCursor: null }
+        })
+        .then(({ records, nextCursor }) => {
+          if (active)
+            setComparisonResult({
+              key: comparisonKey,
+              rows: records,
+              nextCursor,
+            })
+        })
+        .catch(() => {
+          if (active)
+            setComparisonResult({
+              key: comparisonKey,
+              rows: [],
+              nextCursor: null,
+              failed: true,
+            })
+        })
     return () => {
       active = false
     }
-  }, [api, selectedMaterial, projectId, comparisonKey])
+  }, [api, selectedMaterial, projectId, comparisonKey, comparisonCursor])
 
   useEffect(() => {
     if (!supplierEditor) return
@@ -378,16 +413,16 @@ export function SuppliersPricesPage({
   const currencyGroups = new Map<string, CatalogPriceView[]>()
   for (const row of comparison?.rows ?? []) {
     const key = `${row.currency}\u0000${row.unit}`
-    currencyGroups.set(key, [...(currencyGroups.get(key) ?? []), row])
+    const group = currencyGroups.get(key)
+    if (group) group.push(row)
+    else currencyGroups.set(key, [row])
   }
-  for (const rows of currencyGroups.values())
-    rows.sort((a, b) =>
-      BigInt(a.unitPriceMinor) < BigInt(b.unitPriceMinor)
-        ? -1
-        : BigInt(a.unitPriceMinor) > BigInt(b.unitPriceMinor)
-          ? 1
-          : a.supplierName.localeCompare(b.supplierName),
-    )
+  if (!api.listCatalogComparisonPage)
+    for (const rows of currencyGroups.values())
+      rows.sort((a, b) => {
+        const difference = BigInt(a.unitPriceMinor) - BigInt(b.unitPriceMinor)
+        return difference < 0n ? -1 : difference > 0n ? 1 : 0
+      })
   if (!countryId || !projectId)
     return (
       <Alert
@@ -715,9 +750,12 @@ export function SuppliersPricesPage({
                   : undefined
               }
               disabled={saving}
-              onChange={(record) =>
+              onChange={(record) => {
+                if (record?.id !== selectedMaterial?.id) {
+                  setComparisonPagination({ key: '', cursors: [null], page: 0 })
+                }
                 setMaterialSelection({ key: contextKey, record })
-              }
+              }}
             />
           </label>
           <Button
@@ -728,7 +766,7 @@ export function SuppliersPricesPage({
           </Button>
         </div>
         {!selectedMaterial ? (
-          <p role="status">{t('请选择材料以读取该项目可见的全部有效报价。')}</p>
+          <p role="status">{t('请选择材料以分页查看该项目可见的有效报价。')}</p>
         ) : !comparison ? (
           <div role="status" className="supplier-loading">
             <Spin />
@@ -738,6 +776,11 @@ export function SuppliersPricesPage({
           <Alert
             type="error"
             title={t('无法读取报价；未显示不完整结果，请重试。')}
+            action={
+              <Button onClick={() => setComparisonRetry((value) => value + 1)}>
+                {t('重试报价')}
+              </Button>
+            }
           />
         ) : comparison.rows.length ? (
           [...currencyGroups.entries()].map(([key, rows]) => (
@@ -795,7 +838,47 @@ export function SuppliersPricesPage({
             </section>
           ))
         ) : (
-          <p role="status">{c('暂无有效报价')}</p>
+          <p role="status">
+            {comparisonPage === 0 ? c('暂无有效报价') : t('当前页暂无报价')}
+          </p>
+        )}
+        {selectedMaterial && api.listCatalogComparisonPage && (
+          <nav className="supplier-pagination" aria-label={t('比价分页')}>
+            <Button
+              disabled={!comparison || comparisonPage === 0}
+              onClick={() =>
+                setComparisonPagination({
+                  key: comparisonFilterKey,
+                  cursors: comparisonCursors,
+                  page: comparisonPage - 1,
+                })
+              }
+            >
+              {t('上一页')}
+            </Button>
+            {comparison && !comparison.failed && (
+              <span role="status">
+                {t('当前页')} {comparisonPage + 1} · {comparison.rows.length}{' '}
+                {t('项')}
+              </span>
+            )}
+            <Button
+              disabled={!comparison?.nextCursor}
+              onClick={() => {
+                if (!comparison?.nextCursor) return
+                setComparisonPagination({
+                  key: comparisonFilterKey,
+                  cursors: [
+                    ...comparisonCursors.slice(0, comparisonPage + 1),
+                    comparison.nextCursor,
+                  ],
+                  page: comparisonPage + 1,
+                })
+              }}
+            >
+              {t('下一页')}
+            </Button>
+          </nav>
         )}
       </section>
       <Modal

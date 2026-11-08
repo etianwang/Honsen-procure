@@ -52,10 +52,13 @@ const messages = {
     'Rechercher matériau, modèle ou spécification',
   ],
   选择材料: ['Select material', 'Sélectionner un matériau'],
-  '请选择材料以读取该项目可见的全部有效报价。': [
-    'Select a material to read all active quotes visible to this project.',
-    'Sélectionnez un matériau pour lire tous les devis actifs visibles dans ce projet.',
+  '请选择材料以分页查看该项目可见的有效报价。': [
+    'Select a material to browse active quotes visible to this project.',
+    'Sélectionnez un matériau pour parcourir les devis actifs visibles dans ce projet.',
   ],
+  比价分页: ['Comparison pages', 'Pages de comparaison'],
+  重试报价: ['Retry quotes', 'Réessayer les devis'],
+  当前页暂无报价: ['No quotes on this page', 'Aucun devis sur cette page'],
   '同币种、同单位分组排序；不同币种或单位不作高低比较。': [
     'Sorted within the same currency and unit; different currencies or units are not ranked together.',
     'Tri par devise et unité identiques ; aucune comparaison de rang entre devises ou unités différentes.',

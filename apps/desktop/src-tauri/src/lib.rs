@@ -1215,6 +1215,27 @@ pub struct CatalogPriceView {
     pub source_note: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogComparisonCursor {
+    currency: String,
+    unit: String,
+    unit_price_minor: String,
+    price_id: Uuid,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogComparisonPage {
+    records: Vec<CatalogPriceView>,
+    next_cursor: Option<CatalogComparisonCursor>,
+}
+
+enum CatalogPriceWindow {
+    ById(Option<Uuid>),
+    Comparison(Option<CatalogComparisonCursor>),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CatalogSearchCursor {
@@ -6166,13 +6187,61 @@ impl LocalAuthService {
         include_blacklisted: bool,
         now: SystemTime,
     ) -> Result<Vec<CatalogPriceView>, AuthError> {
+        self.read_catalog_price_window(
+            material_id,
+            project_id,
+            CatalogPriceWindow::ById(after),
+            include_blacklisted,
+            now,
+        )
+    }
+
+    pub fn list_catalog_comparison_page(
+        &self,
+        material_id: Uuid,
+        project_id: Uuid,
+        after: Option<CatalogComparisonCursor>,
+        now: SystemTime,
+    ) -> Result<CatalogComparisonPage, AuthError> {
+        let mut records = self.read_catalog_price_window(
+            material_id,
+            Some(project_id),
+            CatalogPriceWindow::Comparison(after),
+            true,
+            now,
+        )?;
+        let next_cursor = if records.len() > 25 {
+            records.truncate(25);
+            records.last().map(|record| CatalogComparisonCursor {
+                currency: record.currency.clone(),
+                unit: record.unit.clone(),
+                unit_price_minor: record.unit_price_minor.clone(),
+                price_id: record.price_id,
+            })
+        } else {
+            None
+        };
+        Ok(CatalogComparisonPage {
+            records,
+            next_cursor,
+        })
+    }
+
+    fn read_catalog_price_window(
+        &self,
+        material_id: Uuid,
+        project_id: Option<Uuid>,
+        window: CatalogPriceWindow,
+        include_blacklisted: bool,
+        now: SystemTime,
+    ) -> Result<Vec<CatalogPriceView>, AuthError> {
         self.require_catalog_read(now)?;
         if project_id.is_none() {
             return Err(AuthError::InvalidInput);
         }
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
-        let mut statement = connection.prepare(
+        let base_query =
             "SELECT p.id, s.id, s.name, s.is_preferred, p.currency, p.unit_price_minor, p.unit, p.effective_at, s.is_blacklisted, s.payment_terms, s.delivery_lead_time, p.source_note
              FROM local_material_prices p JOIN local_suppliers s ON s.id = p.supplier_id
              JOIN local_materials m ON m.id = p.material_id
@@ -6180,40 +6249,81 @@ impl LocalAuthService {
                AND s.country_id IS NOT NULL AND s.is_active = 1 AND (?6 OR s.is_blacklisted = 0) AND s.deleted_at IS NULL
                AND (?2 IS NULL OR s.country_id = (SELECT country_id FROM local_projects WHERE id = ?2 AND is_active = 1 AND deleted_at IS NULL))
                AND EXISTS (SELECT 1 FROM local_authorization_snapshots a JOIN local_projects ap ON ap.id = a.project_id AND ap.is_active = 1 AND ap.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?3 AND a.expires_at >= ?4 AND ap.country_id = s.country_id AND (?2 IS NULL OR a.project_id = ?2))
-             AND (?5 IS NULL OR p.id > ?5)
-             ORDER BY p.id LIMIT 25"
-        ).map_err(|_| AuthError::Database)?;
-        let results = statement
-            .query_map(
+            ";
+        let suffix = match &window {
+            CatalogPriceWindow::ById(_) => "AND (?5 IS NULL OR p.id > ?5) ORDER BY p.id LIMIT 25",
+            CatalogPriceWindow::Comparison(_) =>
+                "AND (?5 IS NULL OR (p.currency, p.unit, p.unit_price_minor, p.id) > (?5, ?7, ?8, ?9))
+                 ORDER BY p.currency, p.unit, p.unit_price_minor, p.id LIMIT 26",
+        };
+        let mut statement = connection
+            .prepare(&format!("{base_query} {suffix}"))
+            .map_err(|_| AuthError::Database)?;
+        let material = material_id.to_string();
+        let project = project_id.map(|id| id.to_string());
+        let account = account_id.to_string();
+        let timestamp = unix_seconds(now);
+        let read_row = |row: &rusqlite::Row<'_>| {
+            let price_id: String = row.get(0)?;
+            let supplier_id: String = row.get(1)?;
+            Ok(CatalogPriceView {
+                price_id: Uuid::parse_str(&price_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                supplier_id: Uuid::parse_str(&supplier_id)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                supplier_name: row.get(2)?,
+                is_preferred_supplier: row.get::<_, i64>(3)? != 0,
+                currency: row.get(4)?,
+                unit_price_minor: row.get::<_, i64>(5)?.to_string(),
+                unit: row.get(6)?,
+                effective_at: row.get(7)?,
+                is_blacklisted: row.get::<_, i64>(8)? != 0,
+                payment_terms: row.get(9)?,
+                delivery_lead_time: row.get(10)?,
+                source_note: row.get(11)?,
+            })
+        };
+        let rows = match window {
+            CatalogPriceWindow::ById(after) => statement.query_map(
                 params![
-                    material_id.to_string(),
-                    project_id.map(|id| id.to_string()),
-                    account_id.to_string(),
-                    unix_seconds(now),
+                    material,
+                    project,
+                    account,
+                    timestamp,
                     after.map(|id| id.to_string()),
                     include_blacklisted
                 ],
-                |row| {
-                    let price_id: String = row.get(0)?;
-                    let supplier_id: String = row.get(1)?;
-                    Ok(CatalogPriceView {
-                        price_id: Uuid::parse_str(&price_id)
-                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        supplier_id: Uuid::parse_str(&supplier_id)
-                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        supplier_name: row.get(2)?,
-                        is_preferred_supplier: row.get::<_, i64>(3)? != 0,
-                        currency: row.get(4)?,
-                        unit_price_minor: row.get::<_, i64>(5)?.to_string(),
-                        unit: row.get(6)?,
-                        effective_at: row.get(7)?,
-                        is_blacklisted: row.get::<_, i64>(8)? != 0,
-                        payment_terms: row.get(9)?,
-                        delivery_lead_time: row.get(10)?,
-                        source_note: row.get(11)?,
+                read_row,
+            ),
+            CatalogPriceWindow::Comparison(after) => {
+                let amount = after
+                    .as_ref()
+                    .map(|cursor| {
+                        if !valid_currency(&cursor.currency) || cursor.unit.len() > 256 {
+                            return Err(AuthError::InvalidInput);
+                        }
+                        cursor
+                            .unit_price_minor
+                            .parse::<i64>()
+                            .map_err(|_| AuthError::InvalidInput)
                     })
-                },
-            )
+                    .transpose()?;
+                statement.query_map(
+                    params![
+                        material,
+                        project,
+                        account,
+                        timestamp,
+                        after.as_ref().map(|cursor| &cursor.currency),
+                        include_blacklisted,
+                        after.as_ref().map(|cursor| &cursor.unit),
+                        amount,
+                        after.as_ref().map(|cursor| cursor.price_id.to_string()),
+                    ],
+                    read_row,
+                )
+            }
+        };
+        let results = rows
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| AuthError::Database);
@@ -8588,6 +8698,17 @@ pub mod commands {
             SystemTime::now(),
         )
         .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn list_catalog_comparison_page(
+        auth: State<'_, LocalAuthService>,
+        material_id: Uuid,
+        project_id: Uuid,
+        after: Option<super::CatalogComparisonCursor>,
+    ) -> Result<super::CatalogComparisonPage, CommandError> {
+        auth.list_catalog_comparison_page(material_id, project_id, after, SystemTime::now())
+            .map_err(Into::into)
     }
 
     #[tauri::command]

@@ -1,0 +1,45 @@
+{
+  "base": "1b8817b",
+  "candidateSha256": "47182DBD0EAA16FCC555340E2AE9477638BA2FB8536DC4ECE1020399AE722B6B",
+  "candidatePath": ".cache/ui-native-build-batch1/debug/HonsenProcure.exe",
+  "browser": "BROWSER_PASS (affected supplier suite, 24/24)",
+  "unit": "UNIT_PASS",
+  "build": "BUILD_PASS",
+  "native": "BLOCKED_NATIVE_CONTROL",
+  "checks": [
+    "Affected supplier browser suite: 24 passed, 0 failed, 0 skipped, 0 flaky",
+    "Desktop strict typecheck, lint and 76 unit tests passed",
+    "Rust formatting and locked library tests: 197 passed, 7 ignored",
+    "Windows Tauri debug build without bundling passed"
+  ],
+  "sourceHashes": [
+    {
+      "path": "apps/desktop/src-tauri/src/catalog_maintenance_tests.rs",
+      "sha256": "40A1C1A903A0A81982573B092C658AAA4B993366BA216278336436B9E068A298"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/lib.rs",
+      "sha256": "977D1981B245FC27583F23A706D2009712F939EBEE72C2C5D67279FAEF56596B"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/main.rs",
+      "sha256": "64241B38AE7E419ECEE22E71C5AC2FF8AF6663E46A1A4B0DF496C60058160187"
+    },
+    {
+      "path": "apps/desktop/src/App.tsx",
+      "sha256": "155F760CC86C91F9342D472AB22D9CD1EBF4B687FCFFE20BF539EF6EC42893CA"
+    },
+    {
+      "path": "apps/desktop/src/lib/catalog-api.ts",
+      "sha256": "EC3E84351A61742A04907E6B3341728B44FC18604B0453834F66E242E57BD674"
+    },
+    {
+      "path": "apps/desktop/src/lib/supplier-prices-messages.ts",
+      "sha256": "E5BF35B577D4AFB0787D6AE2A66AE001CD34890BB0A1D88E8D07E35509E8382B"
+    },
+    {
+      "path": "apps/desktop/src/pages/SuppliersPricesPage.tsx",
+      "sha256": "9379D5B6DDA1B900F1A595010E1AB89775A7D1B19562C24FDF399EBED44E6542"
+    }
+  ]
+}

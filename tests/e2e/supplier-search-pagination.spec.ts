@@ -184,6 +184,8 @@ for (const [
                       ],
                       nextCursor: null,
                     }
+                  if (command === 'list_catalog_comparison_page')
+                    return { records: [], nextCursor: null }
                   if (
                     command === 'list_supplier_prices' ||
                     command === 'list_catalog_prices'
@@ -331,14 +333,12 @@ for (const [
       await picker.press('Enter')
       await expect(picker).toHaveAttribute('aria-expanded', 'false')
       await expect(
-        dialog
-          .locator('.ant-select')
-          .filter({
-            has: page.getByRole('combobox', {
-              name: supplierLabel,
-              exact: true,
-            }),
+        dialog.locator('.ant-select').filter({
+          has: page.getByRole('combobox', {
+            name: supplierLabel,
+            exact: true,
           }),
+        }),
       ).toContainText('SYNTH-105 · Synthetic supplier 105')
       const captured = await page.evaluate(
         () =>

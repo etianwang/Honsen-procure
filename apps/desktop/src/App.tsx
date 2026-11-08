@@ -433,6 +433,7 @@ function App() {
     <ConfigProvider
       locale={locale === 'zh' ? zhCN : locale === 'en' ? enUS : frFR}
       theme={honsenTheme}
+      wave={{ disabled: true }}
     >
       {isSyncConflictFixture ? (
         <SyncConflictFixturePage />
