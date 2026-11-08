@@ -19,7 +19,7 @@ Then compare the project with `docs/HONSEN_TOOLBOX_INTEGRATION.md` and report an
 ## Non-negotiable rules
 
 1. Tauri 2 + React + TypeScript + SQLite desktop; cloud TypeScript HTTPS API + PostgreSQL. Desktop must NEVER connect directly to PostgreSQL.
-2. Every launch requires an account password and local image/arithmetic CAPTCHA. Only a previously authenticated, enabled account cached locally may sign in offline for up to 24 hours. There is no public account/device registration or separate device-enrollment credential; synchronization is authorized by the account session. Enforce role authorization in trusted Tauri/Rust commands and on the server; never store plaintext passwords or expose privileged commands to the renderer.
+2. Every launch requires an account password and exactly one CAPTCHA: cloud-verified for online login, local image/arithmetic for explicitly selected offline login after network failure. Only a previously authenticated, enabled account cached locally may sign in offline for up to 24 hours. There is no public account/device registration or separate device-enrollment credential; synchronization is authorized by the account session. Enforce role authorization in trusted Tauri/Rust commands and on the server; never store plaintext passwords or expose privileged commands to the renderer.
 3. All normal operations work offline; write SQLite business mutation and outbox event in ONE transaction. Never claim synced before server acknowledgment.
 4. Use integer minor units for money (XOF integer francs; CNY/USD/EUR cents). Currency is mandatory. No floating-point money calculations.
 5. Historical order lines snapshot names, specifications, supplier details, unit prices, currency and tax; catalog changes never rewrite orders.

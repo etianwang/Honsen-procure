@@ -514,15 +514,12 @@ fn native_online_login(
     password: &str,
     now: SystemTime,
 ) -> Result<AuthenticatedSession, String> {
-    let local_captcha = auth.issue_captcha(now).map_err(|error| error.to_string())?;
     let cloud_captcha = tauri::async_runtime::block_on(auth.issue_cloud_captcha())
         .map_err(|error| error.to_string())?;
     let cloud_answer = arithmetic_answer(&cloud_captcha.question)?.to_string();
     tauri::async_runtime::block_on(auth.online_login(
         username,
         password,
-        local_captcha.id,
-        arithmetic_answer(&local_captcha.question)?,
         cloud_captcha.id,
         &cloud_answer,
         now,

@@ -2116,7 +2116,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                 question: '1 + 1 = ?',
               })
             if (command === 'issue_cloud_captcha')
-              return Promise.reject(new Error('offline'))
+              return Promise.reject({ code: 'network_unavailable' })
             if (command === 'offline_login')
               return Promise.resolve({
                 user_id: '00000000-0000-4000-8000-000000000007',
@@ -2270,10 +2270,10 @@ test('authenticated desktop switches between cached authorization scopes', async
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
   await page.getByLabel('账号').fill('fixture')
   await page.getByLabel('密码').fill('fixture-password')
-  await page.getByLabel(/本地验证码/).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
   await page
     .getByLabel('当前授权范围')
@@ -2588,11 +2588,10 @@ test('administrator queries and changes cloud-scoped bindings from desktop UI', 
     })
   })
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+
   await page.getByLabel('账号', { exact: true }).fill('admin')
   await page.getByLabel('密码', { exact: true }).fill('fixture-password')
   await page.locator('#captcha').fill('2')
-  await page.locator('#cloud-captcha').fill('2')
   await page.getByRole('button', { name: '在线登录', exact: true }).click()
   await page.getByRole('button', { name: '在线授权管理', exact: true }).click()
   await page.getByRole('button', { name: '管理已有账号', exact: true }).click()

@@ -34,7 +34,7 @@ test('purchaser issues HPA from approved history and can retry a rejected issue 
             if (command === 'issue_local_captcha')
               return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
             if (command === 'issue_cloud_captcha')
-              throw new Error('offline fixture')
+              throw { code: 'network_unavailable' }
             if (command === 'offline_login')
               return {
                 user_id: '00000000-0000-4000-8000-000000000007',
@@ -123,10 +123,10 @@ test('purchaser issues HPA from approved history and can retry a rejected issue 
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
   await page.getByLabel('账号').fill('fixture')
   await page.getByLabel('密码').fill('synthetic-password')
-  await page.getByLabel(/本地验证码/).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
   await page.getByRole('button', { name: '采购申请单' }).click()
   await page

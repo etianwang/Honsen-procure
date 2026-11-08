@@ -1,139 +1,197 @@
-import { expect, test } from '@playwright/test'
-
-test('a delayed cloud CAPTCHA never clears the new local answer', async ({
+import { expect, test, type Page } from '@playwright/test'
+async function fill(page: Page) {
+  await page.locator('#account').fill('synthetic-user')
+  await page.locator('#password').fill('synthetic-unsaved')
+  await page.locator('#captcha').fill('4')
+}
+// DOM contract regression only; real Windows authentication remains separately accepted.
+test('auto online probe presents exactly one cloud challenge and no local request', async ({
   page,
 }) => {
   await page.addInitScript(() => {
-    let resolveCloud: (value: object) => void
     Object.assign(window, {
+      __calls: [] as string[],
       __TAURI_INTERNALS__: {},
-      __releaseCloud: () =>
-        resolveCloud({ id: crypto.randomUUID(), question: '2 + 2 = ?' }),
       __TAURI__: {
         core: {
-          invoke: async (command: string) => {
-            if (command === 'issue_local_captcha')
-              return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
+          invoke: async (command: string, args?: object) => {
+            ;(window as unknown as { __calls: string[] }).__calls.push(command)
             if (command === 'issue_cloud_captcha')
-              return new Promise((resolve) => {
-                resolveCloud = resolve
-              })
-            throw new Error('Unexpected command')
+              return { id: crypto.randomUUID(), question: '2 + 2 = ?' }
+            if (command === 'online_login') {
+              Object.assign(window, { __request: args })
+              throw { code: 'invalid_credentials' }
+            }
+            throw Error('Unexpected')
           },
         },
       },
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
-  await expect(page.getByLabel('本地验证码：1 + 1 = ?')).toBeVisible()
-  await page.locator('#captcha').fill('2')
-  await page.evaluate(() =>
-    (window as unknown as { __releaseCloud: () => void }).__releaseCloud(),
-  )
   await expect(page.getByLabel('云端验证码：2 + 2 = ?')).toBeVisible()
-  await expect(page.locator('#captcha')).toHaveValue('2')
+  await expect(page.locator('#captcha')).toHaveCount(1)
+  await expect(page.getByText('本地验证码', { exact: false })).toHaveCount(0)
+  await fill(page)
+  await page.getByRole('button', { name: '在线登录', exact: true }).click()
+  await expect(
+    page.getByText('账号、密码或验证码无效。', { exact: true }),
+  ).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __calls: string[] }).__calls,
+    ),
+  ).not.toContain('issue_local_captcha')
+  expect(
+    await page.evaluate(() =>
+      Object.keys(
+        (window as unknown as { __request: { request: object } }).__request
+          .request,
+      ).sort(),
+    ),
+  ).toEqual(['cloudCaptchaAnswer', 'cloudCaptchaId', 'password', 'username'])
+  await expect(
+    page.getByRole('button', { name: '使用离线登录', exact: true }),
+  ).toHaveCount(0)
 })
-
-test('cloud CAPTCHA failure explains disabled login and offers a working retry', async ({
+test('network failure asks permission to use offline and retains fields on retry', async ({
   page,
 }) => {
-  const errors: string[] = []
-  page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript(() => {
-    let attempts = 0
+    let online = false
     Object.assign(window, {
+      __networkUp: () => {
+        online = true
+      },
       __TAURI_INTERNALS__: {},
       __TAURI__: {
         core: {
           invoke: async (command: string) => {
-            if (command === 'issue_local_captcha')
-              return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
             if (command === 'issue_cloud_captcha') {
-              if (++attempts === 1) throw new Error('synthetic network failure')
+              if (!online) throw { code: 'network_unavailable' }
               return { id: crypto.randomUUID(), question: '2 + 2 = ?' }
             }
-            throw new Error('Unexpected command')
+            if (command === 'issue_local_captcha')
+              return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
+            if (command === 'offline_login')
+              throw { code: 'offline_window_expired' }
+            throw Error('Unexpected')
           },
         },
       },
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
   await expect(
-    page.getByText('无法获取云端验证码，请检查网络后重试。'),
+    page.getByText('暂时无法连接服务器。是否使用离线登录？', { exact: true }),
   ).toBeVisible()
+  await expect(page.locator('#captcha')).toHaveCount(0)
+  await page.locator('#account').fill('synthetic-user')
+  await page.locator('#password').fill('synthetic-unsaved')
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
+  await expect(page.getByLabel('本地验证码：1 + 1 = ?')).toBeVisible()
+  await page.locator('#captcha').fill('2')
+  await page.getByRole('button', { name: '离线登录', exact: true }).click()
   await expect(
-    page.getByRole('button', { name: '在线登录', exact: true }),
-  ).toBeDisabled()
-  await page
-    .getByRole('button', { name: '重新获取云端验证码', exact: true })
-    .click()
+    page.getByText('离线验证已过期，请重新连接云端登录。', { exact: true }),
+  ).toBeVisible()
+  await page.evaluate(() =>
+    (window as unknown as { __networkUp: () => void }).__networkUp(),
+  )
+  await page.getByRole('button', { name: '重新尝试联网', exact: true }).click()
   await expect(page.getByLabel('云端验证码：2 + 2 = ?')).toBeVisible()
-  await expect(
-    page.getByText('无法获取云端验证码，请检查网络后重试。'),
-  ).not.toBeVisible()
-  await page.locator('#cloud-captcha').fill('4')
-  await expect(
-    page.getByRole('button', { name: '在线登录', exact: true }),
-  ).toBeEnabled()
-  expect(errors).toEqual([])
+  await expect(page.locator('#captcha')).toHaveValue('')
+  await expect(page.locator('#account')).toHaveValue('synthetic-user')
+  await expect(page.locator('#password')).toHaveValue('synthetic-unsaved')
 })
-
-for (const [code, expected] of [
-  ['invalid_credentials', '账号、密码或验证码无效。'],
-  [
-    'credential_storage_error',
-    '无法安全保存登录凭据，请检查 Windows 凭据存储。',
-  ],
-  ['sync_transport_error', '无法完成 HTTPS 登录，请检查网络或服务器响应。'],
+for (const code of [
+  'invalid_credentials',
+  'account_locked',
+  'upgrade_required',
+  'auth_retry_later',
+  'auth_protocol_error',
 ]) {
-  test(`login ${code} remains visible when refreshed cloud CAPTCHA immediately fails`, async ({
+  test(`${code} never offers offline even if subsequent probe fails`, async ({
     page,
   }) => {
-    await page.addInitScript((failureCode) => {
-      let attempts = 0
+    await page.addInitScript((failure) => {
+      let probes = 0
       Object.assign(window, {
         __TAURI_INTERNALS__: {},
         __TAURI__: {
           core: {
             invoke: async (command: string) => {
-              if (command === 'issue_local_captcha')
-                return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
               if (command === 'issue_cloud_captcha') {
-                if (++attempts > 1) throw { code: 'sync_transport_error' }
+                if (++probes > 1) throw { code: 'network_unavailable' }
                 return { id: crypto.randomUUID(), question: '2 + 2 = ?' }
               }
-              if (command === 'online_login') throw { code: failureCode }
-              throw new Error('Unexpected command')
+              if (command === 'online_login') throw { code: failure }
+              throw Error('Unexpected')
             },
           },
         },
       })
     }, code)
     await page.goto('/')
-    await page.getByRole('button', { name: '获取验证码', exact: true }).click()
-    await page.getByLabel('账号', { exact: true }).fill('synthetic')
-    await page.getByLabel('密码', { exact: true }).fill('synthetic-password')
-    await page.locator('#captcha').fill('2')
-    await page.locator('#cloud-captcha').fill('4')
+    await expect(page.locator('#captcha')).toBeVisible()
+    await fill(page)
     await page.getByRole('button', { name: '在线登录', exact: true }).click()
-    await expect(page.getByText(expected, { exact: true })).toBeVisible()
     await expect(
-      page.getByText('无法获取云端验证码，请检查网络后重试。'),
+      page.getByRole('alert').filter({ hasText: /无效|锁定|停用|频繁|异常/ }),
     ).toBeVisible()
     await expect(
-      page.getByRole('button', { name: '重新获取云端验证码', exact: true }),
-    ).toBeVisible()
+      page.getByRole('button', { name: '使用离线登录', exact: true }),
+    ).toHaveCount(0)
+    await page
+      .getByRole('button', { name: '重新尝试联网', exact: true })
+      .click()
     await expect(
-      page.getByRole('button', { name: '在线登录', exact: true }),
-    ).toBeDisabled()
-    await expect(page.getByLabel('账号', { exact: true })).toHaveValue(
-      'synthetic',
-    )
-    await expect(page.getByLabel('密码', { exact: true })).toHaveValue(
-      'synthetic-password',
-    )
+      page.getByRole('button', { name: '使用离线登录', exact: true }),
+    ).toHaveCount(0)
   })
 }
+test('delayed automatic challenge preserves credentials and locale without a second probe', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    let resolveCloud: (value: object) => void
+    Object.assign(window, {
+      __cloudCalls: 0,
+      __releaseCloud: () =>
+        resolveCloud({ id: crypto.randomUUID(), question: '2 + 2 = ?' }),
+      __TAURI_INTERNALS__: {},
+      __TAURI__: {
+        core: {
+          invoke: async (command: string) => {
+            if (command === 'issue_cloud_captcha') {
+              ;(window as unknown as { __cloudCalls: number }).__cloudCalls++
+              return new Promise((resolve) => {
+                resolveCloud = resolve
+              })
+            }
+            throw Error('Unexpected')
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/')
+  await expect(page.getByText('正在连接云端…', { exact: true })).toBeVisible()
+  await page.locator('#account').fill('synthetic-user')
+  await page.locator('#password').fill('synthetic-unsaved')
+  await page
+    .getByRole('button', { name: '界面语言 / UI language / Langue' })
+    .click()
+  await page.getByRole('menuitem', { name: 'Français', exact: true }).click()
+  await page.evaluate(() =>
+    (window as unknown as { __releaseCloud: () => void }).__releaseCloud(),
+  )
+  await expect(page.getByLabel('CAPTCHA serveur：2 + 2 = ?')).toBeVisible()
+  await expect(page.locator('#account')).toHaveValue('synthetic-user')
+  await expect(page.locator('#password')).toHaveValue('synthetic-unsaved')
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __cloudCalls: number }).__cloudCalls,
+    ),
+  ).toBe(1)
+})

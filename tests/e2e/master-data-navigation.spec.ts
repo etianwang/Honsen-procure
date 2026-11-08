@@ -7,6 +7,8 @@ async function openMaster(page: Page, role = 'administrator') {
       __TAURI__: {
         core: {
           invoke: async (command: string) => {
+            if (command === 'issue_cloud_captcha')
+              throw { code: 'network_unavailable' }
             if (command === 'issue_local_captcha')
               return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
             if (command === 'offline_login')
@@ -47,7 +49,7 @@ async function openMaster(page: Page, role = 'administrator') {
     })
   }, role)
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
   await page.getByLabel('账号', { exact: true }).fill('synthetic')
   await page.getByLabel('密码', { exact: true }).fill('synthetic-password')
   await page.locator('#captcha').fill('2')

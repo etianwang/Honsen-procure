@@ -29,7 +29,8 @@ test('home translates live data, errors and empty states in one chosen language'
           invoke: async (command: string) => {
             if (command === 'issue_local_captcha')
               return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
-            if (command === 'issue_cloud_captcha') throw Error('offline')
+            if (command === 'issue_cloud_captcha')
+              throw { code: 'network_unavailable' }
             if (command === 'offline_login')
               return {
                 user_id: '00000000-0000-4000-8000-000000000004',
@@ -68,10 +69,10 @@ test('home translates live data, errors and empty states in one chosen language'
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
   await page.getByLabel('账号').fill('test')
   await page.getByLabel('密码').fill('synthetic-password')
-  await page.getByLabel(/本地验证码/).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
   const language = page.getByLabel('界面语言 / UI language / Langue')
   await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()

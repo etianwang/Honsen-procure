@@ -1452,3 +1452,87 @@ cloud/deployment/migration/order/payment writes. Lastsource2410121; this
 selected PDF layout checkpoint is partial, expected clean tracked tree after
 commit/push. No further native actions until matching candidate is built and
 action-time approved.
+
+
+### 2026-11-08 approved online-first single-CAPTCHA login candidate0.1.23
+
+User explicitly approved the proposed login flow. Selected bounded T03/T13
+authentication UX change (D), continuing6fb2da1 on
+codex/t12-native-export-20261108; origin/main fetched, clean starting tree.
+Previous ordered Toolbox preflight reused for unchanged
+identity/installer/Runner contract; no contract edits. T12 left-word
+layout6fb2da1 remains included, not redeveloped. User-approved0.1.22 was not
+launched because subsequent layout/auth steering superseded that candidate.
+
+Production LoginPage automatically requests cloud CAPTCHA once (StrictMode
+deferred microtask avoids duplicate startup request). Shows one cloud
+challenge/input and online submit only. Only Rust network_unavailable offers
+explicit Use offline / Retry. Offline selection generates one local CAPTCHA,
+makes no cloud challenge request, and retains username/password only in
+component memory. Reconnect resets only challenge/answer; generation counters
+ignore obsolete completions. Successful login clears password state and hands
+session/mode to existing App. Known online auth, lockout, API retirement,
+rate-limit, storage/protocol errors never offer offline fallback in that mounted
+login; original error survives a failed challenge refresh. Explicit retry
+remains available. Chinese/English/French strings supplied; language switch
+preserves entered values.
+
+Trusted Rust online_login and its Tauri request require
+username/password/cloudCaptchaId/cloudCaptchaAnswer only. Removed local
+challenge generation/consume from online test helper/callers; server POST body
+remains exactly existing cloud contract, no server change. Auth GET/POST
+have8-second request timeout; normal sync remains20sec. New sanitized codes
+network_unavailable (timeout/recognized connectivity/DNS/5xx),
+auth_retry_later(429), auth_protocol_error(unknown/TLS/protocol/non2xx/decode).
+Existing401/423 denied and410upgrade behavior retained. No TLS validation
+disabled. DNS matching is narrow known resolver source text, unrecognized
+transport fails closed. Offline production
+verifier/CAPTCHA/lockout/enabled-cache/24-hour policy unchanged. Cloud
+unsuccessful HTTP/JSON cannot activate cached login. No plaintext
+passwords/tokens added to source, files or logs.
+
+User approval updates normative
+AGENTS/PRD/SPECS/SECURITY/DECISIONS/ARCHITECTURE/TEST-RULES to exactly one
+mode-appropriate CAPTCHA. This is approved policy change, not hiding or
+bypassing the old local guard. Existing public registration/device-credential
+prohibition, role/project boundaries, first-change handling, vault and cloud
+session rules retained. No migrations/schema/data/cloud deployment, admin reset,
+financial or historical order writes.
+
+Validation: desktopUnit71PASS; strictTypecheck/ViteBuild/Prettier code
+checksPASS; Lint exit0 retains prior warnings plus cancellation-counter-ref
+cleanup warning. Rust full192PASS/7originalignored, cargo fmtPASS, cargo
+clippy--all-targets exit0existingwarnings and main-bincheckPASS. First Rust
+run190PASS/1fixture expectationfailure/7ignored retained, unrelated offline
+InvalidCredentials assertion restored; final192PASS. Relevant DOM fixture suite
+initial92PASS/1stale410disabled-button expectation failure (newUI omits submit
+entirely); stronger no-submit/no-offline+retry assertion fixed, focused
+api-upgrade2PASS. Thus all93 distinct relevant test cases covered by
+initial+focused rerun; no claim single93-clean run. Additional10direct
+login/localization casesPASS including exactly one startup request, no local
+online fields, explicit offline, expired-cache error, retry/credential retention
+and known-denial fallback prevention. Ten existing business test files changed
+only login setup, core business assertions retained. DOM mocks are not native
+acceptance. Independent read-only Rust/UI security rechecks found no new
+confirmed defect within changed boundary.
+
+Native real online login,8-second elapsed network failure,
+offline-switch/reconnect and installed regression for0.1.23 NOT_RUN. No
+old0.1.21 or simulated result transferred as newnativePASS. Build
+candidate0.1.23 succeeded at
+H:/Honsen/Honsen-Procure/.cache/alpha-candidate-v1closure-018/release/bundle/nsis/Honsen-Procure-0.1.23-Setup.exe,
+SHA256facf906da4ec18fa98bee929599ba90ab6898fdffd8e19de50f207782ff6236c,
+unsigned/notinstalled. Fresh action-time install/run confirmation required by
+computer-use confirmations.md, and user authentication handoff remains
+mandatory; no plugin changes/bypass.
+
+BLOCKER for selected flow final acceptance: installed native
+login/mode/error/reconnect proof after approved install. BLOCKER original T12
+gates remain
+nativeleft-layout/cleanheader/SPO/OPA/multipage/parentREQ/paymentmodules/projectlanguage,
+not closed by login work. DEFERRED paymentscopepaused. WARNING existing Rust/TS
+lint warnings, whole-file historical Markdown formatting debt and original
+installer warnings retained. Changed source/docs formatted where edited and
+references/status/diff checked without unrelated mass-formatting. Containing
+source checkpoint to be committed/pushed, tracked tree expected clean; ignored
+build/evidence logs retained. No PR merge/release/cloud action.

@@ -5,14 +5,14 @@
 - Formal Desktop/Toolbox identity is approved: Toolbox `appId` is `honsen.procure`; Tauri identifier is the distinct field `africa.honsen.procure`; display name and product directory are both `Honsen Procure`; main executable is `HonsenProcure.exe`; default release installation scope is machine. The normal mutable-data directory is `%LOCALAPPDATA%\\Honsen Program\\honsen.procure`. This approval does not authorize an installer, Runner, manifest, registry entry, catalog change or release.
 - Desktop: Tauri 2 + React + TypeScript + SQLite.
 - Remote: PostgreSQL behind HTTPS API; bidirectional incremental sync.
-- Every launch uses account/password plus local CAPTCHA; session locks at 30 minutes. A cached enabled user can sign in offline for 24 hours.
+- Every launch uses account/password plus one cloud CAPTCHA online or one local CAPTCHA offline; session locks at 30 minutes. A cached enabled user can sign in offline for 24 hours.
 - Roles: engineer, purchaser, administrator and viewer/auditor. Users can have multiple roles; administrator creates/stops/unlocks accounts.
 - Internal parent requisitions split to supplier-specific child purchase orders. Purchasers/administrators approve/reject and can view all projects.
 - Parent totals use an elected primary currency and order-locked user-entered exchange rate; children have one supplier/currency.
 - RFQs, price history, permanent audit/comments/attachments, partial receiving, Excel export, PDFs and backups are production scope.
 - WebSocket is used for change notifications that trigger cursor Pull; HTTPS Push/Pull remains authoritative.
 - Super administrator is a narrow governance role. Self-approval defaults off and is configurable only by super administrator with an immutable audit trail; retain at least two enabled super administrators.
-- Super administrator uses standard password/local-CAPTCHA login. Mobile-number last four digits are display-only recognition information, not an authentication factor.
+- Super administrator uses standard password/mode-appropriate single-CAPTCHA login. Mobile-number last four digits are display-only recognition information, not an authentication factor.
 - TOTP two-factor authentication is optional. Once a user enrolls, it is mandatory for every login and is supported during the permitted offline-login window.
 - All UI screens support Chinese, French and English. Users select one active UI language; order PDFs remain Chinese/French or Chinese/English according to the selected document language pair.
 - The approved UI direction is the Chinese desktop workbench visual draft: restrained green HONSEN accent, light/dark adaptive surfaces, compact left navigation, persistent top status bar, data-dense tables, rounded small controls and explicit text-plus-color statuses. This is the baseline for subsequent page/component implementation.
@@ -60,3 +60,13 @@ User's final decision supersedes earlier test username测试1: new login usernam
 ## 2026-11-08 approved lightweight transfer details
 
 User explicitly rejects a V1 group bank-account management subsystem. Preserve existing payment/reversal/attachment flow; default cash. Reuse bank_transfer for optional per-payment transfer details: recipient personal/company and name, channel SWIFT/IBAN/WesternUnion/UnionPay/other, applicable bank/account/IBAN/BIC/MTCN/recipientidentifier/transactionreference. Channel-dependent validation must not require all fields; payment confirmation remains explicit and audit-bound. Keep immutable append-only corrections, multiple mixed payments per HPA, owner-mode payment prohibition, multilingual UI and purpose-aware masking. No changes to supplier/material/order core identity. This approved scope is not implementation or acceptance evidence. Strict old server payload validation requires an additive compatible server candidate and isolated tests before rollout; no remote deployment authorized. T12 remains required and its current failures are not waived.
+
+
+2026-11-08 USER APPROVED: replace dual CAPTCHA login with online-first single
+cloud CAPTCHA; after bounded8sec HTTPS network failure explicitly offer local
+offline sign-in or reconnect. Offline still requires local CAPTCHA and an
+enabled previously verified cache within24h. Known
+authentication/lockout/retirement/rate-limit/TLS/protocol errors do not offer
+offline downgrade. Persist no plaintext passwords; server login CAPTCHA remains
+unchanged. This narrow approved decision supersedes prior
+local-CAPTCHA-every-launch wording only for online login.

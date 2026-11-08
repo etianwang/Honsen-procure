@@ -57,9 +57,7 @@ test('compact login language menu preserves entered credentials and captcha', as
   await page
     .getByLabel('密码', { exact: true })
     .fill('synthetic-unsaved-password')
-  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
   await page.locator('#captcha').fill('7')
-  await page.locator('#cloud-captcha').fill('7')
   const picker = page.getByRole('button', {
     name: '界面语言 / UI language / Langue',
   })
@@ -72,7 +70,6 @@ test('compact login language menu preserves entered credentials and captcha', as
     'synthetic-unsaved-password',
   )
   await expect(page.locator('#captcha')).toHaveValue('7')
-  await expect(page.locator('#cloud-captcha')).toHaveValue('7')
   expect(
     await picker.evaluate((element) => element.getBoundingClientRect().width),
   ).toBeLessThan(180)

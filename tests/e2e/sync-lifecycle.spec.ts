@@ -31,7 +31,7 @@ test('switching accounts never renders the previous account authorization scope'
                 question: '1 + 1 = ?',
               })
             if (command === 'issue_cloud_captcha')
-              return Promise.reject({ code: 'sync_transport_error' })
+              return Promise.reject({ code: 'network_unavailable' })
             if (command === 'offline_login') {
               activeAccount =
                 args?.request?.username === 'account-b' ? accountB : accountA
@@ -67,10 +67,12 @@ test('switching accounts never renders the previous account authorization scope'
 
   await page.goto('/')
   for (const username of ['account-a', 'account-b']) {
-    await page.getByRole('button', { name: '获取验证码' }).click()
+    await page
+      .getByRole('button', { name: '使用离线登录', exact: true })
+      .click()
     await page.getByLabel('账号').fill(username)
     await page.getByLabel('密码').fill('fixture-password')
-    await page.getByLabel(/本地验证码/u).fill('2')
+    await page.locator('#captcha').fill('2')
     await page.getByRole('button', { name: '离线登录' }).click()
     if (username === 'account-a') {
       await expect(page.getByLabel('当前授权范围')).toContainText(
@@ -166,11 +168,10 @@ test('authenticated online login pushes before pull and displays pending until a
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+
   await page.getByLabel('账号').fill('test-en')
   await page.getByLabel('密码').fill('test-password')
-  await page.getByLabel(/本地验证码/).fill('2')
-  await page.getByLabel(/云端验证码/).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '在线登录' }).click()
   await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
     '待同步 1',
@@ -216,7 +217,7 @@ test('offline login never pushes and lock stops later reconnect work', async ({
                 question: '1 + 1 = ?',
               })
             if (command === 'issue_cloud_captcha')
-              return Promise.reject({ code: 'sync_transport_error' })
+              return Promise.reject({ code: 'network_unavailable' })
             if (command === 'offline_login')
               return Promise.resolve({
                 user_id: crypto.randomUUID(),
@@ -243,10 +244,10 @@ test('offline login never pushes and lock stops later reconnect work', async ({
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
   await page.getByLabel('账号').fill('test-en')
   await page.getByLabel('密码').fill('test-password')
-  await page.getByLabel(/本地验证码/).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
   await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
     '离线本地数据',
@@ -303,11 +304,10 @@ test('failed CAPTCHA login never starts a sync cycle', async ({ page }) => {
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+
   await page.getByLabel('账号').fill('test-en')
   await page.getByLabel('密码').fill('bad-password')
-  await page.getByLabel(/本地验证码/).fill('2')
-  await page.getByLabel(/云端验证码/).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '在线登录' }).click()
   await expect(
     page.getByText('账号、密码或验证码无效。', { exact: true }),
@@ -371,11 +371,10 @@ test('cross-account Pull boundary is actionable and does not loop on reconnect',
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+
   await page.getByLabel('账号').fill('test-en')
   await page.getByLabel('密码').fill('test-password')
-  await page.getByLabel(/本地验证码/).fill('2')
-  await page.getByLabel(/云端验证码/).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '在线登录' }).click()
   await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
     '多账号拉取已暂停',

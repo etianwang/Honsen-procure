@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('retired API displays upgrade guidance while local login remains available', async ({
+test('retired API displays upgrade guidance without offering offline bypass', async ({
   page,
 }) => {
   const errors: string[] = []
@@ -28,12 +28,19 @@ test('retired API displays upgrade guidance while local login remains available'
   })
   test.setTimeout(90_000)
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: '获取验证码' }).click()
+
   await expect(page.getByRole('alert')).toContainText(
     '服务版本已停用，请升级客户端；本地数据已保留',
   )
-  await expect(page.getByRole('button', { name: '离线登录' })).toBeEnabled()
-  await expect(page.getByRole('button', { name: '在线登录' })).toBeDisabled()
+  await expect(
+    page.getByRole('button', { name: '使用离线登录', exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: '在线登录', exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: '重新尝试联网', exact: true }),
+  ).toBeVisible()
   await page
     .getByRole('button', { name: '界面语言 / UI language / Langue' })
     .click()
@@ -93,11 +100,10 @@ test('initial password advisory allows the authenticated workspace', async ({
     })
   })
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: '获取验证码' }).click()
+
   await page.getByLabel('账号').fill('admin')
   await page.getByLabel('密码').fill('runtime-fixture')
-  await page.getByLabel(/本地验证码/u).fill('2')
-  await page.getByLabel(/云端验证码/u).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '在线登录' }).click()
   await expect(
     page.getByText('初始密码仍在使用，建议修改密码；可继续使用系统'),

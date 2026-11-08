@@ -11,6 +11,8 @@ for (const previouslyLoaded of [false, true]) {
         __TAURI__: {
           core: {
             invoke: async (command: string) => {
+              if (command === 'issue_cloud_captcha')
+                throw { code: 'network_unavailable' }
               if (command === 'issue_local_captcha')
                 return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
               if (command === 'offline_login')
@@ -23,7 +25,7 @@ for (const previouslyLoaded of [false, true]) {
               if (command === 'list_sync_conflicts') return []
               if (command === 'list_payment_sync_conflicts') {
                 const phase = (window as unknown as { __phase: string }).__phase
-                if (phase === 'failed') throw { code: 'sync_transport_error' }
+                if (phase === 'failed') throw { code: 'network_unavailable' }
                 if (phase === 'loaded')
                   return [
                     {
@@ -46,7 +48,9 @@ for (const previouslyLoaded of [false, true]) {
       })
     }, previouslyLoaded)
     await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+    await page
+      .getByRole('button', { name: '使用离线登录', exact: true })
+      .click()
     await page.getByLabel('账号', { exact: true }).fill('synthetic-admin')
     await page.getByLabel('密码', { exact: true }).fill('synthetic-password')
     await page.locator('#captcha').fill('2')
@@ -113,7 +117,7 @@ test('administrator reconciles immutable payments through the production conflic
                 question: '1 + 1 = ?',
               })
             if (command === 'issue_cloud_captcha')
-              return Promise.reject({ code: 'sync_transport_error' })
+              return Promise.reject({ code: 'network_unavailable' })
             if (command === 'offline_login')
               return Promise.resolve({
                 user_id: '00000000-0000-4000-8000-000000000733',
@@ -178,10 +182,10 @@ test('administrator reconciles immutable payments through the production conflic
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
   await page.getByLabel('账号').fill('synthetic-admin')
   await page.getByLabel('密码').fill('fixture-password')
-  await page.getByLabel(/本地验证码/u).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
   await page.getByRole('button', { name: '同步冲突', exact: true }).click()
   await page.getByText('比较本地与云端内容').click()

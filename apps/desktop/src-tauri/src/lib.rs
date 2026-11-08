@@ -1329,6 +1329,59 @@ pub enum ReferenceMasterDataInput {
     },
 }
 
+fn auth_dns_failure(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    !["tls", "certificate", "ssl"]
+        .iter()
+        .any(|s| message.contains(s))
+        && (message.contains("dns error")
+            || message.contains("failed to lookup address information"))
+}
+fn auth_transport_error(error: reqwest::Error) -> AuthError {
+    if error.is_timeout() {
+        return AuthError::NetworkUnavailable;
+    }
+    // Fail closed on certificate/TLS/protocol errors. Only recognizable I/O
+    // connectivity failures may offer the existing offline authentication flow.
+    let mut source = std::error::Error::source(&error);
+    while let Some(cause) = source {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            if matches!(
+                io.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::NetworkUnreachable
+                    | std::io::ErrorKind::HostUnreachable
+            ) {
+                return AuthError::NetworkUnavailable;
+            }
+        }
+        if auth_dns_failure(&cause.to_string()) {
+            return AuthError::NetworkUnavailable;
+        }
+        source = cause.source();
+    }
+    AuthError::AuthProtocolError
+}
+fn require_auth_status(status: reqwest::StatusCode) -> Result<(), AuthError> {
+    require_active_api(status)?;
+    if status.is_server_error() {
+        return Err(AuthError::NetworkUnavailable);
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(AuthError::AuthRetryLater);
+    }
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::LOCKED {
+        return Err(AuthError::InvalidCredentials);
+    }
+    if !status.is_success() {
+        return Err(AuthError::AuthProtocolError);
+    }
+    Ok(())
+}
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AuthError {
     #[error("ambiguous cached account name")]
@@ -1359,6 +1412,12 @@ pub enum AuthError {
     MissingDocumentTranslation,
     #[error("business code cannot change")]
     ImmutableBusinessCode,
+    #[error("authentication network unavailable")]
+    NetworkUnavailable,
+    #[error("authentication retry required")]
+    AuthRetryLater,
+    #[error("authentication protocol failure")]
+    AuthProtocolError,
     #[error("synchronization transport error")]
     SyncTransport,
     #[error("this API version is retired; upgrade the client; local changes are retained")]
@@ -2085,31 +2144,30 @@ impl LocalAuthService {
         let response = self
             .https_client()?
             .get(endpoint)
+            .timeout(Duration::from_secs(8))
             .send()
             .await
-            .map_err(|_| AuthError::SyncTransport)?;
-        require_active_api(response.status())?;
-        if !response.status().is_success() {
-            return Err(AuthError::SyncTransport);
-        }
-        response.json().await.map_err(|_| AuthError::SyncTransport)
+            .map_err(auth_transport_error)?;
+        require_auth_status(response.status())?;
+        response
+            .json()
+            .await
+            .map_err(|_| AuthError::AuthProtocolError)
     }
 
     pub async fn online_login(
         &self,
         username: &str,
         password: &str,
-        local_captcha_id: Uuid,
-        local_captcha_answer: u8,
         cloud_captcha_id: Uuid,
         cloud_captcha_answer: &str,
         now: SystemTime,
     ) -> Result<AuthenticatedSession, AuthError> {
         self.lock()?;
-        self.consume_captcha(local_captcha_id, local_captcha_answer, now)?;
         if !valid_required_text(username, 128)
             || password.is_empty()
             || password.len() > 1024
+            || cloud_captcha_answer.is_empty()
             || cloud_captcha_answer.len() > 4
             || !cloud_captcha_answer
                 .bytes()
@@ -2129,22 +2187,19 @@ impl LocalAuthService {
             .map_err(|_| AuthError::Database)?;
         let endpoint = cloud_auth_endpoint("login")?;
         let response = self.https_client()?
-            .post(endpoint).header("x-installation-id", installation_id)
+            .post(endpoint).timeout(Duration::from_secs(8)).header("x-installation-id", installation_id)
             .json(&serde_json::json!({"username": username, "password": password, "captchaId": cloud_captcha_id, "captchaAnswer": cloud_captcha_answer}))
-            .send().await.map_err(|_| AuthError::SyncTransport)?;
+            .send().await.map_err(auth_transport_error)?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED
             || response.status() == reqwest::StatusCode::LOCKED
         {
             return Err(AuthError::InvalidCredentials);
         }
-        require_active_api(response.status())?;
-        if !response.status().is_success() {
-            return Err(AuthError::SyncTransport);
-        }
+        require_auth_status(response.status())?;
         let login = response
             .json::<CloudLoginResponse>()
             .await
-            .map_err(|_| AuthError::SyncTransport)?;
+            .map_err(|_| AuthError::AuthProtocolError)?;
         self.accept_cloud_login(username, password, login, now)
     }
 
@@ -7544,8 +7599,6 @@ pub mod commands {
     pub struct OnlineLoginRequest {
         pub username: String,
         pub password: String,
-        pub local_captcha_id: Uuid,
-        pub local_captcha_answer: u8,
         pub cloud_captcha_id: Uuid,
         pub cloud_captcha_answer: String,
     }
@@ -7572,6 +7625,9 @@ pub mod commands {
                 AuthError::ImmutableBusinessCode => "immutable_business_code",
                 AuthError::PasswordHashing | AuthError::SecureStorage => "credential_storage_error",
                 AuthError::SyncTransport => "sync_transport_error",
+                AuthError::NetworkUnavailable => "network_unavailable",
+                AuthError::AuthRetryLater => "auth_retry_later",
+                AuthError::AuthProtocolError => "auth_protocol_error",
                 AuthError::UpgradeRequired => "upgrade_required",
                 AuthError::SyncAccountBoundary => "sync_account_boundary",
             };
@@ -7954,8 +8010,6 @@ pub mod commands {
         auth.online_login(
             &request.username,
             &request.password,
-            request.local_captcha_id,
-            request.local_captcha_answer,
             request.cloud_captcha_id,
             &request.cloud_captcha_answer,
             SystemTime::now(),
@@ -12565,12 +12619,10 @@ mod tests {
                 "engineer",
                 "wrong-password",
                 Uuid::new_v4(),
-                0,
-                Uuid::new_v4(),
-                "0",
+                "",
                 now
             )),
-            Err(AuthError::InvalidCredentials)
+            Err(AuthError::InvalidInput)
         );
         assert_eq!(
             service.require_online_sync_session(now),
@@ -12846,15 +12898,20 @@ mod tests {
                     "reject-a",
                     "wrong",
                     Uuid::new_v4(),
-                    0,
-                    Uuid::new_v4(),
-                    "0",
+                    "",
                     now,
                 ))
             } else {
                 service.offline_login("reject-a", "wrong", Uuid::new_v4(), 0, now)
             };
-            assert_eq!(result, Err(AuthError::InvalidCredentials));
+            assert_eq!(
+                result,
+                Err(if online {
+                    AuthError::InvalidInput
+                } else {
+                    AuthError::InvalidCredentials
+                })
+            );
             assert_eq!(
                 service.list_sync_conflicts(now),
                 Err(AuthError::NoActiveSession)
@@ -22504,4 +22561,72 @@ mod tests {
     }
 
     include!("reference_sync_tests.rs");
+}
+
+#[cfg(test)]
+mod online_first_tests {
+    use super::*;
+    #[test]
+    fn only_network_server_failure_allows_offline_offer() {
+        for status in [500, 502, 503, 504] {
+            assert_eq!(
+                require_auth_status(reqwest::StatusCode::from_u16(status).unwrap()),
+                Err(AuthError::NetworkUnavailable)
+            );
+        }
+        for status in [400, 403, 404, 422] {
+            assert_eq!(
+                require_auth_status(reqwest::StatusCode::from_u16(status).unwrap()),
+                Err(AuthError::AuthProtocolError)
+            );
+        }
+        assert_eq!(
+            require_auth_status(reqwest::StatusCode::TOO_MANY_REQUESTS),
+            Err(AuthError::AuthRetryLater)
+        );
+        assert_eq!(
+            require_auth_status(reqwest::StatusCode::UNAUTHORIZED),
+            Err(AuthError::InvalidCredentials)
+        );
+        assert_eq!(
+            require_auth_status(reqwest::StatusCode::GONE),
+            Err(AuthError::UpgradeRequired)
+        );
+        assert_eq!(require_auth_status(reqwest::StatusCode::OK), Ok(()));
+    }
+    #[test]
+    fn dns_is_network_but_unrecognized_tls_is_not() {
+        assert!(auth_dns_failure("dns error: host not found"));
+        assert!(auth_dns_failure(
+            "failed to lookup address information: no such host"
+        ));
+        assert!(!auth_dns_failure("TLS certificate validation failed"));
+        assert!(!auth_dns_failure(
+            "TLS: dns error certificate name mismatch"
+        ));
+        assert!(!auth_dns_failure("connection protocol error"));
+    }
+    #[test]
+    fn online_request_contract_has_only_cloud_captcha_and_rejects_empty_answer_before_network() {
+        let id = Uuid::new_v4();
+        let request: commands::OnlineLoginRequest=serde_json::from_value(serde_json::json!({"username":"test", "password":"test-only", "cloudCaptchaId":id, "cloudCaptchaAnswer":""})).unwrap();
+        let auth = LocalAuthService::open_in_memory().unwrap();
+        let result = tauri::async_runtime::block_on(auth.online_login(
+            &request.username,
+            &request.password,
+            request.cloud_captcha_id,
+            &request.cloud_captcha_answer,
+            SystemTime::now(),
+        ));
+        assert_eq!(result, Err(AuthError::InvalidInput));
+        assert_eq!(
+            auth.connection
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM local_accounts", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
 }

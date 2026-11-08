@@ -258,3 +258,11 @@ Runner, raw target main EXE hash differs from installed and no equality PASS
 claimed.0.1.22 T12-only output-decoration candidate built, not installed. No
 identity/installer/Runner contract edits; original integration gates remain
 open. Details in V1-REMOTE-ALPHA-ACCEPTANCE.md.
+
+
+2026-11-08 candidate0.1.23 includes approved online-first auth and left-amount
+PDF adjustments. Existing release builder, immutable appId/path/main
+EXE/Runner/manifest/registry/uninstall contract unchanged. Unsigned installer
+SHA256facf906da4ec18fa98bee929599ba90ab6898fdffd8e19de50f207782ff6236c;
+notinstalled. No new Toolbox acceptance or Release publish. Existing integration
+gaps retained.

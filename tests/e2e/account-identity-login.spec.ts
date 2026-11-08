@@ -1,17 +1,17 @@
 import { expect, test } from '@playwright/test'
 
 for (const [locale, hint, captchaButton, loginButton] of [
-  ['zh', '已有非英文用户名仍可使用。', '获取验证码', '离线登录'],
+  ['zh', '已有非英文用户名仍可使用。', '使用离线登录', '离线登录'],
   [
     'en',
     'Existing non-English usernames remain supported.',
-    'Get CAPTCHA',
+    'Use offline sign-in',
     'Sign in offline',
   ],
   [
     'fr',
     'Les noms utilisateurs non anglais existants restent acceptés.',
-    'Obtenir un CAPTCHA',
+    'Utiliser la connexion hors ligne',
     'Connexion hors ligne',
   ],
 ]) {
@@ -31,10 +31,9 @@ for (const [locale, hint, captchaButton, loginButton] of [
               command: string,
               args?: { request?: { username: string; password: string } },
             ) => {
-              if (
-                command === 'issue_local_captcha' ||
-                command === 'issue_cloud_captcha'
-              )
+              if (command === 'issue_cloud_captcha')
+                throw { code: 'network_unavailable' }
+              if (command === 'issue_local_captcha')
                 return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
               if (command === 'offline_login') {
                 Object.assign(window, {

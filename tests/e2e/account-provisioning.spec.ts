@@ -62,7 +62,7 @@ test('legacy cached name collision is explicit and does not sign in another acco
             if (command === 'issue_local_captcha')
               return { id: crypto.randomUUID(), question: '1 + 1 = ?' }
             if (command === 'issue_cloud_captcha')
-              throw { code: 'sync_transport_error' }
+              throw { code: 'network_unavailable' }
             if (command === 'offline_login')
               throw { code: 'account_name_collision' }
             throw new Error('Unexpected command')
@@ -72,7 +72,7 @@ test('legacy cached name collision is explicit and does not sign in another acco
     }),
   )
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
   await page.getByLabel('账号', { exact: true }).fill('LegacyName')
   await page.getByLabel('密码', { exact: true }).fill('synthetic-temporary')
   await page.locator('#captcha').fill('2')
@@ -119,11 +119,10 @@ test('first-login password change blocks business effects and returns to login',
     })
   })
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+
   await page.getByLabel('账号', { exact: true }).fill('synthetic')
   await page.getByLabel('密码', { exact: true }).fill('synthetic-temporary')
   await page.locator('#captcha').fill('2')
-  await page.locator('#cloud-captcha').fill('2')
   await page.getByRole('button', { name: '在线登录', exact: true }).click()
   await expect(
     page.getByRole('heading', { name: '首次登录必须修改密码' }),
@@ -134,7 +133,7 @@ test('first-login password change blocks business effects and returns to login',
       () =>
         (window as Window & { __accountCommands: string[] }).__accountCommands,
     ),
-  ).toEqual(['issue_local_captcha', 'issue_cloud_captcha', 'online_login'])
+  ).toEqual(['issue_cloud_captcha', 'online_login'])
   await page.getByLabel('当前密码').fill('synthetic-temporary')
   await page.getByLabel('新密码（至少12位）').fill('synthetic-replacement')
   await page.getByRole('button', { name: '修改并重新登录' }).click()
@@ -153,7 +152,7 @@ async function openAccounts(
   displayName?: string,
 ) {
   await page.addInitScript(
-    ({ empty, existing, recommended, superAdmin, displayName }) => {
+    ({ empty, existing, recommended, superAdmin, displayName, online }) => {
       const id = (n: number) =>
         `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
       const records = [
@@ -193,6 +192,8 @@ async function openAccounts(
         __TAURI__: {
           core: {
             invoke: async (command: string, args?: { input: unknown }) => {
+              if (command === 'issue_cloud_captcha' && !online)
+                throw { code: 'network_unavailable' }
               if (
                 command === 'issue_local_captcha' ||
                 command === 'issue_cloud_captcha'
@@ -250,14 +251,17 @@ async function openAccounts(
         },
       })
     },
-    { empty, existing, recommended, superAdmin, displayName },
+    { empty, existing, recommended, superAdmin, displayName, online },
   )
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: '获取验证码', exact: true }).click()
+
+  if (!online)
+    await page
+      .getByRole('button', { name: '使用离线登录', exact: true })
+      .click()
   await page.getByLabel('账号', { exact: true }).fill('synthetic-admin')
   await page.getByLabel('密码', { exact: true }).fill('synthetic-temporary')
   await page.locator('#captcha').fill('2')
-  if (online) await page.locator('#cloud-captcha').fill('2')
   await page
     .getByRole('button', {
       name: online ? '在线登录' : '离线登录',

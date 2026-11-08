@@ -89,7 +89,7 @@ New login usernames contain ASCII letters/digits only, are globally unique under
 - Backend: modal password unlock, auto-lock after configurable inactivity, manual lock button.
 - Search works offline using SQLite indexes/FTS as appropriate; diacritic-insensitive French search where feasible.
 - Clear empty, loading, offline and error states; never show stale cloud status as live.
-- Login requires password and local image/arithmetic CAPTCHA. Lock after 30 minutes idle and save drafts. Enforce user/project scope independently of what the UI hides.
+- Login requires password and one mode-appropriate CAPTCHA: cloud online, local image/arithmetic offline. Start with an 8-second cloud request; only network unavailability offers explicit offline selection and reconnect. Lock after 30 minutes idle and save drafts. Enforce user/project scope independently of what the UI hides.
 - UI strings use complete `zh-CN`, `fr-FR` and `en-US` message catalogs; no visible application label may be hardcoded in a component. The user switches one active UI locale from the top bar/profile settings. Missing translated material/document values follow the print-language validation rules rather than silently changing the UI locale.
 
 ## 4. Printing

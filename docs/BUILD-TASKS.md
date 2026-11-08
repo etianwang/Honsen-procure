@@ -618,3 +618,13 @@ Poppler visual review PASS within generator scope. New native layout
 NOT_RUN;0.1.22 not installed because user changed layout before launch. Login
 online-first/single-CAPTCHA proposal requested, no authentication implementation
 or policy change approved/performed. Parent T12/Alpha stays OPEN.
+
+
+2026-11-08 approved T03/T13 online-first single-CAPTCHA slice implemented:
+cloud-only online, explicit local offline only on recognized network
+unavailability, retry/8sec auth timeouts, old offline cache safeguards
+unchanged. Rust192PASS/7originalignored; desktopUnit71PASS; initialDOM92/93 plus
+corrected410target2PASS, Typecheck/Lint/BuildPASS.0.1.23 candidate built, native
+acceptance NOT_RUN pending action-time install approval. Original T12/T14/Alpha
+gates remain OPEN; no cloud/migration/data mutation. Details in
+V1-REMOTE-ALPHA-ACCEPTANCE.md.

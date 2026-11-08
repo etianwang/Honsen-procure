@@ -1,5 +1,24 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '正在连接云端…': ['Connecting to the server…', 'Connexion au serveur…'],
+  '暂时无法连接服务器。是否使用离线登录？': [
+    'Cannot reach the server. Sign in offline?',
+    'Serveur inaccessible. Se connecter hors ligne ?',
+  ],
+  使用离线登录: ['Use offline sign-in', 'Utiliser la connexion hors ligne'],
+  重新尝试联网: ['Retry connection', 'Réessayer la connexion'],
+  '离线验证已过期，请重新连接云端登录。': [
+    'Offline verification expired. Connect to sign in online.',
+    'Vérification hors ligne expirée. Reconnectez-vous au serveur.',
+  ],
+  '请求过于频繁，请稍后重新尝试。': [
+    'Too many requests. Try again later.',
+    'Trop de demandes. Réessayez plus tard.',
+  ],
+  '服务器响应异常，请重新连接；暂不提供离线切换。': [
+    'Unexpected server response. Retry the connection; offline switching is unavailable.',
+    'Réponse serveur inattendue. Réessayez ; le passage hors ligne est indisponible.',
+  ],
   '请使用用户名登录，英文字母 A–Z 不区分大小写；姓名不是登录账号。已有非英文用户名仍可使用。':
     [
       'Sign in with the username; A–Z letter case is ignored. Display names are not login names. Existing non-English usernames remain supported.',

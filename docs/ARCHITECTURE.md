@@ -9,7 +9,7 @@
 
 ## Trust boundaries
 
-React UI is untrusted. Rust/Tauri commands and the server enforce user/role/project authorization for every mutation. Persist only Argon2id password hashes and local offline-account cache data; secrets use OS secure credential storage where practical. The local CAPTCHA is an anti-automation control, not an authorization control. There is no separate device-enrollment credential: the server authorizes the signed-in account session and tracks a non-secret installation UUID for cursors, one-active-session enforcement and formal-number namespaces. It is not an access credential. TLS is mandatory for sync and failed authentication is rate-limited.
+React UI is untrusted. Rust/Tauri commands and the server enforce user/role/project authorization for every mutation. Persist only Argon2id password hashes and local offline-account cache data; secrets use OS secure credential storage where practical. CAPTCHA is mode-specific: cloud-verified for online sign-in, locally verified only for explicitly selected offline sign-in after network unavailability. Rust sends only the cloud challenge online; it preserves the existing local challenge, enabled-cache and 24-hour checks offline. CAPTCHA is an anti-automation control, not an authorization control. There is no separate device-enrollment credential: the server authorizes the signed-in account session and tracks a non-secret installation UUID for cursors, one-active-session enforcement and formal-number namespaces. It is not an access credential. TLS is mandatory for sync and failed authentication is rate-limited.
 
 ## Local write and outbox
 
