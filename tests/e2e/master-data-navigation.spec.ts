@@ -34,6 +34,28 @@ async function openMaster(page: Page, role = 'administrator') {
                 },
               ]
             if (
+              command === 'list_reference_master_data' &&
+              role === 'purchaser'
+            )
+              return [
+                {
+                  kind: 'material_category',
+                  id: 'synthetic-category',
+                  business_code: 'TEST-CAT',
+                  name: 'Synthetic category',
+                  is_active: true,
+                  version: 1,
+                },
+                {
+                  kind: 'unit',
+                  id: 'synthetic-unit',
+                  business_code: 'TEST-EA',
+                  name: 'Synthetic unit',
+                  is_active: true,
+                  version: 1,
+                },
+              ]
+            if (
               [
                 'list_reference_master_data',
                 'list_tax_templates',
@@ -208,4 +230,31 @@ test('engineer can browse all categories but cannot mutate them', async ({
       .all())
       await expect(button).toBeDisabled()
   }
+})
+
+test('purchaser sees category administrator requirement while ordinary units remain editable', async ({
+  page,
+}) => {
+  await openMaster(page, 'purchaser')
+  const nav = page.getByRole('navigation', { name: '基础资料分类' })
+  await nav.getByRole('button', { name: '材料分类', exact: true }).click()
+  const panel = page.locator('#master-data-reference-panel')
+  await expect(
+    panel.getByRole('button', { name: '新增材料分类', exact: true }),
+  ).toBeVisible()
+  await expect(
+    panel.getByRole('button', { name: '新增材料分类', exact: true }),
+  ).toBeDisabled()
+  await expect(
+    panel.getByText('材料分类维护需要管理员或超级管理员权限', { exact: true }),
+  ).toBeVisible()
+  await expect(panel.getByLabel('编辑材料分类名称-TEST-CAT')).toBeDisabled()
+  await expect(panel.getByRole('button', { name: /停\s*用/ })).toBeDisabled()
+  await nav.getByRole('button', { name: '单位', exact: true }).click()
+  const units = page.locator('#master-data-reference-panel')
+  await expect(
+    units.getByRole('button', { name: '新增单位', exact: true }),
+  ).toBeEnabled()
+  await expect(units.getByLabel('编辑单位名称-TEST-EA')).toBeEnabled()
+  await expect(units.getByRole('button', { name: /停\s*用/ })).toBeEnabled()
 })

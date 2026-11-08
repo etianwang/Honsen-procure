@@ -1,5 +1,34 @@
 import { useUiLocale } from './ui-locale'
 const messages = {
+  材料分类维护需要管理员或超级管理员权限: [
+    'Material category maintenance requires an administrator or super administrator',
+    'La maintenance des catégories nécessite un administrateur ou super administrateur',
+  ],
+  请输入0至100000之间的整数基点: [
+    'Enter integer basis points from 0 to 100000',
+    'Saisissez un entier de 0 à 100000 points de base',
+  ],
+  请输入最多8位小数的非负汇率: [
+    'Enter a non-negative rate with up to 8 decimal places',
+    'Saisissez un taux positif ou nul avec 8 décimales maximum',
+  ],
+  '此编码已存在，请使用其他编码': [
+    'This code already exists. Choose another code.',
+    'Ce code existe déjà. Choisissez un autre code.',
+  ],
+  填写所有必填字段后即可保存: [
+    'Complete all required fields to save',
+    'Renseignez tous les champs obligatoires pour enregistrer',
+  ],
+  取消: ['Cancel', 'Annuler'],
+  当前账号无维护权限: [
+    'This account cannot maintain master data',
+    'Ce compte ne peut pas modifier les données',
+  ],
+  业务编码创建后不可修改: [
+    'The business code cannot be changed after creation',
+    'Le code métier est immuable après création',
+  ],
   基础资料分类: [
     'Master data categories',
     'Catégories des données de référence',

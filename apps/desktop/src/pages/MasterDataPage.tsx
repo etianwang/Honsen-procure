@@ -130,6 +130,9 @@ export function MasterDataPage({ role }: { role: UserRole }) {
         >
           <MasterDataManager
             api={tauriMasterDataApi}
+            canMaintainCategories={
+              role === 'administrator' || role === 'super_administrator'
+            }
             activeCategory={referenceCategory ? category : 'countries'}
             records={referenceData}
             canEdit={canEdit}

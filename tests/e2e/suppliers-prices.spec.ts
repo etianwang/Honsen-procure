@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 async function mount(page: Page, role = 'purchaser', locale = 'zh') {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('button', { name: '打开界面预览' })).toBeVisible()
   await page.evaluate(
     async ({ role, locale }) => {
       const load = (p: string) => import(/* @vite-ignore */ p)
@@ -227,9 +228,19 @@ test('quote form submits XAF integer minor units without selecting a supplier im
     '',
   )
   await dialog.getByRole('combobox', { name: /供应商$/ }).click()
-  await page.getByText('SYNTH · Synthetic supplier', { exact: true }).click()
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+    .filter({ hasText: /^SYNTH · Synthetic supplier$/ })
+    .click()
+  await expect(
+    dialog.getByTitle('SYNTH · Synthetic supplier', { exact: true }),
+  ).toBeVisible()
   await dialog.getByRole('combobox', { name: /货币$/ }).click()
-  await page.getByText('XAF', { exact: true }).last().click()
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+    .filter({ hasText: /^XAF$/ })
+    .click()
+  await expect(dialog.getByTitle('XAF', { exact: true })).toBeVisible()
   await dialog.getByLabel(/单价（最小货币单位）/).fill('9007199254740993')
   await dialog.getByRole('button', { name: /保存/ }).click()
   await expect(

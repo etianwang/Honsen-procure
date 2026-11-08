@@ -249,6 +249,7 @@ fn main() {
             commands::save_material_image,
             commands::get_material_square_image,
             commands::search_catalog,
+            commands::search_catalog_page,
             commands::list_catalog_prices,
             commands::list_suppliers,
             commands::list_supplier_prices,

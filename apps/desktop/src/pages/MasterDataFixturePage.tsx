@@ -104,7 +104,12 @@ export function MasterDataFixturePage() {
 
   return (
     <main className="fixture-page">
-      <MasterDataManager api={api} records={referenceData} canEdit />
+      <MasterDataManager
+        api={api}
+        records={referenceData}
+        canEdit
+        canMaintainCategories
+      />
       <TaxTemplateEditor
         api={api}
         templates={[]}

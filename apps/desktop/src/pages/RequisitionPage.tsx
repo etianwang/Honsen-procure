@@ -12,8 +12,12 @@ import {
 import { Alert, Button, Card, Input, Select, Space } from 'antd'
 import { Minus, Plus, Send } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { MaterialPicker } from '../components/MaterialPicker'
 import { OrderWorkflowPanel } from '../components/OrderWorkflowPanel'
-import { RequisitionHistoryPanel } from '../components/RequisitionHistoryPanel'
+import {
+  RequisitionHistoryPanel,
+  type HistoryEntryRequest,
+} from '../components/RequisitionHistoryPanel'
 import type {
   CatalogApi,
   CatalogMaterialView,
@@ -41,9 +45,13 @@ export type RequisitionContext = Omit<
 
 type RequisitionPageProps = {
   api: RequisitionApi
-  catalogApi: Pick<CatalogApi, 'searchCatalog' | 'listCatalogPrices'>
+  catalogApi: Pick<
+    CatalogApi,
+    'searchCatalog' | 'searchCatalogPage' | 'listCatalogPrices'
+  >
   context: RequisitionContext
   workflowApi?: WorkflowApi
+  historyEntry?: HistoryEntryRequest
   canApprove?: boolean
 }
 
@@ -341,6 +349,7 @@ export function RequisitionPage({
   catalogApi,
   context,
   workflowApi,
+  historyEntry,
   canApprove = false,
 }: RequisitionPageProps) {
   const { locale } = useUiLocale()
@@ -369,13 +378,6 @@ export function RequisitionPage({
   const [pricingIncomplete, setPricingIncomplete] = useState(false)
   const [status, setStatus] = useState<'draft' | 'pending'>('draft')
   const [message, setMessage] = useState<RequisitionMessage | null>(null)
-
-  useEffect(() => {
-    catalogApi
-      .searchCatalog('', context.projectId)
-      .then(setMaterials)
-      .catch(() => setMaterials([]))
-  }, [catalogApi, context.projectId])
 
   const draft = useMemo(
     () =>
@@ -734,28 +736,32 @@ export function RequisitionPage({
               <div className="requisition-fields">
                 <label>
                   {t('材料')}
-                  <Select
-                    aria-label={t('材料')}
+                  <MaterialPicker
+                    api={catalogApi}
+                    projectId={context.projectId}
                     disabled={status === 'pending'}
                     value={line.materialId ?? undefined}
-                    placeholder={t('选择材料')}
-                    options={materials.map((material) => ({
-                      value: material.id,
-                      label: `${material.nameZh} · ${material.model}`,
-                    }))}
-                    onChange={(materialId) => {
-                      const material = materials.find(
-                        ({ id }) => id === materialId,
-                      )
-                      if (material) {
-                        updateLine(index, materialLine(line, material, mode))
-                        updateOwnerPricing(line.id, {
-                          materialPriceId: null,
-                          converted: null,
-                          final: null,
-                        })
-                        void loadQuotes(material.id, null)
-                      }
+                    valueLabel={
+                      line.materialId
+                        ? ((locale === 'fr'
+                            ? line.materialSnapshot.nameFr
+                            : null) || line.materialSnapshot.nameZh) +
+                          ' · ' +
+                          line.materialSnapshot.model
+                        : undefined
+                    }
+                    onChange={(material) => {
+                      setMaterials((current) => [
+                        ...current.filter((item) => item.id !== material.id),
+                        material,
+                      ])
+                      updateLine(index, materialLine(line, material, mode))
+                      updateOwnerPricing(line.id, {
+                        materialPriceId: null,
+                        converted: null,
+                        final: null,
+                      })
+                      void loadQuotes(material.id, null)
                     }}
                   />
                 </label>
@@ -1023,6 +1029,8 @@ export function RequisitionPage({
         ) : null}
       </Card>
       <RequisitionHistoryPanel
+        key={historyEntry?.requestId ?? 'default'}
+        entry={historyEntry}
         api={api}
         refreshKey={status}
         projectId={context.projectId}

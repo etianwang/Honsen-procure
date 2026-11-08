@@ -6,7 +6,7 @@ import {
   type SupplierNotice,
 } from '../lib/supplier-workflow-messages'
 import { Alert, Button, Card, Input, Select } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RfqApi, RfqView } from '../lib/rfq-api'
 import type { AllocationSupplier } from './SupplierAllocationPanel'
 
@@ -31,6 +31,19 @@ export function RfqPanel({
   const [message, setMessage] = useState<SupplierNotice | null>(null)
   const [rfqs, setRfqs] = useState<RfqView[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
+  const creating = useRef(false)
+  const [createBusy, setCreateBusy] = useState(false)
+  const noticeType =
+    message &&
+    ['created', '询价单已发送。', '询价单已关闭。'].includes(message.key)
+      ? 'success'
+      : message &&
+          [
+            '询价单已创建，但列表刷新失败，请重试。',
+            '询价单状态已保存，但列表刷新失败，请重试。',
+          ].includes(message.key)
+        ? 'warning'
+        : 'error'
   const refresh = useCallback(
     () => api.listRfqs(sourceOrderId).then(setRfqs),
     [api, sourceOrderId],
@@ -41,10 +54,14 @@ export function RfqPanel({
   }, [refresh])
 
   async function create() {
+    if (creating.current) return
     if (!supplierId || !displayNo.trim()) {
       setMessage({ key: '请选择供应商并填写询价单编号。' })
       return
     }
+    creating.current = true
+    setCreateBusy(true)
+    setMessage(null)
     try {
       const rfq = await api.createRfq({
         id: crypto.randomUUID(),
@@ -62,6 +79,9 @@ export function RfqPanel({
       )
     } catch {
       setMessage({ key: '创建失败：请确认内部请购单已确认且该币种有材料。' })
+    } finally {
+      creating.current = false
+      setCreateBusy(false)
     }
   }
 
@@ -97,7 +117,8 @@ export function RfqPanel({
       {message ? (
         <Alert
           title={supplierText(locale, message.key, message.values)}
-          type="info"
+          type={noticeType}
+          role={noticeType === 'error' ? 'alert' : 'status'}
           showIcon
         />
       ) : null}
@@ -107,6 +128,7 @@ export function RfqPanel({
             {t('供应商')}
             <Select
               aria-label={t('RFQ 供应商')}
+              disabled={createBusy}
               value={supplierId || undefined}
               placeholder={t('选择供应商')}
               options={suppliers.map((supplier) => ({
@@ -120,6 +142,7 @@ export function RfqPanel({
             {t('询价币种')}
             <Select
               aria-label={t('RFQ 币种')}
+              disabled={createBusy}
               value={currency}
               options={currencySchema.options.map((value) => ({ value }))}
               onChange={(value) => setCurrency(value)}
@@ -129,6 +152,7 @@ export function RfqPanel({
             {t('询价单编号')}
             <Input
               aria-label={t('询价单编号')}
+              disabled={createBusy}
               value={displayNo}
               onChange={(event) => setDisplayNo(event.target.value)}
             />
@@ -136,7 +160,12 @@ export function RfqPanel({
         </div>
       ) : null}
       {canCreate ? (
-        <Button type="primary" onClick={() => void create()}>
+        <Button
+          type="primary"
+          loading={createBusy}
+          disabled={createBusy}
+          onClick={() => void create()}
+        >
           {t('创建询价单')}
         </Button>
       ) : null}

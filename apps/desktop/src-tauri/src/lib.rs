@@ -1209,6 +1209,21 @@ pub struct CatalogPriceView {
     pub source_note: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CatalogSearchCursor {
+    pub name_zh: String,
+    pub model: String,
+    pub id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogSearchPage {
+    pub records: Vec<CatalogMaterialView>,
+    pub next_cursor: Option<CatalogSearchCursor>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogMaterialView {
@@ -5835,6 +5850,44 @@ impl LocalAuthService {
         include_inactive: bool,
         now: SystemTime,
     ) -> Result<Vec<CatalogMaterialView>, AuthError> {
+        self.search_catalog_window(query, project_id, include_inactive, None, false, now)
+    }
+
+    pub fn search_catalog_page(
+        &self,
+        query: &str,
+        project_id: Option<Uuid>,
+        after: Option<CatalogSearchCursor>,
+        now: SystemTime,
+    ) -> Result<CatalogSearchPage, AuthError> {
+        let mut records =
+            self.search_catalog_window(query, project_id, false, after.as_ref(), true, now)?;
+        let has_more = records.len() > 50;
+        records.truncate(50);
+        let next_cursor = if has_more {
+            records.last().map(|record| CatalogSearchCursor {
+                name_zh: record.name_zh.clone(),
+                model: record.model.clone(),
+                id: record.id,
+            })
+        } else {
+            None
+        };
+        Ok(CatalogSearchPage {
+            records,
+            next_cursor,
+        })
+    }
+
+    fn search_catalog_window(
+        &self,
+        query: &str,
+        project_id: Option<Uuid>,
+        include_inactive: bool,
+        after: Option<&CatalogSearchCursor>,
+        paginated: bool,
+        now: SystemTime,
+    ) -> Result<Vec<CatalogMaterialView>, AuthError> {
         self.require_catalog_read(now)?;
         if include_inactive {
             self.require_material_mutation(now)?;
@@ -5843,38 +5896,80 @@ impl LocalAuthService {
         if query.len() > 255 {
             return Err(AuthError::InvalidInput);
         }
+        if after.is_some_and(|cursor| cursor.name_zh.len() > 1024 || cursor.model.len() > 1024) {
+            return Err(AuthError::InvalidInput);
+        }
+        let tokens: Vec<String> = query
+            .split_whitespace()
+            .map(|token| {
+                format!(
+                    "%{}%",
+                    token
+                        .replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                )
+            })
+            .collect();
+        if paginated && tokens.len() > 8 {
+            return Err(AuthError::InvalidInput);
+        }
+        let token_json = serde_json::to_string(&tokens).map_err(|_| AuthError::InvalidInput)?;
         let pattern = format!("%{}%", query.trim());
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let mut materials = connection
             .prepare(
-                "SELECT id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, version, is_active, category_id
+                "SELECT id, sku, name_zh, name_fr, aliases_json, brand, model, specification, unit, notes, version, is_active, category_id, name_en
                  FROM local_materials
                  WHERE (is_active = 1 OR ?2) AND deleted_at IS NULL
-                   AND (?1 = '%%' OR name_zh LIKE ?1 COLLATE NOCASE OR COALESCE(name_fr, '') LIKE ?1 COLLATE NOCASE OR COALESCE(name_en, '') LIKE ?1 COLLATE NOCASE
+                   AND (?3 OR ?1 = '%%' OR name_zh LIKE ?1 COLLATE NOCASE OR COALESCE(name_fr, '') LIKE ?1 COLLATE NOCASE OR COALESCE(name_en, '') LIKE ?1 COLLATE NOCASE
                      OR aliases_json LIKE ?1 COLLATE NOCASE OR model LIKE ?1 COLLATE NOCASE
                      OR specification LIKE ?1 COLLATE NOCASE OR COALESCE(sku, '') LIKE ?1 COLLATE NOCASE)
-                 ORDER BY name_zh, model
-                 LIMIT 100",
+                   AND (NOT ?3 OR NOT EXISTS (
+                     SELECT 1 FROM json_each(?4) token WHERE NOT (
+                       name_zh LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                       OR COALESCE(name_fr, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                       OR COALESCE(name_en, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                       OR aliases_json LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                       OR model LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                       OR specification LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                       OR COALESCE(sku, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE)))
+                   AND (?5 IS NULL OR (name_zh, model, id) > (?5, ?6, ?7))
+                 ORDER BY name_zh, model, id
+                 LIMIT ?8",
             )
             .map_err(|_| AuthError::Database)?;
         let rows = materials
-            .query_map(params![pattern, include_inactive], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, i64>(10)?,
-                    row.get::<_, bool>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                ))
-            })
+            .query_map(
+                params![
+                    pattern,
+                    include_inactive,
+                    paginated,
+                    token_json,
+                    after.map(|c| c.name_zh.as_str()),
+                    after.map(|c| c.model.as_str()),
+                    after.map(|c| c.id.to_string()),
+                    if paginated { 51 } else { 100 }
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, i64>(10)?,
+                        row.get::<_, bool>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                    ))
+                },
+            )
             .map_err(|_| AuthError::Database)?;
         let material_rows = rows
             .collect::<Result<Vec<_>, _>>()
@@ -5921,6 +6016,7 @@ impl LocalAuthService {
                     version,
                     is_active,
                     category_id,
+                    name_en,
                 )| {
                     let material_id = Uuid::parse_str(&id).map_err(|_| AuthError::Database)?;
                     let aliases =
@@ -5977,13 +6073,6 @@ impl LocalAuthService {
                             })
                         })
                         .collect::<Result<Vec<_>, AuthError>>()?;
-                    let name_en = connection
-                        .query_row(
-                            "SELECT name_en FROM local_materials WHERE id=?1",
-                            [&id],
-                            |row| row.get::<_, Option<String>>(0),
-                        )
-                        .map_err(|_| AuthError::Database)?;
                     Ok(CatalogMaterialView {
                         id: material_id,
                         is_active,
@@ -8321,6 +8410,17 @@ pub mod commands {
             SystemTime::now(),
         )
         .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn search_catalog_page(
+        auth: State<'_, LocalAuthService>,
+        query: String,
+        project_id: Option<Uuid>,
+        after: Option<super::CatalogSearchCursor>,
+    ) -> Result<super::CatalogSearchPage, CommandError> {
+        auth.search_catalog_page(&query, project_id, after, SystemTime::now())
+            .map_err(Into::into)
     }
 
     #[tauri::command]
@@ -21963,6 +22063,20 @@ mod tests {
             .unwrap();
         assert_eq!(ci_catalog[0].prices.len(), 1);
         assert_eq!(ci_catalog[0].prices[0].supplier_id, ci_supplier);
+        let paged_catalog = service
+            .search_catalog_page("global", Some(ci_project), None, now)
+            .unwrap();
+        assert_eq!(paged_catalog.records, ci_catalog);
+        assert!(paged_catalog.next_cursor.is_none());
+        assert!(
+            service
+                .search_catalog_page("global", Some(cm_project), None, now)
+                .unwrap()
+                .records[0]
+                .prices
+                .is_empty()
+        );
+
         for i in 0..30 {
             let supplier = Uuid::new_v4();
             let price = Uuid::new_v4();

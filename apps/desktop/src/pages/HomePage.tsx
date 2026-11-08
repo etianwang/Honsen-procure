@@ -11,6 +11,7 @@ type HomePageProps = {
   projectId?: string
   onOpenMaterials: () => void
   onNewRequisition: () => void
+  onOpenHistory: (workflowStatus?: string, orderId?: string) => void
   onOpenExecution: () => void
 }
 
@@ -30,6 +31,7 @@ export function HomePage({
   projectId,
   onOpenMaterials,
   onNewRequisition,
+  onOpenHistory,
   onOpenExecution,
 }: HomePageProps) {
   const { locale } = useUiLocale()
@@ -43,6 +45,19 @@ export function HomePage({
   const requestKey = `${projectId ?? ''}:${refresh}`
   const data = result?.key === requestKey ? result.data : null
   const failed = result?.key === requestKey && result.failed
+  const numberLabel = (displayNo: string, state: string) =>
+    !displayNo ||
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(
+      displayNo,
+    )
+      ? state === 'draft'
+        ? t('草稿')
+        : locale === 'zh'
+          ? '未正式编号'
+          : locale === 'fr'
+            ? 'Sans numéro officiel'
+            : 'Not formally numbered'
+      : displayNo
   useEffect(() => {
     let active = true
     void loadWorkbench(api, projectId)
@@ -106,6 +121,28 @@ export function HomePage({
                         : 'fr-FR',
                   )}
                 </div>
+                <div>
+                  {(label === '待审批'
+                    ? ['pending_confirmation']
+                    : label === '采购进行中'
+                      ? ['approved', 'confirmed', 'executing']
+                      : ['formally_issued', 'receiving']
+                  ).map((state) => (
+                    <Button
+                      key={state}
+                      type="link"
+                      onClick={() => onOpenHistory(state)}
+                    >
+                      {state === 'confirmed'
+                        ? locale === 'zh'
+                          ? '已批准（旧状态）'
+                          : locale === 'fr'
+                            ? 'Approuvée (ancien statut)'
+                            : 'Approved (legacy status)'
+                        : t(statusLabels[state] ?? '未知状态')}
+                    </Button>
+                  ))}
+                </div>
               </article>
             ))}
           </section>
@@ -113,7 +150,7 @@ export function HomePage({
             className="card"
             title={t('待处理订单')}
             extra={
-              <Button type="link" onClick={onNewRequisition}>
+              <Button type="link" onClick={() => onOpenHistory()}>
                 {t('打开请购历史')}
               </Button>
             }
@@ -131,7 +168,14 @@ export function HomePage({
                 <tbody>
                   {data.orders.map((order) => (
                     <tr key={order.id}>
-                      <td>{order.displayNo}</td>
+                      <td>
+                        <Button
+                          type="link"
+                          onClick={() => onOpenHistory(undefined, order.id)}
+                        >
+                          {numberLabel(order.displayNo, order.workflowStatus)}
+                        </Button>
+                      </td>
                       <td>{order.projectName}</td>
                       <td>{order.site}</td>
                       <td>

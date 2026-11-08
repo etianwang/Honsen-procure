@@ -35,6 +35,8 @@ export function ProcurementExpenditurePanel({
   const [paymentMethod, setPaymentMethod] =
     useState<RecordProcurementExpenditureInput['paymentMethod']>('cash')
   const [message, setMessage] = useState<string | null>(null)
+  const [messageType, setMessageType] = useState<'success' | 'error'>('success')
+  const [reversalError, setReversalError] = useState(false)
   const [busy, setBusy] = useState(false)
   const [reversalId, setReversalId] = useState<string | null>(null)
   const [reason, setReason] = useState('')
@@ -53,17 +55,20 @@ export function ProcurementExpenditurePanel({
         voucherReference: null,
         notes: null,
       })
+      setMessageType('success')
       setMessage(t.saved)
       setAmountMinor('')
       onChanged?.()
     } catch {
+      setMessageType('error')
       setMessage(t.error)
     } finally {
       setBusy(false)
     }
   }
   async function reverse() {
-    if (!reversalId || !reason.trim()) return
+    if (!reversalId || !reason.trim() || busy) return
+    setReversalError(false)
     setBusy(true)
     try {
       await api.reverse({
@@ -73,9 +78,12 @@ export function ProcurementExpenditurePanel({
       })
       setReversalId(null)
       setReason('')
+      setMessageType('success')
       setMessage(t.reversed)
       onChanged?.()
     } catch {
+      setReversalError(true)
+      setMessageType('error')
       setMessage(t.error)
     } finally {
       setBusy(false)
@@ -109,6 +117,7 @@ export function ProcurementExpenditurePanel({
                 <Button
                   disabled={busy}
                   onClick={() => {
+                    setReversalError(false)
                     setReversalId(record.id)
                     setReason('')
                   }}
@@ -155,22 +164,28 @@ export function ProcurementExpenditurePanel({
             onChange={(e) => setPaymentDate(e.target.value)}
           />
         </label>
-        <Select
-          aria-label={t.type}
-          value={paymentType}
-          onChange={setPaymentType}
-          options={(['advance', 'progress', 'final', 'other'] as const).map(
-            (value) => ({ value, label: t[value] }),
-          )}
-        />
-        <Select
-          aria-label={t.method}
-          value={paymentMethod}
-          onChange={setPaymentMethod}
-          options={(
-            ['cash', 'bank_transfer', 'mobile_payment', 'other'] as const
-          ).map((value) => ({ value, label: t[value] }))}
-        />
+        <label>
+          {t.type}
+          <Select
+            aria-label={t.type}
+            value={paymentType}
+            onChange={setPaymentType}
+            options={(['advance', 'progress', 'final', 'other'] as const).map(
+              (value) => ({ value, label: t[value] }),
+            )}
+          />
+        </label>
+        <label>
+          {t.method}
+          <Select
+            aria-label={t.method}
+            value={paymentMethod}
+            onChange={setPaymentMethod}
+            options={(
+              ['cash', 'bank_transfer', 'mobile_payment', 'other'] as const
+            ).map((value) => ({ value, label: t[value] }))}
+          />
+        </label>
         <Button
           type="primary"
           loading={busy}
@@ -181,7 +196,12 @@ export function ProcurementExpenditurePanel({
         </Button>
       </Space>
       {message ? (
-        <Alert role="status" showIcon type="info" title={message} />
+        <Alert
+          role={messageType === 'error' ? 'alert' : 'status'}
+          showIcon
+          type={messageType}
+          title={message}
+        />
       ) : null}
       <Modal
         title={t.reverse}
@@ -195,6 +215,9 @@ export function ProcurementExpenditurePanel({
         confirmLoading={busy}
         okButtonProps={{ disabled: !reason.trim() }}
       >
+        {reversalError && (
+          <Alert role="alert" type="error" showIcon title={t.error} />
+        )}
         <label>
           {t.reason}
           <Input.TextArea

@@ -1,5 +1,16 @@
 import { useMasterText } from '../lib/master-data-messages'
-import { Alert, Button, Card, Input, Select, Space, Table, Tabs } from 'antd'
+import {
+  Alert,
+  Button,
+  Card,
+  Input,
+  Select,
+  Space,
+  Table,
+  Tabs,
+  Modal,
+} from 'antd'
+import { FormField } from './FormField'
 import { useMemo, useState, type ReactNode } from 'react'
 import type {
   MasterDataApi,
@@ -10,6 +21,7 @@ type Props = {
   api: MasterDataApi
   records: ReferenceMasterDataView[]
   canEdit: boolean
+  canMaintainCategories: boolean
   activeCategory?: string
 }
 
@@ -19,6 +31,7 @@ export function MasterDataManager({
   api,
   records,
   canEdit,
+  canMaintainCategories,
   activeCategory,
 }: Props) {
   const t = useMasterText()
@@ -97,15 +110,17 @@ export function MasterDataManager({
           : current.map((item) => (item.id === record.id ? record : item))
       })
       setMessage('基础资料已保存；等待同步确认')
+      return true
     } catch {
       setMessage('保存被拒绝，请检查权限或关联资料')
+      return false
     }
   }
 
-  function status(record: ReferenceMasterDataView) {
+  function status(record: ReferenceMasterDataView, allowed = canEdit) {
     return (
       <Button
-        disabled={!canEdit}
+        disabled={!allowed}
         size="small"
         onClick={() =>
           void save({
@@ -212,9 +227,9 @@ export function MasterDataManager({
             children: (
               <MaterialCategoryEditor
                 categories={categories}
-                canEdit={canEdit}
+                canEdit={canMaintainCategories}
                 save={save}
-                status={status}
+                status={(record) => status(record, canMaintainCategories)}
               />
             ),
           },
@@ -232,43 +247,114 @@ function MaterialCategoryEditor({
 }: {
   categories: Extract<ReferenceMasterDataView, { kind: 'material_category' }>[]
   canEdit: boolean
-  save: (item: ReferenceMasterDataView) => Promise<void>
+  save: (item: ReferenceMasterDataView) => Promise<boolean>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [failed, setFailed] = useState(false)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
+  const duplicateCode =
+    !!code.trim() &&
+    categories.some((record) => record.business_code === code.trim())
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
-      <Space wrap>
-        <Input
-          aria-label={t('材料分类代码')}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('材料分类名称')}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          disabled={!canEdit}
-        />
-        <Button
-          disabled={!canEdit || !code.trim() || !name.trim()}
-          onClick={() =>
-            void save({
-              kind: 'material_category',
-              id: newId(),
-              business_code: code.trim(),
-              name: name.trim(),
-              is_active: true,
-              version: 1,
-            })
-          }
-        >
-          {t('新增材料分类')}
-        </Button>
-      </Space>
+      <Button
+        type="primary"
+        disabled={!canEdit}
+        onClick={() => {
+          setFailed(false)
+          setOpen(true)
+        }}
+      >
+        {t('新增材料分类')}
+      </Button>
+      {!canEdit && <p>{t('材料分类维护需要管理员或超级管理员权限')}</p>}
+      <Modal
+        title={t('新增材料分类')}
+        open={open}
+        footer={null}
+        closable={!pending}
+        keyboard={!pending}
+        mask={{ closable: false }}
+        onCancel={() => {
+          if (!pending) setOpen(false)
+        }}
+      >
+        <div className="honsen-master-form">
+          <p>{t('填写所有必填字段后即可保存')}</p>
+          <FormField
+            id="category-create-1"
+            label={t('材料分类代码')}
+            required
+            hint={t('业务编码创建后不可修改')}
+            error={
+              duplicateCode ? t('此编码已存在，请使用其他编码') : undefined
+            }
+          >
+            <Input
+              autoFocus
+              disabled={pending}
+              aria-label={t('材料分类代码')}
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+            />
+          </FormField>
+          <FormField id="category-create-2" label={t('材料分类名称')} required>
+            <Input
+              disabled={pending}
+              aria-label={t('材料分类名称')}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </FormField>
+          <Button
+            type="primary"
+            loading={pending}
+            disabled={!canEdit || duplicateCode || !code.trim() || !name.trim()}
+            onClick={() =>
+              void (async () => {
+                if (pending || duplicateCode) return
+                setPending(true)
+                setFailed(false)
+                try {
+                  const saved = await save({
+                    kind: 'material_category',
+                    id: newId(),
+                    business_code: code.trim(),
+                    name: name.trim(),
+                    is_active: true,
+                    version: 1,
+                  })
+                  if (saved) {
+                    setOpen(false)
+                    setCode('')
+                    setName('')
+                  } else setFailed(true)
+                } catch {
+                  setFailed(true)
+                } finally {
+                  setPending(false)
+                }
+              })()
+            }
+          >
+            {t('新增材料分类')}
+          </Button>
+          {failed && (
+            <Alert
+              type="error"
+              showIcon
+              title={t('保存被拒绝，请检查权限或关联资料')}
+            />
+          )}
+          <Button disabled={pending} onClick={() => setOpen(false)}>
+            {t('取消')}
+          </Button>
+        </div>
+      </Modal>
       <Table
         rowKey="id"
         pagination={false}
@@ -278,19 +364,24 @@ function MaterialCategoryEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <Input
-                aria-label={`${t('编辑材料分类名称')}-${row.business_code}`}
-                defaultValue={row.name}
-                disabled={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== row.name)
-                    void save({
-                      ...row,
-                      name: event.target.value,
-                      version: row.version + 1,
-                    })
-                }}
-              />
+              <FormField
+                id={`category-edit-${row.id}`}
+                label={t('材料分类名称')}
+              >
+                <Input
+                  aria-label={`${t('编辑材料分类名称')}-${row.business_code}`}
+                  defaultValue={row.name}
+                  disabled={!canEdit}
+                  onBlur={(event) => {
+                    if (event.target.value !== row.name)
+                      void save({
+                        ...row,
+                        name: event.target.value,
+                        version: row.version + 1,
+                      })
+                  }}
+                />
+              </FormField>
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },
@@ -308,43 +399,114 @@ function DepartmentEditor({
 }: {
   departments: Extract<ReferenceMasterDataView, { kind: 'department' }>[]
   canEdit: boolean
-  save: (item: ReferenceMasterDataView) => Promise<void>
+  save: (item: ReferenceMasterDataView) => Promise<boolean>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [failed, setFailed] = useState(false)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
+  const duplicateCode =
+    !!code.trim() &&
+    departments.some((record) => record.business_code === code.trim())
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
-      <Space wrap>
-        <Input
-          aria-label={t('部门代码')}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('部门名称')}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          disabled={!canEdit}
-        />
-        <Button
-          disabled={!canEdit || !code.trim() || !name.trim()}
-          onClick={() =>
-            void save({
-              kind: 'department',
-              id: newId(),
-              business_code: code.trim(),
-              name: name.trim(),
-              is_active: true,
-              version: 1,
-            })
-          }
-        >
-          {t('新增部门')}
-        </Button>
-      </Space>
+      <Button
+        type="primary"
+        disabled={!canEdit}
+        onClick={() => {
+          setFailed(false)
+          setOpen(true)
+        }}
+      >
+        {t('新增部门')}
+      </Button>
+      {!canEdit && <p>{t('当前账号无维护权限')}</p>}
+      <Modal
+        title={t('新增部门')}
+        open={open}
+        footer={null}
+        closable={!pending}
+        keyboard={!pending}
+        mask={{ closable: false }}
+        onCancel={() => {
+          if (!pending) setOpen(false)
+        }}
+      >
+        <div className="honsen-master-form">
+          <p>{t('填写所有必填字段后即可保存')}</p>
+          <FormField
+            id="department-create-1"
+            label={t('部门代码')}
+            required
+            hint={t('业务编码创建后不可修改')}
+            error={
+              duplicateCode ? t('此编码已存在，请使用其他编码') : undefined
+            }
+          >
+            <Input
+              autoFocus
+              disabled={pending}
+              aria-label={t('部门代码')}
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+            />
+          </FormField>
+          <FormField id="department-create-2" label={t('部门名称')} required>
+            <Input
+              disabled={pending}
+              aria-label={t('部门名称')}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </FormField>
+          <Button
+            type="primary"
+            loading={pending}
+            disabled={!canEdit || duplicateCode || !code.trim() || !name.trim()}
+            onClick={() =>
+              void (async () => {
+                if (pending || duplicateCode) return
+                setPending(true)
+                setFailed(false)
+                try {
+                  const saved = await save({
+                    kind: 'department',
+                    id: newId(),
+                    business_code: code.trim(),
+                    name: name.trim(),
+                    is_active: true,
+                    version: 1,
+                  })
+                  if (saved) {
+                    setOpen(false)
+                    setCode('')
+                    setName('')
+                  } else setFailed(true)
+                } catch {
+                  setFailed(true)
+                } finally {
+                  setPending(false)
+                }
+              })()
+            }
+          >
+            {t('新增部门')}
+          </Button>
+          {failed && (
+            <Alert
+              type="error"
+              showIcon
+              title={t('保存被拒绝，请检查权限或关联资料')}
+            />
+          )}
+          <Button disabled={pending} onClick={() => setOpen(false)}>
+            {t('取消')}
+          </Button>
+        </div>
+      </Modal>
       <Table
         rowKey="id"
         pagination={false}
@@ -354,19 +516,21 @@ function DepartmentEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <Input
-                aria-label={`${t('编辑部门名称')}-${row.business_code}`}
-                defaultValue={row.name}
-                disabled={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== row.name)
-                    void save({
-                      ...row,
-                      name: event.target.value,
-                      version: row.version + 1,
-                    })
-                }}
-              />
+              <FormField id={`department-edit-${row.id}`} label={t('部门名称')}>
+                <Input
+                  aria-label={`${t('编辑部门名称')}-${row.business_code}`}
+                  defaultValue={row.name}
+                  disabled={!canEdit}
+                  onBlur={(event) => {
+                    if (event.target.value !== row.name)
+                      void save({
+                        ...row,
+                        name: event.target.value,
+                        version: row.version + 1,
+                      })
+                  }}
+                />
+              </FormField>
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },
@@ -386,58 +550,137 @@ function TeamEditor({
   departments: Extract<ReferenceMasterDataView, { kind: 'department' }>[]
   teams: Extract<ReferenceMasterDataView, { kind: 'team' }>[]
   canEdit: boolean
-  save: (item: ReferenceMasterDataView) => Promise<void>
+  save: (item: ReferenceMasterDataView) => Promise<boolean>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [failed, setFailed] = useState(false)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
+  const duplicateCode =
+    !!code.trim() &&
+    teams.some((record) => record.business_code === code.trim())
   const [departmentId, setDepartmentId] = useState('')
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
-      <Space wrap>
-        <Input
-          aria-label={t('团队代码')}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('团队名称')}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          disabled={!canEdit}
-        />
-        <Select
-          aria-label={t('团队所属部门')}
-          value={departmentId || undefined}
-          onChange={setDepartmentId}
-          options={departments
-            .filter((department) => department.is_active)
-            .map((department) => ({
-              value: department.id,
-              label: department.name,
-            }))}
-          disabled={!canEdit}
-          placeholder={t('选择部门')}
-        />
-        <Button
-          disabled={!canEdit || !code.trim() || !name.trim() || !departmentId}
-          onClick={() =>
-            void save({
-              kind: 'team',
-              id: newId(),
-              department_id: departmentId,
-              business_code: code.trim(),
-              name: name.trim(),
-              is_active: true,
-              version: 1,
-            })
-          }
-        >
-          {t('新增团队')}
-        </Button>
-      </Space>
+      <Button
+        type="primary"
+        disabled={!canEdit}
+        onClick={() => {
+          setFailed(false)
+          setOpen(true)
+        }}
+      >
+        {t('新增团队')}
+      </Button>
+      {!canEdit && <p>{t('当前账号无维护权限')}</p>}
+      <Modal
+        title={t('新增团队')}
+        open={open}
+        footer={null}
+        closable={!pending}
+        keyboard={!pending}
+        mask={{ closable: false }}
+        onCancel={() => {
+          if (!pending) setOpen(false)
+        }}
+      >
+        <div className="honsen-master-form">
+          <p>{t('填写所有必填字段后即可保存')}</p>
+          <FormField
+            id="team-create-1"
+            label={t('团队代码')}
+            required
+            hint={t('业务编码创建后不可修改')}
+            error={
+              duplicateCode ? t('此编码已存在，请使用其他编码') : undefined
+            }
+          >
+            <Input
+              autoFocus
+              disabled={pending}
+              aria-label={t('团队代码')}
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+            />
+          </FormField>
+          <FormField id="team-create-2" label={t('团队名称')} required>
+            <Input
+              disabled={pending}
+              aria-label={t('团队名称')}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </FormField>
+          <FormField id="team-department" label={t('团队所属部门')} required>
+            <Select
+              aria-label={t('团队所属部门')}
+              value={departmentId || undefined}
+              onChange={setDepartmentId}
+              options={departments
+                .filter((department) => department.is_active)
+                .map((department) => ({
+                  value: department.id,
+                  label: department.name,
+                }))}
+              disabled={!canEdit || pending}
+              placeholder={t('选择部门')}
+            />
+          </FormField>
+          <Button
+            type="primary"
+            loading={pending}
+            disabled={
+              !canEdit ||
+              duplicateCode ||
+              !code.trim() ||
+              !name.trim() ||
+              !departmentId
+            }
+            onClick={() =>
+              void (async () => {
+                if (pending || duplicateCode) return
+                setPending(true)
+                setFailed(false)
+                try {
+                  const saved = await save({
+                    kind: 'team',
+                    id: newId(),
+                    department_id: departmentId,
+                    business_code: code.trim(),
+                    name: name.trim(),
+                    is_active: true,
+                    version: 1,
+                  })
+                  if (saved) {
+                    setOpen(false)
+                    setCode('')
+                    setName('')
+                  } else setFailed(true)
+                } catch {
+                  setFailed(true)
+                } finally {
+                  setPending(false)
+                }
+              })()
+            }
+          >
+            {t('新增团队')}
+          </Button>
+          {failed && (
+            <Alert
+              type="error"
+              showIcon
+              title={t('保存被拒绝，请检查权限或关联资料')}
+            />
+          )}
+          <Button disabled={pending} onClick={() => setOpen(false)}>
+            {t('取消')}
+          </Button>
+        </div>
+      </Modal>
       <Table
         rowKey="id"
         pagination={false}
@@ -447,19 +690,21 @@ function TeamEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <Input
-                aria-label={`${t('编辑团队名称')}-${row.business_code}`}
-                defaultValue={row.name}
-                disabled={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== row.name)
-                    void save({
-                      ...row,
-                      name: event.target.value,
-                      version: row.version + 1,
-                    })
-                }}
-              />
+              <FormField id={`team-edit-${row.id}`} label={t('团队名称')}>
+                <Input
+                  aria-label={`${t('编辑团队名称')}-${row.business_code}`}
+                  defaultValue={row.name}
+                  disabled={!canEdit}
+                  onBlur={(event) => {
+                    if (event.target.value !== row.name)
+                      void save({
+                        ...row,
+                        name: event.target.value,
+                        version: row.version + 1,
+                      })
+                  }}
+                />
+              </FormField>
             ),
           },
           {
@@ -484,43 +729,114 @@ function UnitEditor({
 }: {
   units: Extract<ReferenceMasterDataView, { kind: 'unit' }>[]
   canEdit: boolean
-  save: (item: ReferenceMasterDataView) => Promise<void>
+  save: (item: ReferenceMasterDataView) => Promise<boolean>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [failed, setFailed] = useState(false)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
+  const duplicateCode =
+    !!code.trim() &&
+    units.some((record) => record.business_code === code.trim())
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
-      <Space wrap>
-        <Input
-          aria-label={t('单位代码')}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('单位名称')}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          disabled={!canEdit}
-        />
-        <Button
-          disabled={!canEdit || !code.trim() || !name.trim()}
-          onClick={() =>
-            void save({
-              kind: 'unit',
-              id: newId(),
-              business_code: code.trim(),
-              name: name.trim(),
-              is_active: true,
-              version: 1,
-            })
-          }
-        >
-          {t('新增单位')}
-        </Button>
-      </Space>
+      <Button
+        type="primary"
+        disabled={!canEdit}
+        onClick={() => {
+          setFailed(false)
+          setOpen(true)
+        }}
+      >
+        {t('新增单位')}
+      </Button>
+      {!canEdit && <p>{t('当前账号无维护权限')}</p>}
+      <Modal
+        title={t('新增单位')}
+        open={open}
+        footer={null}
+        closable={!pending}
+        keyboard={!pending}
+        mask={{ closable: false }}
+        onCancel={() => {
+          if (!pending) setOpen(false)
+        }}
+      >
+        <div className="honsen-master-form">
+          <p>{t('填写所有必填字段后即可保存')}</p>
+          <FormField
+            id="unit-create-1"
+            label={t('单位代码')}
+            required
+            hint={t('业务编码创建后不可修改')}
+            error={
+              duplicateCode ? t('此编码已存在，请使用其他编码') : undefined
+            }
+          >
+            <Input
+              autoFocus
+              disabled={pending}
+              aria-label={t('单位代码')}
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+            />
+          </FormField>
+          <FormField id="unit-create-2" label={t('单位名称')} required>
+            <Input
+              disabled={pending}
+              aria-label={t('单位名称')}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </FormField>
+          <Button
+            type="primary"
+            loading={pending}
+            disabled={!canEdit || duplicateCode || !code.trim() || !name.trim()}
+            onClick={() =>
+              void (async () => {
+                if (pending || duplicateCode) return
+                setPending(true)
+                setFailed(false)
+                try {
+                  const saved = await save({
+                    kind: 'unit',
+                    id: newId(),
+                    business_code: code.trim(),
+                    name: name.trim(),
+                    is_active: true,
+                    version: 1,
+                  })
+                  if (saved) {
+                    setOpen(false)
+                    setCode('')
+                    setName('')
+                  } else setFailed(true)
+                } catch {
+                  setFailed(true)
+                } finally {
+                  setPending(false)
+                }
+              })()
+            }
+          >
+            {t('新增单位')}
+          </Button>
+          {failed && (
+            <Alert
+              type="error"
+              showIcon
+              title={t('保存被拒绝，请检查权限或关联资料')}
+            />
+          )}
+          <Button disabled={pending} onClick={() => setOpen(false)}>
+            {t('取消')}
+          </Button>
+        </div>
+      </Modal>
       <Table
         rowKey="id"
         pagination={false}
@@ -530,19 +846,21 @@ function UnitEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <Input
-                aria-label={`${t('编辑单位名称')}-${row.business_code}`}
-                defaultValue={row.name}
-                disabled={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== row.name)
-                    void save({
-                      ...row,
-                      name: event.target.value,
-                      version: row.version + 1,
-                    })
-                }}
-              />
+              <FormField id={`unit-edit-${row.id}`} label={t('单位名称')}>
+                <Input
+                  aria-label={`${t('编辑单位名称')}-${row.business_code}`}
+                  defaultValue={row.name}
+                  disabled={!canEdit}
+                  onBlur={(event) => {
+                    if (event.target.value !== row.name)
+                      void save({
+                        ...row,
+                        name: event.target.value,
+                        version: row.version + 1,
+                      })
+                  }}
+                />
+              </FormField>
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },
@@ -560,7 +878,7 @@ function CountryEditor({
 }: {
   countries: Extract<ReferenceMasterDataView, { kind: 'country' }>[]
   canEdit: boolean
-  save: (item: ReferenceMasterDataView) => Promise<void>
+  save: (item: ReferenceMasterDataView) => Promise<boolean>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
@@ -570,27 +888,33 @@ function CountryEditor({
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
-        <Input
-          aria-label={t('国家代码')}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          placeholder={t('国家代码')}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('国家名称')}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder={t('国家名称')}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('国家时区')}
-          value={timeZone}
-          onChange={(event) => setTimeZone(event.target.value)}
-          placeholder={t('时区')}
-          disabled={!canEdit}
-        />
+        <FormField id="MasterDataManager-field-1" label={t('国家代码')}>
+          <Input
+            aria-label={t('国家代码')}
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            placeholder={t('国家代码')}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-2" label={t('国家名称')}>
+          <Input
+            aria-label={t('国家名称')}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder={t('国家名称')}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-3" label={t('国家时区')}>
+          <Input
+            aria-label={t('国家时区')}
+            value={timeZone}
+            onChange={(event) => setTimeZone(event.target.value)}
+            placeholder={t('时区')}
+            disabled={!canEdit}
+          />
+        </FormField>
         <Button
           disabled={!canEdit}
           onClick={() =>
@@ -617,37 +941,47 @@ function CountryEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <Input
-                aria-label={`${t('编辑国家名称')}-${row.business_code}`}
-                defaultValue={row.name}
-                disabled={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== row.name)
-                    void save({
-                      ...row,
-                      name: event.target.value,
-                      version: row.version + 1,
-                    })
-                }}
-              />
+              <FormField
+                id={`MasterDataManager-14-${row.id}`}
+                label={`${t('编辑国家名称')} · ${row.business_code}`}
+              >
+                <Input
+                  aria-label={`${t('编辑国家名称')}-${row.business_code}`}
+                  defaultValue={row.name}
+                  disabled={!canEdit}
+                  onBlur={(event) => {
+                    if (event.target.value !== row.name)
+                      void save({
+                        ...row,
+                        name: event.target.value,
+                        version: row.version + 1,
+                      })
+                  }}
+                />
+              </FormField>
             ),
           },
           {
             title: t('时区'),
             render: (_, row) => (
-              <Input
-                aria-label={`${t('编辑国家时区')}-${row.business_code}`}
-                defaultValue={row.time_zone}
-                disabled={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== row.time_zone)
-                    void save({
-                      ...row,
-                      time_zone: event.target.value,
-                      version: row.version + 1,
-                    })
-                }}
-              />
+              <FormField
+                id={`MasterDataManager-15-${row.id}`}
+                label={`${t('编辑国家时区')} · ${row.business_code}`}
+              >
+                <Input
+                  aria-label={`${t('编辑国家时区')}-${row.business_code}`}
+                  defaultValue={row.time_zone}
+                  disabled={!canEdit}
+                  onBlur={(event) => {
+                    if (event.target.value !== row.time_zone)
+                      void save({
+                        ...row,
+                        time_zone: event.target.value,
+                        version: row.version + 1,
+                      })
+                  }}
+                />
+              </FormField>
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },
@@ -667,7 +1001,7 @@ function ProjectEditor({
   countries: Extract<ReferenceMasterDataView, { kind: 'country' }>[]
   projects: Extract<ReferenceMasterDataView, { kind: 'project' }>[]
   canEdit: boolean
-  save: (item: ReferenceMasterDataView) => Promise<void>
+  save: (item: ReferenceMasterDataView) => Promise<boolean>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
@@ -681,64 +1015,78 @@ function ProjectEditor({
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
-        <Input
-          aria-label={t('项目代码')}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          placeholder={t('项目代码')}
-          disabled={!canEdit}
-        />
-        <Select
-          aria-label={t('项目默认币种')}
-          value={currency}
-          onChange={setCurrency}
-          options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
-            value,
-            label: value,
-          }))}
-          disabled={!canEdit}
-        />
-        <Select
-          aria-label={t('项目默认语言')}
-          value={language}
-          onChange={setLanguage}
-          options={[
-            { value: 'zh_fr', label: t('中文 + 法语') },
-            { value: 'zh_en', label: t('中文 + 英文') },
-          ]}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('项目名称')}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder={t('项目名称')}
-          disabled={!canEdit}
-        />
-        <Select
-          aria-label={t('项目国家')}
-          value={countryId || undefined}
-          onChange={setCountryId}
-          options={countries
-            .filter((country) => country.is_active)
-            .map((country) => ({ value: country.id, label: country.name }))}
-          disabled={!canEdit}
-          placeholder={t('选择国家')}
-        />
-        <Input
-          aria-label={t('项目默认站点')}
-          value={site}
-          onChange={(event) => setSite(event.target.value)}
-          placeholder={t('默认站点')}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('项目部门')}
-          value={department}
-          onChange={(event) => setDepartment(event.target.value)}
-          placeholder={t('部门')}
-          disabled={!canEdit}
-        />
+        <FormField id="MasterDataManager-field-4" label={t('项目代码')}>
+          <Input
+            aria-label={t('项目代码')}
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            placeholder={t('项目代码')}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-5" label={t('项目默认币种')}>
+          <Select
+            aria-label={t('项目默认币种')}
+            value={currency}
+            onChange={setCurrency}
+            options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
+              value,
+              label: value,
+            }))}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-6" label={t('项目默认语言')}>
+          <Select
+            aria-label={t('项目默认语言')}
+            value={language}
+            onChange={setLanguage}
+            options={[
+              { value: 'zh_fr', label: t('中文 + 法语') },
+              { value: 'zh_en', label: t('中文 + 英文') },
+            ]}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-7" label={t('项目名称')}>
+          <Input
+            aria-label={t('项目名称')}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder={t('项目名称')}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-8" label={t('项目国家')}>
+          <Select
+            aria-label={t('项目国家')}
+            value={countryId || undefined}
+            onChange={setCountryId}
+            options={countries
+              .filter((country) => country.is_active)
+              .map((country) => ({ value: country.id, label: country.name }))}
+            disabled={!canEdit}
+            placeholder={t('选择国家')}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-9" label={t('项目默认站点')}>
+          <Input
+            aria-label={t('项目默认站点')}
+            value={site}
+            onChange={(event) => setSite(event.target.value)}
+            placeholder={t('默认站点')}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-10" label={t('项目部门')}>
+          <Input
+            aria-label={t('项目部门')}
+            value={department}
+            onChange={(event) => setDepartment(event.target.value)}
+            placeholder={t('部门')}
+            disabled={!canEdit}
+          />
+        </FormField>
         <Button
           disabled={!canEdit}
           onClick={() =>
@@ -769,78 +1117,98 @@ function ProjectEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <Input
-                aria-label={`${t('编辑项目名称')}-${row.business_code}`}
-                defaultValue={row.name}
-                disabled={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== row.name)
-                    void save({
-                      ...row,
-                      name: event.target.value,
-                      version: row.version + 1,
-                    })
-                }}
-              />
+              <FormField
+                id={`MasterDataManager-16-${row.id}`}
+                label={`${t('编辑项目名称')} · ${row.business_code}`}
+              >
+                <Input
+                  aria-label={`${t('编辑项目名称')}-${row.business_code}`}
+                  defaultValue={row.name}
+                  disabled={!canEdit}
+                  onBlur={(event) => {
+                    if (event.target.value !== row.name)
+                      void save({
+                        ...row,
+                        name: event.target.value,
+                        version: row.version + 1,
+                      })
+                  }}
+                />
+              </FormField>
             ),
           },
           {
             title: t('国家'),
             render: (_, row) => (
-              <Select
-                aria-label={`${t('编辑项目国家')}-${row.business_code}`}
-                value={row.country_id}
-                disabled={!canEdit}
-                options={countries.map((country) => ({
-                  value: country.id,
-                  label: country.name,
-                }))}
-                onChange={(country_id) =>
-                  void save({ ...row, country_id, version: row.version + 1 })
-                }
-              />
+              <FormField
+                id={`MasterDataManager-17-${row.id}`}
+                label={`${t('编辑项目国家')} · ${row.business_code}`}
+              >
+                <Select
+                  aria-label={`${t('编辑项目国家')}-${row.business_code}`}
+                  value={row.country_id}
+                  disabled={!canEdit}
+                  options={countries.map((country) => ({
+                    value: country.id,
+                    label: country.name,
+                  }))}
+                  onChange={(country_id) =>
+                    void save({ ...row, country_id, version: row.version + 1 })
+                  }
+                />
+              </FormField>
             ),
           },
           {
             title: t('币种'),
             render: (_, row) => (
-              <Select
-                aria-label={`${t('编辑项目币种')}-${row.business_code}`}
-                value={row.default_currency}
-                disabled={!canEdit}
-                options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
-                  value,
-                  label: value,
-                }))}
-                onChange={(default_currency) =>
-                  void save({
-                    ...row,
-                    default_currency,
-                    version: row.version + 1,
-                  })
-                }
-              />
+              <FormField
+                id={`MasterDataManager-18-${row.id}`}
+                label={`${t('编辑项目币种')} · ${row.business_code}`}
+              >
+                <Select
+                  aria-label={`${t('编辑项目币种')}-${row.business_code}`}
+                  value={row.default_currency}
+                  disabled={!canEdit}
+                  options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
+                    value,
+                    label: value,
+                  }))}
+                  onChange={(default_currency) =>
+                    void save({
+                      ...row,
+                      default_currency,
+                      version: row.version + 1,
+                    })
+                  }
+                />
+              </FormField>
             ),
           },
           {
             title: t('语言'),
             render: (_, row) => (
-              <Select
-                aria-label={`${t('编辑项目语言')}-${row.business_code}`}
-                value={row.default_language_pair}
-                disabled={!canEdit}
-                options={[
-                  { value: 'zh_fr', label: t('中文 + 法语') },
-                  { value: 'zh_en', label: t('中文 + 英文') },
-                ]}
-                onChange={(default_language_pair) =>
-                  void save({
-                    ...row,
-                    default_language_pair,
-                    version: row.version + 1,
-                  })
-                }
-              />
+              <FormField
+                id={`MasterDataManager-19-${row.id}`}
+                label={`${t('编辑项目语言')} · ${row.business_code}`}
+              >
+                <Select
+                  aria-label={`${t('编辑项目语言')}-${row.business_code}`}
+                  value={row.default_language_pair}
+                  disabled={!canEdit}
+                  options={[
+                    { value: 'zh_fr', label: t('中文 + 法语') },
+                    { value: 'zh_en', label: t('中文 + 英文') },
+                  ]}
+                  onChange={(default_language_pair) =>
+                    void save({
+                      ...row,
+                      default_language_pair,
+                      version: row.version + 1,
+                    })
+                  }
+                />
+              </FormField>
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },
@@ -860,7 +1228,7 @@ function SiteEditor({
   projects: Extract<ReferenceMasterDataView, { kind: 'project' }>[]
   sites: Extract<ReferenceMasterDataView, { kind: 'site' }>[]
   canEdit: boolean
-  save: (item: ReferenceMasterDataView) => Promise<void>
+  save: (item: ReferenceMasterDataView) => Promise<boolean>
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
@@ -870,30 +1238,36 @@ function SiteEditor({
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Space wrap>
-        <Input
-          aria-label={t('站点代码')}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          placeholder={t('站点代码')}
-          disabled={!canEdit}
-        />
-        <Input
-          aria-label={t('站点名称')}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder={t('站点名称')}
-          disabled={!canEdit}
-        />
-        <Select
-          aria-label={t('站点项目')}
-          value={projectId || undefined}
-          onChange={setProjectId}
-          options={projects
-            .filter((project) => project.is_active)
-            .map((project) => ({ value: project.id, label: project.name }))}
-          disabled={!canEdit}
-          placeholder={t('选择项目')}
-        />
+        <FormField id="MasterDataManager-field-11" label={t('站点代码')}>
+          <Input
+            aria-label={t('站点代码')}
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            placeholder={t('站点代码')}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-12" label={t('站点名称')}>
+          <Input
+            aria-label={t('站点名称')}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder={t('站点名称')}
+            disabled={!canEdit}
+          />
+        </FormField>
+        <FormField id="MasterDataManager-field-13" label={t('站点项目')}>
+          <Select
+            aria-label={t('站点项目')}
+            value={projectId || undefined}
+            onChange={setProjectId}
+            options={projects
+              .filter((project) => project.is_active)
+              .map((project) => ({ value: project.id, label: project.name }))}
+            disabled={!canEdit}
+            placeholder={t('选择项目')}
+          />
+        </FormField>
         <Button
           disabled={!canEdit}
           onClick={() =>
@@ -919,36 +1293,46 @@ function SiteEditor({
           {
             title: t('站点'),
             render: (_, row) => (
-              <Input
-                aria-label={`${t('编辑站点名称')}-${row.business_code}`}
-                defaultValue={row.name}
-                disabled={!canEdit}
-                onBlur={(event) => {
-                  if (event.target.value !== row.name)
-                    void save({
-                      ...row,
-                      name: event.target.value,
-                      version: row.version + 1,
-                    })
-                }}
-              />
+              <FormField
+                id={`MasterDataManager-20-${row.id}`}
+                label={`${t('编辑站点名称')} · ${row.business_code}`}
+              >
+                <Input
+                  aria-label={`${t('编辑站点名称')}-${row.business_code}`}
+                  defaultValue={row.name}
+                  disabled={!canEdit}
+                  onBlur={(event) => {
+                    if (event.target.value !== row.name)
+                      void save({
+                        ...row,
+                        name: event.target.value,
+                        version: row.version + 1,
+                      })
+                  }}
+                />
+              </FormField>
             ),
           },
           {
             title: t('项目'),
             render: (_, row) => (
-              <Select
-                aria-label={`${t('编辑站点项目')}-${row.business_code}`}
-                value={row.project_id}
-                disabled={!canEdit}
-                options={projects.map((project) => ({
-                  value: project.id,
-                  label: project.name,
-                }))}
-                onChange={(project_id) =>
-                  void save({ ...row, project_id, version: row.version + 1 })
-                }
-              />
+              <FormField
+                id={`MasterDataManager-21-${row.id}`}
+                label={`${t('编辑站点项目')} · ${row.business_code}`}
+              >
+                <Select
+                  aria-label={`${t('编辑站点项目')}-${row.business_code}`}
+                  value={row.project_id}
+                  disabled={!canEdit}
+                  options={projects.map((project) => ({
+                    value: project.id,
+                    label: project.name,
+                  }))}
+                  onChange={(project_id) =>
+                    void save({ ...row, project_id, version: row.version + 1 })
+                  }
+                />
+              </FormField>
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },

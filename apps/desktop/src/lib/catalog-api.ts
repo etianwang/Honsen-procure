@@ -89,7 +89,18 @@ export type MaterialImageInput = {
   cropJson: string
 }
 
+export type CatalogSearchCursor = { nameZh: string; model: string; id: string }
+export type CatalogSearchPage = {
+  records: CatalogMaterialView[]
+  nextCursor: CatalogSearchCursor | null
+}
+
 export type CatalogApi = {
+  searchCatalogPage?(
+    query: string,
+    projectId: string,
+    after: CatalogSearchCursor | null,
+  ): Promise<CatalogSearchPage>
   searchCatalog(
     query: string,
     projectId?: string,
@@ -127,6 +138,12 @@ function tauriInvoke(): TauriInvoke {
 }
 
 export const tauriCatalogApi: CatalogApi = {
+  searchCatalogPage: (query, projectId, after) =>
+    tauriInvoke()<CatalogSearchPage>('search_catalog_page', {
+      query,
+      projectId,
+      after,
+    }),
   searchCatalog: (query, projectId, includeInactive = false) =>
     tauriInvoke()<CatalogMaterialView[]>('search_catalog', {
       query,

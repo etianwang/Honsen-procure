@@ -10,6 +10,8 @@ import {
 import type { UserRole } from '../lib/permissions'
 import type { SyncState } from '../lib/sync-lifecycle'
 import defaultAvatar from '../assets/default-avatar.svg'
+import { SyncStatusDetails } from './SyncStatusDetails'
+import './AppShellToolbar.css'
 
 export type AppPage =
   | 'home'
@@ -155,7 +157,7 @@ export function AppShell({
         </nav>
       </aside>
       <main className="workspace">
-        <header className="topbar">
+        <header className="topbar honsen-shell-toolbar">
           <div>
             <p className="eyebrow">
               HONSEN Procure ·{' '}
@@ -167,23 +169,32 @@ export function AppShell({
             </p>
             <h1>{shellText(locale, pageTitle) ?? pageTitle}</h1>
           </div>
-          <div className="identity">
-            <select
-              aria-label="界面语言 / UI language / Langue"
-              value={locale}
-              onChange={(event) => {
-                const value = event.target.value
-                if (value === 'zh' || value === 'en' || value === 'fr')
-                  setLocale(value)
-              }}
-            >
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-              <option value="fr">Français</option>
-            </select>
+          <div className="honsen-shell-controls">
+            <label className="honsen-shell-language">
+              <span>
+                {locale === 'zh'
+                  ? '语言'
+                  : locale === 'fr'
+                    ? 'Langue'
+                    : 'Language'}
+              </span>
+              <select
+                aria-label="界面语言 / UI language / Langue"
+                value={locale}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (value === 'zh' || value === 'en' || value === 'fr')
+                    setLocale(value)
+                }}
+              >
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+                <option value="fr">Français</option>
+              </select>
+            </label>
             {authorizationContexts && authorizationContexts.length > 0 && (
-              <label>
-                <span className="sr-only">{t('当前授权范围')}</span>
+              <label className="honsen-shell-scope">
+                <span>{t('当前授权范围')}</span>
                 <select
                   aria-label={t('当前授权范围')}
                   value={selectedAuthorizationContext}
@@ -207,70 +218,40 @@ export function AppShell({
                 </select>
               </label>
             )}
-            <span role="status" aria-label={t('同步状态')}>
-              {syncState?.kind === 'syncing'
-                ? t('同步中')
-                : syncState?.kind === 'synced'
-                  ? t('上次同步成功；新操作可能待同步')
-                  : syncState?.kind === 'pending'
-                    ? `${t('待同步')} ${syncState.pendingCount ?? t('未知')}`
-                    : syncState?.kind === 'retrying'
-                      ? t('连接失败，等待重试；本地数据待同步')
-                      : syncState?.kind === 'upgrade-required'
-                        ? t('服务版本已停用，请升级客户端；本地数据已保留')
-                        : syncState?.kind === 'auth-required'
-                          ? t('登录已失效，请重新在线登录')
-                          : syncState?.kind === 'account-boundary'
-                            ? t('多账号拉取已暂停，需先完成账号隔离恢复')
-                            : t('离线本地数据')}
-              {syncState?.kind !== 'pending' &&
-              syncState?.pendingCount !== undefined
-                ? ` · ${t('待同步')} ${syncState.pendingCount}`
-                : ''}
-              {syncState?.conflictCount
-                ? ` · ${t('未解决冲突')} ${syncState.conflictCount}`
-                : ''}
-              {syncState?.quoteRejectedCount
-                ? ` · ${syncState.quoteRejectedCount} ${t('项报价失效，请撤回采购单并重新选价')}`
-                : ''}
-              {syncState?.quarantinedCount
-                ? ` · ${t('待归属旧事件')} ${syncState.quarantinedCount}`
-                : ''}
-              {syncState?.lastSuccessAt != null
-                ? ` · ${t('上次拉取成功')} ${new Date(syncState.lastSuccessAt * 1000).toLocaleString(locale === 'zh' ? 'zh-CN' : locale === 'en' ? 'en-US' : 'fr-FR')}`
-                : ''}
-            </span>
-            <span className="avatar" aria-hidden="true">
-              <img src={defaultAvatar} width={32} height={32} alt="" />
-            </span>
-            {username && (
-              <span className="signed-in-username">
-                {displayName || username}
-                {displayName && displayName !== username
-                  ? ` (${username})`
-                  : ''}
+            <SyncStatusDetails state={syncState} />
+            <div className="honsen-shell-user">
+              <span className="avatar" aria-hidden="true">
+                <img src={defaultAvatar} width={32} height={32} alt="" />
               </span>
-            )}
-            <span>{t(roleLabel[role])}</span>
-            {onChangePassword && (
-              <button
-                type="button"
-                disabled={!passwordChangeAvailable}
-                onClick={onChangePassword}
-              >
-                {t('修改密码')}
-              </button>
-            )}
-            {onChangePassword && !passwordChangeAvailable && (
-              <span className="password-online-note">
-                {t('修改密码需要在线登录和可用连接。')}
-              </span>
-            )}
-            {onLock && (
-              <button type="button" onClick={onLock}>
-                {t('锁定')}
-              </button>
-            )}
+              {username && (
+                <span className="signed-in-username">
+                  {displayName || username}
+                  {displayName && displayName !== username
+                    ? ` (${username})`
+                    : ''}
+                </span>
+              )}
+              <span>{t(roleLabel[role])}</span>
+              {onChangePassword && (
+                <button
+                  type="button"
+                  disabled={!passwordChangeAvailable}
+                  onClick={onChangePassword}
+                >
+                  {t('修改密码')}
+                </button>
+              )}
+              {onChangePassword && !passwordChangeAvailable && (
+                <span className="password-online-note">
+                  {t('修改密码需要在线登录和可用连接。')}
+                </span>
+              )}
+              {onLock && (
+                <button type="button" onClick={onLock}>
+                  {t('锁定')}
+                </button>
+              )}
+            </div>
           </div>
         </header>
         <div className="content">

@@ -16,7 +16,14 @@ import type { WorkflowApi } from '../lib/workflow-api'
 import { OrderWorkflowPanel } from './OrderWorkflowPanel'
 import { FormalPrintPreview } from './FormalPrintPreview'
 
+export type HistoryEntryRequest = {
+  filter: RequisitionHistoryFilter
+  requestId: number
+  orderId?: string
+}
+
 type Props = {
+  entry?: HistoryEntryRequest
   api: Pick<
     RequisitionApi,
     | 'listRequisitionHistory'
@@ -34,6 +41,7 @@ type Props = {
 }
 
 export function RequisitionHistoryPanel({
+  entry,
   api,
   refreshKey,
   projectId,
@@ -108,13 +116,20 @@ export function RequisitionHistoryPanel({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [retry, setRetry] = useState(0)
-  const [query, setQuery] = useState('')
-  const [workflowStatus, setWorkflowStatus] = useState('')
-  const [currentProjectOnly, setCurrentProjectOnly] = useState(false)
-  const [filter, setFilter] = useState<RequisitionHistoryFilter>({})
+  const [query, setQuery] = useState(entry?.filter.query ?? '')
+  const [workflowStatus, setWorkflowStatus] = useState(
+    entry?.filter.workflowStatus ?? '',
+  )
+  const [currentProjectOnly, setCurrentProjectOnly] = useState(
+    entry?.filter.projectId === projectId,
+  )
+  const [filter, setFilter] = useState<RequisitionHistoryFilter>(
+    entry?.filter ?? {},
+  )
+  const entryTarget = useRef<HTMLDivElement>(null)
   const [detail, setDetail] = useState<RequisitionDetail | null>(null)
   const [detailError, setDetailError] = useState(false)
-  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(!!entry?.orderId)
   const [withdrawError, setWithdrawError] = useState(false)
   const [issueError, setIssueError] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -166,6 +181,31 @@ export function RequisitionHistoryPanel({
     }
   }
   const detailRequest = useRef(0)
+
+  useEffect(() => {
+    if (!entry) return
+    entryTarget.current?.scrollIntoView({ block: 'start' })
+  }, [entry])
+
+  useEffect(() => {
+    if (!entry?.orderId) return
+    const request = ++detailRequest.current
+    let active = true
+    void api
+      .getRequisitionDetail(entry.orderId)
+      .then((value) => {
+        if (active && request === detailRequest.current) setDetail(value)
+      })
+      .catch(() => {
+        if (active && request === detailRequest.current) setDetailError(true)
+      })
+      .finally(() => {
+        if (active && request === detailRequest.current) setDetailLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [api, entry])
 
   useEffect(() => {
     let active = true
@@ -243,7 +283,7 @@ export function RequisitionHistoryPanel({
   }
 
   return (
-    <Card className="card" title={t('请购历史')}>
+    <Card ref={entryTarget} className="card" title={t('请购历史')}>
       <p>
         {t(
           '导出当前筛选范围的全部授权记录，包含内部评论与审计；此文件用于内部核对。',

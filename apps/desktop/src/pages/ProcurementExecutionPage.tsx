@@ -5,7 +5,7 @@ import {
   type ExecutionMessage,
 } from '../lib/execution-messages'
 import { Alert, Button, Card, Empty, Space } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AttachmentPanel } from '../components/AttachmentPanel'
 import { RfqPanel } from '../components/RfqPanel'
 import { SupplierAllocationPanel } from '../components/SupplierAllocationPanel'
@@ -45,6 +45,37 @@ export function ProcurementExecutionPage({
   const [suppliers, setSuppliers] = useState<SupplierView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [message, setMessage] = useState<ExecutionMessage | null>(null)
+  const [startNotice, setStartNotice] = useState<{
+    orderId: string
+    message: ExecutionMessage
+    type: 'success' | 'error'
+  } | null>(null)
+  const [startingId, setStartingId] = useState<string | null>(null)
+  const startPending = useRef(false)
+  async function startMarket(orderId: string) {
+    if (startPending.current) return
+    startPending.current = true
+    setStartingId(orderId)
+    setStartNotice(null)
+    try {
+      await api.startHonsenMarketExecution(orderId)
+      setStartNotice({
+        orderId,
+        type: 'success',
+        message: '市场直采已开始；可直接登记收货，无需 RFQ 或供应商子订单。',
+      })
+      await refresh()
+    } catch {
+      setStartNotice({
+        orderId,
+        type: 'error',
+        message: '无法开始市场直采，请检查模式、状态及授权。',
+      })
+    } finally {
+      startPending.current = false
+      setStartingId(null)
+    }
+  }
   const selected = orders.find((order) => order.id === selectedId)
   const refresh = useCallback(
     () =>
@@ -132,24 +163,22 @@ export function ProcurementExecutionPage({
               ))}
             </ul>
           </Card>
+          {startNotice?.orderId === selected.id && (
+            <Alert
+              role={startNotice.type === 'error' ? 'alert' : 'status'}
+              type={startNotice.type}
+              title={t(startNotice.message)}
+              showIcon
+            />
+          )}
           {selected.procurementMode === 'honsen_self_purchase' &&
           ['confirmed', 'approved'].includes(selected.workflowStatus) &&
           selected.children.length === 0 ? (
             <Button
               type="primary"
-              onClick={() =>
-                void api
-                  .startHonsenMarketExecution(selected.id)
-                  .then(() => {
-                    setMessage(
-                      '市场直采已开始；可直接登记收货，无需 RFQ 或供应商子订单。',
-                    )
-                    void refresh()
-                  })
-                  .catch(() =>
-                    setMessage('无法开始市场直采，请检查模式、状态及授权。'),
-                  )
-              }
+              loading={startingId === selected.id}
+              disabled={startingId !== null}
+              onClick={() => void startMarket(selected.id)}
             >
               {t('开始市场直采')}
             </Button>

@@ -423,3 +423,138 @@ fn failed_material_reactivation_keeps_disabled_row_and_pending_outbox_unchanged(
     );
     assert_eq!(service.pending_sync_events(100, now).unwrap(), before);
 }
+
+#[test]
+fn material_picker_pages_multilingual_combinations_and_bounds_without_mutation() {
+    let (service, _, now) = fixture(Role::Engineer);
+    let mut db = service.connection.lock().unwrap();
+    let transaction = db.transaction().unwrap();
+    for index in 0..10050 {
+        transaction.execute("INSERT INTO local_materials(id,sku,name_zh,name_fr,name_en,aliases_json,model,specification,unit,is_active,version) VALUES(?1,?2,'测试电缆','Câble synthétique','Copper cable','[\"wire\"]','M-25','3x25','m',1,1)", params![Uuid::new_v4().to_string(), format!("SYNTH-{index:05}")]).unwrap();
+    }
+    transaction.execute("INSERT INTO local_materials(id,sku,name_zh,aliases_json,model,specification,unit,is_active,version) VALUES(?1,'SYNTH-INACTIVE','测试电缆','[]','M-25','3x25','m',0,1)", [Uuid::new_v4().to_string()]).unwrap();
+    transaction.commit().unwrap();
+    let before: i64 = db
+        .query_row("SELECT COUNT(*) FROM local_sync_outbox", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    drop(db);
+    let started = std::time::Instant::now();
+    let first = service
+        .search_catalog_page("电缆 Copper wire M-25", None, None, now)
+        .unwrap();
+    println!(
+        "material_picker synthetic rows=10050 first_page_ms={} records={}",
+        started.elapsed().as_millis(),
+        first.records.len()
+    );
+    assert_eq!(first.records.len(), 50);
+    assert_eq!(first.records[0].name_en.as_deref(), Some("Copper cable"));
+    let second = service
+        .search_catalog_page(
+            "电缆 Copper wire M-25",
+            None,
+            first.next_cursor.clone(),
+            now,
+        )
+        .unwrap();
+    assert_eq!(second.records.len(), 50);
+    assert!(
+        second
+            .records
+            .iter()
+            .all(|record| !first.records.iter().any(|old| old.id == record.id))
+    );
+    let all_started = std::time::Instant::now();
+    let mut seen = std::collections::HashSet::new();
+    let mut cursor = None;
+    let mut pages = 0;
+    loop {
+        let page = service
+            .search_catalog_page("电缆 Copper wire M-25", None, cursor, now)
+            .unwrap();
+        assert!(page.records.len() <= 50);
+        for record in page.records {
+            assert!(
+                seen.insert(record.id),
+                "duplicate across stable cursor pages"
+            );
+        }
+        pages += 1;
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen.len(), 10050);
+    assert_eq!(pages, 201);
+    println!(
+        "material_picker full_scan rows={} pages={} bounded_page=50 elapsed_ms={}",
+        seen.len(),
+        pages,
+        all_started.elapsed().as_millis()
+    );
+    let single = service
+        .search_catalog_page("Câble SYNTH-10049", None, None, now)
+        .unwrap();
+    assert_eq!(single.records.len(), 1);
+    assert!(single.next_cursor.is_none());
+    assert!(
+        service
+            .search_catalog_page("%", None, None, now)
+            .unwrap()
+            .records
+            .is_empty()
+    );
+    assert!(
+        service
+            .search_catalog_page("_", None, None, now)
+            .unwrap()
+            .records
+            .is_empty()
+    );
+    assert!(
+        service
+            .search_catalog_page("' OR 1=1 --", None, None, now)
+            .unwrap()
+            .records
+            .is_empty()
+    );
+    assert!(matches!(
+        service.search_catalog_page(&"x".repeat(256), None, None, now),
+        Err(AuthError::InvalidInput)
+    ));
+    assert!(matches!(
+        service.search_catalog_page("a b c d e f g h i", None, None, now),
+        Err(AuthError::InvalidInput)
+    ));
+    assert!(matches!(
+        service.search_catalog_page("", Some(Uuid::new_v4()), None, now),
+        Err(AuthError::InvalidInput)
+    ));
+    let cursor = CatalogSearchCursor {
+        name_zh: "x".repeat(1025),
+        model: String::new(),
+        id: Uuid::new_v4(),
+    };
+    assert!(matches!(
+        service.search_catalog_page("", None, Some(cursor), now),
+        Err(AuthError::InvalidInput)
+    ));
+    let after: i64 = service
+        .connection
+        .lock()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM local_sync_outbox", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(before, after);
+    assert!(
+        LocalAuthService::open_in_memory()
+            .unwrap()
+            .search_catalog_page("", None, None, now)
+            .is_err()
+    );
+}

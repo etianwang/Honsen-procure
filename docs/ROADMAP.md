@@ -520,3 +520,7 @@ No cloud/contract/data mutation; full T12/T14/Alpha and other native gates OPEN.
 ## Modern Industrial design system — 2026-11-09
 
 IN PROGRESS: specifications, shared tokens/theme, initial history and account-feedback changes. Full native Windows, three-language/DPI, all-control and large-data acceptance remain open. See `design/ROLLOUT-20261109.md`; no original milestone is completed by this checkpoint.
+
+2026-11-09 Stage2 partial: four dictionary create dialogs implemented and focused/independent DOM checks passed. New native EXE built; launch blocked by automatic approval review, user handoff pending. Native FUNCTIONAL/UX gates and all original milestones stay open; no page completion claim.
+
+2026-11-09 unattended Modern Industrial: first production-page implementation batch in progress with bounded native and automated evidence; supplier quote regression and current-source native/all-page/DPI gates remain open. Original milestones unchanged; details in existing design rollout.

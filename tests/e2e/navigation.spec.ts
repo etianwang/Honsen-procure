@@ -65,6 +65,37 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
                 ),
               )
             }
+            if (command === 'search_catalog_page')
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000901',
+                    sku: 'OWNER-FIXTURE',
+                    nameZh: '业主报价材料',
+                    nameFr: null,
+                    aliases: [],
+                    brand: null,
+                    model: 'OP-01',
+                    specification: 'fixture',
+                    unit: '件',
+                    notes: null,
+                    version: 1,
+                    prices: [
+                      {
+                        priceId: '00000000-0000-4000-8000-000000000902',
+                        supplierId: '00000000-0000-4000-8000-000000000903',
+                        supplierName: 'owner fixture supplier',
+                        isPreferredSupplier: false,
+                        currency: 'XOF',
+                        unitPriceMinor: '1250',
+                        unit: '件',
+                        effectiveAt: '2026-10-12',
+                      },
+                    ],
+                  },
+                ],
+                nextCursor: null,
+              })
             if (command === 'search_catalog')
               return Promise.resolve([
                 {
@@ -203,6 +234,38 @@ test('regular requisition page completes owner pricing rejection and resubmissio
               reason?: string
             },
           ) {
+            if (command === 'search_catalog_page') {
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000914',
+                    sku: 'OWNER-CNY',
+                    nameZh: '跨币种业主材料',
+                    nameFr: null,
+                    aliases: [],
+                    brand: null,
+                    model: 'OPA-CNY',
+                    specification: 'fixture',
+                    unit: '件',
+                    notes: null,
+                    version: 1,
+                    prices: [
+                      {
+                        priceId: '00000000-0000-4000-8000-000000000915',
+                        supplierId: '00000000-0000-4000-8000-000000000916',
+                        supplierName: '审批报价供应商',
+                        isPreferredSupplier: true,
+                        currency: 'CNY',
+                        unitPriceMinor: '1234',
+                        unit: '件',
+                        effectiveAt: '2026-10-12',
+                      },
+                    ],
+                  },
+                ],
+                nextCursor: null,
+              })
+            }
             if (command === 'search_catalog') {
               return Promise.resolve([
                 {
@@ -355,6 +418,26 @@ test('regular owner draft marks manual reference pricing as an exception', async
       __TAURI__: {
         core: {
           invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command === 'search_catalog_page')
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000921',
+                    sku: 'MANUAL',
+                    nameZh: '手工报价材料',
+                    nameFr: null,
+                    aliases: [],
+                    brand: null,
+                    model: 'OPA-MANUAL',
+                    specification: 'fixture',
+                    unit: '件',
+                    notes: null,
+                    version: 1,
+                    prices: [],
+                  },
+                ],
+                nextCursor: null,
+              })
             if (command === 'search_catalog')
               return Promise.resolve([
                 {
@@ -584,10 +667,13 @@ test('administrator can create, edit and disable a unit offline', async ({
   })
   await page.goto('/?test=master-data')
   await page.getByRole('tab', { name: '单位' }).click()
-  await expect(page.getByRole('button', { name: '新增单位' })).toBeDisabled()
+  await page.getByRole('button', { name: '新增单位', exact: true }).click()
   await page.getByLabel('单位代码').fill('fixture-ea')
   await page.getByLabel('单位名称', { exact: true }).fill('Each')
-  await page.getByRole('button', { name: '新增单位' }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '新增单位' })
+    .click()
   await expect(page.getByLabel('编辑单位名称-fixture-ea')).toHaveValue('Each')
   await page.getByLabel('编辑单位名称-fixture-ea').fill('Piece')
   await page.getByLabel('编辑单位名称-fixture-ea').blur()
@@ -606,9 +692,13 @@ test('administrator can create, rename and disable a material category offline',
   })
   await page.goto('/?test=master-data')
   await page.getByRole('tab', { name: '材料分类' }).click()
+  await page.getByRole('button', { name: '新增材料分类', exact: true }).click()
   await page.getByLabel('材料分类代码').fill('fixture-electrical')
   await page.getByLabel('材料分类名称').fill('Electrical')
-  await page.getByRole('button', { name: '新增材料分类' }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '新增材料分类' })
+    .click()
   await expect(
     page.getByLabel('编辑材料分类名称-fixture-electrical'),
   ).toHaveValue('Electrical')
@@ -704,20 +794,39 @@ test('administrator creates a department and team with an explicit parent', asyn
   })
   await page.goto('/?test=master-data')
   await page.getByRole('tab', { name: '部门' }).click()
+  await page.getByRole('button', { name: '新增部门', exact: true }).click()
   await page.getByLabel('部门代码').fill('fixture-proc')
   await page.getByLabel('部门名称', { exact: true }).fill('Procurement')
-  await page.getByRole('button', { name: '新增部门' }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '新增部门' })
+    .click()
   await expect(page.getByLabel('编辑部门名称-fixture-proc')).toHaveValue(
     'Procurement',
   )
 
   await page.getByRole('tab', { name: '团队' }).click()
+  await page.getByRole('button', { name: '新增团队', exact: true }).click()
   await page.getByLabel('团队代码').fill('fixture-team')
   await page.getByLabel('团队名称', { exact: true }).fill('Site team')
-  await expect(page.getByRole('button', { name: '新增团队' })).toBeDisabled()
+  await expect(
+    page.getByRole('dialog').getByRole('button', { name: '新增团队' }),
+  ).toBeDisabled()
   await page.getByLabel('团队所属部门').click()
-  await page.getByText('Procurement', { exact: true }).last().click()
-  await page.getByRole('button', { name: '新增团队' }).click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('Procurement', { exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('团队所属部门').press('ArrowDown')
+  await page.getByLabel('团队所属部门').press('Enter')
+  await expect(
+    page.getByRole('dialog').getByRole('button', { name: '新增团队' }),
+  ).toBeEnabled()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '新增团队' })
+    .click()
   await expect(page.getByLabel('编辑团队名称-fixture-team')).toHaveValue(
     'Site team',
   )
@@ -856,6 +965,8 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
               image?: { squareCropBase64?: string }
             },
           ) {
+            if (command === 'search_catalog_page')
+              return Promise.resolve({ records: [], nextCursor: null })
             if (command === 'search_catalog') return Promise.resolve([])
             if (command === 'save_material') {
               Object.assign(window, {
@@ -971,6 +1082,8 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
               price?: { unitPriceMinor?: string }
             },
           ) {
+            if (command === 'search_catalog_page')
+              return Promise.resolve({ records: [material], nextCursor: null })
             if (command === 'search_catalog') return Promise.resolve([material])
             if (command === 'list_suppliers') return Promise.resolve([supplier])
             if (command === 'save_supplier') {
@@ -1100,6 +1213,10 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
               projectId?: string
             },
           ) {
+            if (command === 'search_catalog_page') {
+              Object.assign(window, { __catalogProjectId: args?.projectId })
+              return Promise.resolve({ records: [material], nextCursor: null })
+            }
             if (command === 'search_catalog') {
               Object.assign(window, { __catalogProjectId: args?.projectId })
               return Promise.resolve([material])
@@ -1137,13 +1254,16 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
   await page.getByRole('button', { name: '采购申请单', exact: true }).click()
-  await expect(
-    page.evaluate(
-      () =>
-        (window as Window & { __catalogProjectId?: string }).__catalogProjectId,
-    ),
-  ).resolves.toMatch(/^[0-9a-f-]{36}$/)
   await page.getByLabel('材料').click()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { __catalogProjectId?: string })
+            .__catalogProjectId,
+      ),
+    )
+    .toMatch(/^[0-9a-f-]{36}$/)
   await page.getByText('请购测试电缆 · RQ-01').click()
   await page.getByLabel('数量').fill('2.5')
   await page.getByLabel('行折扣（最小货币单位）').fill('125')
@@ -2710,6 +2830,8 @@ test('catalog details and Honsen draft can reach later quote pages', async ({
               draft?: unknown
             },
           ) {
+            if (command === 'search_catalog_page')
+              return Promise.resolve({ records: [material], nextCursor: null })
             if (command === 'search_catalog') return Promise.resolve([material])
             if (command === 'list_catalog_prices') {
               Object.assign(window, { __pagedProject: args?.projectId })

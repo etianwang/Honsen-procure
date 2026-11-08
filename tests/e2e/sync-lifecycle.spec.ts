@@ -190,6 +190,13 @@ test('authenticated online login pushes before pull and displays pending until a
   )
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
   await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
+    '上次同步成功',
+  )
+  await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
+    '待同步 0',
+  )
+  await page.locator('summary').filter({ hasText: '同步详情' }).click()
+  await expect(page.locator('.honsen-shell-sync details')).toContainText(
     '上次同步成功；新操作可能待同步',
   )
   expect(browserErrors).toEqual([])

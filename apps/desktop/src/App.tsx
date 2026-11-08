@@ -21,6 +21,7 @@ import {
 import { AuthFixturePage } from './pages/AuthFixturePage'
 import { CatalogFixturePage } from './pages/CatalogFixturePage'
 import { HomePage } from './pages/HomePage'
+import type { HistoryEntryRequest } from './components/RequisitionHistoryPanel'
 import { LoginPage } from './pages/LoginPage'
 import { MaterialsPage } from './pages/MaterialsPage'
 import { MasterDataPage } from './pages/MasterDataPage'
@@ -199,6 +200,9 @@ function App() {
   const isSyncConflictFixture =
     new URLSearchParams(window.location.search).get('test') === 'sync-conflict'
   const [page, setPage] = useState<AppPage>('home')
+  const [historyEntry, setHistoryEntry] = useState<
+    HistoryEntryRequest & { accountId?: string }
+  >()
   const [isPreviewOpen, setPreviewOpen] = useState(false)
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
   const [session, setSession] = useState<{
@@ -543,7 +547,22 @@ function App() {
               }
               projectId={authorizationContext?.projectId}
               onOpenMaterials={() => setPage('materials')}
-              onNewRequisition={() => setPage('requisition')}
+              onNewRequisition={() => {
+                setHistoryEntry(undefined)
+                setPage('requisition')
+              }}
+              onOpenHistory={(workflowStatus, orderId) => {
+                setHistoryEntry((current) => ({
+                  requestId: (current?.requestId ?? 0) + 1,
+                  accountId: session?.user_id,
+                  filter: {
+                    projectId: authorizationContext?.projectId,
+                    workflowStatus,
+                  },
+                  orderId,
+                }))
+                setPage('requisition')
+              }}
               onOpenExecution={() => setPage('execution')}
             />
           ) : page === 'materials' ? (
@@ -581,6 +600,12 @@ function App() {
             />
           ) : page === 'requisition' && requisitionContext ? (
             <RequisitionPage
+              historyEntry={
+                historyEntry?.accountId === session?.user_id &&
+                historyEntry?.filter.projectId === requisitionContext.projectId
+                  ? historyEntry
+                  : undefined
+              }
               key={`${requisitionContext.projectId}:${requisitionContext.departmentId}:${requisitionContext.teamId}`}
               api={
                 (

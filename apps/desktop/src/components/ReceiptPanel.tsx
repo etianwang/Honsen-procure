@@ -53,6 +53,7 @@ export function ReceiptPanel({
   useEffect(() => setStatus(statusText(initialStatus)), [initialStatus])
   const terminal = status === '已完成' || status === '已完成（有条件）'
   const [message, setMessage] = useState<ReceiptMessage | null>(null)
+  const [messageType, setMessageType] = useState<'success' | 'error'>('error')
   const [receivedCount, setReceivedCount] = useState(0)
   const submitting = useRef(false)
   const [busy, setBusy] = useState(false)
@@ -67,6 +68,7 @@ export function ReceiptPanel({
         unit: line.unit,
       }))
     if (!items.length) {
+      setMessageType('error')
       setMessage('至少填写一条实收数量。')
       return
     }
@@ -91,9 +93,11 @@ export function ReceiptPanel({
       )
       setReceivedCount(receipt.receivedItemCount)
       setQuantities(Object.fromEntries(lines.map((line) => [line.id, ''])))
+      setMessageType('success')
       setMessage('收货已登记，共 {count} 条明细。')
       onChanged?.()
     } catch {
+      setMessageType('error')
       setMessage('收货失败：超收必须填写原因，且订单必须处于可收货状态。')
     } finally {
       submitting.current = false
@@ -104,6 +108,7 @@ export function ReceiptPanel({
   async function closeWithConditions() {
     if (submitting.current || terminal) return
     if (!closeReason.trim()) {
+      setMessageType('error')
       setMessage('有条件完成原因必填。')
       return
     }
@@ -112,9 +117,11 @@ export function ReceiptPanel({
     try {
       await api.closeSupplierOrderWithConditions(orderId, closeReason.trim())
       setStatus('已完成（有条件）')
+      setMessageType('success')
       setMessage('订单已按有条件完成关闭，原因已写入审计。')
       onChanged?.()
     } catch {
+      setMessageType('error')
       setMessage('关闭失败：订单必须处于可有条件关闭的状态。')
     } finally {
       submitting.current = false
@@ -133,7 +140,8 @@ export function ReceiptPanel({
       {message ? (
         <Alert
           title={t(message).replace('{count}', String(receivedCount))}
-          type="info"
+          type={messageType}
+          role={messageType === 'error' ? 'alert' : 'status'}
           showIcon
         />
       ) : null}
