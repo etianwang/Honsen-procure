@@ -1,5 +1,5 @@
 import { ManagedAccountEditor } from '../components/ManagedAccountEditor'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ManagedAccountForm } from '../components/ManagedAccountForm'
 import {
   accountScopeNames,
@@ -30,6 +30,35 @@ function invoke<T>(command: string, args?: object) {
     : Promise.reject(new Error('Desktop required'))
 }
 
+const feedback = {
+  notFound: [
+    '未找到该账号。请检查用户名，或切换到创建账号。',
+    'Account not found. Check the username or switch to account creation.',
+    'Compte introuvable. Vérifiez le nom ou passez à la création.',
+  ],
+  loaded: [
+    '已读取云端授权范围。',
+    'Cloud authorization scopes loaded.',
+    'Périmètres serveur chargés.',
+  ],
+  lookupFailed: [
+    '查询失败。请检查在线连接、登录状态与管理权限。',
+    'Lookup failed. Check the connection, sign-in and management permissions.',
+    'Échec de recherche. Vérifiez la connexion et les droits de gestion.',
+  ],
+  unconfirmed: [
+    '云端操作未确认；请重新查询账号确认最终状态。',
+    'Cloud operation not confirmed. Search the account again to verify the final state.',
+    'Opération non confirmée. Recherchez à nouveau le compte pour vérifier son état.',
+  ],
+  revoked: ['授权已撤销。', 'Authorization revoked.', 'Autorisation révoquée.'],
+  assigned: [
+    '授权已分配或更新。',
+    'Authorization assigned or updated.',
+    'Autorisation attribuée ou modifiée.',
+  ],
+} as const
+
 export function AuthorizationManagementPage({
   role = 'administrator',
 }: {
@@ -45,8 +74,10 @@ export function AuthorizationManagementPage({
   const [scope, setScope] = useState<AccountScope>(emptyAccountScope)
   const [editing, setEditing] = useState<Binding | null>(null)
   const [busy, setBusy] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const searchPending = useRef(false)
   const [wizardBusy, setWizardBusy] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState<keyof typeof feedback | ''>('')
   const [rawOptions, setOptions] = useState<AccountScopeOptions>({
     records: [],
     allowed: [],
@@ -103,6 +134,9 @@ export function AuthorizationManagementPage({
     setScope(emptyAccountScope)
   }
   const search = async () => {
+    if (searchPending.current) return
+    searchPending.current = true
+    setSearching(true)
     setBusy(true)
     setMessage('')
     setBindings([])
@@ -114,13 +148,7 @@ export function AuthorizationManagementPage({
         username,
       })
       if (!accounts.length) {
-        setMessage(
-          t(
-            '未找到该账号。请检查用户名，或切换到创建账号。',
-            'Account not found. Check the username or switch to account creation.',
-            'Compte introuvable. Vérifiez le nom ou passez à la création.',
-          ),
-        )
+        setMessage('notFound')
         return
       }
       const selected = accounts[0]
@@ -129,22 +157,12 @@ export function AuthorizationManagementPage({
       })
       setAccount(selected)
       setBindings(result)
-      setMessage(
-        t(
-          '已读取云端授权范围。',
-          'Cloud authorization scopes loaded.',
-          'Périmètres serveur chargés.',
-        ),
-      )
+      setMessage('loaded')
     } catch {
-      setMessage(
-        t(
-          '查询失败。请检查在线连接、登录状态与管理权限。',
-          'Lookup failed. Check the connection, sign-in and management permissions.',
-          'Échec de recherche. Vérifiez la connexion et les droits de gestion.',
-        ),
-      )
+      setMessage('lookupFailed')
     } finally {
+      searchPending.current = false
+      setSearching(false)
       setBusy(false)
     }
   }
@@ -198,31 +216,13 @@ export function AuthorizationManagementPage({
       )
       setEditing(null)
       setScope(emptyAccountScope)
-      setMessage(
-        revoke
-          ? t(
-              '授权已撤销。',
-              'Authorization revoked.',
-              'Autorisation révoquée.',
-            )
-          : t(
-              '授权已分配或更新。',
-              'Authorization assigned or updated.',
-              'Autorisation attribuée ou modifiée.',
-            ),
-      )
+      setMessage(revoke ? 'revoked' : 'assigned')
     } catch {
       setAccount(null)
       setBindings([])
       setEditing(null)
       setScope(emptyAccountScope)
-      setMessage(
-        t(
-          '云端操作未确认；请重新查询账号确认最终状态。',
-          'Cloud operation not confirmed. Search the account again to verify the final state.',
-          'Opération non confirmée. Recherchez à nouveau le compte pour vérifier son état.',
-        ),
-      )
+      setMessage('unconfirmed')
     } finally {
       setBusy(false)
     }
@@ -344,9 +344,11 @@ export function AuthorizationManagementPage({
                   value={username}
                   maxLength={100}
                   autoComplete="off"
+                  aria-describedby="managed-account-search-feedback"
                   disabled={busy}
                   onChange={(e) => {
                     setUsername(e.target.value)
+                    setMessage('')
                     setAccount(null)
                     setBindings([])
                     setEditing(null)
@@ -355,17 +357,40 @@ export function AuthorizationManagementPage({
                 />
               </label>
               <button
+                aria-busy={searching}
+                aria-describedby="managed-account-search-feedback"
                 disabled={
                   busy || !username.trim() || username.trim() !== username
                 }
               >
-                {t(
-                  '查询账号授权',
-                  'Find account authorization',
-                  'Rechercher les autorisations',
-                )}
+                {searching
+                  ? t('正在查询…', 'Searching…', 'Recherche…')
+                  : t(
+                      '查询账号授权',
+                      'Find account authorization',
+                      'Rechercher les autorisations',
+                    )}
               </button>
             </form>
+            <p
+              id="managed-account-search-feedback"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {searching
+                ? t(
+                    '正在查询账号授权，请稍候。',
+                    'Loading account authorization. Please wait.',
+                    'Chargement des autorisations du compte. Veuillez patienter.',
+                  )
+                : (message === 'loaded' ||
+                    message === 'notFound' ||
+                    message === 'lookupFailed') &&
+                  feedback[message][
+                    locale === 'zh' ? 0 : locale === 'fr' ? 2 : 1
+                  ]}
+            </p>
             {account && (
               <>
                 <ManagedAccountEditor
@@ -490,9 +515,15 @@ export function AuthorizationManagementPage({
                 </fieldset>
               </>
             )}
-            {message && (
+            {(message === 'revoked' ||
+              message === 'assigned' ||
+              message === 'unconfirmed') && (
               <p role="status" aria-live="polite">
-                {message}
+                {
+                  feedback[message][
+                    locale === 'zh' ? 0 : locale === 'fr' ? 2 : 1
+                  ]
+                }
               </p>
             )}
           </>

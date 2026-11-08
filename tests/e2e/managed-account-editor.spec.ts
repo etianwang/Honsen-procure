@@ -1,5 +1,69 @@
 import { expect, test, type Page } from '@playwright/test'
 
+test('account reload and saving show pending states and translate retained failure', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await mount(page)
+  await page
+    .getByLabel('Display name', { exact: true })
+    .fill('Synthetic retained edit')
+  await page.evaluate(() => {
+    const host = window as Window & {
+      __TAURI__: {
+        core: { invoke: (command: string, args?: object) => Promise<unknown> }
+      }
+      __finishAccountRequest?: (fail: boolean) => void
+    }
+    const original = host.__TAURI__.core.invoke
+    host.__TAURI__.core.invoke = (command, args) =>
+      new Promise((resolve, reject) => {
+        host.__finishAccountRequest = (fail) =>
+          fail
+            ? reject(new Error('Synthetic offline'))
+            : resolve(original(command, args))
+      })
+  })
+  await page
+    .getByRole('button', { name: 'Save account settings', exact: true })
+    .click()
+  await expect(page.getByRole('status')).toContainText('Saving account')
+  await expect(page.getByLabel('Display name', { exact: true })).toBeDisabled()
+  await page.evaluate(() =>
+    (
+      window as Window & { __finishAccountRequest?: (fail: boolean) => void }
+    ).__finishAccountRequest?.(true),
+  )
+  await expect(page.getByRole('status')).toContainText('Unable to save')
+  await page.evaluate(async () => {
+    const path = '/src/lib/ui-locale.ts'
+    ;(await import(path)).setUiLocale('fr')
+  })
+  await expect(page.getByRole('status')).toContainText(
+    'Enregistrement impossible',
+  )
+  await expect(page.getByLabel('Nom affiché', { exact: true })).toHaveValue(
+    'Synthetic retained edit',
+  )
+  await page
+    .getByRole('button', { name: 'Recharger le compte', exact: true })
+    .click()
+  await expect(page.getByRole('status')).toContainText('Chargement du compte')
+  await expect(
+    page.getByRole('button', { name: 'Recharger le compte', exact: true }),
+  ).toBeDisabled()
+  await page.evaluate(() =>
+    (
+      window as Window & { __finishAccountRequest?: (fail: boolean) => void }
+    ).__finishAccountRequest?.(false),
+  )
+  await expect(page.getByLabel('Nom affiché', { exact: true })).toHaveValue(
+    'Synthetic',
+  )
+  expect(errors).toEqual([])
+})
+
 async function mount(page: Page, protectedAccount = false) {
   await page.goto('/')
   await page.evaluate(async (protectedAccount) => {

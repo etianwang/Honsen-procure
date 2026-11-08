@@ -1,5 +1,93 @@
 import { expect, test } from '@playwright/test'
 
+for (const explicitLocale of [undefined, 'fr-FR'] as const) {
+  test(`conflict loading disables refresh and partial failure never announces empty explicit=${explicitLocale}`, async ({
+    page,
+  }) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await page.goto('/')
+    await page.evaluate(async (explicitLocale) => {
+      const load = (path: string) => import(/* @vite-ignore */ path)
+      const React = await load('/node_modules/.vite/deps/react.js')
+      const DOM = await load('/node_modules/.vite/deps/react-dom_client.js')
+      const { SyncConflictPanel } = await load(
+        '/src/components/SyncConflictPanel.tsx',
+      )
+      const { setUiLocale } = await load('/src/lib/ui-locale.ts')
+      setUiLocale(explicitLocale ? 'zh' : 'en')
+      const host = window as Window & {
+        __conflictCalls?: number
+        __finishLocal?: () => void
+        __failPayment?: () => void
+      }
+      host.__conflictCalls = 0
+      const api = {
+        listSyncConflicts: () => {
+          host.__conflictCalls = (host.__conflictCalls ?? 0) + 1
+          return new Promise((resolve) => {
+            host.__finishLocal = () => resolve([])
+          })
+        },
+        listPaymentSyncConflicts: () =>
+          new Promise((_resolve, reject) => {
+            host.__failPayment = () => reject(new Error('Synthetic offline'))
+          }),
+      }
+      const target = document.createElement('div')
+      const createRoot = DOM.createRoot ?? DOM.default.createRoot
+      const createElement = React.createElement ?? React.default.createElement
+      document.body.replaceChildren(target)
+      createRoot(target).render(
+        createElement(SyncConflictPanel, {
+          api,
+          locale: explicitLocale,
+        }),
+      )
+    }, explicitLocale)
+    await expect(page.getByRole('status')).toContainText(
+      explicitLocale ? 'Chargement des conflits' : 'Loading sync conflicts',
+    )
+    if (explicitLocale) {
+      await expect(
+        page.getByRole('heading', { name: 'Conflits de synchronisation' }),
+      ).toBeVisible()
+      await expect(
+        page.getByLabel('Motif de résolution', { exact: true }),
+      ).toBeVisible()
+    }
+    await expect(
+      page.locator('.sync-conflict-panel button').first(),
+    ).toBeDisabled()
+    await page.evaluate(async () => {
+      const path = '/src/lib/ui-locale.ts'
+      ;(await import(path)).setUiLocale('fr')
+    })
+    await expect(page.getByRole('status')).toContainText(
+      'Chargement des conflits',
+    )
+    await page.evaluate(() => {
+      const host = window as Window & {
+        __finishLocal?: () => void
+        __failPayment?: () => void
+      }
+      host.__finishLocal?.()
+      host.__failPayment?.()
+    })
+    await expect(
+      page.locator('.sync-conflict-panel button').first(),
+    ).toBeEnabled()
+    await expect(page.locator('.conflict-empty')).toHaveCount(0)
+    await expect(page.locator('.conflict-feedback')).not.toBeEmpty()
+    expect(
+      await page.evaluate(
+        () => (window as Window & { __conflictCalls?: number }).__conflictCalls,
+      ),
+    ).toBe(1)
+    expect(errors).toEqual([])
+  })
+}
+
 for (const previouslyLoaded of [false, true]) {
   test(`partial conflict read failure never masquerades as empty previous=${previouslyLoaded}`, async ({
     page,

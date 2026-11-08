@@ -1,5 +1,67 @@
 import { expect, test, type Page } from '@playwright/test'
 
+test('existing account lookup reports pending and failures next to its controls in the active language', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await openAccounts(page)
+  await page.getByRole('button', { name: '管理已有账号', exact: true }).click()
+  await page.evaluate(() => {
+    const host = window as Window & {
+      __TAURI__: {
+        core: { invoke: (command: string, args?: object) => Promise<unknown> }
+      }
+      __rejectLookup?: () => void
+      __lookupCount?: number
+    }
+    const original = host.__TAURI__.core.invoke
+    host.__lookupCount = 0
+    host.__TAURI__.core.invoke = (command, args) => {
+      if (command !== 'find_managed_accounts') return original(command, args)
+      host.__lookupCount = (host.__lookupCount ?? 0) + 1
+      return new Promise((_resolve, reject) => {
+        host.__rejectLookup = () => reject(new Error('Synthetic offline'))
+      })
+    }
+  })
+  await page.getByLabel('查找用户名', { exact: true }).fill('SyntheticLookup')
+  await page.getByRole('button', { name: '查询账号授权', exact: true }).click()
+  await expect(page.locator('#managed-account-search-feedback')).toContainText(
+    '正在查询账号授权',
+  )
+  await expect(
+    page.getByRole('button', { name: '正在查询…', exact: true }),
+  ).toBeDisabled()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.locator('#managed-account-search-feedback')).toContainText(
+    'Loading account authorization',
+  )
+  await page.evaluate(() =>
+    (window as Window & { __rejectLookup?: () => void }).__rejectLookup?.(),
+  )
+  await expect(page.locator('#managed-account-search-feedback')).toContainText(
+    'Lookup failed',
+  )
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.locator('#managed-account-search-feedback')).toContainText(
+    'Échec de recherche',
+  )
+  await expect(
+    page.getByLabel('Rechercher un utilisateur', { exact: true }),
+  ).toHaveValue('SyntheticLookup')
+  await page
+    .getByLabel('Rechercher un utilisateur', { exact: true })
+    .fill('ChangedLookup')
+  await expect(page.locator('#managed-account-search-feedback')).toBeEmpty()
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __lookupCount?: number }).__lookupCount,
+    ),
+  ).toBe(1)
+  expect(errors).toEqual([])
+})
+
 test('username check gives immediate local feedback and preserves form on retry', async ({
   page,
 }) => {
@@ -178,7 +240,10 @@ test('first-login password change blocks business effects and returns to login',
                 roles: ['engineer'],
                 requires_password_change: true,
               }
-            if (command === 'change_account_password') return undefined
+            if (command === 'change_account_password')
+              return new Promise<void>((resolve) =>
+                Object.assign(window, { __finishPasswordChange: resolve }),
+              )
             throw new Error(`Unexpected ${command}`)
           },
         },
@@ -204,6 +269,13 @@ test('first-login password change blocks business effects and returns to login',
   await page.getByLabel('当前密码').fill('synthetic-temporary')
   await page.getByLabel('新密码（至少12位）').fill('synthetic-replacement')
   await page.getByRole('button', { name: '修改并重新登录' }).click()
+  await expect(page.getByLabel('当前密码')).toBeDisabled()
+  await expect(page.getByRole('status')).toContainText('正在修改密码')
+  await page.evaluate(() =>
+    (
+      window as Window & { __finishPasswordChange?: () => void }
+    ).__finishPasswordChange?.(),
+  )
   await expect(
     page.getByRole('heading', { name: '登录 HONSEN Procure' }),
   ).toBeVisible()

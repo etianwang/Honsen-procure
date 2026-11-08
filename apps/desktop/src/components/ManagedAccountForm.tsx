@@ -47,44 +47,58 @@ export function RequiredPasswordChange({
           'Changez votre mot de passe pour continuer',
         )}
       </h2>
-      <label>
-        {t('当前密码', 'Current password', 'Mot de passe actuel')}
-        <input
-          type="password"
-          autoComplete="current-password"
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-          required
-          maxLength={1024}
-        />
-      </label>
-      <label>
-        {t(
-          '新密码（至少12位）',
-          'New password (at least 12 characters)',
-          'Nouveau mot de passe (12 caractères minimum)',
-        )}
-        <input
-          type="password"
-          autoComplete="new-password"
-          value={replacement}
-          onChange={(e) => setReplacement(e.target.value)}
-          required
-          minLength={12}
-          maxLength={1024}
-        />
-      </label>
-      <button
-        disabled={
-          busy || replacement.length < 12 || !current || current === replacement
-        }
-      >
-        {t(
-          '修改并重新登录',
-          'Change and sign in again',
-          'Modifier et se reconnecter',
-        )}
-      </button>
+      <fieldset disabled={busy}>
+        <label>
+          {t('当前密码', 'Current password', 'Mot de passe actuel')}
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            required
+            maxLength={1024}
+          />
+        </label>
+        <label>
+          {t(
+            '新密码（至少12位）',
+            'New password (at least 12 characters)',
+            'Nouveau mot de passe (12 caractères minimum)',
+          )}
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={replacement}
+            onChange={(e) => setReplacement(e.target.value)}
+            required
+            minLength={12}
+            maxLength={1024}
+          />
+        </label>
+        <button
+          disabled={
+            busy ||
+            replacement.length < 12 ||
+            !current ||
+            current === replacement
+          }
+        >
+          {t(
+            '修改并重新登录',
+            'Change and sign in again',
+            'Modifier et se reconnecter',
+          )}
+        </button>
+      </fieldset>
+      {busy && (
+        <p role="status" aria-live="polite">
+          {t(
+            '正在修改密码…',
+            'Changing password…',
+            'Modification du mot de passe…',
+          )}
+        </p>
+      )}
       {error && (
         <p role="alert">
           {t(

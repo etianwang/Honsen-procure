@@ -1,5 +1,21 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '供应商表格，可横向滚动': [
+    'Suppliers table; scroll horizontally',
+    'Tableau des fournisseurs ; défilement horizontal',
+  ],
+  '搜索名称、编码、型号或规格；空格组合关键词': [
+    'Search name, SKU, model or specification; combine keywords with spaces',
+    'Rechercher nom, référence, modèle ou spécification ; séparer les mots par des espaces',
+  ],
+  当前页材料: ['Materials on this page', 'Matériaux de cette page'],
+  当前页: ['Page', 'Page'],
+  材料分页: ['Material pages', 'Pages des matériaux'],
+  重试: ['Retry', 'Réessayer'],
+  '材料表格，可横向滚动': [
+    'Materials table; scroll horizontally',
+    'Tableau des matériaux ; défilement horizontal',
+  ],
   显示停用材料: [
     'Show inactive materials',
     'Afficher les matériaux désactivés',

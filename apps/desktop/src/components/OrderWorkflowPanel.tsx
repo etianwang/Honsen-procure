@@ -6,7 +6,7 @@ import {
 } from '../lib/workflow-messages'
 import { Alert, Button, Card, Input, Space } from 'antd'
 import { Check, MessageSquare, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
   OrderAuditView,
   OrderCommentView,
@@ -37,6 +37,9 @@ export function OrderWorkflowPanel({
   const [comment, setComment] = useState('')
   const [comments, setComments] = useState<OrderCommentView[]>([])
   const [audits, setAudits] = useState<OrderAuditView[]>([])
+  const requestPending = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [messageType, setMessageType] = useState<'success' | 'error'>('error')
   const [message, setMessage] = useState<WorkflowMessage | number | null>(null)
 
   useEffect(() => {
@@ -51,41 +54,68 @@ export function OrderWorkflowPanel({
   }, [api, orderId])
 
   async function confirm() {
+    if (requestPending.current) return
+    setMessageType('error')
+    requestPending.current = true
+    setBusy(true)
+    setMessage(null)
     try {
       await api.confirmRequisition(orderId)
+      setMessageType('success')
       setStatus('confirmed')
       setMessage('订单已确认，审批记录已写入审计。')
       onChanged?.()
     } catch {
       setMessage('确认失败：不能确认自己的订单或当前状态不允许确认。')
+    } finally {
+      requestPending.current = false
+      setBusy(false)
     }
   }
 
   async function reject() {
+    if (requestPending.current) return
+    setMessageType('error')
     if (!reason.trim()) {
       setMessage('驳回原因必填。')
       return
     }
+    requestPending.current = true
+    setBusy(true)
+    setMessage(null)
     try {
       await api.rejectRequisition(orderId, reason.trim())
+      setMessageType('success')
       setStatus('rejected')
       setMessage('订单已驳回，申请人可修改后重新提交。')
       onRejected?.()
       onChanged?.()
     } catch {
       setMessage('驳回失败，请稍后重试。')
+    } finally {
+      requestPending.current = false
+      setBusy(false)
     }
   }
 
   async function sendComment() {
+    if (requestPending.current) return
+    setMessageType('error')
     if (!comment.trim()) return
+    requestPending.current = true
+    setBusy(true)
+    setMessage(null)
     try {
       const saved = await api.addOrderComment(orderId, comment.trim())
+      setMessageType('success')
       setComments((current) => [...current, saved])
       setComment('')
       setMessage(saved.notificationCount)
     } catch {
       setMessage('评论发送失败。')
+    } finally {
+      requestPending.current = false
+      setBusy(false)
     }
   }
 
@@ -123,26 +153,39 @@ export function OrderWorkflowPanel({
               ? commentSentText(locale, message)
               : t(message)
           }
-          type="info"
+          type={messageType}
+          role={messageType === 'error' ? 'alert' : 'status'}
           showIcon
         />
       ) : null}
       {canApprove && status === 'pending_confirmation' ? (
         <Space className="workflow-actions" wrap>
           <Button
+            disabled={busy}
+            loading={busy}
             type="primary"
             icon={<Check size={16} />}
             onClick={() => void confirm()}
           >
             {t('确认订单')}
           </Button>
-          <Input
-            aria-label={t('驳回原因')}
-            placeholder={t('填写驳回原因（必填）')}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-          <Button danger icon={<X size={16} />} onClick={() => void reject()}>
+          <label>
+            {t('驳回原因')}
+            <Input
+              disabled={busy}
+              aria-label={t('驳回原因')}
+              placeholder={t('填写驳回原因（必填）')}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </label>
+          <Button
+            disabled={busy}
+            loading={busy}
+            danger
+            icon={<X size={16} />}
+            onClick={() => void reject()}
+          >
             {t('驳回订单')}
           </Button>
         </Space>
@@ -218,13 +261,20 @@ export function OrderWorkflowPanel({
         <label>
           {t('留言（支持 @某人）')}
           <Input.TextArea
+            disabled={busy}
             aria-label={t('留言（支持 @某人）')}
             maxLength={4000}
             value={comment}
             onChange={(event) => setComment(event.target.value)}
           />
         </label>
-        <Button onClick={() => void sendComment()}>{t('发送评论')}</Button>
+        <Button
+          disabled={busy}
+          loading={busy}
+          onClick={() => void sendComment()}
+        >
+          {t('发送评论')}
+        </Button>
       </section>
     </Card>
   )

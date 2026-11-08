@@ -5860,8 +5860,25 @@ impl LocalAuthService {
         after: Option<CatalogSearchCursor>,
         now: SystemTime,
     ) -> Result<CatalogSearchPage, AuthError> {
-        let mut records =
-            self.search_catalog_window(query, project_id, false, after.as_ref(), true, now)?;
+        self.search_catalog_page_with_inactive(query, project_id, after, false, now)
+    }
+
+    pub fn search_catalog_page_with_inactive(
+        &self,
+        query: &str,
+        project_id: Option<Uuid>,
+        after: Option<CatalogSearchCursor>,
+        include_inactive: bool,
+        now: SystemTime,
+    ) -> Result<CatalogSearchPage, AuthError> {
+        let mut records = self.search_catalog_window(
+            query,
+            project_id,
+            include_inactive,
+            after.as_ref(),
+            true,
+            now,
+        )?;
         let has_more = records.len() > 50;
         records.truncate(50);
         let next_cursor = if has_more {
@@ -8418,9 +8435,16 @@ pub mod commands {
         query: String,
         project_id: Option<Uuid>,
         after: Option<super::CatalogSearchCursor>,
+        include_inactive: Option<bool>,
     ) -> Result<super::CatalogSearchPage, CommandError> {
-        auth.search_catalog_page(&query, project_id, after, SystemTime::now())
-            .map_err(Into::into)
+        auth.search_catalog_page_with_inactive(
+            &query,
+            project_id,
+            after,
+            include_inactive.unwrap_or(false),
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
     }
 
     #[tauri::command]

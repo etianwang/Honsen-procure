@@ -11,7 +11,7 @@ import {
   Modal,
 } from 'antd'
 import { FormField } from './FormField'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   MasterDataApi,
   ReferenceMasterDataView,
@@ -870,6 +870,53 @@ function UnitEditor({
   )
 }
 
+function useReferenceCreate(
+  save: (item: ReferenceMasterDataView) => Promise<boolean>,
+) {
+  const inFlight = useRef(false)
+  const [state, setState] = useState<'idle' | 'pending' | 'success' | 'error'>(
+    'idle',
+  )
+  async function create(record: () => ReferenceMasterDataView) {
+    if (inFlight.current) return
+    inFlight.current = true
+    setState('pending')
+    try {
+      const saved = await save(record())
+      setState(saved ? 'success' : 'error')
+      return saved
+    } catch {
+      setState('error')
+    } finally {
+      inFlight.current = false
+    }
+  }
+  return { pending: state === 'pending', state, create }
+}
+
+function ReferenceCreateNotice({
+  state,
+}: {
+  state: 'idle' | 'pending' | 'success' | 'error'
+}) {
+  const t = useMasterText()
+  if (state === 'idle') return null
+  return (
+    <Alert
+      role={state === 'error' ? 'alert' : 'status'}
+      type={state === 'pending' ? 'info' : state}
+      showIcon
+      title={t(
+        state === 'pending'
+          ? '正在保存，请稍候'
+          : state === 'success'
+            ? '基础资料已保存；等待同步确认'
+            : '保存被拒绝，请检查权限或关联资料',
+      )}
+    />
+  )
+}
+
 function CountryEditor({
   countries,
   canEdit,
@@ -882,56 +929,86 @@ function CountryEditor({
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
+  const creation = useReferenceCreate(save)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [timeZone, setTimeZone] = useState('Africa/Abidjan')
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
+      <p>{t('填写所有必填字段后即可保存')}</p>
       <Space wrap>
-        <FormField id="MasterDataManager-field-1" label={t('国家代码')}>
+        <FormField
+          id="MasterDataManager-field-1"
+          label={t('国家代码')}
+          required
+        >
           <Input
             aria-label={t('国家代码')}
             value={code}
             onChange={(event) => setCode(event.target.value)}
             placeholder={t('国家代码')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
-        <FormField id="MasterDataManager-field-2" label={t('国家名称')}>
+        <FormField
+          id="MasterDataManager-field-2"
+          label={t('国家名称')}
+          required
+        >
           <Input
             aria-label={t('国家名称')}
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder={t('国家名称')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
-        <FormField id="MasterDataManager-field-3" label={t('国家时区')}>
+        <FormField
+          id="MasterDataManager-field-3"
+          label={t('国家时区')}
+          required
+        >
           <Input
             aria-label={t('国家时区')}
             value={timeZone}
             onChange={(event) => setTimeZone(event.target.value)}
             placeholder={t('时区')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
         <Button
-          disabled={!canEdit}
+          type="primary"
+          loading={creation.pending}
+          disabled={
+            !canEdit ||
+            creation.pending ||
+            !code.trim() ||
+            !name.trim() ||
+            !timeZone.trim()
+          }
           onClick={() =>
-            void save({
-              kind: 'country',
-              id: newId(),
-              business_code: code,
-              name,
-              time_zone: timeZone,
-              is_active: true,
-              version: 1,
-            })
+            void creation
+              .create(() => ({
+                kind: 'country',
+                id: newId(),
+                business_code: code,
+                name,
+                time_zone: timeZone,
+                is_active: true,
+                version: 1,
+              }))
+              .then((saved) => {
+                if (saved) {
+                  setCode('')
+                  setName('')
+                }
+              })
           }
         >
           {t('新增国家')}
         </Button>
       </Space>
+      <ReferenceCreateNotice state={creation.state} />
       <Table
         rowKey="id"
         pagination={false}
@@ -1005,6 +1082,7 @@ function ProjectEditor({
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
+  const creation = useReferenceCreate(save)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [countryId, setCountryId] = useState('')
@@ -1014,14 +1092,19 @@ function ProjectEditor({
   const [language, setLanguage] = useState<'zh_fr' | 'zh_en'>('zh_fr')
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
+      <p>{t('填写所有必填字段后即可保存')}</p>
       <Space wrap>
-        <FormField id="MasterDataManager-field-4" label={t('项目代码')}>
+        <FormField
+          id="MasterDataManager-field-4"
+          label={t('项目代码')}
+          required
+        >
           <Input
             aria-label={t('项目代码')}
             value={code}
             onChange={(event) => setCode(event.target.value)}
             placeholder={t('项目代码')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
         <FormField id="MasterDataManager-field-5" label={t('项目默认币种')}>
@@ -1033,7 +1116,7 @@ function ProjectEditor({
               value,
               label: value,
             }))}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
         <FormField id="MasterDataManager-field-6" label={t('项目默认语言')}>
@@ -1045,19 +1128,27 @@ function ProjectEditor({
               { value: 'zh_fr', label: t('中文 + 法语') },
               { value: 'zh_en', label: t('中文 + 英文') },
             ]}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
-        <FormField id="MasterDataManager-field-7" label={t('项目名称')}>
+        <FormField
+          id="MasterDataManager-field-7"
+          label={t('项目名称')}
+          required
+        >
           <Input
             aria-label={t('项目名称')}
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder={t('项目名称')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
-        <FormField id="MasterDataManager-field-8" label={t('项目国家')}>
+        <FormField
+          id="MasterDataManager-field-8"
+          label={t('项目国家')}
+          required
+        >
           <Select
             aria-label={t('项目国家')}
             value={countryId || undefined}
@@ -1065,49 +1156,75 @@ function ProjectEditor({
             options={countries
               .filter((country) => country.is_active)
               .map((country) => ({ value: country.id, label: country.name }))}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
             placeholder={t('选择国家')}
           />
         </FormField>
-        <FormField id="MasterDataManager-field-9" label={t('项目默认站点')}>
+        <FormField
+          id="MasterDataManager-field-9"
+          label={t('项目默认站点')}
+          required
+        >
           <Input
             aria-label={t('项目默认站点')}
             value={site}
             onChange={(event) => setSite(event.target.value)}
             placeholder={t('默认站点')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
-        <FormField id="MasterDataManager-field-10" label={t('项目部门')}>
+        <FormField
+          id="MasterDataManager-field-10"
+          label={t('项目部门')}
+          required
+        >
           <Input
             aria-label={t('项目部门')}
             value={department}
             onChange={(event) => setDepartment(event.target.value)}
             placeholder={t('部门')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
         <Button
-          disabled={!canEdit}
+          type="primary"
+          loading={creation.pending}
+          disabled={
+            !canEdit ||
+            creation.pending ||
+            !code.trim() ||
+            !name.trim() ||
+            !countryId ||
+            !site.trim() ||
+            !department.trim()
+          }
           onClick={() =>
-            void save({
-              kind: 'project',
-              id: newId(),
-              country_id: countryId,
-              business_code: code,
-              name,
-              site,
-              department_name: department,
-              default_currency: currency,
-              default_language_pair: language,
-              is_active: true,
-              version: 1,
-            })
+            void creation
+              .create(() => ({
+                kind: 'project',
+                id: newId(),
+                country_id: countryId,
+                business_code: code,
+                name,
+                site,
+                department_name: department,
+                default_currency: currency,
+                default_language_pair: language,
+                is_active: true,
+                version: 1,
+              }))
+              .then((saved) => {
+                if (saved) {
+                  setCode('')
+                  setName('')
+                }
+              })
           }
         >
           {t('新增项目')}
         </Button>
       </Space>
+      <ReferenceCreateNotice state={creation.state} />
       <Table
         rowKey="id"
         pagination={false}
@@ -1232,31 +1349,45 @@ function SiteEditor({
   status: (item: ReferenceMasterDataView) => ReactNode
 }) {
   const t = useMasterText()
+  const creation = useReferenceCreate(save)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [projectId, setProjectId] = useState('')
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
+      <p>{t('填写所有必填字段后即可保存')}</p>
       <Space wrap>
-        <FormField id="MasterDataManager-field-11" label={t('站点代码')}>
+        <FormField
+          id="MasterDataManager-field-11"
+          label={t('站点代码')}
+          required
+        >
           <Input
             aria-label={t('站点代码')}
             value={code}
             onChange={(event) => setCode(event.target.value)}
             placeholder={t('站点代码')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
-        <FormField id="MasterDataManager-field-12" label={t('站点名称')}>
+        <FormField
+          id="MasterDataManager-field-12"
+          label={t('站点名称')}
+          required
+        >
           <Input
             aria-label={t('站点名称')}
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder={t('站点名称')}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
           />
         </FormField>
-        <FormField id="MasterDataManager-field-13" label={t('站点项目')}>
+        <FormField
+          id="MasterDataManager-field-13"
+          label={t('站点项目')}
+          required
+        >
           <Select
             aria-label={t('站点项目')}
             value={projectId || undefined}
@@ -1264,27 +1395,43 @@ function SiteEditor({
             options={projects
               .filter((project) => project.is_active)
               .map((project) => ({ value: project.id, label: project.name }))}
-            disabled={!canEdit}
+            disabled={!canEdit || creation.pending}
             placeholder={t('选择项目')}
           />
         </FormField>
         <Button
-          disabled={!canEdit}
+          type="primary"
+          loading={creation.pending}
+          disabled={
+            !canEdit ||
+            creation.pending ||
+            !code.trim() ||
+            !name.trim() ||
+            !projectId
+          }
           onClick={() =>
-            void save({
-              kind: 'site',
-              id: newId(),
-              project_id: projectId,
-              business_code: code,
-              name,
-              is_active: true,
-              version: 1,
-            })
+            void creation
+              .create(() => ({
+                kind: 'site',
+                id: newId(),
+                project_id: projectId,
+                business_code: code,
+                name,
+                is_active: true,
+                version: 1,
+              }))
+              .then((saved) => {
+                if (saved) {
+                  setCode('')
+                  setName('')
+                }
+              })
           }
         >
           {t('新增站点')}
         </Button>
       </Space>
+      <ReferenceCreateNotice state={creation.state} />
       <Table
         rowKey="id"
         pagination={false}

@@ -558,3 +558,73 @@ fn material_picker_pages_multilingual_combinations_and_bounds_without_mutation()
             .is_err()
     );
 }
+
+#[test]
+fn material_catalog_inactive_pagination_requires_maintenance_role_and_preserves_read_only_state() {
+    let (service, _, now) = fixture(Role::Purchaser);
+    let mut connection = service.connection.lock().unwrap();
+    let transaction = connection.transaction().unwrap();
+    for index in 0..140 {
+        transaction.execute("INSERT INTO local_materials(id,sku,name_zh,name_fr,name_en,aliases_json,model,specification,unit,is_active,version) VALUES(?1,?2,?3,'Matériau','Material','[]','M','S','pcs',?4,1)", params![Uuid::new_v4().to_string(),format!("CAT-{index:03}"),format!("材料{index:03}"),index<120]).unwrap();
+    }
+    transaction.commit().unwrap();
+    let before: i64 = connection
+        .query_row("SELECT COUNT(*) FROM local_sync_outbox", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    drop(connection);
+    for (include_inactive, expected) in [(false, 120), (true, 140)] {
+        let mut cursor = None;
+        let mut seen = std::collections::HashSet::new();
+        loop {
+            let page = service
+                .search_catalog_page_with_inactive("", None, cursor, include_inactive, now)
+                .unwrap();
+            assert!(page.records.len() <= 50);
+            for record in page.records {
+                assert!(include_inactive || record.is_active);
+                assert!(seen.insert(record.id));
+            }
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(seen.len(), expected);
+    }
+    assert!(
+        service
+            .search_catalog_page("CAT-139", None, None, now)
+            .unwrap()
+            .records
+            .is_empty()
+    );
+    let inactive = service
+        .search_catalog_page_with_inactive("CAT-139", None, None, true, now)
+        .unwrap();
+    assert_eq!(inactive.records.len(), 1);
+    assert!(!inactive.records[0].is_active);
+    assert!(inactive.next_cursor.is_none());
+    assert_eq!(
+        service
+            .search_catalog_page_with_inactive("CAT-139", None, None, true, now)
+            .unwrap(),
+        inactive
+    );
+    let after: i64 = service
+        .connection
+        .lock()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM local_sync_outbox", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(before, after);
+    let (engineer, _, time) = fixture(Role::Engineer);
+    assert!(matches!(
+        engineer.search_catalog_page_with_inactive("", None, None, true, time),
+        Err(AuthError::Forbidden)
+    ));
+    assert!(engineer.search_catalog_page("", None, None, time).is_ok());
+}

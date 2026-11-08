@@ -21,6 +21,8 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
     historyText(locale, message)
   const [document, setDocument] = useState<FormalPrintDocument | null>(null)
   const [failed, setFailed] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const previewPending = useRef(false)
   const [primaryLanguage, setPrimaryLanguage] =
     useState<PrintPrimaryLanguage>('zh')
   const [printSnapshot, setPrintSnapshot] = useState<{
@@ -99,6 +101,9 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
     }
   }, [printSnapshot])
   async function preview() {
+    if (previewPending.current) return
+    previewPending.current = true
+    setPreviewing(true)
     setDocument(null)
     setFailed(false)
     try {
@@ -119,14 +124,31 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
       setDocument(parsed)
     } catch {
       setFailed(true)
+    } finally {
+      previewPending.current = false
+      setPreviewing(false)
     }
   }
   return (
     <>
       <section aria-label={t('正式单据打印预览')}>
-        <Button onClick={() => void preview()}>
+        <Button
+          loading={previewing}
+          disabled={previewing}
+          aria-busy={previewing}
+          onClick={() => void preview()}
+        >
           {t('正式单据预览 / Aperçu')}
         </Button>
+        {previewing && (
+          <p role="status" aria-live="polite">
+            {locale === 'zh'
+              ? '正在准备正式单据预览…'
+              : locale === 'fr'
+                ? 'Préparation de l’aperçu du document officiel…'
+                : 'Preparing the formal document preview…'}
+          </p>
+        )}
         {failed && (
           <Alert
             type="error"

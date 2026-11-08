@@ -20,6 +20,34 @@ function invoke<T>(command: string, args?: object) {
     : Promise.reject(new Error('Desktop required'))
 }
 
+const feedback = {
+  exists: [
+    '账号已存在；不创建或重置密码。',
+    'Account exists; no creation or password reset.',
+    'Compte existant ; aucune création ni réinitialisation.',
+  ],
+  available: [
+    '账号可用，请继续选择角色。',
+    'Username available. Continue to roles.',
+    'Nom disponible. Poursuivez avec les rôles.',
+  ],
+  lookupFailed: [
+    '无法查询账号。请检查在线连接和管理权限后重试。',
+    'Cannot check the account. Check the online connection and management permissions, then retry.',
+    'Vérification impossible. Vérifiez la connexion et les droits de gestion, puis réessayez.',
+  ],
+  created: [
+    '已创建；首次登录必须改密。',
+    'Created; first sign-in requires a password change.',
+    'Créé ; changement du mot de passe requis à la première connexion.',
+  ],
+  unconfirmed: [
+    '创建未确认。请先重新查询账号；已存在的账号不会重置密码。',
+    'Creation not confirmed. Check the username again first; existing passwords are never reset.',
+    'Création non confirmée. Vérifiez à nouveau le nom ; aucun mot de passe existant ne sera réinitialisé.',
+  ],
+} as const
+
 export function ManagedAccountForm({
   options,
   canGrantPrivileged,
@@ -50,7 +78,7 @@ export function ManagedAccountForm({
   const [exists, setExists] = useState(false)
   const [created, setCreated] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState<keyof typeof feedback | ''>('')
   const checkGeneration = useRef(0)
   const labels = [
     t('基本信息', 'Basic information', 'Informations générales'),
@@ -98,33 +126,15 @@ export function ManagedAccountForm({
           accounts[0].username,
           accounts[0].displayName ?? undefined,
         )
-        setMessage(
-          t(
-            '账号已存在；不创建或重置密码。',
-            'Account exists; no creation or password reset.',
-            'Compte existant ; aucune création ni réinitialisation.',
-          ),
-        )
+        setMessage('exists')
       } else {
         setChecked(username)
-        setMessage(
-          t(
-            '账号可用，请继续选择角色。',
-            'Username available. Continue to roles.',
-            'Nom disponible. Poursuivez avec les rôles.',
-          ),
-        )
+        setMessage('available')
       }
     } catch {
       if (generation !== checkGeneration.current) return
       setChecked(null)
-      setMessage(
-        t(
-          '无法查询账号。请检查在线连接和管理权限后重试。',
-          'Cannot check the account. Check the online connection and management permissions, then retry.',
-          'Vérification impossible. Vérifiez la connexion et les droits de gestion, puis réessayez.',
-        ),
-      )
+      setMessage('lookupFailed')
     } finally {
       setBusy(false)
       onBusyChange(false)
@@ -172,23 +182,11 @@ export function ManagedAccountForm({
       )
       setCreated(true)
       setChecked(null)
-      setMessage(
-        t(
-          '已创建；首次登录必须改密。',
-          'Created; first sign-in requires a password change.',
-          'Créé ; changement du mot de passe requis à la première connexion.',
-        ),
-      )
+      setMessage('created')
     } catch {
       setChecked(null)
       setStep(0)
-      setMessage(
-        t(
-          '创建未确认。请先重新查询账号；已存在的账号不会重置密码。',
-          'Creation not confirmed. Check the username again first; existing passwords are never reset.',
-          'Création non confirmée. Vérifiez à nouveau le nom ; aucun mot de passe existant ne sera réinitialisé.',
-        ),
-      )
+      setMessage('unconfirmed')
     } finally {
       setPassword('')
       setBusy(false)
@@ -267,7 +265,10 @@ export function ManagedAccountForm({
                     'Checking the username. Please wait.',
                     'Vérification du nom utilisateur en cours. Veuillez patienter.',
                   )
-                : message}
+                : message &&
+                  feedback[message][
+                    locale === 'zh' ? 0 : locale === 'fr' ? 2 : 1
+                  ]}
             </p>
             <p>
               {t(
@@ -425,7 +426,8 @@ export function ManagedAccountForm({
       </fieldset>
       {message && step !== 0 && (
         <p role="status" aria-live="polite">
-          {message}
+          {message &&
+            feedback[message][locale === 'zh' ? 0 : locale === 'fr' ? 2 : 1]}
         </p>
       )}
       {exists && (

@@ -524,3 +524,5 @@ IN PROGRESS: specifications, shared tokens/theme, initial history and account-fe
 2026-11-09 Stage2 partial: four dictionary create dialogs implemented and focused/independent DOM checks passed. New native EXE built; launch blocked by automatic approval review, user handoff pending. Native FUNCTIONAL/UX gates and all original milestones stay open; no page completion claim.
 
 2026-11-09 unattended Modern Industrial: first production-page implementation batch in progress with bounded native and automated evidence; supplier quote regression and current-source native/all-page/DPI gates remain open. Original milestones unchanged; details in existing design rollout.
+
+UI phase2 batch2 remains PARTIAL: scoped automation verified; current-source Windows native acceptance BLOCKED_AUTH_INTERACTION. Original milestone gates unchanged; see design rollout.

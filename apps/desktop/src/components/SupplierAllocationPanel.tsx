@@ -4,7 +4,7 @@ import {
   type SupplierMessage,
 } from '../lib/supplier-workflow-messages'
 import { Alert, Button, Card, Input, Select, Space } from 'antd'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
   SupplierChildAllocationInput,
   SupplierChildOrderView,
@@ -61,6 +61,9 @@ export function SupplierAllocationPanel({
   )
   const [children, setChildren] = useState<SupplierChildOrderView[]>([])
   const [savedCount, setSavedCount] = useState(0)
+  const requestPending = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [messageType, setMessageType] = useState<'success' | 'error'>('error')
   const [message, setMessage] = useState<string | null>(null)
 
   function updateLine(id: string, update: Partial<AllocationDraft>) {
@@ -71,6 +74,8 @@ export function SupplierAllocationPanel({
   }
 
   async function allocate() {
+    if (requestPending.current) return
+    setMessageType('error')
     const payload = lines.map((line) => ({
       parentItemId: line.id,
       ...allocations[line.id],
@@ -86,11 +91,15 @@ export function SupplierAllocationPanel({
       setMessage('每条材料必须选择供应商，并填写子单编号和锁定汇率。')
       return
     }
+    requestPending.current = true
+    setBusy(true)
+    setMessage(null)
     try {
       const saved = await api.allocateSupplierChildOrders(
         parentOrderId,
         payload,
       )
+      setMessageType('success')
       setChildren(saved)
       onCreated?.()
       setSavedCount(saved.length)
@@ -99,6 +108,9 @@ export function SupplierAllocationPanel({
       setMessage(
         '拆单失败：目录报价只能分配给对应供应商，且币种、单价与报价必须一致。请检查报价仍有效、父单已批准且每行仅分配一次；原分配内容已保留。',
       )
+    } finally {
+      requestPending.current = false
+      setBusy(false)
     }
   }
 
@@ -115,7 +127,8 @@ export function SupplierAllocationPanel({
             '{count}',
             String(savedCount),
           )}
-          type="info"
+          type={messageType}
+          role={messageType === 'error' ? 'alert' : 'status'}
           showIcon
         />
       ) : null}
@@ -138,6 +151,7 @@ export function SupplierAllocationPanel({
                 <label>
                   {t('供应商')}
                   <Select
+                    disabled={busy}
                     aria-label={`${line.materialName} ${t('供应商')}`}
                     value={allocation.supplierId || undefined}
                     placeholder={t('选择供应商')}
@@ -153,6 +167,7 @@ export function SupplierAllocationPanel({
                 <label>
                   {t('子单币种')}
                   <Select
+                    disabled={busy}
                     aria-label={`${line.materialName} ${t('子单币种')}`}
                     value={allocation.currency}
                     options={['XOF', 'CNY', 'USD', 'EUR'].map((currency) => ({
@@ -168,6 +183,7 @@ export function SupplierAllocationPanel({
                 <label>
                   {t('子单编号')}
                   <Input
+                    disabled={busy}
                     aria-label={`${line.materialName} ${t('子单编号')}`}
                     value={allocation.childDisplayNo}
                     onChange={(event) =>
@@ -180,6 +196,7 @@ export function SupplierAllocationPanel({
                 <label>
                   {t('锁定汇率')}
                   <Input
+                    disabled={busy}
                     aria-label={`${line.materialName} ${t('锁定汇率')}`}
                     inputMode="decimal"
                     value={allocation.lockedExchangeRateDecimal}
@@ -196,7 +213,12 @@ export function SupplierAllocationPanel({
         })}
       </div>
       <Space className="requisition-actions" wrap>
-        <Button type="primary" onClick={() => void allocate()}>
+        <Button
+          disabled={busy}
+          loading={busy}
+          type="primary"
+          onClick={() => void allocate()}
+        >
           {t('创建供应商子单')}
         </Button>
       </Space>

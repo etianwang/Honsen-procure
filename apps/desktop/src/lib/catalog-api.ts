@@ -100,6 +100,7 @@ export type CatalogApi = {
     query: string,
     projectId: string,
     after: CatalogSearchCursor | null,
+    includeInactive?: boolean,
   ): Promise<CatalogSearchPage>
   searchCatalog(
     query: string,
@@ -138,11 +139,12 @@ function tauriInvoke(): TauriInvoke {
 }
 
 export const tauriCatalogApi: CatalogApi = {
-  searchCatalogPage: (query, projectId, after) =>
+  searchCatalogPage: (query, projectId, after, includeInactive = false) =>
     tauriInvoke()<CatalogSearchPage>('search_catalog_page', {
       query,
       projectId,
       after,
+      includeInactive,
     }),
   searchCatalog: (query, projectId, includeInactive = false) =>
     tauriInvoke()<CatalogMaterialView[]>('search_catalog', {

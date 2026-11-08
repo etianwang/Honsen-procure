@@ -6,7 +6,7 @@ import {
 } from '../lib/supplier-workflow-messages'
 import { FormalPrintPreview } from './FormalPrintPreview'
 import { Alert, Button, Card, Checkbox, Input, Space } from 'antd'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
   SupplierChildTermsInput,
   SupplierOrderApi,
@@ -46,6 +46,9 @@ export function SupplierChildTermsPanel({
     ),
   )
   const [saved, setSaved] = useState(false)
+  const requestPending = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [messageType, setMessageType] = useState<'success' | 'error'>('error')
   const [message, setMessage] = useState<SupplierNotice | null>(null)
 
   function input(): SupplierChildTermsInput | null {
@@ -80,24 +83,39 @@ export function SupplierChildTermsPanel({
   }
 
   async function save() {
+    if (requestPending.current) return
+    setMessageType('error')
     const payload = input()
     if (!payload) return
+    requestPending.current = true
+    setBusy(true)
+    setMessage(null)
     try {
       const total = await api.saveSupplierChildTerms(payload)
+      setMessageType('success')
       setSaved(true)
       setMessage({ key: 'saved', values: { total: total.totalMinor } })
     } catch {
       setMessage({ key: '保存失败：请确认子单仍为草稿且所有金额有效。' })
+    } finally {
+      requestPending.current = false
+      setBusy(false)
     }
   }
 
   async function send() {
+    if (requestPending.current) return
+    setMessageType('error')
     if (!saved) {
       setMessage({ key: '请先保存税、折扣和运费条款。' })
       return
     }
+    requestPending.current = true
+    setBusy(true)
+    setMessage(null)
     try {
       const issued = await api.sendSupplierOrder(orderId)
+      setMessageType('success')
       if (issued) {
         setMessage({
           key: 'issued',
@@ -110,6 +128,9 @@ export function SupplierChildTermsPanel({
       setMessage({
         key: '发送失败：请确认父单已批准、子单条款已保存且订单尚未签发；原条款已保留。',
       })
+    } finally {
+      requestPending.current = false
+      setBusy(false)
     }
   }
 
@@ -124,7 +145,8 @@ export function SupplierChildTermsPanel({
       {message ? (
         <Alert
           title={supplierText(locale, message.key, message.values)}
-          type="info"
+          type={messageType}
+          role={messageType === 'error' ? 'alert' : 'status'}
           showIcon
         />
       ) : null}
@@ -138,6 +160,7 @@ export function SupplierChildTermsPanel({
                 <label>
                   {t('行折扣（最小货币单位）')}
                   <Input
+                    disabled={busy}
                     aria-label={`${line.materialName} ${t('行折扣')}`}
                     inputMode="numeric"
                     value={terms.discount}
@@ -155,6 +178,7 @@ export function SupplierChildTermsPanel({
                 <label>
                   {t('行运费（最小货币单位）')}
                   <Input
+                    disabled={busy}
                     aria-label={`${line.materialName} ${t('行运费')}`}
                     inputMode="numeric"
                     value={terms.freight}
@@ -170,6 +194,7 @@ export function SupplierChildTermsPanel({
                   />
                 </label>
                 <Checkbox
+                  disabled={busy}
                   checked={terms.freightIncluded}
                   onChange={(event) =>
                     setLineTerms((current) => ({
@@ -192,6 +217,7 @@ export function SupplierChildTermsPanel({
         <label>
           {t('印花税（手填，单据币种最小单位）')}
           <Input
+            disabled={busy}
             aria-label={t('印花税（手填，单据币种最小单位）')}
             inputMode="numeric"
             value={manualStampDutyMinor}
@@ -201,6 +227,7 @@ export function SupplierChildTermsPanel({
         <label>
           {t('税率（基点；18% = 1800）')}
           <Input
+            disabled={busy}
             aria-label={t('子单税率')}
             inputMode="numeric"
             value={taxRateBasisPoints}
@@ -210,6 +237,7 @@ export function SupplierChildTermsPanel({
         <label>
           {t('单据折扣（最小货币单位）')}
           <Input
+            disabled={busy}
             aria-label={t('子单单据折扣')}
             inputMode="numeric"
             value={orderDiscount}
@@ -219,6 +247,7 @@ export function SupplierChildTermsPanel({
         <label>
           {t('单据运费（最小货币单位）')}
           <Input
+            disabled={busy}
             aria-label={t('子单单据运费')}
             inputMode="numeric"
             value={orderFreight}
@@ -227,10 +256,17 @@ export function SupplierChildTermsPanel({
         </label>
       </div>
       <Space className="requisition-actions" wrap>
-        <Button type="primary" onClick={() => void save()}>
+        <Button
+          disabled={busy}
+          loading={busy}
+          type="primary"
+          onClick={() => void save()}
+        >
           {t('保存子单条款')}
         </Button>
-        <Button onClick={() => void send()}>{t('发送供应商')}</Button>
+        <Button disabled={busy} loading={busy} onClick={() => void send()}>
+          {t('发送供应商')}
+        </Button>
       </Space>
     </Card>
   )

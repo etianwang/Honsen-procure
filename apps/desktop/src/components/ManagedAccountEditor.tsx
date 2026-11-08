@@ -23,6 +23,29 @@ function invoke<T>(command: string, args: object) {
     : Promise.reject(new Error('Desktop required'))
 }
 
+const feedback = {
+  loadFailed: [
+    '无法读取账号详情，请重新加载。',
+    'Unable to load account details. Reload to retry.',
+    'Impossible de charger le compte. Rechargez pour réessayer.',
+  ],
+  saved: [
+    '已保存。角色或启用状态变更后，该账号需要重新登录。',
+    'Saved. Role or enabled-state changes require this account to sign in again.',
+    'Enregistré. Après modification des rôles ou de l’activation, ce compte doit se reconnecter.',
+  ],
+  conflict: [
+    '账号已被其他操作修改，请重新加载后核对。',
+    'This account changed elsewhere. Reload and review before saving.',
+    'Ce compte a été modifié ailleurs. Rechargez et vérifiez avant d’enregistrer.',
+  ],
+  saveFailed: [
+    '未能保存，请检查在线会话及管理权限；输入已保留。',
+    'Unable to save. Check your online session and permissions. Your input is retained.',
+    'Enregistrement impossible. Vérifiez la connexion et les droits. Votre saisie est conservée.',
+  ],
+} as const
+
 export function ManagedAccountEditor({
   accountId,
   role,
@@ -37,14 +60,16 @@ export function ManagedAccountEditor({
   const [name, setName] = useState('')
   const [language, setLanguage] = useState('zh-CN')
   const [roles, setRoles] = useState<UserRole[]>([])
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState<keyof typeof feedback | ''>('')
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [stale, setStale] = useState(false)
   const [reload, setReload] = useState(0)
   const pending = useRef(false)
   useEffect(() => {
     let active = true
     setDetails(null)
+    setLoading(true)
     setMessage('')
     setStale(false)
     void invoke<Details>('get_managed_account_details', { accountId })
@@ -55,15 +80,11 @@ export function ManagedAccountEditor({
         setLanguage(value.uiLocale)
         setRoles(value.roles)
       })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
       .catch(() => {
-        if (active)
-          setMessage(
-            t(
-              '无法读取账号详情，请重新加载。',
-              'Unable to load account details. Reload to retry.',
-              'Impossible de charger le compte. Rechargez pour réessayer.',
-            ),
-          )
+        if (active) setMessage('loadFailed')
       })
     return () => {
       active = false
@@ -97,13 +118,7 @@ export function ManagedAccountEditor({
       setName(value.displayName)
       setLanguage(value.uiLocale)
       setRoles(value.roles)
-      setMessage(
-        t(
-          '已保存。角色或启用状态变更后，该账号需要重新登录。',
-          'Saved. Role or enabled-state changes require this account to sign in again.',
-          'Enregistré. Après modification des rôles ou de l’activation, ce compte doit se reconnecter.',
-        ),
-      )
+      setMessage('saved')
     } catch (error) {
       const code =
         typeof error === 'object' && error !== null && 'code' in error
@@ -111,21 +126,8 @@ export function ManagedAccountEditor({
           : ''
       if (code === 'account_conflict') {
         setStale(true)
-        setMessage(
-          t(
-            '账号已被其他操作修改，请重新加载后核对。',
-            'This account changed elsewhere. Reload and review before saving.',
-            'Ce compte a été modifié ailleurs. Rechargez et vérifiez avant d’enregistrer.',
-          ),
-        )
-      } else
-        setMessage(
-          t(
-            '未能保存，请检查在线会话及管理权限；输入已保留。',
-            'Unable to save. Check your online session and permissions. Your input is retained.',
-            'Enregistrement impossible. Vérifiez la connexion et les droits. Votre saisie est conservée.',
-          ),
-        )
+        setMessage('conflict')
+      } else setMessage('saveFailed')
     } finally {
       pending.current = false
       setBusy(false)
@@ -137,11 +139,21 @@ export function ManagedAccountEditor({
       className="account-management-panel"
     >
       <h3>{t('账号设置', 'Account settings', 'Paramètres du compte')}</h3>
-      {message && <p role="status">{message}</p>}
+      <p role="status" aria-live="polite" aria-atomic="true">
+        {loading
+          ? t('正在加载账号…', 'Loading account…', 'Chargement du compte…')
+          : busy
+            ? t('正在保存账号…', 'Saving account…', 'Enregistrement du compte…')
+            : message &&
+              feedback[message][locale === 'zh' ? 0 : locale === 'fr' ? 2 : 1]}
+      </p>
       <button
         type="button"
-        disabled={busy}
-        onClick={() => setReload((v) => v + 1)}
+        disabled={busy || loading}
+        onClick={() => {
+          setLoading(true)
+          setReload((v) => v + 1)
+        }}
       >
         {t('重新加载账号', 'Reload account', 'Recharger le compte')}
       </button>

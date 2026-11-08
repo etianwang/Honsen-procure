@@ -26,13 +26,21 @@ export function SyncConflictPanel({
   locale?: UiLocale
 }) {
   const { locale: activeLocale } = useUiLocale()
-  const text = (key: GovernanceMessage) => governanceText(activeLocale, key)
+  const effectiveLocale = explicitLocale
+    ? explicitLocale === 'fr-FR'
+      ? 'fr'
+      : explicitLocale === 'en-US'
+        ? 'en'
+        : 'zh'
+    : activeLocale
+  const text = (key: GovernanceMessage) => governanceText(effectiveLocale, key)
   const [items, setItems] = useState<SyncConflictView[]>([])
   const [reason, setReason] = useState('')
   const [message, setMessage] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [fullyLoaded, setFullyLoaded] = useState(false)
+  const [loading, setLoading] = useState(true)
   const locale =
     explicitLocale ??
     (activeLocale === 'zh'
@@ -43,13 +51,17 @@ export function SyncConflictPanel({
   const t = paymentConflictMessages[locale]
   useEffect(() => {
     let active = true
-    const update = () => setRefresh((value) => value + 1)
+    const update = () => {
+      setLoading(true)
+      setRefresh((value) => value + 1)
+    }
     window.addEventListener('honsen-procurement-synced', update)
     void Promise.allSettled([
       api.listSyncConflicts(),
       api.listPaymentSyncConflicts(),
     ]).then(([local, payments]) => {
       if (!active) return
+      setLoading(false)
       setFullyLoaded(
         local.status === 'fulfilled' && payments.status === 'fulfilled',
       )
@@ -154,10 +166,24 @@ export function SyncConflictPanel({
         <button
           type="button"
           className="secondary-button"
-          onClick={() => setRefresh((value) => value + 1)}
+          disabled={loading || busyId !== null}
+          aria-busy={loading}
+          onClick={() => {
+            setLoading(true)
+            setRefresh((value) => value + 1)
+          }}
         >
           {t.refresh}
         </button>
+        {loading && (
+          <p role="status" aria-live="polite">
+            {effectiveLocale === 'zh'
+              ? '正在读取同步冲突…'
+              : effectiveLocale === 'fr'
+                ? 'Chargement des conflits de synchronisation…'
+                : 'Loading sync conflicts…'}
+          </p>
+        )}
         <label className="conflict-field">
           {text('处理原因')}
           <input
@@ -259,7 +285,7 @@ export function SyncConflictPanel({
             </div>
           </article>
         ))}
-        {fullyLoaded && items.length === 0 && (
+        {!loading && fullyLoaded && items.length === 0 && (
           <p className="conflict-empty">{text('没有待处理的同步冲突。')}</p>
         )}
       </div>

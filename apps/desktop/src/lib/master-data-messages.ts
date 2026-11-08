@@ -1,5 +1,6 @@
 import { useUiLocale } from './ui-locale'
 const messages = {
+  '正在保存，请稍候': ['Saving, please wait', 'Enregistrement en cours'],
   材料分类维护需要管理员或超级管理员权限: [
     'Material category maintenance requires an administrator or super administrator',
     'La maintenance des catégories nécessite un administrateur ou super administrateur',

@@ -1,3 +1,4 @@
+import './MaterialsPage.css'
 import {
   SupplierFormFields,
   PriceFormFields,
@@ -19,6 +20,8 @@ import {
   type CatalogApi,
   type CatalogMaterialView,
   type CatalogPriceView,
+  type CatalogSearchCursor,
+  type CatalogSearchPage,
   type SupplierView,
 } from '../lib/catalog-api'
 import {
@@ -59,12 +62,31 @@ export function MaterialsPage({
   const t = (key: CatalogMessage) => catalogText(locale, key)
   const canEdit = canEditMaterials(role)
   const [query, setQuery] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
   const [includeInactive, setIncludeInactive] = useState(false)
-  const [materials, setMaterials] = useState<CatalogMaterialView[] | null>(null)
-  const [loadedProject, setLoadedProject] = useState<string | undefined>()
+  const [pagination, setPagination] = useState<{
+    key: string
+    cursors: (CatalogSearchCursor | null)[]
+    page: number
+  }>({ key: '', cursors: [null], page: 0 })
+  const [catalogResult, setCatalogResult] = useState<
+    (CatalogSearchPage & { key: string; failed?: boolean }) | null
+  >(null)
+  const filterKey = JSON.stringify([
+    projectId,
+    query,
+    canEdit && includeInactive,
+  ])
+  const pageIndex = pagination.key === filterKey ? pagination.page : 0
+  const pageCursors = pagination.key === filterKey ? pagination.cursors : [null]
+  const pageCursor = pageCursors[pageIndex] ?? null
+  const requestKey = JSON.stringify([filterKey, pageCursor, reloadKey])
+  const currentCatalog =
+    catalogResult?.key === requestKey ? catalogResult : null
+  const loading = !!projectId && !currentCatalog
+  const materials = currentCatalog?.records ?? []
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [reloadKey, setReloadKey] = useState(0)
   const [editor, setEditor] = useState<CatalogMaterialView | 'new' | null>(null)
   const [supplierManagerOpen, setSupplierManagerOpen] = useState(false)
   const [supplierEditor, setSupplierEditor] = useState<
@@ -89,24 +111,45 @@ export function MaterialsPage({
 
   useEffect(() => {
     let isCurrent = true
-    if (!projectId) {
-      return () => {
-        isCurrent = false
-      }
-    }
-    api
-      .searchCatalog(query, projectId, canEdit && includeInactive)
-      .then((result) => {
-        if (!isCurrent) return
-        setError(null)
-        setMaterials(result)
-        setLoadedProject(projectId)
-      })
-      .catch(() => isCurrent && setError('无法读取本地材料库'))
+    if (!projectId) return
+    const timer = window.setTimeout(() => {
+      const request = Promise.resolve().then(() =>
+        api.searchCatalogPage
+          ? api.searchCatalogPage(
+              query.trim(),
+              projectId,
+              pageCursor,
+              canEdit && includeInactive,
+            )
+          : api
+              .searchCatalog(
+                query.trim(),
+                projectId,
+                canEdit && includeInactive,
+              )
+              .then((records) => ({ records, nextCursor: null })),
+      )
+      void request
+        .then((result) => {
+          if (!isCurrent) return
+          setError(null)
+          setCatalogResult({ ...result, key: requestKey })
+        })
+        .catch(() => {
+          if (isCurrent)
+            setCatalogResult({
+              key: requestKey,
+              records: [],
+              nextCursor: null,
+              failed: true,
+            })
+        })
+    }, 250)
     return () => {
       isCurrent = false
+      window.clearTimeout(timer)
     }
-  }, [api, projectId, query, reloadKey, canEdit, includeInactive])
+  }, [api, projectId, query, requestKey, pageCursor, canEdit, includeInactive])
 
   useEffect(() => {
     if (!editor) return
@@ -343,24 +386,44 @@ export function MaterialsPage({
           </Button>
         )}
       </section>
-      <section className="toolbar" aria-label={t('材料筛选')}>
-        <Input
-          className="search"
-          type="search"
-          placeholder={t('搜索材料名称、型号、规格或供应商')}
-          aria-label={t('搜索材料')}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          prefix={<Search size={16} aria-hidden="true" />}
-        />
-        <Button disabled icon={<SlidersHorizontal size={16} />}>
+      <section className="toolbar materials-toolbar" aria-label={t('材料筛选')}>
+        <label className="materials-search" htmlFor="materials-search-input">
+          <span>{t('搜索材料')}</span>
+          <Input
+            id="materials-search-input"
+            className="search"
+            type="search"
+            placeholder={t('搜索名称、编码、型号或规格；空格组合关键词')}
+            aria-label={t('搜索材料')}
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setPagination({ key: '', cursors: [null], page: 0 })
+            }}
+            prefix={<Search size={16} aria-hidden="true" />}
+          />
+        </label>
+        <Button
+          icon={<SlidersHorizontal size={16} aria-hidden="true" />}
+          aria-label={t('筛选')}
+          aria-busy={loading}
+          loading={loading}
+          disabled={!projectId || loading}
+          onClick={() => {
+            setPagination({ key: '', cursors: [null], page: 0 })
+            setReloadKey((value) => value + 1)
+          }}
+        >
           {t('筛选')}
         </Button>
         {canEdit && (
           <label>
             <Switch
               checked={includeInactive}
-              onChange={setIncludeInactive}
+              onChange={(value) => {
+                setIncludeInactive(value)
+                setPagination({ key: '', cursors: [null], page: 0 })
+              }}
               aria-label={t('显示停用材料')}
             />{' '}
             {t('显示停用材料')}
@@ -385,9 +448,23 @@ export function MaterialsPage({
           title={contextNotice ?? t('请选择有效的授权项目以查看报价')}
           showIcon
         />
-      ) : error ? (
-        <Alert type="error" title={t(error as CatalogMessage)} showIcon />
-      ) : materials === null || loadedProject !== projectId ? (
+      ) : currentCatalog?.failed || error ? (
+        <Alert
+          type="error"
+          title={t(error ? (error as CatalogMessage) : '无法读取本地材料库')}
+          showIcon
+          action={
+            <Button
+              onClick={() => {
+                setError(null)
+                setReloadKey((value) => value + 1)
+              }}
+            >
+              {t('重试')}
+            </Button>
+          }
+        />
+      ) : loading ? (
         <Spin aria-label={t('正在搜索材料')} />
       ) : (
         <CatalogTable
@@ -403,6 +480,44 @@ export function MaterialsPage({
             void loadDetailPrices(material, null, 0)
           }}
         />
+      )}
+      {projectId && (
+        <nav className="materials-pagination" aria-label={t('材料分页')}>
+          <Button
+            disabled={loading || pageIndex === 0}
+            onClick={() =>
+              setPagination({
+                key: filterKey,
+                cursors: pageCursors,
+                page: pageIndex - 1,
+              })
+            }
+          >
+            {t('上一页')}
+          </Button>
+          <span role="status">
+            {t('当前页')} {pageIndex + 1} ·{' '}
+            {loading
+              ? t('正在搜索材料')
+              : String(materials.length) + ' ' + t('项')}
+          </span>
+          <Button
+            disabled={loading || !currentCatalog?.nextCursor}
+            onClick={() => {
+              if (!currentCatalog?.nextCursor) return
+              setPagination({
+                key: filterKey,
+                cursors: [
+                  ...pageCursors.slice(0, pageIndex + 1),
+                  currentCatalog.nextCursor,
+                ],
+                page: pageIndex + 1,
+              })
+            }}
+          >
+            {t('下一页')}
+          </Button>
+        </nav>
       )}
       <p className="access-note">
         {canEdit
@@ -559,41 +674,48 @@ export function MaterialsPage({
         {suppliers.length === 0 ? (
           <p role="status">{t('暂无供应商')}</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t('编码')}</th>
-                <th>{t('供应商')}</th>
-                <th>{t('联系人')}</th>
-                <th>{t('状态')}</th>
-                <th>{t('操作')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers.map((supplier) => (
-                <tr key={supplier.id}>
-                  <td>{supplier.businessCode}</td>
-                  <td>{supplier.name}</td>
-                  <td>{supplier.contactName ?? '—'}</td>
-                  <td>
-                    {supplier.isBlacklisted
-                      ? t('黑名单')
-                      : supplier.isActive
-                        ? t('启用')
-                        : t('停用')}
-                  </td>
-                  <td>
-                    <Button
-                      type="link"
-                      onClick={() => openSupplierEditor(supplier)}
-                    >
-                      {t('编辑供应商')}
-                    </Button>
-                  </td>
+          <div
+            className="materials-table-scroll"
+            role="region"
+            aria-label={t('供应商表格，可横向滚动')}
+            tabIndex={0}
+          >
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t('编码')}</th>
+                  <th>{t('供应商')}</th>
+                  <th>{t('联系人')}</th>
+                  <th>{t('状态')}</th>
+                  <th>{t('操作')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {suppliers.map((supplier) => (
+                  <tr key={supplier.id}>
+                    <td>{supplier.businessCode}</td>
+                    <td>{supplier.name}</td>
+                    <td>{supplier.contactName ?? '—'}</td>
+                    <td>
+                      {supplier.isBlacklisted
+                        ? t('黑名单')
+                        : supplier.isActive
+                          ? t('启用')
+                          : t('停用')}
+                    </td>
+                    <td>
+                      <Button
+                        type="link"
+                        onClick={() => openSupplierEditor(supplier)}
+                      >
+                        {t('编辑供应商')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Modal>
       <Modal
@@ -651,10 +773,10 @@ function CatalogTable({
   const t = (key: CatalogMessage) => catalogText(locale, key)
   return (
     <Card
-      className="card"
+      className="card materials-catalog-card"
       title={
         <>
-          <span>{t('全部材料')}</span>{' '}
+          <span>{t('当前页材料')}</span>{' '}
           <span className="muted">
             · {materials.length} {t('项')}
           </span>
@@ -665,84 +787,97 @@ function CatalogTable({
       {materials.length === 0 ? (
         <p role="status">{t('未找到匹配材料')}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t('材料')}</th>
-              <th>{t('型号 / 规格')}</th>
-              <th>{t('单位')}</th>
-              <th>{t('供应商报价（最多 4 家）')}</th>
-              <th>{t('操作')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {materials.map((material) => (
-              <tr key={material.id}>
-                <td>
-                  <div className="material-name">
-                    <MaterialThumbnail api={api} materialId={material.id} />
-                    <strong>{material.nameZh}</strong>
-                    {material.isActive === false && <span>{t('停用')}</span>}
-                  </div>
-                </td>
-                <td>
-                  {material.model} · {material.specification}
-                </td>
-                <td>{material.unit}</td>
-                <td>
-                  <div className="quote-grid">
-                    {material.prices.map((price) => (
-                      <div
-                        className={`quote ${price.isPreferredSupplier ? 'preferred' : ''}`}
-                        key={price.priceId}
-                      >
-                        <strong>
-                          {price.supplierName}
-                          {price.isPreferredSupplier ? t(' · 首选') : ''}
-                        </strong>
-                        <span>
-                          {formatMoney(
-                            {
-                              currency: price.currency,
-                              minor: price.unitPriceMinor,
-                            },
-                            locale === 'zh'
-                              ? 'zh-CN'
-                              : locale === 'fr'
-                                ? 'fr-FR'
-                                : 'en-US',
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                    {material.prices.length === 0 && (
-                      <span className="muted">{t('暂无有效报价')}</span>
-                    )}
-                  </div>
-                </td>
-                <td>
-                  <Button type="link" onClick={() => onDetails(material)}>
-                    {t('查看全部报价')}
-                  </Button>
-                  {canEdit && (
-                    <>
-                      <Button type="link" onClick={() => onEdit(material)}>
-                        {t('编辑材料')}
-                      </Button>
-                      <Button
-                        type="link"
-                        disabled={material.isActive === false}
-                        onClick={() => onAddPrice(material)}
-                      >
-                        {t('维护报价')}
-                      </Button>
-                    </>
-                  )}
-                </td>
+        <div
+          className="materials-table-scroll"
+          role="region"
+          aria-label={t('材料表格，可横向滚动')}
+          tabIndex={0}
+        >
+          <table className="data-table materials-data-table">
+            <thead>
+              <tr>
+                <th>{t('材料')}</th>
+                <th>{t('型号 / 规格')}</th>
+                <th>{t('单位')}</th>
+                <th>{t('供应商报价（最多 4 家）')}</th>
+                <th>{t('操作')}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {materials.map((material) => (
+                <tr key={material.id}>
+                  <td>
+                    <div className="material-name">
+                      <MaterialThumbnail api={api} materialId={material.id} />
+                      <strong>
+                        {locale === 'fr'
+                          ? material.nameFr || material.nameZh
+                          : locale === 'en'
+                            ? material.nameEn || material.nameZh
+                            : material.nameZh}
+                      </strong>
+                      {material.isActive === false && <span>{t('停用')}</span>}
+                    </div>
+                  </td>
+                  <td>
+                    {material.model} · {material.specification}
+                  </td>
+                  <td>{material.unit}</td>
+                  <td>
+                    <div className="quote-grid">
+                      {material.prices.map((price) => (
+                        <div
+                          className={`quote ${price.isPreferredSupplier ? 'preferred' : ''}`}
+                          key={price.priceId}
+                        >
+                          <strong>
+                            {price.supplierName}
+                            {price.isPreferredSupplier ? t(' · 首选') : ''}
+                          </strong>
+                          <span>
+                            {formatMoney(
+                              {
+                                currency: price.currency,
+                                minor: price.unitPriceMinor,
+                              },
+                              locale === 'zh'
+                                ? 'zh-CN'
+                                : locale === 'fr'
+                                  ? 'fr-FR'
+                                  : 'en-US',
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                      {material.prices.length === 0 && (
+                        <span className="muted">{t('暂无有效报价')}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    <Button type="link" onClick={() => onDetails(material)}>
+                      {t('查看全部报价')}
+                    </Button>
+                    {canEdit && (
+                      <>
+                        <Button type="link" onClick={() => onEdit(material)}>
+                          {t('编辑材料')}
+                        </Button>
+                        <Button
+                          type="link"
+                          disabled={material.isActive === false}
+                          onClick={() => onAddPrice(material)}
+                        >
+                          {t('维护报价')}
+                        </Button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   )
