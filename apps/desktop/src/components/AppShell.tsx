@@ -10,6 +10,7 @@ import {
 import type { UserRole } from '../lib/permissions'
 import type { SyncState } from '../lib/sync-lifecycle'
 import defaultAvatar from '../assets/default-avatar.svg'
+import { AuthorizationContextSelect } from './AuthorizationContextSelect'
 import { SyncStatusDetails } from './SyncStatusDetails'
 import './AppShellToolbar.css'
 
@@ -193,30 +194,11 @@ export function AppShell({
               </select>
             </label>
             {authorizationContexts && authorizationContexts.length > 0 && (
-              <label className="honsen-shell-scope">
-                <span>{t('当前授权范围')}</span>
-                <select
-                  aria-label={t('当前授权范围')}
-                  value={selectedAuthorizationContext}
-                  onChange={(event) =>
-                    onSelectAuthorizationContext?.(event.target.value)
-                  }
-                >
-                  {authorizationContexts.map((context) => {
-                    const value = [
-                      context.projectId,
-                      context.departmentId,
-                      context.teamId,
-                    ].join(':')
-                    return (
-                      <option key={value} value={value}>
-                        {context.projectName} · {context.site} ·{' '}
-                        {context.departmentName} · {context.teamName}
-                      </option>
-                    )
-                  })}
-                </select>
-              </label>
+              <AuthorizationContextSelect
+                contexts={authorizationContexts}
+                value={selectedAuthorizationContext}
+                onChange={onSelectAuthorizationContext}
+              />
             )}
             <SyncStatusDetails state={syncState} />
             <div className="honsen-shell-user">

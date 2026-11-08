@@ -1,0 +1,72 @@
+.supplier-prices-page .supplier-toolbar > label {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: var(--honsen-space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.supplier-prices-page .supplier-toolbar > label > .ant-select,
+.supplier-prices-page .supplier-toolbar > label > .ant-input {
+  min-width: 0;
+  width: 100%;
+}
+
+.supplier-prices-page .supplier-layout {
+  grid-template-columns: minmax(340px, 1fr) minmax(0, 1.7fr);
+  gap: var(--honsen-space-4);
+}
+
+.supplier-prices-page .supplier-list,
+.supplier-prices-page .supplier-detail,
+.supplier-prices-page .supplier-material-comparison {
+  padding: var(--honsen-space-4);
+  border-radius: var(--honsen-radius-panel);
+}
+
+.supplier-prices-page .supplier-list .data-table {
+  min-width: 440px;
+}
+
+.supplier-prices-page .supplier-list .data-table th:first-child {
+  min-width: 100px;
+}
+
+.supplier-prices-page .supplier-list .data-table th:nth-child(2),
+.supplier-prices-page .supplier-list .data-table td button {
+  min-width: 170px;
+}
+
+.supplier-prices-page .supplier-list .data-table th:last-child {
+  min-width: 120px;
+}
+
+.supplier-prices-page .supplier-list .data-table td button {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.supplier-prices-page .supplier-list .data-table td:first-child {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.supplier-prices-page .supplier-detail .data-table {
+  min-width: 1060px;
+}
+
+.supplier-prices-page .supplier-currency-group .data-table {
+  min-width: 880px;
+}
+
+.supplier-prices-page .supplier-table-scroll .data-table td {
+  padding: var(--honsen-space-2);
+}
+
+@media (max-width: 1100px) {
+  .supplier-prices-page .supplier-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -95,7 +95,23 @@ export type CatalogSearchPage = {
   nextCursor: CatalogSearchCursor | null
 }
 
+export type SupplierSearchCursor = {
+  isActive: boolean
+  name: string
+  id: string
+}
+export type SupplierSearchPage = {
+  records: SupplierView[]
+  nextCursor: SupplierSearchCursor | null
+}
+
 export type CatalogApi = {
+  searchSuppliersPage?(
+    query: string,
+    countryId: string,
+    after: SupplierSearchCursor | null,
+    selectableOnly?: boolean,
+  ): Promise<SupplierSearchPage>
   searchCatalogPage?(
     query: string,
     projectId: string,
@@ -139,6 +155,13 @@ function tauriInvoke(): TauriInvoke {
 }
 
 export const tauriCatalogApi: CatalogApi = {
+  searchSuppliersPage: (query, countryId, after, selectableOnly = false) =>
+    tauriInvoke()<SupplierSearchPage>('search_suppliers_page', {
+      query,
+      countryId,
+      after,
+      selectableOnly,
+    }),
   searchCatalogPage: (query, projectId, after, includeInactive = false) =>
     tauriInvoke()<CatalogSearchPage>('search_catalog_page', {
       query,

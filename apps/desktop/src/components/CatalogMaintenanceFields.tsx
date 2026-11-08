@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import { Form, Input, Select, Switch } from 'antd'
 import { useUiLocale } from '../lib/ui-locale'
 import { catalogText, type CatalogMessage } from '../lib/catalog-messages'
@@ -83,7 +84,13 @@ export function SupplierFormFields({ editing }: { editing: boolean }) {
     </>
   )
 }
-export function PriceFormFields({ suppliers }: { suppliers: SupplierView[] }) {
+export function PriceFormFields({
+  suppliers,
+  supplierControl,
+}: {
+  suppliers: SupplierView[]
+  supplierControl?: ReactElement
+}) {
   const { locale } = useUiLocale()
   const t = (key: CatalogMessage) => catalogText(locale, key)
   return (
@@ -93,15 +100,19 @@ export function PriceFormFields({ suppliers }: { suppliers: SupplierView[] }) {
         name="supplierId"
         rules={[{ required: true, message: t('请选择供应商') }]}
       >
-        <Select
-          placeholder={t('选择启用且非黑名单供应商')}
-          options={suppliers
-            .filter((supplier) => supplier.isActive && !supplier.isBlacklisted)
-            .map((supplier) => ({
-              value: supplier.id,
-              label: `${supplier.businessCode} · ${supplier.name}`,
-            }))}
-        />
+        {supplierControl ?? (
+          <Select
+            placeholder={t('选择启用且非黑名单供应商')}
+            options={suppliers
+              .filter(
+                (supplier) => supplier.isActive && !supplier.isBlacklisted,
+              )
+              .map((supplier) => ({
+                value: supplier.id,
+                label: `${supplier.businessCode} · ${supplier.name}`,
+              }))}
+          />
+        )}
       </Form.Item>
       <Form.Item label={t('货币')} name="currency" rules={[{ required: true }]}>
         <Select options={currencySchema.options.map((value) => ({ value }))} />

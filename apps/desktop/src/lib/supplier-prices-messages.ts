@@ -1,6 +1,21 @@
 import { useUiLocale } from './ui-locale'
 
 const messages = {
+  '供应商列表，可横向滚动': [
+    'Supplier list; scroll horizontally',
+    'Liste des fournisseurs ; défilement horizontal',
+  ],
+  '报价历史，可横向滚动': [
+    'Quote history; scroll horizontally',
+    'Historique des devis ; défilement horizontal',
+  ],
+  '材料报价，可横向滚动': [
+    'Material quotes; scroll horizontally',
+    'Devis du matériau ; défilement horizontal',
+  ],
+  供应商分页: ['Supplier pages', 'Pages des fournisseurs'],
+  当前页: ['Page', 'Page'],
+  项: ['items', 'éléments'],
   单价: ['Unit price', 'Prix unitaire'],
   供应商与价格: ['Suppliers and prices', 'Fournisseurs et prix'],
   '当前授权国家的供应商，以及本地保留的供应材料和报价记录。': [

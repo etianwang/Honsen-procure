@@ -75,7 +75,7 @@ test('switching accounts never renders the previous account authorization scope'
     await page.locator('#captcha').fill('2')
     await page.getByRole('button', { name: '离线登录' }).click()
     if (username === 'account-a') {
-      await expect(page.getByLabel('当前授权范围')).toContainText(
+      await expect(page.locator('.honsen-shell-scope')).toContainText(
         '仅 A 可见的项目',
       )
       await page.getByRole('button', { name: '锁定' }).click()

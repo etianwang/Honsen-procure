@@ -10,6 +10,7 @@ import { useUiLocale } from '../lib/ui-locale'
 type Props = {
   api: Pick<CatalogApi, 'searchCatalog' | 'searchCatalogPage'>
   projectId: string
+  ariaLabel?: string
   value?: string
   valueLabel?: string
   disabled?: boolean
@@ -19,6 +20,7 @@ type Props = {
 export function MaterialPicker({
   api,
   projectId,
+  ariaLabel,
   value,
   valueLabel,
   disabled,
@@ -141,7 +143,7 @@ export function MaterialPicker({
 
   return (
     <Select
-      aria-label={text.label}
+      aria-label={ariaLabel ?? text.label}
       value={value}
       disabled={disabled}
       placeholder={text.placeholder}

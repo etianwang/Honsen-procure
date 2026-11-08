@@ -60,6 +60,7 @@ export function ReceiptPanel({
 
   async function record() {
     if (submitting.current || terminal) return
+    setMessage(null)
     const items = lines
       .filter((line) => quantities[line.id].trim())
       .map((line) => ({
@@ -107,6 +108,7 @@ export function ReceiptPanel({
 
   async function closeWithConditions() {
     if (submitting.current || terminal) return
+    setMessage(null)
     if (!closeReason.trim()) {
       setMessageType('error')
       setMessage('有条件完成原因必填。')
@@ -137,6 +139,20 @@ export function ReceiptPanel({
           {t(status as ReceiptMessage)}
         </strong>
       </p>
+      {busy && (
+        <Alert
+          role="status"
+          type="info"
+          title={
+            locale === 'zh'
+              ? '正在保存，请稍候…'
+              : locale === 'fr'
+                ? 'Enregistrement en cours…'
+                : 'Saving, please wait…'
+          }
+          showIcon
+        />
+      )}
       {message ? (
         <Alert
           title={t(message).replace('{count}', String(receivedCount))}
@@ -178,6 +194,7 @@ export function ReceiptPanel({
       <Button
         type="primary"
         disabled={busy || terminal}
+        loading={busy}
         onClick={() => void record()}
       >
         {t('登记收货')}
@@ -194,6 +211,7 @@ export function ReceiptPanel({
       </label>
       <Button
         disabled={busy || terminal}
+        loading={busy}
         onClick={() => void closeWithConditions()}
       >
         {t('按有条件完成关闭')}

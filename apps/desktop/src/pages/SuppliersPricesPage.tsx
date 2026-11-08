@@ -1,4 +1,7 @@
-import { Alert, Button, Form, Input, Modal, Select, Spin } from 'antd'
+import './SuppliersPricesPage.css'
+import { MaterialPicker } from '../components/MaterialPicker'
+import { SupplierPicker } from '../components/SupplierPicker'
+import { Alert, Button, Form, Input, Modal, Spin } from 'antd'
 import { useEffect, useState } from 'react'
 import { formatMoney } from '@honsen/shared'
 import { canEditMaterials, type UserRole } from '../lib/permissions'
@@ -12,6 +15,7 @@ import {
   type CatalogPriceView,
   type SupplierView,
   type SupplierPriceHistoryView,
+  type SupplierSearchCursor,
 } from '../lib/catalog-api'
 import {
   priceFromForm,
@@ -51,16 +55,22 @@ export function SuppliersPricesPage({
   const [supplierResult, setSupplierResult] = useState<{
     key: string
     rows: SupplierView[]
+    nextCursor: SupplierSearchCursor | null
     failed?: boolean
   } | null>(null)
-  const [selectedSupplierId, setSelectedSupplierId] = useState('')
-  const [materialQuery, setMaterialQuery] = useState('')
-  const [materialResult, setMaterialResult] = useState<{
+  const [supplierPagination, setSupplierPagination] = useState<{
     key: string
-    rows: CatalogMaterialView[]
-    failed?: boolean
+    cursors: (SupplierSearchCursor | null)[]
+    page: number
+  }>({ key: '', cursors: [null], page: 0 })
+  const [supplierSelection, setSupplierSelection] = useState<{
+    key: string
+    record: SupplierView
   } | null>(null)
-  const [selectedMaterialId, setSelectedMaterialId] = useState('')
+  const [materialSelection, setMaterialSelection] = useState<{
+    key: string
+    record: CatalogMaterialView
+  } | null>(null)
   const [historyPage, setHistoryPage] = useState(0)
   const [historyCursors, setHistoryCursors] = useState<(string | null)[]>([
     null,
@@ -85,18 +95,29 @@ export function SuppliersPricesPage({
   const [saveError, setSaveError] = useState<'supplier' | 'price' | null>(null)
   const [supplierForm] = Form.useForm<SupplierFormValues>()
   const [priceForm] = Form.useForm<PriceFormValues>()
-  const supplierKey = `${contextKey}:${reload}`
-  const materialKey = `${contextKey}:${materialQuery}:${reload}`
+  const supplierFilterKey = JSON.stringify([contextKey, supplierQuery])
+  const supplierPage =
+    supplierPagination.key === supplierFilterKey ? supplierPagination.page : 0
+  const supplierCursors =
+    supplierPagination.key === supplierFilterKey
+      ? supplierPagination.cursors
+      : [null]
+  const supplierCursor = supplierCursors[supplierPage] ?? null
+  const supplierKey = JSON.stringify([
+    supplierFilterKey,
+    supplierCursor,
+    reload,
+  ])
   const suppliers =
     supplierResult?.key === supplierKey ? supplierResult.rows : []
-  const materials =
-    materialResult?.key === materialKey ? materialResult.rows : []
-  const selectedSupplier = suppliers.find(
-    (row) => row.id === selectedSupplierId,
-  )
-  const selectedMaterial = materials.find(
-    (row) => row.id === selectedMaterialId,
-  )
+  const selectedSupplier =
+    supplierSelection?.key === contextKey
+      ? (suppliers.find((row) => row.id === supplierSelection.record.id) ??
+        supplierSelection.record)
+      : undefined
+  const selectedSupplierId = selectedSupplier?.id
+  const selectedMaterial =
+    materialSelection?.key === contextKey ? materialSelection.record : undefined
   const historyCursor = historyCursors[historyPage]
   const historyKey = `${contextKey}:${selectedSupplier?.id ?? ''}:${historyCursor ?? ''}:${reload}`
   const comparisonKey = `${contextKey}:${selectedMaterial?.id ?? ''}:${reload}`
@@ -114,41 +135,62 @@ export function SuppliersPricesPage({
 
   useEffect(() => {
     let active = true
-    if (countryId && projectId)
-      void api
-        .listSuppliers()
-        .then((rows) => {
+    if (!countryId || !projectId) return
+    const timer = window.setTimeout(() => {
+      void Promise.resolve()
+        .then(async () => {
+          if (api.searchSuppliersPage)
+            return api.searchSuppliersPage(
+              supplierQuery.trim(),
+              countryId,
+              supplierCursor,
+            )
+          const rows = await api.listSuppliers()
+          const terms = supplierQuery
+            .trim()
+            .toLocaleLowerCase()
+            .split(/\s+/)
+            .filter(Boolean)
+          return {
+            records: rows.filter(
+              (row) =>
+                row.countryId === countryId &&
+                terms.every((term) =>
+                  [
+                    row.name,
+                    row.businessCode,
+                    row.contactName,
+                    row.address,
+                    row.city,
+                  ].some((field) => field?.toLocaleLowerCase().includes(term)),
+                ),
+            ),
+            nextCursor: null,
+          }
+        })
+        .then((page) => {
           if (active)
             setSupplierResult({
               key: supplierKey,
-              rows: rows.filter((row) => row.countryId === countryId),
+              rows: page.records,
+              nextCursor: page.nextCursor,
             })
         })
         .catch(() => {
           if (active)
-            setSupplierResult({ key: supplierKey, rows: [], failed: true })
+            setSupplierResult({
+              key: supplierKey,
+              rows: [],
+              nextCursor: null,
+              failed: true,
+            })
         })
+    }, 250)
     return () => {
       active = false
+      window.clearTimeout(timer)
     }
-  }, [api, countryId, projectId, supplierKey])
-
-  useEffect(() => {
-    let active = true
-    if (countryId && projectId)
-      void api
-        .searchCatalog(materialQuery, projectId)
-        .then((rows) => {
-          if (active) setMaterialResult({ key: materialKey, rows })
-        })
-        .catch(() => {
-          if (active)
-            setMaterialResult({ key: materialKey, rows: [], failed: true })
-        })
-    return () => {
-      active = false
-    }
-  }, [api, countryId, projectId, materialQuery, materialKey])
+  }, [api, countryId, projectId, supplierQuery, supplierCursor, supplierKey])
 
   useEffect(() => {
     let active = true
@@ -264,7 +306,7 @@ export function SuppliersPricesPage({
         countryId,
       )
       await api.saveSupplier(payload)
-      setSelectedSupplierId(payload.id)
+      setSupplierSelection({ key: contextKey, record: payload })
       setHistoryPage(0)
       setHistoryCursors([null])
       setNotice('supplier')
@@ -322,13 +364,6 @@ export function SuppliersPricesPage({
           ? 1
           : a.supplierName.localeCompare(b.supplierName),
     )
-  const filteredSuppliers = suppliers.filter((row) =>
-    [row.name, row.businessCode, row.contactName, row.address, row.city].some(
-      (value) =>
-        value?.toLocaleLowerCase().includes(supplierQuery.toLocaleLowerCase()),
-    ),
-  )
-
   if (!countryId || !projectId)
     return (
       <Alert
@@ -369,8 +404,7 @@ export function SuppliersPricesPage({
           }
         />
       )}
-      {((supplierResult?.key === supplierKey && supplierResult.failed) ||
-        (materialResult?.key === materialKey && materialResult.failed)) && (
+      {supplierResult?.key === supplierKey && supplierResult.failed && (
         <Alert
           type="error"
           showIcon
@@ -380,12 +414,19 @@ export function SuppliersPricesPage({
       <div className="supplier-layout">
         <section className="supplier-list" aria-label={c('供应商')}>
           <div className="supplier-toolbar">
-            <Input
-              value={supplierQuery}
-              onChange={(e) => setSupplierQuery(e.target.value)}
-              aria-label={t('搜索供应商名称、编码或联系人')}
-              placeholder={t('搜索供应商名称、编码或联系人')}
-            />
+            <label htmlFor="supplier-page-search">
+              <span>{t('搜索供应商名称、编码或联系人')}</span>
+              <Input
+                id="supplier-page-search"
+                value={supplierQuery}
+                onChange={(e) => {
+                  setSupplierQuery(e.target.value)
+                  setSupplierPagination({ key: '', cursors: [null], page: 0 })
+                }}
+                aria-label={t('搜索供应商名称、编码或联系人')}
+                placeholder={t('搜索供应商名称、编码或联系人')}
+              />
+            </label>
             <Button
               type="primary"
               disabled={!canEdit || saving}
@@ -399,8 +440,13 @@ export function SuppliersPricesPage({
               <Spin />
               {t('正在读取供应商…')}
             </div>
-          ) : supplierResult.failed ? null : filteredSuppliers.length ? (
-            <div className="supplier-table-scroll">
+          ) : supplierResult.failed ? null : suppliers.length ? (
+            <div
+              className="supplier-table-scroll"
+              role="region"
+              aria-label={t('供应商列表，可横向滚动')}
+              tabIndex={0}
+            >
               <table className="data-table">
                 <thead>
                   <tr>
@@ -410,7 +456,7 @@ export function SuppliersPricesPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredSuppliers.map((row) => (
+                  {suppliers.map((row) => (
                     <tr
                       key={row.id}
                       aria-selected={selectedSupplierId === row.id}
@@ -420,7 +466,10 @@ export function SuppliersPricesPage({
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedSupplierId(row.id)
+                            setSupplierSelection({
+                              key: contextKey,
+                              record: row,
+                            })
                             setHistoryPage(0)
                             setHistoryCursors([null])
                           }}
@@ -441,6 +490,44 @@ export function SuppliersPricesPage({
           ) : (
             <p role="status">{c('暂无供应商')}</p>
           )}
+          <nav className="supplier-pagination" aria-label={t('供应商分页')}>
+            <Button
+              disabled={
+                supplierResult?.key !== supplierKey || supplierPage === 0
+              }
+              onClick={() =>
+                setSupplierPagination({
+                  key: supplierFilterKey,
+                  cursors: supplierCursors,
+                  page: supplierPage - 1,
+                })
+              }
+            >
+              {t('上一页')}
+            </Button>
+            <span role="status">
+              {t('当前页')} {supplierPage + 1} · {suppliers.length} {t('项')}
+            </span>
+            <Button
+              disabled={
+                supplierResult?.key !== supplierKey ||
+                !supplierResult?.nextCursor
+              }
+              onClick={() => {
+                if (supplierResult?.nextCursor)
+                  setSupplierPagination({
+                    key: supplierFilterKey,
+                    cursors: [
+                      ...supplierCursors.slice(0, supplierPage + 1),
+                      supplierResult.nextCursor,
+                    ],
+                    page: supplierPage + 1,
+                  })
+              }}
+            >
+              {t('下一页')}
+            </Button>
+          </nav>
         </section>
         <section className="supplier-detail">
           {selectedSupplier ? (
@@ -490,7 +577,12 @@ export function SuppliersPricesPage({
                   title={t('无法读取报价；未显示不完整结果，请重试。')}
                 />
               ) : (
-                <div className="supplier-table-scroll">
+                <div
+                  className="supplier-table-scroll"
+                  role="region"
+                  aria-label={t('报价历史，可横向滚动')}
+                  tabIndex={0}
+                >
                   <table className="data-table">
                     <thead>
                       <tr>
@@ -581,41 +673,33 @@ export function SuppliersPricesPage({
           <p>{t('同币种、同单位分组排序；不同币种或单位不作高低比较。')}</p>
         </header>
         <div className="supplier-toolbar">
-          <Input
-            aria-label={t('搜索材料名称、型号或规格')}
-            value={materialQuery}
-            onChange={(e) => {
-              setMaterialQuery(e.target.value)
-              setSelectedMaterialId('')
-            }}
-            placeholder={t('搜索材料名称、型号或规格')}
-          />
-          <Select
-            aria-label={t('选择材料')}
-            loading={materialResult?.key !== materialKey}
-            placeholder={t('选择材料')}
-            value={selectedMaterial?.id}
-            onChange={(value) => setSelectedMaterialId(value)}
-            options={materials.map((row) => ({
-              value: row.id,
-              label: `${materialName(row)} · ${row.model} · ${row.specification}`,
-            }))}
-          />
+          <label>
+            <span>{t('选择材料')}</span>
+            <MaterialPicker
+              api={api}
+              projectId={projectId}
+              ariaLabel={t('选择材料')}
+              value={selectedMaterial?.id}
+              valueLabel={
+                selectedMaterial
+                  ? materialName(selectedMaterial) +
+                    ' · ' +
+                    selectedMaterial.model
+                  : undefined
+              }
+              disabled={saving}
+              onChange={(record) =>
+                setMaterialSelection({ key: contextKey, record })
+              }
+            />
+          </label>
           <Button
-            disabled={
-              !canEdit ||
-              !selectedMaterial ||
-              saving ||
-              !suppliers.some((row) => row.isActive && !row.isBlacklisted)
-            }
+            disabled={!canEdit || !selectedMaterial || saving}
             onClick={openQuote}
           >
             {c('维护报价')}
           </Button>
         </div>
-        {materials.length === 100 && (
-          <p role="status">{t('已达到材料搜索结果上限，请缩小搜索范围。')}</p>
-        )}
         {!selectedMaterial ? (
           <p role="status">{t('请选择材料以读取该项目可见的全部有效报价。')}</p>
         ) : !comparison ? (
@@ -634,7 +718,12 @@ export function SuppliersPricesPage({
               <h4>
                 {rows[0].currency} · {rows[0].unit}
               </h4>
-              <div className="supplier-table-scroll">
+              <div
+                className="supplier-table-scroll"
+                role="region"
+                aria-label={t('材料报价，可横向滚动')}
+                tabIndex={0}
+              >
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -757,7 +846,17 @@ export function SuppliersPricesPage({
           onFinish={savePrice}
           disabled={saving || !canEdit}
         >
-          <PriceFormFields suppliers={suppliers} />
+          <PriceFormFields
+            suppliers={suppliers}
+            supplierControl={
+              <SupplierPicker
+                api={api}
+                countryId={countryId}
+                knownSupplier={selectedSupplier}
+                disabled={saving}
+              />
+            }
+          />
         </Form>
       </Modal>
     </section>

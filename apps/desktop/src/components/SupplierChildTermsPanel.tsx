@@ -85,6 +85,7 @@ export function SupplierChildTermsPanel({
   async function save() {
     if (requestPending.current) return
     setMessageType('error')
+    setMessage(null)
     const payload = input()
     if (!payload) return
     requestPending.current = true
@@ -96,6 +97,7 @@ export function SupplierChildTermsPanel({
       setSaved(true)
       setMessage({ key: 'saved', values: { total: total.totalMinor } })
     } catch {
+      setMessageType('error')
       setMessage({ key: '保存失败：请确认子单仍为草稿且所有金额有效。' })
     } finally {
       requestPending.current = false
@@ -106,6 +108,7 @@ export function SupplierChildTermsPanel({
   async function send() {
     if (requestPending.current) return
     setMessageType('error')
+    setMessage(null)
     if (!saved) {
       setMessage({ key: '请先保存税、折扣和运费条款。' })
       return
@@ -125,6 +128,7 @@ export function SupplierChildTermsPanel({
       }
       setMessage({ key: '供应商子单已签发 SPO 并发送，可开始登记收货。' })
     } catch {
+      setMessageType('error')
       setMessage({
         key: '发送失败：请确认父单已批准、子单条款已保存且订单尚未签发；原条款已保留。',
       })

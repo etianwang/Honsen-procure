@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Input, Modal, Select, Space } from 'antd'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { UiLocale } from '@honsen/shared'
 import type {
   ProcurementExpenditureApi,
@@ -37,10 +37,20 @@ export function ProcurementExpenditurePanel({
   const [message, setMessage] = useState<string | null>(null)
   const [messageType, setMessageType] = useState<'success' | 'error'>('success')
   const [reversalError, setReversalError] = useState(false)
+  const requestPending = useRef(false)
+  const pendingText =
+    locale === 'zh-CN'
+      ? '正在保存，请稍候…'
+      : locale === 'fr-FR'
+        ? 'Enregistrement en cours…'
+        : 'Saving, please wait…'
   const [busy, setBusy] = useState(false)
   const [reversalId, setReversalId] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   async function record() {
+    if (requestPending.current) return
+    requestPending.current = true
+    setMessage(null)
     setBusy(true)
     try {
       await api.record({
@@ -63,11 +73,14 @@ export function ProcurementExpenditurePanel({
       setMessageType('error')
       setMessage(t.error)
     } finally {
+      requestPending.current = false
       setBusy(false)
     }
   }
   async function reverse() {
-    if (!reversalId || !reason.trim() || busy) return
+    if (!reversalId || !reason.trim() || requestPending.current) return
+    requestPending.current = true
+    setMessage(null)
     setReversalError(false)
     setBusy(true)
     try {
@@ -86,6 +99,7 @@ export function ProcurementExpenditurePanel({
       setMessageType('error')
       setMessage(t.error)
     } finally {
+      requestPending.current = false
       setBusy(false)
     }
   }
@@ -139,6 +153,7 @@ export function ProcurementExpenditurePanel({
         <label>
           {t.payee}
           <Input
+            disabled={busy}
             aria-label={t.payee}
             value={payeeName}
             maxLength={255}
@@ -148,6 +163,7 @@ export function ProcurementExpenditurePanel({
         <label>
           {t.amount}
           <Input
+            disabled={busy}
             aria-label={t.amount}
             value={amountMinor}
             inputMode="numeric"
@@ -158,6 +174,7 @@ export function ProcurementExpenditurePanel({
         <label>
           {t.date}
           <Input
+            disabled={busy}
             aria-label={t.date}
             type="date"
             value={paymentDate}
@@ -167,6 +184,7 @@ export function ProcurementExpenditurePanel({
         <label>
           {t.type}
           <Select
+            disabled={busy}
             aria-label={t.type}
             value={paymentType}
             onChange={setPaymentType}
@@ -178,6 +196,7 @@ export function ProcurementExpenditurePanel({
         <label>
           {t.method}
           <Select
+            disabled={busy}
             aria-label={t.method}
             value={paymentMethod}
             onChange={setPaymentMethod}
@@ -189,12 +208,15 @@ export function ProcurementExpenditurePanel({
         <Button
           type="primary"
           loading={busy}
-          disabled={!/^[1-9]\d*$/.test(amountMinor) || !payeeName.trim()}
+          disabled={
+            busy || !/^[1-9]\d*$/.test(amountMinor) || !payeeName.trim()
+          }
           onClick={() => void record()}
         >
           {t.record}
         </Button>
       </Space>
+      {busy && <Alert role="status" type="info" title={pendingText} showIcon />}
       {message ? (
         <Alert
           role={messageType === 'error' ? 'alert' : 'status'}
@@ -213,14 +235,21 @@ export function ProcurementExpenditurePanel({
         okText={t.confirm}
         cancelText={t.cancel}
         confirmLoading={busy}
-        okButtonProps={{ disabled: !reason.trim() }}
+        closable={!busy}
+        keyboard={!busy}
+        cancelButtonProps={{ disabled: busy }}
+        okButtonProps={{ disabled: busy || !reason.trim() }}
       >
+        {busy && (
+          <Alert role="status" type="info" title={pendingText} showIcon />
+        )}
         {reversalError && (
           <Alert role="alert" type="error" showIcon title={t.error} />
         )}
         <label>
           {t.reason}
           <Input.TextArea
+            disabled={busy}
             aria-label={t.reason}
             value={reason}
             maxLength={1000}

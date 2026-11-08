@@ -2395,14 +2395,14 @@ test('authenticated desktop switches between cached authorization scopes', async
   await page.getByLabel('密码').fill('fixture-password')
   await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
-  await page
-    .getByLabel('当前授权范围')
-    .selectOption(
-      '00000000-0000-4000-8000-000000000005:00000000-0000-4000-8000-000000000003:00000000-0000-4000-8000-000000000006',
-    )
-  await expect(page.getByLabel('当前授权范围')).toHaveValue(
-    '00000000-0000-4000-8000-000000000005:00000000-0000-4000-8000-000000000003:00000000-0000-4000-8000-000000000006',
-  )
+  const scopePicker = page.getByRole('combobox', {
+    name: '当前授权范围',
+    exact: true,
+  })
+  await scopePicker.fill('项目乙')
+  await scopePicker.press('ArrowDown')
+  await scopePicker.press('Enter')
+  await expect(page.locator('.honsen-shell-scope')).toContainText('项目乙')
   await page.getByRole('button', { name: '采购申请单' }).click()
   await expect(page.locator('.page-heading p')).toContainText('乙工地')
   await expect(page.getByRole('table', { name: '请购历史' })).toContainText(

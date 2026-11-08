@@ -29,6 +29,13 @@
 .honsen-shell-scope {
   flex: 1 1 22rem;
   max-width: 32rem;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.honsen-shell-scope .ant-select {
+  width: 100%;
+  min-width: 0;
 }
 .honsen-shell-user {
   display: flex;

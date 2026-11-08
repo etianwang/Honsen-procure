@@ -628,3 +628,151 @@ fn material_catalog_inactive_pagination_requires_maintenance_role_and_preserves_
     ));
     assert!(engineer.search_catalog_page("", None, None, time).is_ok());
 }
+
+#[test]
+fn supplier_search_pages_are_bounded_stable_country_scoped_and_read_only() {
+    let (service, account, now) = fixture(Role::Engineer);
+    let allowed_country = country(&service);
+    let denied_country = Uuid::new_v4();
+    let mut db = service.connection.lock().unwrap();
+    let transaction = db.transaction().unwrap();
+    transaction.execute("INSERT INTO local_countries(id,business_code,name,time_zone,is_active,version) VALUES(?1,'OTHER','Other synthetic country','UTC',1,1)",[denied_country.to_string()]).unwrap();
+    let mut selectable_count = 0;
+    for index in 0..10050 {
+        let active = index % 13 != 0;
+        let blacklisted = index % 17 == 0;
+        if active && !blacklisted {
+            selectable_count += 1;
+        }
+        transaction.execute("INSERT INTO local_suppliers(id,country_id,business_code,name,contact_name,address,city,is_active,is_blacklisted,is_preferred,version) VALUES(?1,?2,?3,'Synthetic supplier','Synthetic contact','Synthetic address','Synthetic city',?4,?5,0,1)",params![Uuid::new_v4().to_string(),allowed_country.to_string(),format!("SYNTH-{index:05}"),active,blacklisted]).unwrap();
+    }
+    transaction.execute("INSERT INTO local_suppliers(id,country_id,business_code,name,is_active,is_blacklisted,version) VALUES(?1,?2,'OTHER-SUP','Other country supplier',1,0,1)",params![Uuid::new_v4().to_string(),denied_country.to_string()]).unwrap();
+    transaction.commit().unwrap();
+    let before: i64 = db
+        .query_row("SELECT COUNT(*) FROM local_sync_outbox", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    drop(db);
+    for (selectable_only, expected) in [(false, 10050), (true, selectable_count)] {
+        let start = std::time::Instant::now();
+        let mut cursor = None;
+        let mut seen = std::collections::HashSet::new();
+        let mut pages = 0;
+        loop {
+            let page = service
+                .search_suppliers_page("", allowed_country, cursor, selectable_only, now)
+                .unwrap();
+            if pages == 0 {
+                println!(
+                    "supplier_search rows=10050 selectable_only={} first_page_ms={} bounded_page={}",
+                    selectable_only,
+                    start.elapsed().as_millis(),
+                    page.records.len()
+                );
+            }
+            assert!(page.records.len() <= 50);
+            for record in page.records {
+                assert_eq!(record.country_id, allowed_country);
+                assert!(!selectable_only || record.is_active && !record.is_blacklisted);
+                assert!(seen.insert(record.id));
+            }
+            pages += 1;
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        println!(
+            "supplier_search selectable_only={} records={} pages={} elapsed_ms={}",
+            selectable_only,
+            seen.len(),
+            pages,
+            start.elapsed().as_millis()
+        );
+        assert_eq!(seen.len(), expected);
+    }
+    assert_eq!(service.list_suppliers(now).unwrap().len(), 10050);
+    let combined = service
+        .search_suppliers_page(
+            "contact city SYNTH-10049",
+            allowed_country,
+            None,
+            false,
+            now,
+        )
+        .unwrap();
+    assert_eq!(combined.records.len(), 1);
+    assert!(combined.next_cursor.is_none());
+    assert_eq!(
+        combined,
+        service
+            .search_suppliers_page(
+                "contact city SYNTH-10049",
+                allowed_country,
+                None,
+                false,
+                now
+            )
+            .unwrap()
+    );
+    assert!(
+        service
+            .search_suppliers_page("", denied_country, None, false, now)
+            .unwrap()
+            .records
+            .is_empty()
+    );
+    for query in ["%", "_", "' OR 1=1 --"] {
+        assert!(
+            service
+                .search_suppliers_page(query, allowed_country, None, false, now)
+                .unwrap()
+                .records
+                .is_empty()
+        );
+    }
+    assert!(matches!(
+        service.search_suppliers_page(&"x".repeat(256), allowed_country, None, false, now),
+        Err(AuthError::InvalidInput)
+    ));
+    assert!(matches!(
+        service.search_suppliers_page("a b c d e f g h i", allowed_country, None, false, now),
+        Err(AuthError::InvalidInput)
+    ));
+    let long_cursor = SupplierSearchCursor {
+        is_active: true,
+        name: "x".repeat(1025),
+        id: Uuid::new_v4(),
+    };
+    assert!(matches!(
+        service.search_suppliers_page("", allowed_country, Some(long_cursor), false, now),
+        Err(AuthError::InvalidInput)
+    ));
+    let db = service.connection.lock().unwrap();
+    assert_eq!(
+        before,
+        db.query_row("SELECT COUNT(*) FROM local_sync_outbox", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap()
+    );
+    db.execute(
+        "UPDATE local_authorization_snapshots SET expires_at=?2, verified_at=?2-100 WHERE account_id=?1",
+        params![account.to_string(), unix_seconds(now) - 1],
+    )
+    .unwrap();
+    drop(db);
+    assert!(
+        service
+            .search_suppliers_page("", allowed_country, None, false, now)
+            .unwrap()
+            .records
+            .is_empty()
+    );
+    assert!(
+        LocalAuthService::open_in_memory()
+            .unwrap()
+            .search_suppliers_page("", allowed_country, None, false, now)
+            .is_err()
+    );
+}

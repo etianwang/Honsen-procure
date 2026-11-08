@@ -1,0 +1,36 @@
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--honsen-space-3);
+  margin-block: var(--honsen-space-4);
+}
+
+.history-filters > label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--honsen-space-1);
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.history-filters > label:first-child {
+  flex-basis: 240px;
+}
+
+.history-filters > label:has(input[type='checkbox']) {
+  flex: 0 1 auto;
+  flex-direction: row;
+  align-items: center;
+  min-height: 32px;
+}
+
+.history-table-region {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.history-table-region:focus-visible {
+  outline: 2px solid var(--honsen-focus);
+  outline-offset: 2px;
+}

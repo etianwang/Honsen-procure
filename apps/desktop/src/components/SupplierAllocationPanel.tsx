@@ -76,6 +76,7 @@ export function SupplierAllocationPanel({
   async function allocate() {
     if (requestPending.current) return
     setMessageType('error')
+    setMessage(null)
     const payload = lines.map((line) => ({
       parentItemId: line.id,
       ...allocations[line.id],
@@ -105,6 +106,7 @@ export function SupplierAllocationPanel({
       setSavedCount(saved.length)
       setMessage('已创建 {count} 张供应商子单，父单明细分配已锁定。')
     } catch {
+      setMessageType('error')
       setMessage(
         '拆单失败：目录报价只能分配给对应供应商，且币种、单价与报价必须一致。请检查报价仍有效、父单已批准且每行仅分配一次；原分配内容已保留。',
       )

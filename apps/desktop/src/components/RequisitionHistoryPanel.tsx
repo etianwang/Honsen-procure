@@ -15,6 +15,7 @@ import { tauriWorkflowApi } from '../lib/workflow-api'
 import type { WorkflowApi } from '../lib/workflow-api'
 import { OrderWorkflowPanel } from './OrderWorkflowPanel'
 import { FormalPrintPreview } from './FormalPrintPreview'
+import './RequisitionHistoryPanel.css'
 
 export type HistoryEntryRequest = {
   filter: RequisitionHistoryFilter
@@ -116,7 +117,12 @@ export function RequisitionHistoryPanel({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [retry, setRetry] = useState(0)
+  const listRequest = useRef(0)
+  const pagePending = useRef(false)
   const [query, setQuery] = useState(entry?.filter.query ?? '')
+  const [dateFrom, setDateFrom] = useState(entry?.filter.dateFrom ?? '')
+  const [dateTo, setDateTo] = useState(entry?.filter.dateTo ?? '')
+  const [dateError, setDateError] = useState(false)
   const [workflowStatus, setWorkflowStatus] = useState(
     entry?.filter.workflowStatus ?? '',
   )
@@ -209,37 +215,47 @@ export function RequisitionHistoryPanel({
 
   useEffect(() => {
     let active = true
+    const request = ++listRequest.current
+    pagePending.current = false
+    setLoading(true)
     api
       .listRequisitionHistory(undefined, filter)
       .then((page) => {
-        if (!active) return
+        if (!active || request !== listRequest.current) return
         setRecords(page.records)
         setCursor(page.nextCursor)
         setError(false)
       })
       .catch(() => {
-        if (active) setError(true)
+        if (active && request === listRequest.current) setError(true)
       })
       .finally(() => {
-        if (active) setLoading(false)
+        if (active && request === listRequest.current) setLoading(false)
       })
     return () => {
       active = false
+      listRequest.current += 1
     }
   }, [api, filter, refreshKey, retry])
 
   async function loadMore() {
-    if (!cursor || loading) return
+    if (!cursor || loading || pagePending.current) return
+    const request = listRequest.current
+    pagePending.current = true
     setLoading(true)
     setError(false)
     try {
       const page = await api.listRequisitionHistory(cursor, filter)
+      if (request !== listRequest.current) return
       setRecords((current) => [...current, ...page.records])
       setCursor(page.nextCursor)
     } catch {
-      setError(true)
+      if (request === listRequest.current) setError(true)
     } finally {
-      setLoading(false)
+      if (request === listRequest.current) {
+        pagePending.current = false
+        setLoading(false)
+      }
     }
   }
 
@@ -289,7 +305,9 @@ export function RequisitionHistoryPanel({
           '导出当前筛选范围的全部授权记录，包含内部评论与审计；此文件用于内部核对。',
         )}
       </p>
+      <label htmlFor="history-export-language">{t('Excel导出语言')}</label>
       <Select
+        id="history-export-language"
         aria-label={t('Excel导出语言')}
         value={
           exportLocale ??
@@ -316,9 +334,16 @@ export function RequisitionHistoryPanel({
         />
       )}
       <form
+        className="history-filters"
         onSubmit={(event) => {
           event.preventDefault()
+          if (dateFrom && dateTo && dateFrom > dateTo) {
+            setDateError(true)
+            return
+          }
+          setDateError(false)
           setRecords([])
+          listRequest.current += 1
           setCursor(null)
           detailRequest.current += 1
           setDetail(null)
@@ -328,6 +353,8 @@ export function RequisitionHistoryPanel({
             query: query.trim() || undefined,
             workflowStatus: workflowStatus || undefined,
             projectId: currentProjectOnly ? projectId : undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
           })
         }}
       >
@@ -338,6 +365,37 @@ export function RequisitionHistoryPanel({
             onChange={(event) => setQuery(event.target.value)}
             maxLength={100}
           />
+        </label>
+        <label>
+          {t('申请日期从')}
+          <Input
+            type="date"
+            value={dateFrom}
+            max={dateTo || undefined}
+            onChange={(event) => {
+              setDateFrom(event.target.value)
+              setDateError(false)
+            }}
+          />
+        </label>
+        <label>
+          {t('申请日期至')}
+          <Input
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            aria-invalid={dateError}
+            aria-describedby={dateError ? 'history-date-error' : undefined}
+            onChange={(event) => {
+              setDateTo(event.target.value)
+              setDateError(false)
+            }}
+          />
+          {dateError ? (
+            <span id="history-date-error" role="alert">
+              {t('结束日期不能早于开始日期。')}
+            </span>
+          ) : null}
         </label>
         <label>
           {t('请购状态')}
@@ -378,6 +436,7 @@ export function RequisitionHistoryPanel({
           action={
             <Button
               onClick={() => {
+                listRequest.current += 1
                 setLoading(true)
                 setError(false)
                 setRetry((value) => value + 1)
@@ -388,81 +447,100 @@ export function RequisitionHistoryPanel({
           }
         />
       ) : null}
-      <Table
+      <div
+        className="history-table-region"
+        role="region"
+        tabIndex={0}
         aria-label={t('请购历史')}
-        size="small"
-        rowKey="id"
-        loading={loading}
-        dataSource={records}
-        pagination={false}
-        scroll={{ x: 850 }}
-        locale={{
-          emptyText: error ? t('历史加载失败。') : t('暂无请购记录。'),
-        }}
-        columns={[
-          {
-            title: labels[0],
-            key: 'document',
-            render: (_, record) => (
-              <Button type="link" onClick={() => void openDetail(record.id)}>
-                {numberLabel(record.displayNo, record.workflowStatus)}
-              </Button>
-            ),
-          },
-          { title: labels[1], dataIndex: 'projectName' },
-          { title: labels[2], dataIndex: 'site' },
-          {
-            title: labels[3],
-            key: 'amount',
-            align: 'right',
-            render: (_, record) => {
-              const currency = currencySchema.safeParse(record.primaryCurrency)
-              return currency.success
-                ? formatMoney(
-                    { currency: currency.data, minor: record.totalMinor },
-                    numberLocale,
-                  )
-                : '—'
+      >
+        <Table
+          aria-label={t('请购历史')}
+          size="small"
+          rowKey="id"
+          loading={loading}
+          dataSource={records}
+          pagination={false}
+          scroll={{ x: 1100 }}
+          locale={{
+            emptyText: error ? t('历史加载失败。') : t('暂无请购记录。'),
+          }}
+          columns={[
+            {
+              title: labels[0],
+              key: 'document',
+              render: (_, record) => (
+                <Button type="link" onClick={() => void openDetail(record.id)}>
+                  {numberLabel(record.displayNo, record.workflowStatus)}
+                </Button>
+              ),
             },
-          },
-          {
-            title: labels[4],
-            key: 'mode',
-            render: (_, record) =>
-              record.procurementMode === 'owner_self_purchase'
-                ? t('业主自购')
-                : record.procurementMode === 'honsen_self_purchase'
-                  ? t('Honsen自购')
-                  : t('历史模式未记录'),
-          },
-          {
-            title: t('请购状态'),
-            key: 'status',
-            render: (_, record) => (
-              <Tag>{statusText(record.workflowStatus)}</Tag>
-            ),
-          },
-          {
-            title: labels[5],
-            key: 'updated',
-            render: (_, record) =>
-              new Intl.DateTimeFormat(numberLocale, {
-                dateStyle: 'short',
-                timeStyle: 'short',
-              }).format(new Date(record.updatedAt * 1000)),
-          },
-          {
-            title: labels[6],
-            key: 'actions',
-            render: (_, record) => (
-              <Button size="small" onClick={() => void openDetail(record.id)}>
-                {t('查看详情：')}
-                {numberLabel(record.displayNo, record.workflowStatus)}
-              </Button>
-            ),
-          },
-        ]}
-      />
+            { title: labels[1], dataIndex: 'projectName' },
+            { title: labels[2], dataIndex: 'site' },
+            {
+              title: t('申请人'),
+              key: 'applicant',
+              render: (_, record) => record.applicantName || '—',
+            },
+            {
+              title: t('申请日期'),
+              key: 'orderDate',
+              render: (_, record) => record.orderDate || '—',
+            },
+            {
+              title: labels[3],
+              key: 'amount',
+              align: 'right',
+              render: (_, record) => {
+                const currency = currencySchema.safeParse(
+                  record.primaryCurrency,
+                )
+                return currency.success
+                  ? formatMoney(
+                      { currency: currency.data, minor: record.totalMinor },
+                      numberLocale,
+                    )
+                  : '—'
+              },
+            },
+            {
+              title: labels[4],
+              key: 'mode',
+              render: (_, record) =>
+                record.procurementMode === 'owner_self_purchase'
+                  ? t('业主自购')
+                  : record.procurementMode === 'honsen_self_purchase'
+                    ? t('Honsen自购')
+                    : t('历史模式未记录'),
+            },
+            {
+              title: t('请购状态'),
+              key: 'status',
+              render: (_, record) => (
+                <Tag>{statusText(record.workflowStatus)}</Tag>
+              ),
+            },
+            {
+              title: labels[5],
+              key: 'updated',
+              render: (_, record) =>
+                new Intl.DateTimeFormat(numberLocale, {
+                  dateStyle: 'short',
+                  timeStyle: 'short',
+                }).format(new Date(record.updatedAt * 1000)),
+            },
+            {
+              title: labels[6],
+              key: 'actions',
+              render: (_, record) => (
+                <Button size="small" onClick={() => void openDetail(record.id)}>
+                  {t('查看详情：')}
+                  {numberLabel(record.displayNo, record.workflowStatus)}
+                </Button>
+              ),
+            },
+          ]}
+        />
+      </div>
       {cursor ? (
         <Button loading={loading} onClick={() => void loadMore()}>
           {t('加载更多')}

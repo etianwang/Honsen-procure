@@ -477,6 +477,8 @@ pub struct RequisitionHistoryView {
     pub primary_currency: String,
     pub total_minor: String,
     pub updated_at: i64,
+    pub applicant_name: Option<String>,
+    pub order_date: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -492,6 +494,8 @@ pub struct RequisitionHistoryFilter {
     pub query: Option<String>,
     pub workflow_status: Option<String>,
     pub project_id: Option<Uuid>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1242,6 +1246,21 @@ pub struct CatalogMaterialView {
     pub notes: Option<String>,
     pub version: i64,
     pub prices: Vec<CatalogPriceView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SupplierSearchCursor {
+    pub is_active: bool,
+    pub name: String,
+    pub id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupplierSearchPage {
+    pub records: Vec<SupplierView>,
+    pub next_cursor: Option<SupplierSearchCursor>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -3399,6 +3418,28 @@ impl LocalAuthService {
         now: SystemTime,
     ) -> Result<RequisitionHistoryPageView, AuthError> {
         self.require_catalog_read(now)?;
+        let valid_filter_date = |date: &str| {
+            valid_iso_date(date)
+                && date.bytes().enumerate().all(|(index, byte)| {
+                    if index == 4 || index == 7 {
+                        byte == b'-'
+                    } else {
+                        byte.is_ascii_digit()
+                    }
+                })
+        };
+        if filter
+            .date_from
+            .as_deref()
+            .is_some_and(|date| !valid_filter_date(date))
+            || filter
+                .date_to
+                .as_deref()
+                .is_some_and(|date| !valid_filter_date(date))
+            || matches!((&filter.date_from, &filter.date_to), (Some(from), Some(to)) if from > to)
+        {
+            return Err(AuthError::InvalidInput);
+        }
         let query = filter
             .query
             .map(|value| value.trim().to_string())
@@ -3430,15 +3471,18 @@ impl LocalAuthService {
         let cursor_at = cursor.as_ref().map(|value| value.updated_at);
         let cursor_id = cursor.as_ref().map(|value| value.id.to_string());
         let mut statement = connection.prepare(
-            "SELECT o.id, o.display_no, p.name, o.site, o.workflow_status, o.procurement_mode, o.primary_currency, o.total_minor, o.updated_at
+            "SELECT o.id, o.display_no, p.name, o.site, o.workflow_status, o.procurement_mode, o.primary_currency, o.total_minor, o.updated_at, COALESCE(NULLIF(u.display_name, ''), u.username), o.order_date
              FROM local_purchase_orders o
              JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id
              JOIN local_projects p ON p.id = o.project_id
+             LEFT JOIN local_accounts u ON u.id = o.applicant_id
              WHERE o.parent_order_id IS NULL AND o.deleted_at IS NULL
                AND (?2 IS NULL OR o.updated_at < ?2 OR (o.updated_at = ?2 AND o.id < ?3))
                AND (?4 IS NULL OR instr(lower(o.display_no), lower(?4)) > 0 OR instr(lower(p.name), lower(?4)) > 0 OR instr(lower(o.site), lower(?4)) > 0)
                AND (?5 IS NULL OR o.workflow_status = ?5)
                AND (?6 IS NULL OR o.project_id = ?6)
+               AND (?7 IS NULL OR o.order_date >= ?7)
+               AND (?8 IS NULL OR o.order_date <= ?8)
              ORDER BY o.updated_at DESC, o.id DESC LIMIT 51"
         ).map_err(|_| AuthError::Database)?;
         let mut records = statement
@@ -3449,7 +3493,9 @@ impl LocalAuthService {
                     cursor_id,
                     query,
                     filter.workflow_status,
-                    filter.project_id.map(|value| value.to_string())
+                    filter.project_id.map(|value| value.to_string()),
+                    filter.date_from,
+                    filter.date_to
                 ],
                 |row| {
                     Ok(RequisitionHistoryView {
@@ -3463,6 +3509,8 @@ impl LocalAuthService {
                         primary_currency: row.get(6)?,
                         total_minor: row.get::<_, i64>(7)?.to_string(),
                         updated_at: row.get(8)?,
+                        applicant_name: row.get(9)?,
+                        order_date: row.get(10)?,
                     })
                 },
             )
@@ -6178,7 +6226,72 @@ impl LocalAuthService {
     }
 
     pub fn list_suppliers(&self, now: SystemTime) -> Result<Vec<SupplierView>, AuthError> {
+        self.list_supplier_window(None, None, None, false, now)
+    }
+
+    pub fn search_suppliers_page(
+        &self,
+        query: &str,
+        country_id: Uuid,
+        after: Option<SupplierSearchCursor>,
+        selectable_only: bool,
+        now: SystemTime,
+    ) -> Result<SupplierSearchPage, AuthError> {
+        let mut records = self.list_supplier_window(
+            Some(query),
+            Some(country_id),
+            after.as_ref(),
+            selectable_only,
+            now,
+        )?;
+        let more = records.len() > 50;
+        records.truncate(50);
+        let next_cursor = if more {
+            records.last().map(|record| SupplierSearchCursor {
+                is_active: record.is_active,
+                name: record.name.clone(),
+                id: record.id,
+            })
+        } else {
+            None
+        };
+        Ok(SupplierSearchPage {
+            records,
+            next_cursor,
+        })
+    }
+
+    fn list_supplier_window(
+        &self,
+        query: Option<&str>,
+        country_id: Option<Uuid>,
+        after: Option<&SupplierSearchCursor>,
+        selectable_only: bool,
+        now: SystemTime,
+    ) -> Result<Vec<SupplierView>, AuthError> {
         self.require_catalog_read(now)?;
+        if query.is_some_and(|value| value.len() > 255)
+            || after.is_some_and(|cursor| cursor.name.len() > 1024)
+        {
+            return Err(AuthError::InvalidInput);
+        }
+        let tokens: Vec<String> = query
+            .unwrap_or("")
+            .split_whitespace()
+            .map(|token| {
+                format!(
+                    "%{}%",
+                    token
+                        .replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                )
+            })
+            .collect();
+        if tokens.len() > 8 {
+            return Err(AuthError::InvalidInput);
+        }
+        let token_json = serde_json::to_string(&tokens).map_err(|_| AuthError::InvalidInput)?;
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let mut statement = connection
@@ -6188,32 +6301,54 @@ impl LocalAuthService {
                  FROM local_suppliers
                  WHERE deleted_at IS NULL AND country_id IS NOT NULL
                    AND EXISTS (SELECT 1 FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 AND p.country_id = local_suppliers.country_id)
-                 ORDER BY is_active DESC, name",
+                   AND (?3 IS NULL OR country_id = ?3)
+                   AND (NOT ?4 OR (is_active = 1 AND is_blacklisted = 0))
+                   AND NOT EXISTS (SELECT 1 FROM json_each(?5) token WHERE NOT (
+                     name LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                     OR business_code LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                     OR COALESCE(contact_name, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                     OR COALESCE(address, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE
+                     OR COALESCE(city, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE))
+                   AND (?6 IS NULL OR is_active < ?6 OR (is_active = ?6 AND (name, id) > (?7, ?8)))
+                 ORDER BY is_active DESC, name, id LIMIT ?9",
             )
             .map_err(|_| AuthError::Database)?;
         statement
-            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, i64>(12)?,
-                    row.get::<_, i64>(13)?,
-                    row.get::<_, i64>(14)?,
-                    row.get::<_, i64>(15)?,
-                    row.get::<_, String>(16)?,
-                    row.get::<_, Option<String>>(17)?,
-                ))
-            })
+            .query_map(
+                params![
+                    account_id.to_string(),
+                    unix_seconds(now),
+                    country_id.map(|id| id.to_string()),
+                    selectable_only,
+                    token_json,
+                    after.map(|cursor| i64::from(cursor.is_active)),
+                    after.map(|cursor| cursor.name.as_str()),
+                    after.map(|cursor| cursor.id.to_string()),
+                    if query.is_some() { 51 } else { -1 }
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, Option<String>>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, i64>(12)?,
+                        row.get::<_, i64>(13)?,
+                        row.get::<_, i64>(14)?,
+                        row.get::<_, i64>(15)?,
+                        row.get::<_, String>(16)?,
+                        row.get::<_, Option<String>>(17)?,
+                    ))
+                },
+            )
             .map_err(|_| AuthError::Database)?
             .map(|row| {
                 let (
@@ -8460,6 +8595,24 @@ pub mod commands {
             project_id,
             after,
             include_blacklisted,
+            SystemTime::now(),
+        )
+        .map_err(Into::into)
+    }
+
+    #[tauri::command]
+    pub fn search_suppliers_page(
+        auth: State<'_, LocalAuthService>,
+        query: String,
+        country_id: Uuid,
+        after: Option<super::SupplierSearchCursor>,
+        selectable_only: Option<bool>,
+    ) -> Result<super::SupplierSearchPage, CommandError> {
+        auth.search_suppliers_page(
+            &query,
+            country_id,
+            after,
+            selectable_only.unwrap_or(false),
             SystemTime::now(),
         )
         .map_err(Into::into)
@@ -20202,6 +20355,49 @@ mod tests {
         assert_eq!(history.records.len(), 1);
         assert_eq!(history.records[0].id, requisition_id);
         assert!(history.next_cursor.is_none());
+        assert_eq!(history.records[0].order_date, draft.order_date);
+        assert!(history.records[0].applicant_name.is_some());
+        for (from, to, expected) in [
+            (
+                Some(draft.order_date.clone()),
+                Some(draft.order_date.clone()),
+                1,
+            ),
+            (Some("2099-01-01".into()), None, 0),
+            (None, Some("2000-01-01".into()), 0),
+        ] {
+            let page = service
+                .list_requisition_history(
+                    None,
+                    RequisitionHistoryFilter {
+                        date_from: from,
+                        date_to: to,
+                        ..Default::default()
+                    },
+                    now,
+                )
+                .unwrap();
+            assert_eq!(page.records.len(), expected);
+        }
+        for (from, to) in [
+            (Some("2026-02-30".into()), None),
+            (Some("2026-+1-01".into()), None),
+            (None, Some("2026-01-+1".into())),
+            (Some("2026-11-10".into()), Some("2026-11-09".into())),
+        ] {
+            assert!(matches!(
+                service.list_requisition_history(
+                    None,
+                    RequisitionHistoryFilter {
+                        date_from: from,
+                        date_to: to,
+                        ..Default::default()
+                    },
+                    now
+                ),
+                Err(AuthError::InvalidInput)
+            ));
+        }
         assert_eq!(
             service
                 .list_requisition_history(

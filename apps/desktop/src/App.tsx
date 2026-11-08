@@ -4,7 +4,7 @@ import { shellText, useUiLocale, type ShellMessage } from './lib/ui-locale'
 import zhCN from 'antd/locale/zh_CN'
 import enUS from 'antd/locale/en_US'
 import frFR from 'antd/locale/fr_FR'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   readSyncStatus,
   startSyncLifecycle,
@@ -226,6 +226,13 @@ function App() {
   const authorizationRefreshReady =
     session?.onlineAuthenticated &&
     (syncState.kind === 'pending' || syncState.kind === 'synced')
+  const scopeRequest = useRef(0)
+  useLayoutEffect(() => {
+    scopeRequest.current += 1
+    return () => {
+      scopeRequest.current += 1
+    }
+  }, [session, authorizationRefreshReady])
   useEffect(() => {
     if (!session?.onlineAuthenticated || session.requires_password_change)
       return
@@ -349,11 +356,13 @@ function App() {
       }
     ).__TAURI__?.core?.invoke
     if (!invoke || !projectId || !departmentId || !teamId || !session) return
+    const request = ++scopeRequest.current
     void invoke<void>('select_authorization_context', {
       selection: { projectId, departmentId, teamId },
     })
-      .then(() =>
-        invoke<
+      .then(() => {
+        if (request !== scopeRequest.current) return
+        return invoke<
           Omit<
             RequisitionContext,
             | 'displayNo'
@@ -365,9 +374,10 @@ function App() {
             | 'expectedDeliveryDate'
             | 'notes'
           >
-        >('get_authorization_context'),
-      )
+        >('get_authorization_context')
+      })
       .then((context) => {
+        if (!context || request !== scopeRequest.current) return
         setAuthorizationContext({
           ...context,
           displayNo: `REQ-${crypto.randomUUID()}`,
@@ -381,7 +391,10 @@ function App() {
         })
         setContextError('')
       })
-      .catch(() => setContextError('无法切换到所选授权范围。'))
+      .catch(() => {
+        if (request === scopeRequest.current)
+          setContextError('无法切换到所选授权范围。')
+      })
   }
   const role: UserRole = session?.roles.includes('super_administrator')
     ? 'super_administrator'

@@ -15,6 +15,8 @@ export type RequisitionHistoryFilter = {
   query?: string
   workflowStatus?: string
   projectId?: string
+  dateFrom?: string
+  dateTo?: string
 }
 
 export type RequisitionHistoryPage = {
@@ -28,6 +30,8 @@ export type RequisitionHistoryPage = {
     primaryCurrency: string
     totalMinor: string
     updatedAt: number
+    applicantName?: string | null
+    orderDate?: string
   }[]
   nextCursor: RequisitionHistoryCursor | null
 }

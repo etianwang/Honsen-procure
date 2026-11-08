@@ -56,6 +56,7 @@ export function OrderWorkflowPanel({
   async function confirm() {
     if (requestPending.current) return
     setMessageType('error')
+    setMessage(null)
     requestPending.current = true
     setBusy(true)
     setMessage(null)
@@ -66,6 +67,7 @@ export function OrderWorkflowPanel({
       setMessage('订单已确认，审批记录已写入审计。')
       onChanged?.()
     } catch {
+      setMessageType('error')
       setMessage('确认失败：不能确认自己的订单或当前状态不允许确认。')
     } finally {
       requestPending.current = false
@@ -76,6 +78,7 @@ export function OrderWorkflowPanel({
   async function reject() {
     if (requestPending.current) return
     setMessageType('error')
+    setMessage(null)
     if (!reason.trim()) {
       setMessage('驳回原因必填。')
       return
@@ -91,6 +94,7 @@ export function OrderWorkflowPanel({
       onRejected?.()
       onChanged?.()
     } catch {
+      setMessageType('error')
       setMessage('驳回失败，请稍后重试。')
     } finally {
       requestPending.current = false
@@ -101,6 +105,7 @@ export function OrderWorkflowPanel({
   async function sendComment() {
     if (requestPending.current) return
     setMessageType('error')
+    setMessage(null)
     if (!comment.trim()) return
     requestPending.current = true
     setBusy(true)
@@ -112,6 +117,7 @@ export function OrderWorkflowPanel({
       setComment('')
       setMessage(saved.notificationCount)
     } catch {
+      setMessageType('error')
       setMessage('评论发送失败。')
     } finally {
       requestPending.current = false

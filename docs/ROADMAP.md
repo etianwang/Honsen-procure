@@ -526,3 +526,5 @@ IN PROGRESS: specifications, shared tokens/theme, initial history and account-fe
 2026-11-09 unattended Modern Industrial: first production-page implementation batch in progress with bounded native and automated evidence; supplier quote regression and current-source native/all-page/DPI gates remain open. Original milestones unchanged; details in existing design rollout.
 
 UI phase2 batch2 remains PARTIAL: scoped automation verified; current-source Windows native acceptance BLOCKED_AUTH_INTERACTION. Original milestone gates unchanged; see design rollout.
+
+UI phase2 batch3: bounded supplier search, scope account-generation guard, history date fields and pending-state fixes checkpointed as PARTIAL; final functional/native UX acceptance remains open (see rollout).

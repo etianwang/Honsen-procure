@@ -6,6 +6,14 @@ const messages = {
   其他历史操作: ['Other recorded action', 'Autre action enregistrée'],
   '打印 / Imprimer · PDF': ['Print / PDF', 'Imprimer / PDF'],
   请购历史: ['Requisition history', 'Historique des demandes'],
+  申请人: ['Applicant', 'Demandeur'],
+  申请日期: ['Application date', 'Date de demande'],
+  申请日期从: ['Application date from', 'Date de demande du'],
+  申请日期至: ['Application date to', 'Date de demande au'],
+  '结束日期不能早于开始日期。': [
+    'End date must not precede start date.',
+    'La date de fin doit suivre la date de début.',
+  ],
   '导出当前筛选范围的全部授权记录，包含内部评论与审计；此文件用于内部核对。': [
     'Export all authorized records matching the applied filter, including internal comments and audit metadata; for internal review.',
     'Exporter les données autorisées du filtre appliqué, commentaires et audit inclus ; usage interne.',
