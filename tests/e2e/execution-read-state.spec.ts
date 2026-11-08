@@ -1,43 +1,27 @@
 import { expect, test } from '@playwright/test'
 
-for (const [
-  locale,
-  orderLoading,
-  supplierLoading,
-  orderRetry,
-  supplierRetry,
-  orderError,
-  supplierError,
-  empty,
-] of [
+// Supplier pending/error/retry/stale coverage now lives at the lazy execution fields
+// in execution-supplier-scope.spec.ts; every order-read assertion remains here.
+for (const [locale, orderLoading, orderRetry, orderError, empty] of [
   [
     'zh',
     '正在读取已确认采购申请',
-    '正在读取可用供应商',
     '重新读取采购申请',
-    '重新读取供应商',
     '无法读取已确认采购申请',
-    '无法读取可用供应商',
     '没有可执行的已确认采购申请',
   ],
   [
     'en',
     'Loading approved requisitions',
-    'Loading available suppliers',
     'Reload requisitions',
-    'Reload suppliers',
     'Unable to read approved requisitions',
-    'Unable to read available suppliers',
     'No approved requisitions available for execution',
   ],
   [
     'fr',
     'Chargement des demandes approuvées',
-    'Chargement des fournisseurs disponibles',
     'Recharger les demandes',
-    'Recharger les fournisseurs',
     'Impossible de lire les demandes approuvées',
-    'Impossible de lire les fournisseurs disponibles',
     'Aucune demande approuvée à exécuter',
   ],
 ] as const) {
@@ -74,6 +58,7 @@ for (const [
       const order = (name: string) => ({
         id: '00000000-0000-4000-8000-000000000001',
         displayNo: name,
+        countryId: '00000000-0000-4000-8000-000000000101',
         primaryCurrency: 'EUR',
         procurementMode: 'honsen_self_purchase',
         workflowStatus: 'completed',
@@ -92,13 +77,8 @@ for (const [
           else reads[index].resolve(name ? [order(name)] : [])
           await frame()
         },
-        __finishExecutionSuppliers: async (index: number, fail: boolean) => {
-          if (fail)
-            suppliers[index].reject(new Error('Synthetic supplier failure'))
-          else suppliers[index].resolve([])
-          await frame()
-        },
         __executionReadCount: () => reads.length,
+        __executionLegacySupplierReadCount: () => suppliers.length,
       })
       const api = {
         listConfirmedProcurementOrders: () =>
@@ -143,21 +123,18 @@ for (const [
         { index, fail, name },
       )
     await expect(status(orderLoading)).toBeVisible()
-    await expect(status(supplierLoading)).toBeVisible()
+    expect(
+      await page.evaluate(() =>
+        (
+          window as Window & {
+            __executionLegacySupplierReadCount: () => number
+          }
+        ).__executionLegacySupplierReadCount(),
+      ),
+    ).toBe(0)
     await expect(page.getByText(empty, { exact: true })).toHaveCount(0)
     await finishRead(0, true)
-    await page.evaluate(() =>
-      (
-        window as Window & {
-          __finishExecutionSuppliers: (
-            index: number,
-            fail: boolean,
-          ) => Promise<void>
-        }
-      ).__finishExecutionSuppliers(0, true),
-    )
     await expect(alert(orderError)).toBeVisible()
-    await expect(alert(supplierError)).toBeVisible()
     await expect(page.getByText(empty, { exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: orderRetry, exact: true }).click()
     await expect(status(orderLoading)).toBeVisible()
@@ -166,19 +143,6 @@ for (const [
       page.getByRole('button', { name: 'CURRENT', exact: true }),
     ).toBeVisible()
     await expect(alert(orderError)).toHaveCount(0)
-    await expect(alert(supplierError)).toBeVisible()
-    await page.getByRole('button', { name: supplierRetry, exact: true }).click()
-    await page.evaluate(() =>
-      (
-        window as Window & {
-          __finishExecutionSuppliers: (
-            index: number,
-            fail: boolean,
-          ) => Promise<void>
-        }
-      ).__finishExecutionSuppliers(1, false),
-    )
-    await expect(alert(supplierError)).toHaveCount(0)
     await page.evaluate(() =>
       window.dispatchEvent(new Event('honsen-procurement-synced')),
     )
@@ -226,6 +190,15 @@ for (const [
     await finishRead(6, false)
     await expect(page.getByText(empty, { exact: true })).toBeVisible()
     await expect(alert(orderError)).toHaveCount(0)
+    expect(
+      await page.evaluate(() =>
+        (
+          window as Window & {
+            __executionLegacySupplierReadCount: () => number
+          }
+        ).__executionLegacySupplierReadCount(),
+      ),
+    ).toBe(0)
     expect(errors).toEqual([])
   })
 }

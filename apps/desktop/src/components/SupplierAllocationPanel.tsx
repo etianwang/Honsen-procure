@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+import type { SupplierControlProps } from './SupplierPicker'
 import { useUiLocale } from '../lib/ui-locale'
 import {
   supplierText,
@@ -28,7 +30,9 @@ type SupplierAllocationPanelProps = {
   api: SupplierOrderApi
   parentOrderId: string
   lines: AllocationLine[]
-  suppliers: AllocationSupplier[]
+  suppliers?: AllocationSupplier[]
+  renderSupplierControl?: (props: SupplierControlProps) => ReactNode
+  supplierScopeUnavailable?: boolean
   onCreated?: () => void
 }
 
@@ -47,7 +51,9 @@ export function SupplierAllocationPanel({
   api,
   parentOrderId,
   lines,
-  suppliers,
+  suppliers = [],
+  renderSupplierControl,
+  supplierScopeUnavailable = false,
   onCreated,
 }: SupplierAllocationPanelProps) {
   const { locale } = useUiLocale()
@@ -74,7 +80,7 @@ export function SupplierAllocationPanel({
   }
 
   async function allocate() {
-    if (requestPending.current) return
+    if (supplierScopeUnavailable || requestPending.current) return
     setMessageType('error')
     setMessage(null)
     const payload = lines.map((line) => ({
@@ -152,19 +158,29 @@ export function SupplierAllocationPanel({
               <div className="requisition-fields">
                 <label>
                   {t('供应商')}
-                  <Select
-                    disabled={busy}
-                    aria-label={`${line.materialName} ${t('供应商')}`}
-                    value={allocation.supplierId || undefined}
-                    placeholder={t('选择供应商')}
-                    options={suppliers.map((supplier) => ({
-                      value: supplier.id,
-                      label: supplier.name,
-                    }))}
-                    onChange={(supplierId) =>
-                      updateLine(line.id, { supplierId })
-                    }
-                  />
+                  {renderSupplierControl ? (
+                    renderSupplierControl({
+                      value: allocation.supplierId || undefined,
+                      onChange: (supplierId) =>
+                        updateLine(line.id, { supplierId }),
+                      disabled: busy,
+                      ariaLabel: line.materialName + ' ' + t('供应商'),
+                    })
+                  ) : (
+                    <Select
+                      disabled={busy}
+                      aria-label={`${line.materialName} ${t('供应商')}`}
+                      value={allocation.supplierId || undefined}
+                      placeholder={t('选择供应商')}
+                      options={suppliers.map((supplier) => ({
+                        value: supplier.id,
+                        label: supplier.name,
+                      }))}
+                      onChange={(supplierId) =>
+                        updateLine(line.id, { supplierId })
+                      }
+                    />
+                  )}
                 </label>
                 <label>
                   {t('子单币种')}
@@ -216,7 +232,7 @@ export function SupplierAllocationPanel({
       </div>
       <Space className="requisition-actions" wrap>
         <Button
-          disabled={busy}
+          disabled={busy || supplierScopeUnavailable}
           loading={busy}
           type="primary"
           onClick={() => void allocate()}

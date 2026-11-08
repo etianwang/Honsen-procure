@@ -39,6 +39,7 @@ export type ProcurementPaymentSummary = {
 }
 
 export type ProcurementExecutionOrder = {
+  countryId: string
   id: string
   displayNo: string
   primaryCurrency: string

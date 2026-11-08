@@ -776,3 +776,81 @@ fn supplier_search_pages_are_bounded_stable_country_scoped_and_read_only() {
             .is_err()
     );
 }
+
+#[test]
+fn execution_read_exposes_each_parent_country_without_changing_scope_or_money() {
+    let (service, account, now) = fixture(Role::Purchaser);
+    let first_country = country(&service);
+    let second_country = Uuid::new_v4();
+    crate::tests::grant_new_test_scope(&service, account, second_country, now);
+    let third_country = Uuid::new_v4();
+    let third_project = Uuid::new_v4();
+    let db = service.connection.lock().unwrap();
+    let first_scope:(String,String,String)=db.query_row("SELECT p.id,a.department_id,a.team_id FROM local_projects p JOIN local_authorization_snapshots a ON a.project_id=p.id WHERE p.country_id=?1 AND a.account_id=?2",params![first_country.to_string(),account.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+    let second_scope:(String,String,String)=db.query_row("SELECT p.id,a.department_id,a.team_id FROM local_projects p JOIN local_authorization_snapshots a ON a.project_id=p.id WHERE p.country_id=?1 AND a.account_id=?2",params![second_country.to_string(),account.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+    db.execute("INSERT INTO local_countries(id,business_code,name,time_zone,is_active,version) VALUES(?1,'SYNTH-OTHER','Synthetic other country','UTC',1,1)",[third_country.to_string()]).unwrap();
+    db.execute("INSERT INTO local_projects(id,country_id,business_code,name,site,department_name,default_currency,default_language_pair,is_active,version) VALUES(?1,?2,'SYNTH-OTHER-P','Synthetic other project','site','department','XOF','zh_fr',1,1)",params![third_project.to_string(),third_country.to_string()]).unwrap();
+    let ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+    let scopes = [
+        (first_country, first_scope.clone()),
+        (second_country, second_scope),
+        (
+            third_country,
+            (third_project.to_string(), first_scope.1, first_scope.2),
+        ),
+    ];
+    for (index, (country, scope)) in scopes.iter().enumerate() {
+        db.execute("INSERT INTO local_purchase_orders(id,display_no,country_id,project_id,site,department_id,team_id,applicant_id,currency,primary_currency,language_pair,status,workflow_status,procurement_mode,order_date,delivery_address,total_minor,version,created_at,updated_at) VALUES(?1,?2,?3,?4,'Synthetic site',?5,?6,?7,'XOF','XOF','zh_fr','draft','confirmed','honsen_self_purchase','2026-11-09','Synthetic delivery',9007199254740993,7,1,1)",params![ids[index].to_string(),format!("SYNTH-ORDER-{index}"),country.to_string(),scope.0,scope.1,scope.2,account.to_string()]).unwrap();
+    }
+    let before: Vec<(String, String, i64, i64)> = db
+        .prepare("SELECT id,country_id,total_minor,version FROM local_purchase_orders ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    drop(db);
+    let orders = service.list_confirmed_procurement_orders(now).unwrap();
+    assert_eq!(orders.len(), 2);
+    for (id, expected_country) in [(ids[0], first_country), (ids[1], second_country)] {
+        let order = orders.iter().find(|order| order.id == id).unwrap();
+        assert_eq!(order.country_id, expected_country);
+        assert_eq!(order.payment_summary.payable_minor, "9007199254740993");
+        assert_eq!(order.payment_summary.remaining_minor, "9007199254740993");
+        assert_eq!(
+            serde_json::to_value(order).unwrap()["countryId"],
+            expected_country.to_string()
+        );
+    }
+    assert!(orders.iter().all(|order| order.id != ids[2]));
+    service.connection.lock().unwrap().execute("UPDATE local_authorization_snapshots SET expires_at=?2,verified_at=?2-100 WHERE account_id=?1 AND project_id=?3",params![account.to_string(),unix_seconds(now)-1,scopes[1].1.0]).unwrap();
+    assert_eq!(
+        service
+            .list_confirmed_procurement_orders(now)
+            .unwrap()
+            .iter()
+            .map(|order| order.id)
+            .collect::<Vec<_>>(),
+        vec![ids[0]]
+    );
+    let after: Vec<(String, String, i64, i64)> = service
+        .connection
+        .lock()
+        .unwrap()
+        .prepare("SELECT id,country_id,total_minor,version FROM local_purchase_orders ORDER BY id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(before, after);
+    let (engineer, _, time) = fixture(Role::Engineer);
+    assert!(matches!(
+        engineer.list_confirmed_procurement_orders(time),
+        Err(AuthError::Forbidden)
+    ));
+}

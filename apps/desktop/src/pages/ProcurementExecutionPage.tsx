@@ -1,3 +1,7 @@
+import {
+  SupplierPicker,
+  type SupplierControlProps,
+} from '../components/SupplierPicker'
 import { useUiLocale } from '../lib/ui-locale'
 import { documentNumber } from '../lib/document-number'
 import {
@@ -5,7 +9,7 @@ import {
   executionStatus,
   type ExecutionMessage,
 } from '../lib/execution-messages'
-import { Alert, Button, Card, Empty, Space } from 'antd'
+import { Alert, Button, Card, Empty, Select, Space } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AttachmentPanel } from '../components/AttachmentPanel'
 import { RfqPanel } from '../components/RfqPanel'
@@ -13,7 +17,7 @@ import { SupplierAllocationPanel } from '../components/SupplierAllocationPanel'
 import { SupplierChildTermsPanel } from '../components/SupplierChildTermsPanel'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { ProcurementExpenditurePanel } from '../components/ProcurementExpenditurePanel'
-import type { SupplierView } from '../lib/catalog-api'
+import type { CatalogApi } from '../lib/catalog-api'
 import type {
   ProcurementExecutionApi,
   ProcurementExecutionOrder,
@@ -25,7 +29,7 @@ import { tauriProcurementExpenditureApi } from '../lib/procurement-expenditure-a
 
 type Props = {
   api: ProcurementExecutionApi
-  supplierApi: { listSuppliers(): Promise<SupplierView[]> }
+  supplierApi: Pick<CatalogApi, 'listSuppliers' | 'searchSuppliersPage'>
   supplierOrderApi: SupplierOrderApi
   rfqApi: RfqApi
   receiverId: string
@@ -43,14 +47,10 @@ export function ProcurementExecutionPage({
     locale === 'zh' ? 'zh-CN' : locale === 'en' ? 'en-US' : 'fr-FR'
   const t = (key: ExecutionMessage) => executionText(locale, key)
   const [orders, setOrders] = useState<ProcurementExecutionOrder[]>([])
-  const [suppliers, setSuppliers] = useState<SupplierView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [ordersLoading, setOrdersLoading] = useState(true)
   const [ordersError, setOrdersError] = useState(false)
-  const [suppliersLoading, setSuppliersLoading] = useState(true)
-  const [suppliersError, setSuppliersError] = useState(false)
   const ordersRead = useRef(0)
-  const suppliersRead = useRef(0)
   const [startNotice, setStartNotice] = useState<{
     orderId: string
     message: ExecutionMessage
@@ -83,6 +83,29 @@ export function ProcurementExecutionPage({
     }
   }
   const selected = orders.find((order) => order.id === selectedId)
+  const selectedCountryId =
+    selected &&
+    typeof selected.countryId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      selected.countryId,
+    )
+      ? selected.countryId
+      : undefined
+  const renderSupplierControl = (props: SupplierControlProps) =>
+    selectedCountryId ? (
+      <SupplierPicker
+        api={supplierApi}
+        countryId={selectedCountryId}
+        {...props}
+      />
+    ) : (
+      <Select
+        disabled
+        aria-label={props.ariaLabel}
+        placeholder={t('无法确定订单国家范围')}
+      />
+    )
+
   const refresh = useCallback(async () => {
     const request = ++ordersRead.current
     setOrdersLoading(true)
@@ -102,25 +125,6 @@ export function ProcurementExecutionPage({
       if (request === ordersRead.current) setOrdersLoading(false)
     }
   }, [api])
-  const refreshSuppliers = useCallback(async () => {
-    const request = ++suppliersRead.current
-    setSuppliersLoading(true)
-    setSuppliersError(false)
-    try {
-      const value = await supplierApi.listSuppliers()
-      if (request !== suppliersRead.current) return
-      setSuppliers(
-        value.filter(
-          (supplier) => supplier.isActive && !supplier.isBlacklisted,
-        ),
-      )
-    } catch {
-      if (request === suppliersRead.current) setSuppliersError(true)
-    } finally {
-      if (request === suppliersRead.current) setSuppliersLoading(false)
-    }
-  }, [supplierApi])
-
   useEffect(() => {
     const update = () => void refresh()
     window.addEventListener('honsen-procurement-synced', update)
@@ -129,12 +133,10 @@ export function ProcurementExecutionPage({
 
   useEffect(() => {
     void refresh()
-    void refreshSuppliers()
     return () => {
       ordersRead.current += 1
-      suppliersRead.current += 1
     }
-  }, [refresh, refreshSuppliers])
+  }, [refresh])
 
   return (
     <>
@@ -148,23 +150,6 @@ export function ProcurementExecutionPage({
           </p>
         </div>
       </section>
-      {suppliersLoading && <p role="status">{t('正在读取可用供应商…')}</p>}
-      {suppliersError && (
-        <Alert
-          role="alert"
-          type="error"
-          title={t('无法读取可用供应商。')}
-          showIcon
-          action={
-            <Button
-              disabled={suppliersLoading}
-              onClick={() => void refreshSuppliers()}
-            >
-              {t('重新读取供应商')}
-            </Button>
-          }
-        />
-      )}
       <Card className="card" title={t('已确认采购申请')}>
         {ordersLoading && <p role="status">{t('正在读取已确认采购申请…')}</p>}
         {ordersError && (
@@ -216,6 +201,16 @@ export function ProcurementExecutionPage({
               ))}
             </ul>
           </Card>
+          {!selectedCountryId && (
+            <Alert
+              role="alert"
+              type="warning"
+              showIcon
+              title={t(
+                '无法确定订单国家范围；供应商选择暂不可用，其他执行记录仍可查看。',
+              )}
+            />
+          )}
           {startNotice?.orderId === selected.id && (
             <Alert
               role={startNotice.type === 'error' ? 'alert' : 'status'}
@@ -320,7 +315,8 @@ export function ProcurementExecutionPage({
                 api={supplierOrderApi}
                 parentOrderId={selected.id}
                 lines={selected.lines.map((line) => ({ ...line }))}
-                suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
+                renderSupplierControl={renderSupplierControl}
+                supplierScopeUnavailable={!selectedCountryId}
                 onCreated={refresh}
               />
             </>
@@ -335,7 +331,8 @@ export function ProcurementExecutionPage({
               key={selected.id}
               api={rfqApi}
               sourceOrderId={selected.id}
-              suppliers={suppliers.map(({ id, name }) => ({ id, name }))}
+              renderSupplierControl={renderSupplierControl}
+              supplierScopeUnavailable={!selectedCountryId}
               canCreate={
                 selected.children.length === 0 &&
                 ['confirmed', 'approved'].includes(selected.workflowStatus)

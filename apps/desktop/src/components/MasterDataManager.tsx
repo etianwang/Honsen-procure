@@ -2,6 +2,7 @@ import { useMasterText } from '../lib/master-data-messages'
 import { Alert, Button, Card, Input, Select, Space, Tabs, Modal } from 'antd'
 import { FormField } from './FormField'
 import { ReferenceDataTable } from './ReferenceDataTable'
+import { ReferenceNameField } from './ReferenceNameField'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   MasterDataApi,
@@ -28,6 +29,8 @@ export function MasterDataManager({
   const t = useMasterText()
   const [items, setItems] = useState(records)
   const [message, setMessage] = useState<string | null>(null)
+  const pendingRecords = useRef(new Set<string>())
+  const [savingIds, setSavingIds] = useState(new Set<string>())
   const countries = useMemo(
     () =>
       items.filter(
@@ -92,6 +95,10 @@ export function MasterDataManager({
   )
 
   async function save(record: ReferenceMasterDataView) {
+    if (pendingRecords.current.has(record.id)) return false
+    pendingRecords.current.add(record.id)
+    setSavingIds(new Set(pendingRecords.current))
+    setMessage(null)
     try {
       await api.saveReferenceMasterData(record)
       setItems((current) => {
@@ -105,13 +112,20 @@ export function MasterDataManager({
     } catch {
       setMessage('保存被拒绝，请检查权限或关联资料')
       return false
+    } finally {
+      pendingRecords.current.delete(record.id)
+      setSavingIds(new Set(pendingRecords.current))
     }
   }
 
   function status(record: ReferenceMasterDataView, allowed = canEdit) {
     return (
       <Button
-        disabled={!allowed}
+        disabled={!allowed || savingIds.has(record.id)}
+        loading={savingIds.has(record.id)}
+        aria-busy={savingIds.has(record.id)}
+        aria-label={record.is_active ? t('停用') : t('启用')}
+        danger={record.is_active}
         size="small"
         onClick={() =>
           void save({
@@ -131,7 +145,18 @@ export function MasterDataManager({
       title={activeCategory ? undefined : t('管理员基础资料')}
       aria-label={t('管理员基础资料')}
     >
-      {message && <Alert type="info" title={t(message)} showIcon />}
+      {message && (
+        <Alert
+          type={
+            message === '保存被拒绝，请检查权限或关联资料' ? 'error' : 'success'
+          }
+          role={
+            message === '保存被拒绝，请检查权限或关联资料' ? 'alert' : 'status'
+          }
+          title={t(message)}
+          showIcon
+        />
+      )}
       <Tabs
         activeKey={activeCategory}
         renderTabBar={activeCategory ? () => <></> : undefined}
@@ -355,24 +380,16 @@ function MaterialCategoryEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <FormField
+              <ReferenceNameField
                 id={`category-edit-${row.id}`}
                 label={t('材料分类名称')}
-              >
-                <Input
-                  aria-label={`${t('编辑材料分类名称')}-${row.business_code}`}
-                  defaultValue={row.name}
-                  disabled={!canEdit}
-                  onBlur={(event) => {
-                    if (event.target.value !== row.name)
-                      void save({
-                        ...row,
-                        name: event.target.value,
-                        version: row.version + 1,
-                      })
-                  }}
-                />
-              </FormField>
+                ariaLabel={`${t('编辑材料分类名称')}-${row.business_code}`}
+                disabled={!canEdit}
+                value={row.name}
+                onSave={(name) =>
+                  save({ ...row, name, version: row.version + 1 })
+                }
+              />
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },
@@ -507,21 +524,16 @@ function DepartmentEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <FormField id={`department-edit-${row.id}`} label={t('部门名称')}>
-                <Input
-                  aria-label={`${t('编辑部门名称')}-${row.business_code}`}
-                  defaultValue={row.name}
-                  disabled={!canEdit}
-                  onBlur={(event) => {
-                    if (event.target.value !== row.name)
-                      void save({
-                        ...row,
-                        name: event.target.value,
-                        version: row.version + 1,
-                      })
-                  }}
-                />
-              </FormField>
+              <ReferenceNameField
+                id={`department-edit-${row.id}`}
+                label={t('部门名称')}
+                ariaLabel={`${t('编辑部门名称')}-${row.business_code}`}
+                disabled={!canEdit}
+                value={row.name}
+                onSave={(name) =>
+                  save({ ...row, name, version: row.version + 1 })
+                }
+              />
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },
@@ -681,21 +693,16 @@ function TeamEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <FormField id={`team-edit-${row.id}`} label={t('团队名称')}>
-                <Input
-                  aria-label={`${t('编辑团队名称')}-${row.business_code}`}
-                  defaultValue={row.name}
-                  disabled={!canEdit}
-                  onBlur={(event) => {
-                    if (event.target.value !== row.name)
-                      void save({
-                        ...row,
-                        name: event.target.value,
-                        version: row.version + 1,
-                      })
-                  }}
-                />
-              </FormField>
+              <ReferenceNameField
+                id={`team-edit-${row.id}`}
+                label={t('团队名称')}
+                ariaLabel={`${t('编辑团队名称')}-${row.business_code}`}
+                disabled={!canEdit}
+                value={row.name}
+                onSave={(name) =>
+                  save({ ...row, name, version: row.version + 1 })
+                }
+              />
             ),
           },
           {
@@ -837,21 +844,16 @@ function UnitEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <FormField id={`unit-edit-${row.id}`} label={t('单位名称')}>
-                <Input
-                  aria-label={`${t('编辑单位名称')}-${row.business_code}`}
-                  defaultValue={row.name}
-                  disabled={!canEdit}
-                  onBlur={(event) => {
-                    if (event.target.value !== row.name)
-                      void save({
-                        ...row,
-                        name: event.target.value,
-                        version: row.version + 1,
-                      })
-                  }}
-                />
-              </FormField>
+              <ReferenceNameField
+                id={`unit-edit-${row.id}`}
+                label={t('单位名称')}
+                ariaLabel={`${t('编辑单位名称')}-${row.business_code}`}
+                disabled={!canEdit}
+                value={row.name}
+                onSave={(name) =>
+                  save({ ...row, name, version: row.version + 1 })
+                }
+              />
             ),
           },
           { title: t('状态'), render: (_, row) => status(row) },
@@ -1009,24 +1011,16 @@ function CountryEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <FormField
+              <ReferenceNameField
                 id={`MasterDataManager-14-${row.id}`}
                 label={`${t('编辑国家名称')} · ${row.business_code}`}
-              >
-                <Input
-                  aria-label={`${t('编辑国家名称')}-${row.business_code}`}
-                  defaultValue={row.name}
-                  disabled={!canEdit}
-                  onBlur={(event) => {
-                    if (event.target.value !== row.name)
-                      void save({
-                        ...row,
-                        name: event.target.value,
-                        version: row.version + 1,
-                      })
-                  }}
-                />
-              </FormField>
+                ariaLabel={`${t('编辑国家名称')}-${row.business_code}`}
+                disabled={!canEdit}
+                value={row.name}
+                onSave={(name) =>
+                  save({ ...row, name, version: row.version + 1 })
+                }
+              />
             ),
           },
           {
@@ -1225,24 +1219,16 @@ function ProjectEditor({
           {
             title: t('名称'),
             render: (_, row) => (
-              <FormField
+              <ReferenceNameField
                 id={`MasterDataManager-16-${row.id}`}
                 label={`${t('编辑项目名称')} · ${row.business_code}`}
-              >
-                <Input
-                  aria-label={`${t('编辑项目名称')}-${row.business_code}`}
-                  defaultValue={row.name}
-                  disabled={!canEdit}
-                  onBlur={(event) => {
-                    if (event.target.value !== row.name)
-                      void save({
-                        ...row,
-                        name: event.target.value,
-                        version: row.version + 1,
-                      })
-                  }}
-                />
-              </FormField>
+                ariaLabel={`${t('编辑项目名称')}-${row.business_code}`}
+                disabled={!canEdit}
+                value={row.name}
+                onSave={(name) =>
+                  save({ ...row, name, version: row.version + 1 })
+                }
+              />
             ),
           },
           {
@@ -1431,24 +1417,16 @@ function SiteEditor({
           {
             title: t('站点'),
             render: (_, row) => (
-              <FormField
+              <ReferenceNameField
                 id={`MasterDataManager-20-${row.id}`}
                 label={`${t('编辑站点名称')} · ${row.business_code}`}
-              >
-                <Input
-                  aria-label={`${t('编辑站点名称')}-${row.business_code}`}
-                  defaultValue={row.name}
-                  disabled={!canEdit}
-                  onBlur={(event) => {
-                    if (event.target.value !== row.name)
-                      void save({
-                        ...row,
-                        name: event.target.value,
-                        version: row.version + 1,
-                      })
-                  }}
-                />
-              </FormField>
+                ariaLabel={`${t('编辑站点名称')}-${row.business_code}`}
+                disabled={!canEdit}
+                value={row.name}
+                onSave={(name) =>
+                  save({ ...row, name, version: row.version + 1 })
+                }
+              />
             ),
           },
           {

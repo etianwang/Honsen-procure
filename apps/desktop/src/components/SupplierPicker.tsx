@@ -7,9 +7,17 @@ import type {
 } from '../lib/catalog-api'
 import { useUiLocale } from '../lib/ui-locale'
 
+export type SupplierControlProps = {
+  value?: string
+  onChange: (id: string) => void
+  disabled: boolean
+  ariaLabel: string
+}
+
 type Props = {
   api: Pick<CatalogApi, 'searchSuppliersPage' | 'listSuppliers'>
   countryId: string
+  ariaLabel?: string
   knownSupplier?: Pick<SupplierView, 'id' | 'businessCode' | 'name'>
   value?: string
   onChange?: (value: string) => void
@@ -23,6 +31,7 @@ type Props = {
 export function SupplierPicker({
   api,
   countryId,
+  ariaLabel,
   knownSupplier,
   value,
   onChange,
@@ -174,7 +183,7 @@ export function SupplierPicker({
   return (
     <Select
       {...accessible}
-      aria-label={text.label}
+      aria-label={ariaLabel ?? text.label}
       value={value}
       disabled={disabled}
       placeholder={text.search}

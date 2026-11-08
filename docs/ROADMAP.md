@@ -532,3 +532,5 @@ UI phase2 batch3: bounded supplier search, scope account-generation guard, histo
 UI phase2 batch4 remains PARTIAL with automated scope evidence; no current-build native acceptance or parent closure. See design rollout.
 
 UI phase2 batch5 remains PARTIAL; direct automation verified, original functional/native UX gates and stopped supplier assertion evidence remain open. See design rollout.
+
+UI phase2 batch6 stays PARTIAL; automated scope verified, existing native and parent gates remain open. See design rollout.

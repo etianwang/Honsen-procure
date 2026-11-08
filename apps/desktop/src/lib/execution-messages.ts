@@ -1,5 +1,13 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  无法确定订单国家范围: [
+    'Order country unavailable',
+    'Pays de la commande indisponible',
+  ],
+  '无法确定订单国家范围；供应商选择暂不可用，其他执行记录仍可查看。': [
+    'Order country is unavailable. Supplier selection is disabled; other execution records remain visible.',
+    'Pays de la commande indisponible. La sélection du fournisseur est désactivée ; les autres données restent consultables.',
+  ],
   采购执行: ['Purchasing execution', 'Exécution des achats'],
   '选择已批准的 Honsen 采购申请；市场直采无需 RFQ 或供应商子订单。': [
     'Select an approved Honsen requisition; market purchases require no RFQ or supplier order.',

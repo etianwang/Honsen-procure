@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+import type { SupplierControlProps } from './SupplierPicker'
 import { documentNumber } from '../lib/document-number'
 import { rfqMessages } from '../lib/rfq-messages'
 import { currencySchema, type Currency } from '@honsen/shared'
@@ -15,14 +17,18 @@ import type { AllocationSupplier } from './SupplierAllocationPanel'
 type RfqPanelProps = {
   api: RfqApi
   sourceOrderId: string
-  suppliers: AllocationSupplier[]
+  suppliers?: AllocationSupplier[]
+  renderSupplierControl?: (props: SupplierControlProps) => ReactNode
+  supplierScopeUnavailable?: boolean
   canCreate?: boolean
 }
 
 export function RfqPanel({
   api,
   sourceOrderId,
-  suppliers,
+  suppliers = [],
+  renderSupplierControl,
+  supplierScopeUnavailable = false,
   canCreate = true,
 }: RfqPanelProps) {
   const { locale } = useUiLocale()
@@ -94,7 +100,8 @@ export function RfqPanel({
   }, [refresh, sourceOrderId])
 
   async function create() {
-    if (creating.current || transitioning.current) return
+    if (supplierScopeUnavailable || creating.current || transitioning.current)
+      return
     if (!supplierId || !displayNo.trim()) {
       setMessage({ key: '请选择供应商并填写询价单编号。' })
       return
@@ -188,17 +195,26 @@ export function RfqPanel({
         <div className="requisition-fields">
           <label>
             {t('供应商')}
-            <Select
-              aria-label={t('RFQ 供应商')}
-              disabled={createBusy || busyId !== null}
-              value={supplierId || undefined}
-              placeholder={t('选择供应商')}
-              options={suppliers.map((supplier) => ({
-                value: supplier.id,
-                label: supplier.name,
-              }))}
-              onChange={setSupplierId}
-            />
+            {renderSupplierControl ? (
+              renderSupplierControl({
+                value: supplierId || undefined,
+                onChange: setSupplierId,
+                disabled: createBusy || busyId !== null,
+                ariaLabel: t('RFQ 供应商'),
+              })
+            ) : (
+              <Select
+                aria-label={t('RFQ 供应商')}
+                disabled={createBusy || busyId !== null}
+                value={supplierId || undefined}
+                placeholder={t('选择供应商')}
+                options={suppliers.map((supplier) => ({
+                  value: supplier.id,
+                  label: supplier.name,
+                }))}
+                onChange={setSupplierId}
+              />
+            )}
           </label>
           <label>
             {t('询价币种')}
@@ -227,7 +243,7 @@ export function RfqPanel({
           aria-label={t('创建询价单')}
           aria-busy={createBusy}
           loading={createBusy}
-          disabled={createBusy}
+          disabled={createBusy || supplierScopeUnavailable}
           onClick={() => void create()}
         >
           {t('创建询价单')}

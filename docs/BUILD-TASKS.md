@@ -652,3 +652,5 @@ UI batch3 PARTIAL: scope/history/workflow/receipt-payment scoped DOM51 + supplie
 UI batch4 PARTIAL: attachment state/duplicate guards, small dictionary search/pagination, bounded material quote supplier picker and unread-policy write gate implemented; scoped DOM checks passed after retained narrow failures. unit74/build PASS; native BLOCKED_AUTH_INTERACTION and parent gates open. See rollout/evidence.
 
 UI batch5 PARTIAL: execution/RFQ state, paged supplier manager and serialized requisition pending flows implemented; targeted write18/RFQ9/manager3/execution5 plus navigation scoped repairs PASS. Native gate BLOCKED_AUTH_INTERACTION; original parents open. See rollout/build fingerprint.
+
+UI batch6 PARTIAL: history/export guard, workflow reads/password busy, name edits and parent-country supplier search implemented. History27/workflow16/reference independent10/execution scoped10 PASS; Rust196PASS/7ignored; native BLOCKED_AUTH_INTERACTION. See rollout and build fingerprint, no parent closure.

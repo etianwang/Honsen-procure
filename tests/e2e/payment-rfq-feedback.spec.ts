@@ -76,6 +76,7 @@ for (const locale of ['zh', 'en', 'fr'] as const) {
               if (command === 'list_confirmed_procurement_orders')
                 return [
                   {
+                    countryId: '00000000-0000-4000-8000-000000000101',
                     id: 'order',
                     displayNo: 'TEST-ORDER',
                     primaryCurrency: 'XOF',

@@ -20,6 +20,26 @@ const messages = {
   ],
   Excel导出语言: ['Excel export language', 'Langue de l’export Excel'],
   导出Excel: ['Export Excel', 'Exporter Excel'],
+  '正在导出启动时的筛选结果…': [
+    'Exporting the filter selected at start…',
+    'Export du filtre sélectionné au démarrage…',
+  ],
+  '正在撤回申请…': ['Withdrawing the requisition…', 'Retrait de la demande…'],
+  '正在正式签发单据…': [
+    'Issuing the formal document…',
+    'Émission du document officiel…',
+  ],
+  '另一单据操作正在进行，请稍候。': [
+    'An action on another document is in progress. Please wait.',
+    'Une opération sur un autre document est en cours. Veuillez patienter.',
+  ],
+  '历史申请已撤回。': ['Requisition withdrawn.', 'Demande retirée.'],
+  '正式单据已签发。': ['Formal document issued.', 'Document officiel émis.'],
+  '操作已保存，但详情刷新失败；请重新读取详情后继续。': [
+    'The action was saved, but details could not be refreshed. Reload details before continuing.',
+    'L’opération est enregistrée, mais l’actualisation du détail a échoué. Rechargez le détail avant de continuer.',
+  ],
+  重新读取详情: ['Reload details', 'Recharger le détail'],
   '导出失败，未下载部分结果；请刷新列表后重试。': [
     'Export failed; no partial result downloaded. Refresh the list and retry.',
     'Échec de l’export ; aucun résultat partiel téléchargé. Actualisez puis réessayez.',

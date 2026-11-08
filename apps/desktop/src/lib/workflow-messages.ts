@@ -1,5 +1,19 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '正在读取评论…': ['Loading comments…', 'Chargement des commentaires…'],
+  '正在读取审计…': ['Loading audit records…', 'Chargement des traces d’audit…'],
+  '评论读取失败；已加载内容已保留。': [
+    'Cannot load comments. Previously loaded content is retained.',
+    'Impossible de charger les commentaires. Le contenu déjà chargé est conservé.',
+  ],
+  '审计读取失败；已加载内容已保留。': [
+    'Cannot load audit records. Previously loaded content is retained.',
+    'Impossible de charger les traces d’audit. Le contenu déjà chargé est conservé.',
+  ],
+  重新读取评论: ['Reload comments', 'Recharger les commentaires'],
+  重新读取审计: ['Reload audit records', 'Recharger les traces d’audit'],
+  暂无内部评论: ['No internal comments', 'Aucun commentaire interne'],
+  暂无审计记录: ['No audit records', 'Aucune trace d’audit'],
   '印花税（手填）': ['Stamp duty (manual)', 'Droit de timbre (manuel)'],
   草稿: ['Draft', 'Brouillon'],
   已批准: ['Approved', 'Approuvée'],

@@ -42,6 +42,7 @@ test('production payment screen records three payments and reverses once with a 
               )
               return Promise.resolve([
                 {
+                  countryId: '00000000-0000-4000-8000-000000000101',
                   id: orderId,
                   displayNo: 'SYNTHETIC-PAYMENT',
                   primaryCurrency: 'XOF',

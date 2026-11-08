@@ -42,6 +42,7 @@ test('market start exposes local failure then success and blocks duplicate start
                   ? []
                   : [
                       {
+                        countryId: '00000000-0000-4000-8000-000000000101',
                         id: orderId,
                         displayNo: 'HONSEN-MARKET-1',
                         primaryCurrency: 'XOF',

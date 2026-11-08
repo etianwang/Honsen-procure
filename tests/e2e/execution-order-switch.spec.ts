@@ -16,6 +16,7 @@ test('switching approved parent orders isolates supplier allocation drafts witho
             )
             if (command === 'list_confirmed_procurement_orders')
               return ['A', 'B'].map((n) => ({
+                countryId: '00000000-0000-4000-8000-000000000101',
                 id: 'parent' + n,
                 displayNo: 'PARENT-' + n,
                 primaryCurrency: 'XOF',
@@ -35,6 +36,32 @@ test('switching approved parent orders isolates supplier allocation drafts witho
                   },
                 ],
               }))
+            if (command === 'search_suppliers_page') {
+              const countryId =
+                typeof args === 'object' &&
+                args !== null &&
+                'countryId' in args &&
+                typeof args.countryId === 'string'
+                  ? args.countryId
+                  : ''
+              return {
+                records:
+                  countryId === '00000000-0000-4000-8000-000000000101'
+                    ? [
+                        {
+                          id: 'supplier',
+                          name: 'Synthetic supplier',
+                          businessCode: 'SYNTH',
+                          countryId,
+                          isActive: true,
+                          isBlacklisted: false,
+                          isPreferred: false,
+                        },
+                      ]
+                    : [],
+                nextCursor: null,
+              }
+            }
             if (command === 'list_suppliers')
               return [
                 {
@@ -67,7 +94,7 @@ test('switching approved parent orders isolates supplier allocation drafts witho
   await page
     .getByRole('combobox', { name: '材料B 供应商', exact: true })
     .click()
-  await page.getByText('Synthetic supplier', { exact: true }).click()
+  await page.getByText('SYNTH · Synthetic supplier', { exact: true }).click()
   await page.getByLabel('材料B 子单编号', { exact: true }).fill('B-CHILD')
   await page
     .getByRole('button', { name: '创建供应商子单', exact: true })

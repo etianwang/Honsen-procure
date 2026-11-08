@@ -41,6 +41,7 @@ test('execution locale updates existing payment and attachment catalogs without 
               )
               return Promise.resolve([
                 {
+                  countryId: '00000000-0000-4000-8000-000000000101',
                   id: orderId,
                   displayNo: 'SYNTHETIC-PAYMENT',
                   primaryCurrency: 'XOF',

@@ -36,6 +36,7 @@ test('production attachment UI imports a voucher offline and retains pending sta
             if (command === 'list_confirmed_procurement_orders')
               return Promise.resolve([
                 {
+                  countryId: '00000000-0000-4000-8000-000000000101',
                   id: orderId,
                   displayNo: 'SYNTHETIC-ATTACHMENT',
                   primaryCurrency: 'XOF',

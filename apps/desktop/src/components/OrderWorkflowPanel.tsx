@@ -42,16 +42,105 @@ export function OrderWorkflowPanel({
   const [messageType, setMessageType] = useState<'success' | 'error'>('error')
   const [message, setMessage] = useState<WorkflowMessage | number | null>(null)
 
+  const [commentRead, setCommentRead] = useState<'loading' | 'error' | 'ready'>(
+    'loading',
+  )
+  const [auditRead, setAuditRead] = useState<'loading' | 'error' | 'ready'>(
+    'loading',
+  )
+  const [commentRetry, setCommentRetry] = useState(0)
+  const [auditRetry, setAuditRetry] = useState(0)
+  const commentScope = useRef(orderId)
+  const auditScope = useRef(orderId)
+  const commentGeneration = useRef(0)
+  const auditGeneration = useRef(0)
+  const addedComments = useRef<OrderCommentView[]>([])
   useEffect(() => {
-    api
+    let active = true
+    const generation = ++commentGeneration.current
+    if (commentScope.current !== orderId) {
+      commentScope.current = orderId
+      setComments([])
+      addedComments.current = []
+    }
+    setCommentRead('loading')
+    void api
       .listOrderComments(orderId)
-      .then(setComments)
-      .catch(() => undefined)
-    api
+      .then((rows) => {
+        if (!active || generation !== commentGeneration.current) return
+        const byId = new Map(rows.map((row) => [row.id, row]))
+        for (const added of addedComments.current)
+          if (!byId.has(added.id)) byId.set(added.id, added)
+        setComments([...byId.values()])
+        setCommentRead('ready')
+      })
+      .catch(() => {
+        if (active && generation === commentGeneration.current)
+          setCommentRead('error')
+      })
+    return () => {
+      active = false
+      commentGeneration.current++
+    }
+  }, [api, orderId, commentRetry])
+  useEffect(() => {
+    let active = true
+    const generation = ++auditGeneration.current
+    if (auditScope.current !== orderId) {
+      auditScope.current = orderId
+      setAudits([])
+    }
+    setAuditRead('loading')
+    void api
       .listOrderAudits(orderId)
-      .then(setAudits)
-      .catch(() => undefined)
-  }, [api, orderId])
+      .then((rows) => {
+        if (!active || generation !== auditGeneration.current) return
+        setAudits(rows)
+        setAuditRead('ready')
+      })
+      .catch(() => {
+        if (active && generation === auditGeneration.current)
+          setAuditRead('error')
+      })
+    return () => {
+      active = false
+      auditGeneration.current++
+    }
+  }, [api, orderId, auditRetry])
+  function readNotice(kind: 'comments' | 'audits') {
+    const state = kind === 'comments' ? commentRead : auditRead
+    if (state === 'ready') return null
+    return (
+      <Alert
+        role={state === 'error' ? 'alert' : 'status'}
+        type={state === 'error' ? 'error' : 'info'}
+        title={t(
+          kind === 'comments'
+            ? state === 'error'
+              ? '评论读取失败；已加载内容已保留。'
+              : '正在读取评论…'
+            : state === 'error'
+              ? '审计读取失败；已加载内容已保留。'
+              : '正在读取审计…',
+        )}
+        showIcon
+        action={
+          state === 'error' ? (
+            <Button
+              disabled={busy}
+              onClick={() =>
+                kind === 'comments'
+                  ? setCommentRetry((value) => value + 1)
+                  : setAuditRetry((value) => value + 1)
+              }
+            >
+              {t(kind === 'comments' ? '重新读取评论' : '重新读取审计')}
+            </Button>
+          ) : undefined
+        }
+      />
+    )
+  }
 
   async function confirm() {
     if (requestPending.current) return
@@ -113,6 +202,7 @@ export function OrderWorkflowPanel({
     try {
       const saved = await api.addOrderComment(orderId, comment.trim())
       setMessageType('success')
+      addedComments.current.push(saved)
       setComments((current) => [...current, saved])
       setComment('')
       setMessage(saved.notificationCount)
@@ -198,6 +288,10 @@ export function OrderWorkflowPanel({
       ) : null}
       <section className="workflow-audits" aria-label={t('修改留痕')}>
         <h3>{t('修改留痕')}</h3>
+        {readNotice('audits')}
+        {auditRead === 'ready' && audits.length === 0 && (
+          <p>{t('暂无审计记录')}</p>
+        )}
         {audits
           .filter((item) => item.action === 'confirmed_revised')
           .map((item) => (
@@ -221,6 +315,7 @@ export function OrderWorkflowPanel({
       </section>
       <section className="workflow-audits" aria-label={t('内部报价明细')}>
         <h3>{t('内部报价明细')}</h3>
+        {readNotice('audits')}
         {ownerPricingLines(audits, locale).map((line) => (
           <article className="workflow-audit" key={line.id}>
             <p>
@@ -258,6 +353,10 @@ export function OrderWorkflowPanel({
       </section>
       <section className="workflow-comments" aria-label={t('内部评论')}>
         <h3>{t('内部评论')}</h3>
+        {readNotice('comments')}
+        {commentRead === 'ready' && comments.length === 0 && (
+          <p>{t('暂无内部评论')}</p>
+        )}
         {comments.map((item) => (
           <article className="workflow-comment" key={item.id}>
             <MessageSquare size={15} aria-hidden="true" />

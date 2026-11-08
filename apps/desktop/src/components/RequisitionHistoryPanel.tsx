@@ -2,7 +2,7 @@ import { useUiLocale } from '../lib/ui-locale'
 import { historyText, historyAuditText } from '../lib/history-locale'
 import { Alert, Button, Card, Input, Select, Table, Tag } from 'antd'
 import { currencySchema, formatMoney } from '@honsen/shared'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   RequisitionApi,
   RequisitionDetail,
@@ -138,23 +138,63 @@ export function RequisitionHistoryPanel({
   const [detail, setDetail] = useState<RequisitionDetail | null>(null)
   const [detailError, setDetailError] = useState(false)
   const [detailLoading, setDetailLoading] = useState(!!entry?.orderId)
-  const [withdrawError, setWithdrawError] = useState(false)
-  const [issueError, setIssueError] = useState(false)
+  const actionPending = useRef(false)
+  const exportPending = useRef(false)
+  const lifecycle = useRef(0)
+  const [action, setAction] = useState<{
+    orderId: string
+    kind: 'withdraw' | 'issue'
+  } | null>(null)
+  const [actionNotice, setActionNotice] = useState<{
+    orderId: string
+    message: Parameters<typeof historyText>[1]
+    type: 'success' | 'error' | 'warning'
+  } | null>(null)
+  const [staleDetail, setStaleDetail] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(false)
   const [exportLocale, setExportLocale] = useState<
     'zh-CN' | 'fr-FR' | 'en-US' | null
   >(null)
+  useLayoutEffect(() => {
+    actionPending.current = false
+    exportPending.current = false
+    setAction(null)
+    setActionNotice(null)
+    setStaleDetail(null)
+    setExporting(false)
+    setExportError(false)
+    return () => {
+      lifecycle.current += 1
+    }
+  }, [api, applicantId, projectId])
   async function exportExcel() {
+    if (exportPending.current) return
+    exportPending.current = true
+    const generation = lifecycle.current
+    const ensureCurrent = () => {
+      if (generation !== lifecycle.current) throw Error('Stale history export')
+    }
+    const read = async <T,>(work: () => Promise<T>) => {
+      ensureCurrent()
+      const value = await work()
+      ensureCurrent()
+      return value
+    }
     setExporting(true)
     setExportError(false)
     try {
       const bytes = await buildHistoryWorkbook(
         {
           ...api,
-          listOrderComments: (workflowApi ?? tauriWorkflowApi)
-            .listOrderComments,
+          listRequisitionHistory: (cursor, appliedFilter) =>
+            read(() => api.listRequisitionHistory(cursor, appliedFilter)),
+          getRequisitionDetail: (id) =>
+            read(() => api.getRequisitionDetail(id)),
+          listOrderComments: (id) =>
+            read(() => (workflowApi ?? tauriWorkflowApi).listOrderComments(id)),
           getInternalExportDocument: async (orderId) => {
+            ensureCurrent()
             const invoke = (
               window as Window & {
                 __TAURI__?: {
@@ -165,13 +205,16 @@ export function RequisitionHistoryPanel({
               }
             ).__TAURI__?.core?.invoke
             if (!invoke) throw Error('Desktop unavailable')
-            return invoke('get_internal_export_document', { orderId })
+            return read(() =>
+              invoke('get_internal_export_document', { orderId }),
+            )
           },
         },
         filter,
         exportLocale ??
           (locale === 'en' ? 'en-US' : locale === 'fr' ? 'fr-FR' : 'zh-CN'),
       )
+      ensureCurrent()
       const url = URL.createObjectURL(
         new Blob([new Uint8Array(bytes)], {
           type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -183,9 +226,12 @@ export function RequisitionHistoryPanel({
       link.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch {
-      setExportError(true)
+      if (generation === lifecycle.current) setExportError(true)
     } finally {
-      setExporting(false)
+      if (generation === lifecycle.current) {
+        exportPending.current = false
+        setExporting(false)
+      }
     }
   }
   const detailRequest = useRef(0)
@@ -261,42 +307,101 @@ export function RequisitionHistoryPanel({
     }
   }
 
-  async function openDetail(orderId: string) {
+  async function openDetail(orderId: string, preserveDetail = false) {
+    if (!preserveDetail) setActionNotice(null)
+    const generation = lifecycle.current
     const request = ++detailRequest.current
-    setDetail(null)
+    if (!preserveDetail) setDetail(null)
     setDetailError(false)
     setDetailLoading(true)
     try {
       const result = await api.getRequisitionDetail(orderId)
-      if (request === detailRequest.current) setDetail(result)
+      if (
+        generation === lifecycle.current &&
+        request === detailRequest.current
+      ) {
+        setDetail(result)
+        setStaleDetail((current) => (current === orderId ? null : current))
+        setActionNotice((current) =>
+          current?.orderId === orderId && current.type === 'warning'
+            ? null
+            : current,
+        )
+        return true
+      }
+      return false
     } catch {
-      if (request === detailRequest.current) setDetailError(true)
+      if (
+        !preserveDetail &&
+        generation === lifecycle.current &&
+        request === detailRequest.current
+      )
+        setDetailError(true)
+      return false
     } finally {
-      if (request === detailRequest.current) setDetailLoading(false)
+      if (generation === lifecycle.current && request === detailRequest.current)
+        setDetailLoading(false)
     }
   }
 
-  async function withdrawHistoricalOrder(orderId: string) {
-    setWithdrawError(false)
+  async function runOrderAction(
+    orderId: string,
+    kind: 'withdraw' | 'issue',
+    mode?: string | null,
+  ) {
+    if (actionPending.current || staleDetail === orderId) return
+    actionPending.current = true
+    const generation = lifecycle.current
+    const selection = detailRequest.current
+    setAction({ orderId, kind })
+    setActionNotice(null)
     try {
-      await api.withdrawRequisition(orderId)
-      await openDetail(orderId)
-      setRetry((value) => value + 1)
-    } catch {
-      setWithdrawError(true)
-    }
-  }
-
-  async function issueOrder(orderId: string, mode: string | null) {
-    setIssueError(false)
-    try {
-      if (mode === 'owner_self_purchase')
+      if (kind === 'withdraw') await api.withdrawRequisition(orderId)
+      else if (mode === 'owner_self_purchase')
         await api.issueOwnerFormalOrder(orderId)
       else await api.issueHonsenFormalOrder(orderId)
-      await openDetail(orderId)
+      if (generation !== lifecycle.current) return
       setRetry((value) => value + 1)
+      if (selection !== detailRequest.current) return
+      setStaleDetail(orderId)
+      const refreshRequest = detailRequest.current + 1
+      const refreshed = await openDetail(orderId, true)
+      if (
+        generation !== lifecycle.current ||
+        refreshRequest !== detailRequest.current
+      )
+        return
+      if (!refreshed) {
+        setActionNotice({
+          orderId,
+          type: 'warning',
+          message: '操作已保存，但详情刷新失败；请重新读取详情后继续。',
+        })
+        return
+      }
+      setActionNotice({
+        orderId,
+        type: 'success',
+        message: kind === 'withdraw' ? '历史申请已撤回。' : '正式单据已签发。',
+      })
     } catch {
-      setIssueError(true)
+      if (
+        generation === lifecycle.current &&
+        selection === detailRequest.current
+      )
+        setActionNotice({
+          orderId,
+          type: 'error',
+          message:
+            kind === 'withdraw'
+              ? '撤回失败：当前状态或授权不允许撤回。'
+              : '正式下达失败：请检查审批状态、授权和冻结报价。',
+        })
+    } finally {
+      if (generation === lifecycle.current) {
+        actionPending.current = false
+        setAction(null)
+      }
     }
   }
 
@@ -309,6 +414,7 @@ export function RequisitionHistoryPanel({
       </p>
       <label htmlFor="history-export-language">{t('Excel导出语言')}</label>
       <Select
+        disabled={exporting}
         id="history-export-language"
         aria-label={t('Excel导出语言')}
         value={
@@ -323,12 +429,19 @@ export function RequisitionHistoryPanel({
         ]}
       />
       <Button
+        aria-label={t('导出Excel')}
+        aria-busy={exporting}
         loading={exporting}
         disabled={exporting}
         onClick={() => void exportExcel()}
       >
         {t('导出Excel')}
       </Button>
+      {exporting && (
+        <p role="status" aria-live="polite">
+          {t('正在导出启动时的筛选结果…')}
+        </p>
+      )}
       {exportError && (
         <Alert
           type="error"
@@ -551,15 +664,6 @@ export function RequisitionHistoryPanel({
       {detailError ? (
         <Alert type="error" title={t('详情读取失败或无权查看。')} />
       ) : null}
-      {withdrawError ? (
-        <Alert type="error" title={t('撤回失败：当前状态或授权不允许撤回。')} />
-      ) : null}
-      {issueError ? (
-        <Alert
-          type="error"
-          title={t('正式下达失败：请检查审批状态、授权和冻结报价。')}
-        />
-      ) : null}
       {detailLoading ? <p role="status">{t('正在读取详情…')}</p> : null}
       {detail ? (
         <section aria-label={t('请购详情')}>
@@ -572,7 +676,14 @@ export function RequisitionHistoryPanel({
           ) : null}
           {detail.workflowStatus === 'pending_confirmation' &&
           detail.applicantId === applicantId ? (
-            <Button onClick={() => void withdrawHistoricalOrder(detail.id)}>
+            <Button
+              aria-label={t('撤回历史申请')}
+              aria-busy={action?.orderId === detail.id}
+              aria-describedby="history-action-feedback"
+              disabled={action !== null || staleDetail === detail.id}
+              loading={action?.orderId === detail.id}
+              onClick={() => void runOrderAction(detail.id, 'withdraw')}
+            >
               {t('撤回历史申请')}
             </Button>
           ) : null}
@@ -582,17 +693,63 @@ export function RequisitionHistoryPanel({
           (detail.workflowStatus === 'confirmed' ||
             detail.workflowStatus === 'approved') ? (
             <Button
-              onClick={() => void issueOrder(detail.id, detail.procurementMode)}
+              aria-label={t(
+                detail.procurementMode === 'owner_self_purchase'
+                  ? '正式下达业主申请'
+                  : '正式签发 HPA',
+              )}
+              aria-busy={action?.orderId === detail.id}
+              aria-describedby="history-action-feedback"
+              disabled={action !== null || staleDetail === detail.id}
+              loading={action?.orderId === detail.id}
+              onClick={() =>
+                void runOrderAction(detail.id, 'issue', detail.procurementMode)
+              }
             >
               {detail.procurementMode === 'owner_self_purchase'
                 ? t('正式下达业主申请')
                 : t('正式签发 HPA')}
             </Button>
           ) : null}
+          <div id="history-action-feedback">
+            {action && (
+              <p role="status" aria-live="polite">
+                {t(
+                  action.orderId !== detail.id
+                    ? '另一单据操作正在进行，请稍候。'
+                    : action.kind === 'withdraw'
+                      ? '正在撤回申请…'
+                      : '正在正式签发单据…',
+                )}
+              </p>
+            )}
+            {actionNotice?.orderId === detail.id && (
+              <Alert
+                role={actionNotice.type === 'error' ? 'alert' : 'status'}
+                showIcon
+                type={actionNotice.type}
+                title={t(actionNotice.message)}
+              />
+            )}
+            {staleDetail === detail.id && !action && (
+              <Button
+                aria-label={t('重新读取详情')}
+                aria-busy={detailLoading}
+                loading={detailLoading}
+                disabled={detailLoading}
+                onClick={() => void openDetail(detail.id, true)}
+              >
+                {t('重新读取详情')}
+              </Button>
+            )}
+          </div>
           {detail.projectId === projectId &&
           detail.procurementMode &&
           detail.lines.length > 0 ? (
-            <Button disabled={copyDisabled} onClick={() => onCopy(detail)}>
+            <Button
+              disabled={copyDisabled || staleDetail === detail.id}
+              onClick={() => onCopy(detail)}
+            >
               {t('复制为新草稿')}
             </Button>
           ) : (

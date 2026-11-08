@@ -20,6 +20,7 @@ export function AccountPasswordDialog({
   const [replacement, setReplacement] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [busy, setBusy] = useState(false)
+  const [busyAction, setBusyAction] = useState<'change' | 'sign-in'>('change')
   const [errorCode, setErrorCode] = useState('')
   const clearPasswords = () => {
     setCurrent('')
@@ -40,6 +41,7 @@ export function AccountPasswordDialog({
     replacement === confirmation
   const submit = async () => {
     if (busy || !valid) return
+    setBusyAction('change')
     setBusy(true)
     setErrorCode('')
     try {
@@ -180,18 +182,40 @@ export function AccountPasswordDialog({
             )}
           </p>
         )}
-        {errorCode && <p role="alert">{errorMessage}</p>}
+        {busy && (
+          <p role="status" aria-live="polite">
+            {busyAction === 'change'
+              ? t(
+                  '正在修改密码，请稍候…',
+                  'Changing password, please wait…',
+                  'Modification du mot de passe en cours…',
+                )
+              : t(
+                  '正在返回登录，请稍候…',
+                  'Returning to sign-in, please wait…',
+                  'Retour à la connexion en cours…',
+                )}
+          </p>
+        )}
+        {errorCode && !busy && <p role="alert">{errorMessage}</p>}
         <div className="password-change-actions">
           <button
             className="primary-button"
             type="submit"
+            aria-busy={busy && busyAction === 'change'}
             disabled={busy || !valid}
           >
-            {t(
-              '修改并重新登录',
-              'Change and sign in again',
-              'Modifier et se reconnecter',
-            )}
+            {busy && busyAction === 'change'
+              ? t(
+                  '正在修改密码…',
+                  'Changing password…',
+                  'Modification en cours…',
+                )
+              : t(
+                  '修改并重新登录',
+                  'Change and sign in again',
+                  'Modifier et se reconnecter',
+                )}
           </button>
           <button type="button" disabled={busy} onClick={close}>
             {t('取消', 'Cancel', 'Annuler')}
@@ -201,9 +225,11 @@ export function AccountPasswordDialog({
             errorCode === 'sync_transport_error') && (
             <button
               type="button"
+              aria-busy={busy && busyAction === 'sign-in'}
               disabled={busy}
               onClick={async () => {
                 clearPasswords()
+                setBusyAction('sign-in')
                 setBusy(true)
                 try {
                   const invoke = (
@@ -221,7 +247,13 @@ export function AccountPasswordDialog({
                 }
               }}
             >
-              {t('返回登录', 'Return to sign-in', 'Retour à la connexion')}
+              {busy && busyAction === 'sign-in'
+                ? t(
+                    '正在返回登录…',
+                    'Returning to sign-in…',
+                    'Retour à la connexion…',
+                  )
+                : t('返回登录', 'Return to sign-in', 'Retour à la connexion')}
             </button>
           )}
         </div>

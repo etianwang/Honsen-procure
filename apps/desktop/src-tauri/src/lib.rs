@@ -455,6 +455,7 @@ pub struct ProcurementPaymentSummaryView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcurementExecutionOrderView {
+    pub country_id: Uuid,
     pub id: Uuid,
     pub display_no: String,
     pub primary_currency: String,
@@ -3598,9 +3599,9 @@ impl LocalAuthService {
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let parents = connection
-            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status, o.total_minor FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving', 'completed', 'completed_with_conditions') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
+            .prepare("SELECT o.id, o.display_no, o.primary_currency, o.procurement_mode, o.workflow_status, o.total_minor, p.country_id FROM local_purchase_orders o JOIN local_authorization_snapshots a ON a.account_id = ?1 AND a.project_id = o.project_id AND a.department_id = o.department_id AND a.team_id = o.team_id AND a.expires_at >= ?2 JOIN local_projects p ON p.id = o.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = o.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = o.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE o.parent_order_id IS NULL AND o.workflow_status IN ('confirmed', 'approved', 'executing', 'receiving', 'completed', 'completed_with_conditions') AND (o.procurement_mode = 'honsen_self_purchase' OR o.procurement_mode IS NULL) AND o.deleted_at IS NULL ORDER BY o.updated_at DESC, o.id")
             .map_err(|_| AuthError::Database)?
-            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?)))
+            .query_map(params![account_id.to_string(), unix_seconds(now)], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?, row.get::<_, String>(6)?)))
             .map_err(|_| AuthError::Database)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| AuthError::Database)?;
@@ -3672,7 +3673,7 @@ impl LocalAuthService {
         };
         parents
             .into_iter()
-            .map(|(id, display_no, primary_currency, procurement_mode, workflow_status, total_minor)| {
+            .map(|(id, display_no, primary_currency, procurement_mode, workflow_status, total_minor, country_id)| {
                 let children = connection
                     .prepare("SELECT id, display_no, currency, total_minor, workflow_status FROM local_purchase_orders WHERE parent_order_id = ?1 AND deleted_at IS NULL ORDER BY created_at, id")
                     .map_err(|_| AuthError::Database)?
@@ -3683,7 +3684,7 @@ impl LocalAuthService {
                     .into_iter()
                     .map(|(child_id, child_display_no, currency, child_total, workflow_status)| Ok(ProcurementExecutionChildView { id: Uuid::parse_str(&child_id).map_err(|_| AuthError::Database)?, display_no: child_display_no, payment_summary: payment_summary(&child_id, &currency, child_total)?, currency, workflow_status, lines: read_lines(&child_id)? }))
                     .collect::<Result<Vec<_>, AuthError>>()?;
-                Ok(ProcurementExecutionOrderView { id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, payment_summary: payment_summary(&id, &primary_currency, total_minor)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
+                Ok(ProcurementExecutionOrderView { country_id: Uuid::parse_str(&country_id).map_err(|_| AuthError::Database)?, id: Uuid::parse_str(&id).map_err(|_| AuthError::Database)?, payment_summary: payment_summary(&id, &primary_currency, total_minor)?, display_no, primary_currency, procurement_mode, workflow_status, lines: read_lines(&id)?, children })
             })
             .collect()
     }

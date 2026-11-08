@@ -12,6 +12,7 @@ export function FormField({
   label,
   required,
   hint,
+  hintLive = false,
   error,
   children,
 }: {
@@ -19,6 +20,7 @@ export function FormField({
   label: string
   required?: boolean
   hint?: string
+  hintLive?: boolean
   error?: string
   children: ReactElement<ControlProps>
 }) {
@@ -37,7 +39,15 @@ export function FormField({
         'aria-invalid': !!error,
         'aria-required': required,
       })}
-      {hint && <small id={`${id}-hint`}>{hint}</small>}
+      {hint && (
+        <small
+          id={`${id}-hint`}
+          role={hintLive ? 'status' : undefined}
+          aria-live={hintLive ? 'polite' : undefined}
+        >
+          {hint}
+        </small>
+      )}
       {error && (
         <span id={`${id}-error`} role="alert">
           {error}

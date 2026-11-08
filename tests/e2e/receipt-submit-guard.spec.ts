@@ -13,6 +13,7 @@ test('receipt submission is single flight and clears quantities only after ackno
             if (command === 'list_confirmed_procurement_orders')
               return [
                 {
+                  countryId: '00000000-0000-4000-8000-000000000101',
                   id: 'parent',
                   displayNo: 'SYNTHETIC-RECEIPT',
                   primaryCurrency: 'XOF',
@@ -109,6 +110,7 @@ test('supplier child refresh shows actual closed status and blocks further recei
             if (command === 'list_confirmed_procurement_orders')
               return [
                 {
+                  countryId: '00000000-0000-4000-8000-000000000101',
                   id: 'parent',
                   displayNo: 'SYNTHETIC-PARENT',
                   primaryCurrency: 'XOF',

@@ -1463,6 +1463,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
     let allocated = false
     const rfqs: Array<Record<string, unknown>> = []
     const parent = {
+      countryId: '00000000-0000-4000-8000-000000000101',
       id: '00000000-0000-4000-8000-000000000801',
       displayNo: 'CI-FIXTURE-20261012-INT-0001',
       primaryCurrency: 'XOF',
@@ -1487,6 +1488,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
               input?: Record<string, unknown>
               rfqId?: string
               sourceOrderId?: string
+              countryId?: string
               allocations?: Array<Record<string, unknown>>
             },
           ) {
@@ -1517,6 +1519,31 @@ test('purchaser reaches execution from the regular application and completes RFQ
                   children: [],
                 },
               ])
+            if (command === 'search_suppliers_page')
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000805',
+                    countryId: parent.countryId,
+                    businessCode: 'SUP-FIXTURE',
+                    name: 'regular flow supplier',
+                    contactName: null,
+                    address: null,
+                    city: null,
+                    country: null,
+                    phone: null,
+                    whatsapp: null,
+                    email: null,
+                    paymentTerms: null,
+                    deliveryLeadTime: null,
+                    isPreferred: true,
+                    isBlacklisted: false,
+                    isActive: true,
+                    version: 1,
+                  },
+                ].filter((supplier) => supplier.countryId === args?.countryId),
+                nextCursor: null,
+              })
             if (command === 'list_suppliers')
               return Promise.resolve([
                 {
@@ -1590,6 +1617,11 @@ test('purchaser reaches execution from the regular application and completes RFQ
     .click()
   await expect(page.getByText('regular flow cable · 2 米 · XOF')).toBeVisible()
   await page.getByLabel('RFQ 供应商').click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('SUP-FIXTURE · regular flow supplier', { exact: true }),
+  ).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await page.getByLabel('询价单编号').fill('CI-FIXTURE-20261012-RFQ-0001')
@@ -1609,6 +1641,11 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await page.getByRole('button', { name: '发送询价单' }).click()
   await expect(page.getByText('状态：已发送', { exact: true })).toBeVisible()
   await page.getByLabel('regular flow cable 供应商').click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('SUP-FIXTURE · regular flow supplier', { exact: true }),
+  ).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await page
@@ -1687,6 +1724,7 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
                   ? []
                   : [
                       {
+                        countryId: '00000000-0000-4000-8000-000000000101',
                         id: orderId,
                         displayNo: 'HONSEN-MARKET-1',
                         primaryCurrency: 'XOF',
@@ -2329,6 +2367,7 @@ test('authenticated desktop switches between cached authorization scopes', async
               })
             if (command === 'get_requisition_detail')
               return Promise.resolve({
+                countryId: '00000000-0000-4000-8000-000000000101',
                 id: '00000000-0000-4000-8000-000000000009',
                 formalDocumentNo:
                   historicalStatus === 'formally_issued'
