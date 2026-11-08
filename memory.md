@@ -1536,3 +1536,23 @@ installer warnings retained. Changed source/docs formatted where edited and
 references/status/diff checked without unrelated mass-formatting. Containing
 source checkpoint to be committed/pushed, tracked tree expected clean; ignored
 build/evidence logs retained. No PR merge/release/cloud action.
+
+
+### 2026-11-08 — Native 0.1.23 installation checkpoint (source 233c500)
+
+User action-time approval received for the exact package. Real NSIS welcome,
+existing directory, Start Menu, running-app close prompt, success and Run/Finish
+were observed and operated. Installed EXE FileVersion/ProductVersion and
+honsen.app.json all read 0.1.23. Native app automatically obtained a cloud
+CAPTCHA; read-only UI showed exactly one cloud challenge and online login,
+with no local challenge in connected state. This proves startup/UI only.
+No credentials or authentication screenshots saved. No cloud deployment,
+migration or historical/financial mutation.
+
+BLOCKER: authenticated login and native PDF save/reopen await user login under
+computer-use guidance.md mandatory authentication-dialog prohibition.
+NOT_RUN: native network failure/offline/reconnect, balanced PDF and clean header.
+DEFERRED: paused payment extension. WARNING: existing lint/Markdown debt and
+historical installer warning retained; no such warning observed in this install.
+T12/T14/Alpha remain OPEN. Evidence-only JSON/reference/status/diff checks;
+unchanged application suites not rerun. Task branch checkpoint, no merge/release.

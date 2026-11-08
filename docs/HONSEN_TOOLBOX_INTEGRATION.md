@@ -266,3 +266,11 @@ EXE/Runner/manifest/registry/uninstall contract unchanged. Unsigned installer
 SHA256facf906da4ec18fa98bee929599ba90ab6898fdffd8e19de50f207782ff6236c;
 notinstalled. No new Toolbox acceptance or Release publish. Existing integration
 gaps retained.
+
+
+2026-11-08 follow-up (source 233c500): approved 0.1.23 installed through real
+NSIS and launched. Installed EXE and manifest both 0.1.23. Native startup fetched
+one cloud CAPTCHA; no local challenge in connected state. Authenticated login
+and new PDF output BLOCKED pending mandatory user authentication handoff;
+network/offline/reconnect NOT_RUN. Receipt ONLINE-FIRST-LOGIN-20261108.json.
+T12/T14/Alpha remain OPEN; no cloud/data changes. Toolbox identity unchanged.

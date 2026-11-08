@@ -628,3 +628,11 @@ corrected410target2PASS, Typecheck/Lint/BuildPASS.0.1.23 candidate built, native
 acceptance NOT_RUN pending action-time install approval. Original T12/T14/Alpha
 gates remain OPEN; no cloud/migration/data mutation. Details in
 V1-REMOTE-ALPHA-ACCEPTANCE.md.
+
+
+2026-11-08 follow-up (source 233c500): approved 0.1.23 installed through real
+NSIS and launched. Installed EXE and manifest both 0.1.23. Native startup fetched
+one cloud CAPTCHA; no local challenge in connected state. Authenticated login
+and new PDF output BLOCKED pending mandatory user authentication handoff;
+network/offline/reconnect NOT_RUN. Receipt ONLINE-FIRST-LOGIN-20261108.json.
+T12/T14/Alpha remain OPEN; no cloud/data changes. Toolbox identity unchanged.
