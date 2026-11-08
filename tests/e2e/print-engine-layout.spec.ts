@@ -121,6 +121,7 @@ for (const [li, language] of (['fr', 'zh', 'en'] as const).entries()) {
           `${kind}-${language}-${currency}-${count}-${maximum}.pdf`,
         ),
         preferCSSPageSize: true,
+        displayHeaderFooter: true,
         printBackground: true,
       })
       // Skia can embed CJK as searchable Type3 glyph programs rather than FontFile2.
@@ -148,6 +149,9 @@ for (const [li, language] of (['fr', 'zh', 'en'] as const).entries()) {
         ).toHaveLength(2)
         expect(text).toContain(`TEST-${kind}-${language}-${count}`)
         expect(text).not.toContain('10000000-0000')
+        expect(text).not.toContain('127.0.0.1:5173')
+        expect(text).not.toContain('tauri.localhost')
+        expect(text).not.toContain('desktop')
         expect((await p.getOperatorList()).fnArray).toContain(OPS.setFont)
         all += text
       }

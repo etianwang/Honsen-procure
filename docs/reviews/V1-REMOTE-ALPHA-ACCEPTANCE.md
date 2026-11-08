@@ -293,3 +293,80 @@ checkpoint; ignored artifacts retained. No PR merge or release publish.
 
 
 Source checkpoint 838fcaf pushed to codex/t12-native-export-20261108; application/test tree clean. Selected T12 remains PARTIAL/BLOCKED for native0.1.21 action-time install approval and the explicitly listed remaining business adapters/configuration. New package hash is unchanged. GitHub connector returned no workflow runs/statuses for this commit; CI is NOT RUN, not PASS. Code Prettier check PASS; only appended documentation was formatted to avoid rewriting pre-existing whole-file formatting debt (whole-file docs check still warns). Changed references/statuses and git diff --check passed. No cloud or historical data change. Ignored output packages/PDFs/screenshots remain local.
+
+
+### 2026-11-08 native0.1.21 HPA files and browser decoration defect
+
+User action-time approved0.1.21 install/run. Installer launched through
+computer-use; initial snapshot recovery used stale lexical binding (old app
+owner), corrected with fresh returned-window binding. First valid view was
+installation-complete, so intermediate wizard actions are not claimed
+agent-observed. Finish/Run was operated normally. Read-only installed
+EXE/manifest versions0.1.21; appId/path unchanged. Installer details included
+"copy failed": retained WARNING, installed Runner
+SHA9f6a0b302fb42a2de3378ba73b9d4b27846616a5bfbaf4faf781f5312e2835f7 matches
+candidate Runner. Installed main EXE
+SHAa17f3deef47bb0f9453376a8ba22dba47f7421a576a5ce385376bbafa41c9867; raw target
+EXE hash differs, so no exact raw-target binary-equality PASS claimed.
+Installation version/startup is observed; full installer/update gates remain
+open.
+
+User completed Zhanghekai online login under mandatory authentication handoff.
+No agent password/CAPTCHA input or saved authentication screenshot. Existing
+old3300XOF and new1100XOF records still visible after upgrade; this bounds data
+retention to those records, not system-reboot/uninstall acceptance. Sandbox
+ceshi1 retained independently, no account switching/reset.
+
+Actual native0.1.21 HPA-fr preview -> built-in Save as PDF -> actual409077-byte
+searchable A4 one-page file .cache/native-pdf-021/TEST-HPA-021-fr.pdf,
+SHA256a1c3a5e567691be32dfff910270741dae420fc3f23edb29e01c8efa3b7d7a30e. Download
+flyout mouse ownership rejected as msedgewebview2; normal Ctrl+J/Tab to observed
+file/Enter successfully opened separate native WebView2 PDF reader. Reader
+screenshot .cache/native-pdf-021/HPA-fr-reader.png inspected: hierarchy, real
+text, full-width table, summary, words, signatures. This is observed native
+reopen, not generator inference. Explorer WPS association attempt did not
+establish reopen and is not PASS.
+
+Actual selector changed to Chinese primary inside frozen zh_fr pair; native save
+produced438254-byte .cache/native-pdf-021/TEST-HPA-021-zh.pdf,
+SHA256074b1f117f2e24ad0249337f2238f0cc1b1a0c5514da1803c98612d4348c033c. PDFJS
+file read confirms same frozen number
+CI-BETHEL2-20261108-HPA-4NM1JMPR-2,1100XOF, Chinese 西非法郎壹仟壹佰整 / French
+mille-cent francs CFA BCEAO, all8fees inclzero, Page1/1twice and no internal
+projectUUID. Both native files searchable/embedded font programs, actual A4.
+Chinese reader reopen NOT_RUN; English/SPO/OPA/multipage native NOT_RUN, no
+invented language fallback.
+
+Full formal-layout result remains FAIL at0.1.21: WebView2 default print adds
+timestamp/desktop/tauri.localhost and its own1/1 outside our header/footer. Its
+native print UI exposes A4/100%/background only, no header/footer checkbox.
+Independent controlled real-PDF comparison
+.cache/header-margin-review/{baseline,empty,none,brand}.pdf + results.json
+proves six @page margin boxes content:'' suppress default decorations;
+content:none does not. Prior0.1.20 margin-box headings also suppressed them.
+Minimal production fix only adds six empty page-margin boxes; existing body
+header/footer and all business values unchanged. Not a new pagination algorithm
+or snapshot edit.
+
+Focused matrix18PASS now forces displayHeaderFooter:true and verifies no browser
+host/title metadata while preserving both PageX/Y counters, fonts, all
+rows,8summaryitems,A4. Unit71PASS;
+Format/Lint(exit0existingwarnings)/Typecheck/ViteBuildPASS. Existing
+Rust/API/schema unchanged; no unrelated suites repeated. Exact native receipts:
+reviews/evidence/T12-NATIVE-021-20261108.json. Generator artifacts in
+.cache/print-engine-layout were regenerated for this new boundary; earlier
+receipt hashes remain historical and must not be reused as current file hashes.
+
+Windows0.1.22 candidate built via unchanged release builder:
+H:/Honsen/Honsen-Procure/.cache/alpha-candidate-v1closure-018/release/bundle/nsis/Honsen-Procure-0.1.22-Setup.exe
+SHA25616e5dd44305e93983c1ea19fa6a4a2bf4a0b65ea31fa4d7bf7be65a275f84a0f,
+unsigned/not installed. Fresh action-time installation approval required by
+confirmations.md;0.1.21 approval cannot be transferred. BLOCKER: native
+fixed-decoration recheck and outstanding nativeSPO/OPA/multipage; parentREQ
+adapter, HPA settlement modules, persisted project-language config remain open.
+DEFERRED payment-channel scope remains paused. WARNING installer copy message
+and raw-built/installed main-exe hash difference retained; do not silently
+repair installer/Runner. No cloud/server/migration/order/payment/reversal
+mutation this continuation. T12/Alpha gates remain open. Last code
+checkpoint838fcaf, prior evidencea8924be; containing minimal fix checkpoint to
+be committed/pushed, expected tracked tree clean afterward.

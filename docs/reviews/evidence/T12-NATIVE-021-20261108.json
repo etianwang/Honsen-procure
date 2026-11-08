@@ -1,0 +1,63 @@
+{
+  "source": "838fcaf",
+  "version": "0.1.21",
+  "files": [
+    {
+      "path": ".cache/native-pdf-021/TEST-HPA-021-fr.pdf",
+      "sha256": "a1c3a5e567691be32dfff910270741dae420fc3f23edb29e01c8efa3b7d7a30e",
+      "bytes": 409077,
+      "checks": {
+        "singleA4": true,
+        "formalNo": true,
+        "amount": true,
+        "chineseWords": true,
+        "frenchWords": true,
+        "pageNumbers": true,
+        "noInternalUuid": true,
+        "allFees": true,
+        "browserDecorationDefect": true,
+        "embeddedFont": true
+      },
+      "nativeReopened": true
+    },
+    {
+      "path": ".cache/native-pdf-021/TEST-HPA-021-zh.pdf",
+      "sha256": "074b1f117f2e24ad0249337f2238f0cc1b1a0c5514da1803c98612d4348c033c",
+      "bytes": 438254,
+      "checks": {
+        "singleA4": true,
+        "formalNo": true,
+        "amount": true,
+        "chineseWords": true,
+        "frenchWords": true,
+        "pageNumbers": true,
+        "noInternalUuid": true,
+        "allFees": true,
+        "browserDecorationDefect": true,
+        "embeddedFont": true
+      },
+      "nativeReopened": false
+    }
+  ],
+  "install": {
+    "installedExe": "a17f3deef47bb0f9453376a8ba22dba47f7421a576a5ce385376bbafa41c9867",
+    "builtExe": "038b5929ce62eb11d3abbf51e4afb7b2f0e1eafaf8cdaef6c4be7219f0cc0f72",
+    "installedRunner": "9f6a0b302fb42a2de3378ba73b9d4b27846616a5bfbaf4faf781f5312e2835f7",
+    "builtRunner": "9f6a0b302fb42a2de3378ba73b9d4b27846616a5bfbaf4faf781f5312e2835f7",
+    "manifest": {
+      "schemaVersion": 1,
+      "appId": "honsen.procure",
+      "displayName": "Honsen Procure",
+      "version": "0.1.21",
+      "executable": "HonsenProcure.exe",
+      "updateRunner": "HonsenUpdateRunner.exe",
+      "publisher": "Honsen",
+      "updateManifestUrl": "https://api.github.com/repos/etianwang/Honsen-procure/releases/latest"
+    }
+  },
+  "replacementCandidate": {
+    "version": "0.1.22",
+    "sha256": "16e5dd44305e93983c1ea19fa6a4a2bf4a0b65ea31fa4d7bf7be65a275f84a0f",
+    "installed": false
+  }
+}

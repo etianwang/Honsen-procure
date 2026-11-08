@@ -480,3 +480,13 @@ project-language setting remain BLOCKER to full requested scope. Driver raster
 output FAIL retained. No parent/milestone/Alpha closure; details and exact
 artifact hashes in V1-REMOTE-ALPHA-ACCEPTANCE.md and
 reviews/evidence/T12-PRINT-ENGINE-20261108.json.
+
+
+2026-11-08 T12: native0.1.21 HPA French/Chinese real PDF saves and file readback
+PASS within bounded scope, French native reader reopen observed. Full formal
+layout FAIL: default browser decoration. Independent controlled PDFs establish
+six empty @page margin boxes fix; header-enabled matrix18PASS, Unit71PASS,0.1.22
+build ready awaiting immediate installation approval. Native fixed
+output/SPO/OPA/multipage and listed adapters remain BLOCKER. No T12/Alpha
+closure or cloud/history mutation. See V1-REMOTE-ALPHA-ACCEPTANCE.md and
+evidence/T12-NATIVE-021-20261108.json.

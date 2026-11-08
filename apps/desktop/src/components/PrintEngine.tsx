@@ -407,7 +407,7 @@ export function FormalDocumentSheet({
       className="print-engine"
       style={variables}
     >
-      <style>{`@page honsen-formal { size: ${tokens.paperSize} ${tokens.orientation}; margin: ${tokens.margins.top}mm ${tokens.margins.right}mm ${tokens.margins.bottom}mm ${tokens.margins.left}mm; } .print-dense { --print-summary-padding: ${tokens.compact.summaryCellPadding}mm; --print-header: ${tokens.compact.headerHeight}mm; --print-gap: ${tokens.compact.sectionGap}mm; --print-padding: ${tokens.compact.tableCellPadding}mm; } .print-compact { --print-primary: ${tokens.compact.primaryFontSize}pt; --print-line-height: ${tokens.compact.lineHeight}; }`}</style>
+      <style>{`@page honsen-formal { size: ${tokens.paperSize} ${tokens.orientation}; margin: ${tokens.margins.top}mm ${tokens.margins.right}mm ${tokens.margins.bottom}mm ${tokens.margins.left}mm; @top-left { content: ''; } @top-center { content: ''; } @top-right { content: ''; } @bottom-left { content: ''; } @bottom-center { content: ''; } @bottom-right { content: ''; } } .print-dense { --print-summary-padding: ${tokens.compact.summaryCellPadding}mm; --print-header: ${tokens.compact.headerHeight}mm; --print-gap: ${tokens.compact.sectionGap}mm; --print-padding: ${tokens.compact.tableCellPadding}mm; } .print-compact { --print-primary: ${tokens.compact.primaryFontSize}pt; --print-line-height: ${tokens.compact.lineHeight}; }`}</style>
       {layout ? (
         layout.pages.map((p, i) => renderPage(p, i, layout.pages.length))
       ) : (

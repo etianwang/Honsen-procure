@@ -250,3 +250,11 @@ Honsen-Procure-0.1.21-Setup.exe
 SHA2561bfd81934f559449b4c3849a916a50333a6d2520c823318c613cd3abb98e6dbf. No
 installer/Runner/manifest/registry/identity/uninstall logic changed. Native
 installation pending fresh confirmation; existing integration holds not closed.
+
+
+2026-11-08 native0.1.21 install/start observed, EXE and manifest version0.1.21.
+Installer copy-failed warning retained; installed Runner hash matches built
+Runner, raw target main EXE hash differs from installed and no equality PASS
+claimed.0.1.22 T12-only output-decoration candidate built, not installed. No
+identity/installer/Runner contract edits; original integration gates remain
+open. Details in V1-REMOTE-ALPHA-ACCEPTANCE.md.
