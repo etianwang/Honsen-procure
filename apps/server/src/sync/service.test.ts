@@ -1070,3 +1070,61 @@ describe('SyncService', () => {
     expect(store.pushed).toBe(1)
   })
 })
+
+it('retains print profile semantically across updates/retry and denies drop or issuer rewrite', async () => {
+  const store = new FixtureStore(),
+    service = new SyncService(store)
+  const profile = {
+    schemaVersion: 1,
+    profileVersion: 'TEST',
+    legalNameZh: 'TEST issuer',
+    logo: { assetId: 'TEST', sha256: 'a'.repeat(64), mimeType: 'image/png' },
+  }
+  const event = purchaseOrderEvent()
+  store.order = { ...event.payload, printProfile: profile }
+  const send = (payload: Record<string, unknown>) =>
+    service.push(engineer, {
+      deviceId: engineer.installationId,
+      events: [{ ...event, payload }],
+    })
+  for (let i = 0; i < 2; i++)
+    expect(
+      (
+        await send({
+          ...event.payload,
+          printProfile: {
+            logo: {
+              mimeType: 'image/png',
+              sha256: 'a'.repeat(64),
+              assetId: 'TEST',
+            },
+            legalNameZh: 'TEST issuer',
+            profileVersion: 'TEST',
+            schemaVersion: 1,
+          },
+        })
+      ).results[0]?.status,
+    ).toBe('accepted')
+  expect((await send(event.payload)).results[0]?.status).toBe(
+    'validation_error',
+  )
+  expect(
+    (
+      await send({
+        ...event.payload,
+        printProfile: { ...profile, legalNameZh: 'rewritten' },
+      })
+    ).results[0]?.status,
+  ).toBe('validation_error')
+  store.order = { ...event.payload }
+  expect((await send(event.payload)).results[0]?.status).toBe('accepted')
+  expect(
+    (
+      await send({
+        ...event.payload,
+        printProfile: profile,
+        parentOrderId: randomUUID(),
+      })
+    ).results[0]?.status,
+  ).toBe('accepted')
+})

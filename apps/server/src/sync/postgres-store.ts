@@ -512,6 +512,18 @@ export class PostgresSyncStore implements SyncStore {
         )
         const previous = existing.rows[0]?.payload_json
         const next = input.event.payload
+        if (
+          previous?.printProfile != null &&
+          !isDeepStrictEqual(previous.printProfile, next.printProfile)
+        ) {
+          await client.query('ROLLBACK')
+          return {
+            eventId: input.event.eventId,
+            status: 'validation_error',
+            serverVersion: null,
+            errorCode: 'IMMUTABLE_PRINT_PROFILE',
+          }
+        }
         const projectId = previous?.projectId ?? next.projectId
         const scope =
           typeof projectId === 'string'

@@ -35,6 +35,108 @@ describe.skipIf(!pool)('PostgresSyncStore', () => {
     await pool!.end()
   })
 
+  it('locks retained print profile against old-client drop or rewrite without key-order false conflicts', async () => {
+    const store = new PostgresSyncStore(pool!),
+      countryId = randomUUID(),
+      projectId = randomUUID(),
+      departmentId = randomUUID(),
+      teamId = randomUUID(),
+      orderId = randomUUID(),
+      installationId = randomUUID()
+    await pool!.query(
+      "INSERT INTO countries(id,business_code,name,time_zone) VALUES($1::uuid,$1::text,'TEST','UTC')",
+      [countryId],
+    )
+    await pool!.query(
+      "INSERT INTO projects(id,country_id,business_code,name,site,department_name,default_currency,default_language_pair) VALUES($1::uuid,$2::uuid,$1::text,'TEST','TEST','TEST','XOF','zh_fr')",
+      [projectId, countryId],
+    )
+    await pool!.query(
+      "INSERT INTO departments(id,business_code,name) VALUES($1::uuid,$1::text,'TEST')",
+      [departmentId],
+    )
+    await pool!.query(
+      "INSERT INTO teams(id,department_id,business_code,name) VALUES($1::uuid,$2::uuid,$1::text,'TEST')",
+      [teamId, departmentId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_bindings(user_id,project_id) VALUES($1,$2)',
+      [actorId, projectId],
+    )
+    await pool!.query(
+      'INSERT INTO user_project_scope_bindings(user_id,project_id,department_id,team_id) VALUES($1,$2,$3,$4)',
+      [actorId, projectId, departmentId, teamId],
+    )
+    const profile = {
+      schemaVersion: 1,
+      profileVersion: 'TEST',
+      legalNameZh: 'TEST',
+      logo: { assetId: 'TEST', sha256: 'a'.repeat(64), mimeType: 'image/png' },
+    }
+    const payload = {
+      projectId,
+      countryId,
+      departmentId,
+      teamId,
+      procurementMode: 'honsen_self_purchase',
+      workflowStatus: 'draft',
+      printProfile: profile,
+    }
+    const event = {
+      eventId: randomUUID(),
+      entityType: 'purchase_order' as const,
+      entityId: orderId,
+      operation: 'upsert' as const,
+      baseVersion: 0,
+      payload,
+    }
+    const push = (e: typeof event) =>
+      store.pushEvent({ actorId, installationId, event: e })
+    expect(await push(event)).toMatchObject({ status: 'accepted' })
+    expect(await push(event)).toMatchObject({ status: 'accepted' })
+    const reordered = {
+      ...payload,
+      printProfile: {
+        logo: {
+          mimeType: 'image/png',
+          sha256: 'a'.repeat(64),
+          assetId: 'TEST',
+        },
+        legalNameZh: 'TEST',
+        profileVersion: 'TEST',
+        schemaVersion: 1,
+      },
+    }
+    expect(
+      await push({
+        ...event,
+        eventId: randomUUID(),
+        baseVersion: 1,
+        payload: reordered,
+      }),
+    ).toMatchObject({ status: 'accepted' })
+    for (const printProfile of [
+      undefined,
+      { ...profile, legalNameZh: 'changed' },
+    ])
+      expect(
+        await push({
+          ...event,
+          eventId: randomUUID(),
+          baseVersion: 2,
+          payload: { ...payload, printProfile } as typeof payload,
+        }),
+      ).toMatchObject({
+        status: 'validation_error',
+        errorCode: 'IMMUTABLE_PRINT_PROFILE',
+      })
+    const saved = await pool!.query(
+      "SELECT version,payload_json FROM sync_entities WHERE entity_type='purchase_order' AND entity_id=$1",
+      [orderId],
+    )
+    expect(Number(saved.rows[0]?.version)).toBe(2)
+    expect(saved.rows[0]?.payload_json.printProfile).toEqual(profile)
+  })
   it('serializes simultaneous repairs of the same duplicate group', async () => {
     const store = new PostgresSyncStore(pool!)
     const ids = [randomUUID(), randomUUID(), randomUUID()]

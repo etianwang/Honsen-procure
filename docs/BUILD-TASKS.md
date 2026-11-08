@@ -584,3 +584,5 @@ BLOCKER: native new-package installation, actual Windows preview/save/reopen/Pri
 2026-11-08 PDFonly: TESTcatalog FR/EN nowvalid/version2 acknowledged; oldHPA frozenunchanged. Independent7browserPDFPASS does notacceptnative. BLOCKER normaldistinctapplicantapprovalpath + approvedlegalheader/name/logo (useranswerspending); no newHPA/SPO/nativePDF yet. T12unchecked; wallets/Excelpaused.
 
 2026-11-08 T12approved frozencompanyheader implementedcandidate0.1.20 (newdraft→approval→children→snapshot→print); desktop34/Rust189/browserPDF7PASS notnative. IndependentSandboxreal0.1.13found; two-endupgradeapprovalpending. NativeHPA/SPO/multipagePDF/printing remainOPEN. No parentclosure; remoteAlpha report owns evidence.
+
+2026-11-08 actualhost+freshSandbox0.1.20verifiedsameEXE; guestold0.1.13couldnotbeusedforcurrentUI. NativeSandboxinstallPASS; actualguestCAPTCHAHTTP200 onlyAPIreachability, ceshi1normalGUIloginpending. MinimalserverprintProfileimmutabilitycandidate PG1PASS/service23PASS, notdeployed. T12nativePDFstillOPEN.

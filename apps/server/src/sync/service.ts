@@ -228,6 +228,17 @@ export class SyncService {
   }
 
   private async canWrite(actor: SyncActor, event: SyncEvent): Promise<boolean> {
+    if (event.entityType === 'purchase_order') {
+      const previous = await this.store.getEntityPayload(
+        'purchase_order',
+        event.entityId,
+      )
+      if (
+        previous?.printProfile != null &&
+        !isDeepStrictEqual(previous.printProfile, event.payload.printProfile)
+      )
+        return false
+    }
     if (
       event.entityType === 'purchase_order' &&
       event.payload.manualStampDutyMinor !== undefined
