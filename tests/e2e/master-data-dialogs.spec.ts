@@ -48,7 +48,11 @@ test('dictionary dialogs label inputs, retain cancelled draft and expose saved r
         exact: true,
       }),
     })
-    await expect(row.locator('label')).toHaveText(nameLabel)
+    await expect(row.locator('label')).toHaveText(`${nameLabel} *`)
+    await expect(row.getByRole('textbox')).toHaveAttribute(
+      'aria-required',
+      'true',
+    )
     await expect(row.locator('label')).not.toContainText(
       `TEST-${codeLabel.length}`,
     )

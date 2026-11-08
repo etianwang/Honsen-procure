@@ -221,8 +221,15 @@ test('engineer can browse all categories but cannot mutate them', async ({
     '项目默认设置',
   ]) {
     await nav.getByRole('button', { name, exact: true }).click()
+    const search = page.getByRole('searchbox', {
+      name: '搜索编码或名称',
+      exact: true,
+    })
+    if (await search.isVisible()) await expect(search).toBeEnabled()
     for (const input of await page
-      .locator('.master-data-detail input:visible:not([readonly])')
+      .locator(
+        '.master-data-detail input:visible:not([readonly]):not([type="search"])',
+      )
       .all())
       await expect(input).toBeDisabled()
     for (const button of await page

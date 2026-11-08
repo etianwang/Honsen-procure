@@ -430,7 +430,7 @@ fn material_picker_pages_multilingual_combinations_and_bounds_without_mutation()
     let mut db = service.connection.lock().unwrap();
     let transaction = db.transaction().unwrap();
     for index in 0..10050 {
-        transaction.execute("INSERT INTO local_materials(id,sku,name_zh,name_fr,name_en,aliases_json,model,specification,unit,is_active,version) VALUES(?1,?2,'测试电缆','Câble synthétique','Copper cable','[\"wire\"]','M-25','3x25','m',1,1)", params![Uuid::new_v4().to_string(), format!("SYNTH-{index:05}")]).unwrap();
+        transaction.execute("INSERT INTO local_materials(id,sku,name_zh,name_fr,name_en,aliases_json,model,specification,unit,is_active,version) VALUES(?1,?2,'测试电缆','Câble Électricité','Copper cable','[\"wire\", \"MATÉRIAU\"]','M-25','3x25','m',1,1)", params![Uuid::new_v4().to_string(), format!("SYNTH-{index:05}")]).unwrap();
     }
     transaction.execute("INSERT INTO local_materials(id,sku,name_zh,aliases_json,model,specification,unit,is_active,version) VALUES(?1,'SYNTH-INACTIVE','测试电缆','[]','M-25','3x25','m',0,1)", [Uuid::new_v4().to_string()]).unwrap();
     transaction.commit().unwrap();
@@ -442,7 +442,12 @@ fn material_picker_pages_multilingual_combinations_and_bounds_without_mutation()
     drop(db);
     let started = std::time::Instant::now();
     let first = service
-        .search_catalog_page("电缆 Copper wire M-25", None, None, now)
+        .search_catalog_page(
+            "电缆 COPPER wire électricité matériau M-25",
+            None,
+            None,
+            now,
+        )
         .unwrap();
     println!(
         "material_picker synthetic rows=10050 first_page_ms={} records={}",
@@ -453,7 +458,7 @@ fn material_picker_pages_multilingual_combinations_and_bounds_without_mutation()
     assert_eq!(first.records[0].name_en.as_deref(), Some("Copper cable"));
     let second = service
         .search_catalog_page(
-            "电缆 Copper wire M-25",
+            "电缆 COPPER wire électricité matériau M-25",
             None,
             first.next_cursor.clone(),
             now,
@@ -472,7 +477,12 @@ fn material_picker_pages_multilingual_combinations_and_bounds_without_mutation()
     let mut pages = 0;
     loop {
         let page = service
-            .search_catalog_page("电缆 Copper wire M-25", None, cursor, now)
+            .search_catalog_page(
+                "电缆 COPPER wire électricité matériau M-25",
+                None,
+                cursor,
+                now,
+            )
             .unwrap();
         assert!(page.records.len() <= 50);
         for record in page.records {
@@ -496,10 +506,23 @@ fn material_picker_pages_multilingual_combinations_and_bounds_without_mutation()
         all_started.elapsed().as_millis()
     );
     let single = service
-        .search_catalog_page("Câble SYNTH-10049", None, None, now)
+        .search_catalog_page("CÂBLE ÉLECTRICITÉ MATÉRIAU synth-10049", None, None, now)
         .unwrap();
     assert_eq!(single.records.len(), 1);
     assert!(single.next_cursor.is_none());
+    assert!(
+        service
+            .search_catalog("électricité", None, now)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        service
+            .search_catalog("Électricité", None, now)
+            .unwrap()
+            .len(),
+        100
+    );
     assert!(
         service
             .search_catalog_page("%", None, None, now)
@@ -644,7 +667,7 @@ fn supplier_search_pages_are_bounded_stable_country_scoped_and_read_only() {
         if active && !blacklisted {
             selectable_count += 1;
         }
-        transaction.execute("INSERT INTO local_suppliers(id,country_id,business_code,name,contact_name,address,city,is_active,is_blacklisted,is_preferred,version) VALUES(?1,?2,?3,'Synthetic supplier','Synthetic contact','Synthetic address','Synthetic city',?4,?5,0,1)",params![Uuid::new_v4().to_string(),allowed_country.to_string(),format!("SYNTH-{index:05}"),active,blacklisted]).unwrap();
+        transaction.execute("INSERT INTO local_suppliers(id,country_id,business_code,name,contact_name,address,city,is_active,is_blacklisted,is_preferred,version) VALUES(?1,?2,?3,'Synthetic Électricité','Synthetic contact','MATÉRIAU','Synthetic city 测试城',?4,?5,0,1)",params![Uuid::new_v4().to_string(),allowed_country.to_string(),format!("SYNTH-{index:05}"),active,blacklisted]).unwrap();
     }
     transaction.execute("INSERT INTO local_suppliers(id,country_id,business_code,name,is_active,is_blacklisted,version) VALUES(?1,?2,'OTHER-SUP','Other country supplier',1,0,1)",params![Uuid::new_v4().to_string(),denied_country.to_string()]).unwrap();
     transaction.commit().unwrap();
@@ -661,7 +684,13 @@ fn supplier_search_pages_are_bounded_stable_country_scoped_and_read_only() {
         let mut pages = 0;
         loop {
             let page = service
-                .search_suppliers_page("", allowed_country, cursor, selectable_only, now)
+                .search_suppliers_page(
+                    "électricité matériau 测试城",
+                    allowed_country,
+                    cursor,
+                    selectable_only,
+                    now,
+                )
                 .unwrap();
             if pages == 0 {
                 println!(
@@ -695,7 +724,7 @@ fn supplier_search_pages_are_bounded_stable_country_scoped_and_read_only() {
     assert_eq!(service.list_suppliers(now).unwrap().len(), 10050);
     let combined = service
         .search_suppliers_page(
-            "contact city SYNTH-10049",
+            "ÉLECTRICITÉ matériau CONTACT city 测试城 synth-10049",
             allowed_country,
             None,
             false,
@@ -708,7 +737,7 @@ fn supplier_search_pages_are_bounded_stable_country_scoped_and_read_only() {
         combined,
         service
             .search_suppliers_page(
-                "contact city SYNTH-10049",
+                "électricité MATÉRIAU contact CITY 测试城 SYNTH-10049",
                 allowed_country,
                 None,
                 false,

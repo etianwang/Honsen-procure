@@ -1,5 +1,11 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  草稿: ['Draft', 'Brouillon'],
+  未知收货状态: ['Unknown receipt status', 'État de réception inconnu'],
+  '当前订单状态不允许登记收货或有条件完成。': [
+    'The current order status does not allow receipt or conditional completion.',
+    'L’état de la commande ne permet ni la réception ni la clôture sous conditions.',
+  ],
   收货登记: ['Receipt registration', 'Enregistrement des réceptions'],
   当前状态: ['Current status', 'État actuel'],
   收货状态: ['Receipt status', 'État de réception'],

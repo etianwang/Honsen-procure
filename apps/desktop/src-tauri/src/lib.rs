@@ -22,7 +22,7 @@ use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use keyring::Entry;
 use rand_core::OsRng;
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, functions::FunctionFlags, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -93,6 +93,7 @@ pub struct AuthenticatedSession {
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationContextView {
     pub country_id: Uuid,
+    pub country_name: Option<String>,
     pub project_id: Uuid,
     pub project_name: String,
     pub site: String,
@@ -1789,6 +1790,14 @@ impl LocalAuthService {
             .pragma_update(None, "foreign_keys", "ON")
             .map_err(|_| AuthError::Database)?;
         migrate(&mut connection)?;
+        connection
+            .create_scalar_function(
+                "honsen_search_lower",
+                1,
+                FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+                |context| Ok(context.get::<String>(0)?.to_lowercase()),
+            )
+            .map_err(|_| AuthError::Database)?;
         connection
             .execute("DELETE FROM local_session", [])
             .map_err(|_| AuthError::Database)?;
@@ -5965,22 +5974,7 @@ impl LocalAuthService {
         if after.is_some_and(|cursor| cursor.name_zh.len() > 1024 || cursor.model.len() > 1024) {
             return Err(AuthError::InvalidInput);
         }
-        let tokens: Vec<String> = query
-            .split_whitespace()
-            .map(|token| {
-                format!(
-                    "%{}%",
-                    token
-                        .replace('\\', "\\\\")
-                        .replace('%', "\\%")
-                        .replace('_', "\\_")
-                )
-            })
-            .collect();
-        if paginated && tokens.len() > 8 {
-            return Err(AuthError::InvalidInput);
-        }
-        let token_json = serde_json::to_string(&tokens).map_err(|_| AuthError::InvalidInput)?;
+        let token_json = paginated_search_tokens(if paginated { query } else { "" })?;
         let pattern = format!("%{}%", query.trim());
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let mut materials = connection
@@ -5993,13 +5987,13 @@ impl LocalAuthService {
                      OR specification LIKE ?1 COLLATE NOCASE OR COALESCE(sku, '') LIKE ?1 COLLATE NOCASE)
                    AND (NOT ?3 OR NOT EXISTS (
                      SELECT 1 FROM json_each(?4) token WHERE NOT (
-                       name_zh LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                       OR COALESCE(name_fr, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                       OR COALESCE(name_en, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                       OR aliases_json LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                       OR model LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                       OR specification LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                       OR COALESCE(sku, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE)))
+                       honsen_search_lower(name_zh) LIKE token.value ESCAPE '\\'
+                       OR honsen_search_lower(COALESCE(name_fr, '')) LIKE token.value ESCAPE '\\'
+                       OR honsen_search_lower(COALESCE(name_en, '')) LIKE token.value ESCAPE '\\'
+                       OR honsen_search_lower(aliases_json) LIKE token.value ESCAPE '\\'
+                       OR honsen_search_lower(model) LIKE token.value ESCAPE '\\'
+                       OR honsen_search_lower(specification) LIKE token.value ESCAPE '\\'
+                       OR honsen_search_lower(COALESCE(sku, '')) LIKE token.value ESCAPE '\\')))
                    AND (?5 IS NULL OR (name_zh, model, id) > (?5, ?6, ?7))
                  ORDER BY name_zh, model, id
                  LIMIT ?8",
@@ -6276,23 +6270,7 @@ impl LocalAuthService {
         {
             return Err(AuthError::InvalidInput);
         }
-        let tokens: Vec<String> = query
-            .unwrap_or("")
-            .split_whitespace()
-            .map(|token| {
-                format!(
-                    "%{}%",
-                    token
-                        .replace('\\', "\\\\")
-                        .replace('%', "\\%")
-                        .replace('_', "\\_")
-                )
-            })
-            .collect();
-        if tokens.len() > 8 {
-            return Err(AuthError::InvalidInput);
-        }
-        let token_json = serde_json::to_string(&tokens).map_err(|_| AuthError::InvalidInput)?;
+        let token_json = paginated_search_tokens(query.unwrap_or(""))?;
         let account_id = self.active_session_user_id()?;
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let mut statement = connection
@@ -6305,11 +6283,11 @@ impl LocalAuthService {
                    AND (?3 IS NULL OR country_id = ?3)
                    AND (NOT ?4 OR (is_active = 1 AND is_blacklisted = 0))
                    AND NOT EXISTS (SELECT 1 FROM json_each(?5) token WHERE NOT (
-                     name LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                     OR business_code LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                     OR COALESCE(contact_name, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                     OR COALESCE(address, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE
-                     OR COALESCE(city, '') LIKE token.value ESCAPE '\\' COLLATE NOCASE))
+                     honsen_search_lower(name) LIKE token.value ESCAPE '\\'
+                     OR honsen_search_lower(business_code) LIKE token.value ESCAPE '\\'
+                     OR honsen_search_lower(COALESCE(contact_name, '')) LIKE token.value ESCAPE '\\'
+                     OR honsen_search_lower(COALESCE(address, '')) LIKE token.value ESCAPE '\\'
+                     OR honsen_search_lower(COALESCE(city, '')) LIKE token.value ESCAPE '\\'))
                    AND (?6 IS NULL OR is_active < ?6 OR (is_active = ?6 AND (name, id) > (?7, ?8)))
                  ORDER BY is_active DESC, name, id LIMIT ?9",
             )
@@ -7737,11 +7715,12 @@ impl LocalAuthService {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let account_id = Self::catalog_account_on_connection(&connection, now)?;
         connection.query_row(
-            "SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair
+            "SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair, c.name
              FROM local_authorization_snapshots a
              JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL
              JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL
              JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL
+             LEFT JOIN local_countries c ON c.id = p.country_id
              LEFT JOIN local_selected_authorization_contexts s ON s.account_id = a.account_id AND s.project_id = a.project_id AND s.department_id = a.department_id AND s.team_id = a.team_id
              WHERE a.account_id = ?1 AND a.expires_at >= ?2
              ORDER BY (s.account_id IS NOT NULL) DESC, a.verified_at DESC, p.name, d.name, t.name LIMIT 1",
@@ -7758,6 +7737,7 @@ impl LocalAuthService {
                 currency: row.get(8)?,
                 primary_currency: row.get(9)?,
                 language_pair: row.get(10)?,
+                country_name: row.get(11)?,
             }),
         ).optional().map_err(|_| AuthError::Database)?.ok_or(AuthError::Forbidden)
     }
@@ -7768,7 +7748,15 @@ impl LocalAuthService {
     ) -> Result<Vec<AuthorizationContextView>, AuthError> {
         let connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let account_id = Self::catalog_account_on_connection(&connection, now)?;
-        let mut statement = connection.prepare("SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair FROM local_authorization_snapshots a JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL WHERE a.account_id = ?1 AND a.expires_at >= ?2 ORDER BY p.name, d.name, t.name").map_err(|_| AuthError::Database)?;
+        let mut statement = connection.prepare(
+            "SELECT p.country_id, p.id, p.name, p.site, d.id, d.name, t.id, t.name, p.default_currency, p.default_currency, p.default_language_pair, c.name
+             FROM local_authorization_snapshots a
+             JOIN local_projects p ON p.id = a.project_id AND p.is_active = 1 AND p.deleted_at IS NULL
+             JOIN local_departments d ON d.id = a.department_id AND d.is_active = 1 AND d.deleted_at IS NULL
+             JOIN local_teams t ON t.id = a.team_id AND t.department_id = d.id AND t.is_active = 1 AND t.deleted_at IS NULL
+             LEFT JOIN local_countries c ON c.id = p.country_id
+             WHERE a.account_id = ?1 AND a.expires_at >= ?2 ORDER BY p.name, d.name, t.name",
+        ).map_err(|_| AuthError::Database)?;
         statement
             .query_map(params![account_id.to_string(), unix_seconds(now)], |row| {
                 Ok(AuthorizationContextView {
@@ -7787,6 +7775,7 @@ impl LocalAuthService {
                     currency: row.get(8)?,
                     primary_currency: row.get(9)?,
                     language_pair: row.get(10)?,
+                    country_name: row.get(11)?,
                 })
             })
             .map_err(|_| AuthError::Database)?
@@ -12223,6 +12212,26 @@ fn register_failure(
     Ok(())
 }
 
+fn paginated_search_tokens(query: &str) -> Result<String, AuthError> {
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .map(|token| {
+            format!(
+                "%{}%",
+                token
+                    .to_lowercase()
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            )
+        })
+        .collect();
+    if tokens.len() > 8 {
+        return Err(AuthError::InvalidInput);
+    }
+    serde_json::to_string(&tokens).map_err(|_| AuthError::InvalidInput)
+}
+
 fn unix_seconds(value: SystemTime) -> i64 {
     value
         .duration_since(UNIX_EPOCH)
@@ -14640,6 +14649,10 @@ mod tests {
         let context = service.authorization_context(now).unwrap();
         assert_eq!(context.project_id, project_id);
         assert_eq!(context.country_id, country_id);
+        assert_eq!(
+            serde_json::to_value(&context).unwrap()["countryName"],
+            "authorization country"
+        );
         assert_eq!(context.site, "authorized site");
         assert_eq!(context.department_id, department_id);
         assert_eq!(context.team_id, team_id);
@@ -14653,7 +14666,12 @@ mod tests {
             team_id,
             now,
         );
-        assert_eq!(service.list_authorization_contexts(now).unwrap().len(), 2);
+        let contexts = service.list_authorization_contexts(now).unwrap();
+        assert_eq!(contexts.len(), 2);
+        assert!(contexts.iter().all(|context| {
+            context.country_id == country_id
+                && context.country_name.as_deref() == Some("authorization country")
+        }));
         service
             .select_authorization_context(
                 AuthorizationContextSelectionInput {

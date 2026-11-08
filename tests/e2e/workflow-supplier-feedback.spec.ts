@@ -215,7 +215,8 @@ for (const locale of ['zh', 'en', 'fr'] as const) {
       ).toEqual(firstPayload)
       await finish(page)
       await expect(page.locator('.ant-alert-success')).toBeVisible()
-      await expect(action).toBeEnabled()
+      if (command === 'send_supplier_order') await expect(action).toBeDisabled()
+      else await expect(action).toBeEnabled()
     })
   }
 }

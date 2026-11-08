@@ -1501,6 +1501,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
                         {
                           id: '00000000-0000-4000-8000-000000000803',
                           displayNo: 'CI-FIXTURE-20261012-SUP-0001',
+                          workflowStatus: 'draft',
                           currency: 'XOF',
                           lines: [
                             {
@@ -1661,6 +1662,15 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await page.getByLabel('子单税率').fill('537')
   await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
   await expect(page.getByLabel('Child tax rate')).toHaveValue('537')
+  await expect(
+    page.getByRole('button', { name: 'Send to supplier' }),
+  ).toBeDisabled()
+  await expect(
+    page.getByText('Save tax, discount and freight terms first.'),
+  ).toBeVisible()
+  await page
+    .getByRole('button', { name: 'Save child terms', exact: true })
+    .click()
   await expect(
     page.getByText('Child terms saved; total including tax 2950.'),
   ).toBeVisible()
@@ -1930,7 +1940,7 @@ test('purchaser completes supplier-child terms before sending the order', async 
   })
 
   await page.goto('/?test=supplier-terms')
-  await page.getByRole('button', { name: '发送供应商' }).click()
+  await expect(page.getByRole('button', { name: '发送供应商' })).toBeDisabled()
   await expect(page.getByText('请先保存税、折扣和运费条款。')).toBeVisible()
   await page.getByLabel('fixture cable 行折扣').fill('125')
   await page.getByLabel('fixture cable 行运费').fill('25')

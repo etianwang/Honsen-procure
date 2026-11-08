@@ -25,6 +25,7 @@ for (const [locale, scopeLabel, emptyLabel] of [
         teamId: id(1002),
         teamName: 'Synthetic team',
         countryId: id(1003),
+        countryName: i === 259 ? 'Côte synthétique' : undefined,
         currency: 'EUR',
         primaryCurrency: 'EUR',
         languagePair: 'zh_fr',
@@ -94,6 +95,13 @@ for (const [locale, scopeLabel, emptyLabel] of [
       .getByLabel('界面语言 / UI language / Langue')
       .selectOption(locale)
     const scope = page.getByRole('combobox', { name: scopeLabel, exact: true })
+    const scopeDisplay = page.locator('.honsen-shell-scope')
+    await expect(scopeDisplay).toContainText(
+      'Synthetic Zone0 · Synthetic Site0 · Électricité 电气 Electrical · Synthetic team',
+    )
+    await expect(scopeDisplay).not.toContainText(
+      '00000000-0000-4000-8000-000000001003',
+    )
     await scope.click()
     await expect
       .poll(() => page.locator('.ant-select-item-option').count())
@@ -103,7 +111,7 @@ for (const [locale, scopeLabel, emptyLabel] of [
     await expect(
       page.getByRole('status').filter({ hasText: emptyLabel }),
     ).toBeVisible()
-    await scope.fill('Zone259 electricite')
+    await scope.fill('cote Zone259 electricite')
     expect(
       await page.evaluate(
         () =>
@@ -113,8 +121,8 @@ for (const [locale, scopeLabel, emptyLabel] of [
     ).toBe(0)
     await scope.press('ArrowDown')
     await scope.press('Enter')
-    await expect(page.locator('.honsen-shell-scope')).toContainText(
-      'Synthetic Zone259',
+    await expect(scopeDisplay).toContainText(
+      'Côte synthétique · Synthetic Zone259',
     )
     await expect
       .poll(() =>

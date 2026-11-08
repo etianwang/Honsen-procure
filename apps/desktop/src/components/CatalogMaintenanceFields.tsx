@@ -115,7 +115,10 @@ export function PriceFormFields({
         )}
       </Form.Item>
       <Form.Item label={t('货币')} name="currency" rules={[{ required: true }]}>
-        <Select options={currencySchema.options.map((value) => ({ value }))} />
+        <Select
+          virtual={false}
+          options={currencySchema.options.map((value) => ({ value }))}
+        />
       </Form.Item>
       <Form.Item
         label={t('单价（最小货币单位）')}

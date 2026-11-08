@@ -137,9 +137,10 @@ test('supplier history pages include inactive rows and comparison groups preserv
     .click()
   await expect(page.getByText('历史0', { exact: true })).toBeVisible()
   await expect(page.locator('.supplier-detail tbody tr')).toHaveCount(25)
-  await page.getByRole('button', { name: '下一页', exact: true }).click()
+  const history = page.locator('.supplier-detail')
+  await history.getByRole('button', { name: '下一页', exact: true }).click()
   await expect(page.getByText('历史26', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '上一页', exact: true }).click()
+  await history.getByRole('button', { name: '上一页', exact: true }).click()
   await expect(page.getByText('历史0', { exact: true })).toBeVisible()
   await page.getByRole('combobox', { name: '选择材料', exact: true }).click()
   await page.getByText('合成材料', { exact: false }).last().click()
@@ -224,23 +225,31 @@ test('quote form submits XAF integer minor units without selecting a supplier im
     path: '.cache/suppliers-prices-quote-form.png',
     animations: 'disabled',
   })
-  await expect(dialog.getByRole('combobox', { name: /供应商$/ })).toHaveValue(
-    '',
-  )
-  await dialog.getByRole('combobox', { name: /供应商$/ }).click()
-  await page
-    .locator('.ant-select-dropdown:visible .ant-select-item-option-content')
-    .filter({ hasText: /^SYNTH · Synthetic supplier$/ })
-    .click()
+  const supplier = dialog.getByRole('combobox', { name: '供应商', exact: true })
+  await expect(supplier).toHaveValue('')
+  await supplier.click()
   await expect(
-    dialog.getByTitle('SYNTH · Synthetic supplier', { exact: true }),
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('SYNTH · Synthetic supplier', { exact: true }),
   ).toBeVisible()
-  await dialog.getByRole('combobox', { name: /货币$/ }).click()
-  await page
-    .locator('.ant-select-dropdown:visible .ant-select-item-option-content')
-    .filter({ hasText: /^XAF$/ })
-    .click()
-  await expect(dialog.getByTitle('XAF', { exact: true })).toBeVisible()
+  await supplier.press('ArrowDown')
+  await supplier.press('Enter')
+  await expect(supplier).toHaveAttribute('aria-expanded', 'false')
+  await expect(
+    dialog.locator('.ant-select').filter({
+      has: page.getByRole('combobox', { name: '供应商', exact: true }),
+    }),
+  ).toContainText('SYNTH · Synthetic supplier')
+  const currency = dialog.getByRole('combobox', { name: /货币$/ })
+  await currency.click()
+  await page.getByRole('option', { name: 'XAF', exact: true }).click()
+  await expect(currency).toHaveAttribute('aria-expanded', 'false')
+  await expect(
+    dialog
+      .locator('.ant-select')
+      .filter({ has: page.getByRole('combobox', { name: /货币$/ }) }),
+  ).toContainText('XAF')
   await dialog.getByLabel(/单价（最小货币单位）/).fill('9007199254740993')
   await dialog.getByRole('button', { name: /保存/ }).click()
   await expect(
@@ -324,20 +333,23 @@ for (const mode of ['pure-super', 'combined', 'storage-error']) {
               }
               if (command === 'list_authorization_contexts')
                 return mode === 'pure-super' ? [] : [context]
-              if (command === 'list_suppliers')
-                return [
-                  {
-                    id: 's',
-                    countryId: 'ci',
-                    businessCode: 'SYNTH',
-                    name: 'Synthetic supplier',
-                    contactName: 'Synthetic contact',
-                    isActive: true,
-                    isBlacklisted: false,
-                    isPreferred: false,
-                    version: 1,
-                  },
-                ]
+              if (command === 'search_suppliers_page')
+                return {
+                  records: [
+                    {
+                      id: 's',
+                      countryId: 'ci',
+                      businessCode: 'SYNTH',
+                      name: 'Synthetic supplier',
+                      contactName: 'Synthetic contact',
+                      isActive: true,
+                      isBlacklisted: false,
+                      isPreferred: false,
+                      version: 1,
+                    },
+                  ],
+                  nextCursor: null,
+                }
               if (command === 'search_catalog') return []
               return []
             },

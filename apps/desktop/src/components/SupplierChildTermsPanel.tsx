@@ -22,6 +22,9 @@ type SupplierChildTermsPanelProps = {
   api: SupplierOrderApi
   orderId: string
   lines: ChildLine[]
+  workflowStatus?: string
+  parentAllowsIssue?: boolean
+  onIssued?: () => void
 }
 
 const zero = { kind: 'fixed_minor', minor: '0' } as const
@@ -30,6 +33,9 @@ export function SupplierChildTermsPanel({
   api,
   orderId,
   lines,
+  workflowStatus = 'draft',
+  parentAllowsIssue = true,
+  onIssued,
 }: SupplierChildTermsPanelProps) {
   const { locale } = useUiLocale()
   const t = (key: SupplierMessage) => supplierText(locale, key)
@@ -46,10 +52,19 @@ export function SupplierChildTermsPanel({
     ),
   )
   const [saved, setSaved] = useState(false)
+  const savedTerms = useRef(false)
+  const [issuedHere, setIssuedHere] = useState(false)
+  const editable = workflowStatus === 'draft' && !issuedHere
   const requestPending = useRef(false)
   const [busy, setBusy] = useState(false)
   const [messageType, setMessageType] = useState<'success' | 'error'>('error')
   const [message, setMessage] = useState<SupplierNotice | null>(null)
+
+  function invalidateSaved() {
+    savedTerms.current = false
+    setSaved(false)
+    setMessage(null)
+  }
 
   function input(): SupplierChildTermsInput | null {
     const tax = Number(taxRateBasisPoints)
@@ -83,7 +98,7 @@ export function SupplierChildTermsPanel({
   }
 
   async function save() {
-    if (requestPending.current) return
+    if (requestPending.current || !editable) return
     setMessageType('error')
     setMessage(null)
     const payload = input()
@@ -94,6 +109,7 @@ export function SupplierChildTermsPanel({
     try {
       const total = await api.saveSupplierChildTerms(payload)
       setMessageType('success')
+      savedTerms.current = true
       setSaved(true)
       setMessage({ key: 'saved', values: { total: total.totalMinor } })
     } catch {
@@ -106,10 +122,10 @@ export function SupplierChildTermsPanel({
   }
 
   async function send() {
-    if (requestPending.current) return
+    if (requestPending.current || !editable) return
     setMessageType('error')
     setMessage(null)
-    if (!saved) {
+    if (!savedTerms.current || !parentAllowsIssue) {
       setMessage({ key: '请先保存税、折扣和运费条款。' })
       return
     }
@@ -118,7 +134,9 @@ export function SupplierChildTermsPanel({
     setMessage(null)
     try {
       const issued = await api.sendSupplierOrder(orderId)
+      setIssuedHere(true)
       setMessageType('success')
+      onIssued?.()
       if (issued) {
         setMessage({
           key: 'issued',
@@ -154,121 +172,141 @@ export function SupplierChildTermsPanel({
           showIcon
         />
       ) : null}
-      <div className="requisition-lines" aria-label={t('子单明细条款')}>
-        {lines.map((line) => {
-          const terms = lineTerms[line.id]
-          return (
-            <article className="requisition-line" key={line.id}>
-              <strong>{line.materialName}</strong> · {line.currency}
-              <div className="requisition-fields">
-                <label>
-                  {t('行折扣（最小货币单位）')}
-                  <Input
-                    disabled={busy}
-                    aria-label={`${line.materialName} ${t('行折扣')}`}
-                    inputMode="numeric"
-                    value={terms.discount}
+      {!editable && (
+        <p>
+          {t('子单条款仅在草稿状态可编辑；请在正式单据预览中查看已签发条款。')}
+        </p>
+      )}
+      {editable && !saved && <p>{t('请先保存税、折扣和运费条款。')}</p>}
+      {editable && !parentAllowsIssue && (
+        <p>{t('父单当前状态不允许签发供应商子单。')}</p>
+      )}
+      <fieldset
+        disabled={!editable || busy}
+        onChange={invalidateSaved}
+        style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}
+      >
+        <div className="requisition-lines" aria-label={t('子单明细条款')}>
+          {lines.map((line) => {
+            const terms = lineTerms[line.id]
+            return (
+              <article className="requisition-line" key={line.id}>
+                <strong>{line.materialName}</strong> · {line.currency}
+                <div className="requisition-fields">
+                  <label>
+                    {t('行折扣（最小货币单位）')}
+                    <Input
+                      disabled={busy || !editable}
+                      aria-label={`${line.materialName} ${t('行折扣')}`}
+                      inputMode="numeric"
+                      value={editable ? terms.discount : ''}
+                      onChange={(event) =>
+                        setLineTerms((current) => ({
+                          ...current,
+                          [line.id]: {
+                            ...current[line.id],
+                            discount: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    {t('行运费（最小货币单位）')}
+                    <Input
+                      disabled={busy || !editable}
+                      aria-label={`${line.materialName} ${t('行运费')}`}
+                      inputMode="numeric"
+                      value={editable ? terms.freight : ''}
+                      onChange={(event) =>
+                        setLineTerms((current) => ({
+                          ...current,
+                          [line.id]: {
+                            ...current[line.id],
+                            freight: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <Checkbox
+                    disabled={busy || !editable}
+                    checked={editable && terms.freightIncluded}
+                    indeterminate={!editable}
                     onChange={(event) =>
                       setLineTerms((current) => ({
                         ...current,
                         [line.id]: {
                           ...current[line.id],
-                          discount: event.target.value,
+                          freightIncluded: event.target.checked,
                         },
                       }))
                     }
-                  />
-                </label>
-                <label>
-                  {t('行运费（最小货币单位）')}
-                  <Input
-                    disabled={busy}
-                    aria-label={`${line.materialName} ${t('行运费')}`}
-                    inputMode="numeric"
-                    value={terms.freight}
-                    onChange={(event) =>
-                      setLineTerms((current) => ({
-                        ...current,
-                        [line.id]: {
-                          ...current[line.id],
-                          freight: event.target.value,
-                        },
-                      }))
-                    }
-                  />
-                </label>
-                <Checkbox
-                  disabled={busy}
-                  checked={terms.freightIncluded}
-                  onChange={(event) =>
-                    setLineTerms((current) => ({
-                      ...current,
-                      [line.id]: {
-                        ...current[line.id],
-                        freightIncluded: event.target.checked,
-                      },
-                    }))
-                  }
-                >
-                  {t('单价已含运费')}
-                </Checkbox>
-              </div>
-            </article>
-          )
-        })}
-      </div>
-      <div className="requisition-fields">
-        <label>
-          {t('印花税（手填，单据币种最小单位）')}
-          <Input
-            disabled={busy}
-            aria-label={t('印花税（手填，单据币种最小单位）')}
-            inputMode="numeric"
-            value={manualStampDutyMinor}
-            onChange={(event) => setManualStampDutyMinor(event.target.value)}
-          />
-        </label>
-        <label>
-          {t('税率（基点；18% = 1800）')}
-          <Input
-            disabled={busy}
-            aria-label={t('子单税率')}
-            inputMode="numeric"
-            value={taxRateBasisPoints}
-            onChange={(event) => setTaxRateBasisPoints(event.target.value)}
-          />
-        </label>
-        <label>
-          {t('单据折扣（最小货币单位）')}
-          <Input
-            disabled={busy}
-            aria-label={t('子单单据折扣')}
-            inputMode="numeric"
-            value={orderDiscount}
-            onChange={(event) => setOrderDiscount(event.target.value)}
-          />
-        </label>
-        <label>
-          {t('单据运费（最小货币单位）')}
-          <Input
-            disabled={busy}
-            aria-label={t('子单单据运费')}
-            inputMode="numeric"
-            value={orderFreight}
-            onChange={(event) => setOrderFreight(event.target.value)}
-          />
-        </label>
-      </div>
+                  >
+                    {t('单价已含运费')}
+                  </Checkbox>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+        <div className="requisition-fields">
+          <label>
+            {t('印花税（手填，单据币种最小单位）')}
+            <Input
+              disabled={busy || !editable}
+              aria-label={t('印花税（手填，单据币种最小单位）')}
+              inputMode="numeric"
+              value={editable ? manualStampDutyMinor : ''}
+              onChange={(event) => setManualStampDutyMinor(event.target.value)}
+            />
+          </label>
+          <label>
+            {t('税率（基点；18% = 1800）')}
+            <Input
+              disabled={busy || !editable}
+              aria-label={t('子单税率')}
+              inputMode="numeric"
+              value={editable ? taxRateBasisPoints : ''}
+              onChange={(event) => setTaxRateBasisPoints(event.target.value)}
+            />
+          </label>
+          <label>
+            {t('单据折扣（最小货币单位）')}
+            <Input
+              disabled={busy || !editable}
+              aria-label={t('子单单据折扣')}
+              inputMode="numeric"
+              value={editable ? orderDiscount : ''}
+              onChange={(event) => setOrderDiscount(event.target.value)}
+            />
+          </label>
+          <label>
+            {t('单据运费（最小货币单位）')}
+            <Input
+              disabled={busy || !editable}
+              aria-label={t('子单单据运费')}
+              inputMode="numeric"
+              value={editable ? orderFreight : ''}
+              onChange={(event) => setOrderFreight(event.target.value)}
+            />
+          </label>
+        </div>
+      </fieldset>
       <Space className="requisition-actions" wrap>
         <Button
-          disabled={busy}
+          disabled={busy || !editable}
           loading={busy}
           type="primary"
           onClick={() => void save()}
         >
           {t('保存子单条款')}
         </Button>
-        <Button disabled={busy} loading={busy} onClick={() => void send()}>
+        <Button
+          disabled={busy || !editable || !saved || !parentAllowsIssue}
+          loading={busy}
+          onClick={() => void send()}
+        >
           {t('发送供应商')}
         </Button>
       </Space>

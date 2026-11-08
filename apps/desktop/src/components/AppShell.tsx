@@ -25,6 +25,7 @@ export type AppPage =
   | 'authorization'
 
 export type AuthorizationContextOption = {
+  countryName?: string | null
   projectId: string
   projectName: string
   site: string

@@ -15,7 +15,9 @@ for (const [locale, search, empty] of [
     await page
       .getByLabel(search, { exact: true })
       .fill('nonexistent synthetic material')
-    await expect(page.getByRole('status')).toHaveText(empty)
+    await expect(
+      page.getByRole('status').filter({ hasText: empty }),
+    ).toHaveText(empty)
     expect(errors).toEqual([])
   })
 }

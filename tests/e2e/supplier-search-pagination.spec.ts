@@ -269,12 +269,16 @@ for (const [
           exact: true,
         }),
       ).toHaveCount(0)
+      await page.clock.install()
+      await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 500)
       const before = await page.evaluate(
         () =>
           (window as Window & { __supplierSearchRequests: unknown[] })
             .__supplierSearchRequests.length,
       )
       await search.pressSequentially(' contact', { delay: 10 })
+      await page.clock.runFor(250)
+      await page.clock.resume()
       await expect(
         list.getByRole('button', {
           name: 'Synthetic supplier 777',
@@ -325,11 +329,16 @@ for (const [
       ).toBeVisible()
       await picker.press('ArrowDown')
       await picker.press('Enter')
+      await expect(picker).toHaveAttribute('aria-expanded', 'false')
       await expect(
         dialog
-          .locator('.ant-form-item')
-          .filter({ has: picker })
-          .locator('.ant-select-content-has-value'),
+          .locator('.ant-select')
+          .filter({
+            has: page.getByRole('combobox', {
+              name: supplierLabel,
+              exact: true,
+            }),
+          }),
       ).toContainText('SYNTH-105 · Synthetic supplier 105')
       const captured = await page.evaluate(
         () =>

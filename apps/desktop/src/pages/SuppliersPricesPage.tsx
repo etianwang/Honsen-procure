@@ -2,7 +2,7 @@ import './SuppliersPricesPage.css'
 import { MaterialPicker } from '../components/MaterialPicker'
 import { SupplierPicker } from '../components/SupplierPicker'
 import { Alert, Button, Form, Input, Modal, Spin } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { formatMoney } from '@honsen/shared'
 import { canEditMaterials, type UserRole } from '../lib/permissions'
 import { useUiLocale } from '../lib/ui-locale'
@@ -91,7 +91,18 @@ export function SuppliersPricesPage({
   const [quoteOpen, setQuoteOpen] = useState(false)
   const [editorContext, setEditorContext] = useState('')
   const [saving, setSaving] = useState(false)
-  const [notice, setNotice] = useState<'supplier' | 'price' | null>(null)
+  const savePending = useRef(false)
+  const saveGeneration = useRef(0)
+  useLayoutEffect(
+    () => () => {
+      saveGeneration.current += 1
+    },
+    [contextKey, api, canEdit],
+  )
+  const [notice, setNotice] = useState<{
+    kind: 'supplier' | 'price'
+    key: string
+  } | null>(null)
   const [saveError, setSaveError] = useState<'supplier' | 'price' | null>(null)
   const [supplierForm] = Form.useForm<SupplierFormValues>()
   const [priceForm] = Form.useForm<PriceFormValues>()
@@ -283,6 +294,7 @@ export function SuppliersPricesPage({
   }, [quoteOpen, selectedMaterial, editorContext, contextKey, priceForm])
 
   const openSupplierEditor = (supplier: SupplierView | 'new') => {
+    if (savePending.current) return
     setQuoteOpen(false)
     setEditorContext(contextKey)
     setSaveError(null)
@@ -290,6 +302,7 @@ export function SuppliersPricesPage({
   }
   const saveSupplier = async (values: SupplierFormValues) => {
     if (
+      savePending.current ||
       !countryId ||
       !projectId ||
       !canEdit ||
@@ -297,8 +310,11 @@ export function SuppliersPricesPage({
       !supplierEditor
     )
       return
+    savePending.current = true
+    const generation = saveGeneration.current
     setSaving(true)
     setSaveError(null)
+    setNotice(null)
     try {
       const payload = supplierFromForm(
         values,
@@ -306,21 +322,23 @@ export function SuppliersPricesPage({
         countryId,
       )
       await api.saveSupplier(payload)
+      if (generation !== saveGeneration.current) return
       setSupplierSelection({ key: contextKey, record: payload })
       setHistoryPage(0)
       setHistoryCursors([null])
-      setNotice('supplier')
+      setNotice({ kind: 'supplier', key: contextKey })
       setSupplierEditor(null)
       supplierForm.resetFields()
       setReload((value) => value + 1)
     } catch {
-      setSaveError('supplier')
+      if (generation === saveGeneration.current) setSaveError('supplier')
     } finally {
+      savePending.current = false
       setSaving(false)
     }
   }
   const openQuote = () => {
-    if (!selectedMaterial) return
+    if (savePending.current || !selectedMaterial) return
     setSupplierEditor(null)
     setEditorContext(contextKey)
     setSaveError(null)
@@ -328,6 +346,7 @@ export function SuppliersPricesPage({
   }
   const savePrice = async (values: PriceFormValues) => {
     if (
+      savePending.current ||
       !selectedMaterial ||
       !countryId ||
       !projectId ||
@@ -335,19 +354,24 @@ export function SuppliersPricesPage({
       editorContext !== contextKey
     )
       return
+    savePending.current = true
+    const generation = saveGeneration.current
     setSaving(true)
     setSaveError(null)
+    setNotice(null)
     try {
       await api.addMaterialPrice(priceFromForm(values, selectedMaterial.id))
-      setNotice('price')
+      if (generation !== saveGeneration.current) return
+      setNotice({ kind: 'price', key: contextKey })
       setQuoteOpen(false)
       priceForm.resetFields()
       setHistoryPage(0)
       setHistoryCursors([null])
       setReload((value) => value + 1)
     } catch {
-      setSaveError('price')
+      if (generation === saveGeneration.current) setSaveError('price')
     } finally {
+      savePending.current = false
       setSaving(false)
     }
   }
@@ -393,12 +417,13 @@ export function SuppliersPricesPage({
           title={t('只读权限：可以查看资料，不能新增或修改供应商与报价。')}
         />
       )}
-      {notice && (
+      {notice?.key === contextKey && (
         <Alert
           type="success"
+          role="status"
           showIcon
           title={
-            notice === 'supplier'
+            notice.kind === 'supplier'
               ? t('供应商已保存到本地；等待同步确认。')
               : t('报价已保存到本地；等待同步确认。')
           }
@@ -505,9 +530,11 @@ export function SuppliersPricesPage({
             >
               {t('上一页')}
             </Button>
-            <span role="status">
-              {t('当前页')} {supplierPage + 1} · {suppliers.length} {t('项')}
-            </span>
+            {supplierResult?.key === supplierKey && !supplierResult.failed && (
+              <span role="status">
+                {t('当前页')} {supplierPage + 1} · {suppliers.length} {t('项')}
+              </span>
+            )}
             <Button
               disabled={
                 supplierResult?.key !== supplierKey ||
@@ -776,7 +803,7 @@ export function SuppliersPricesPage({
         title={supplierEditor === 'new' ? c('新增供应商') : c('编辑供应商')}
         open={supplierEditor !== null && editorContext === contextKey}
         onCancel={() => {
-          if (!saving) {
+          if (!savePending.current) {
             setSupplierEditor(null)
             supplierForm.resetFields()
             setSaveError(null)
@@ -784,7 +811,13 @@ export function SuppliersPricesPage({
         }}
         onOk={() => supplierForm.submit()}
         okText={c('保存供应商')}
+        okButtonProps={{
+          'aria-label': c('保存供应商'),
+          'aria-busy': saving,
+          disabled: saving,
+        }}
         cancelText={c('取消')}
+        cancelButtonProps={{ disabled: saving }}
         confirmLoading={saving}
         closable={!saving}
         mask={{ closable: !saving }}
@@ -811,7 +844,7 @@ export function SuppliersPricesPage({
         title={c('维护报价')}
         open={quoteOpen && editorContext === contextKey}
         onCancel={() => {
-          if (!saving) {
+          if (!savePending.current) {
             setQuoteOpen(false)
             priceForm.resetFields()
             setSaveError(null)
@@ -819,7 +852,13 @@ export function SuppliersPricesPage({
         }}
         onOk={() => priceForm.submit()}
         okText={c('保存报价')}
+        okButtonProps={{
+          'aria-label': c('保存报价'),
+          'aria-busy': saving,
+          disabled: saving,
+        }}
         cancelText={c('取消')}
+        cancelButtonProps={{ disabled: saving }}
         confirmLoading={saving}
         closable={!saving}
         mask={{ closable: !saving }}

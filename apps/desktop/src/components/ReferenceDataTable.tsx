@@ -28,6 +28,7 @@ export function ReferenceDataTable<
       <label>
         {label}
         <Input
+          type="search"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value)

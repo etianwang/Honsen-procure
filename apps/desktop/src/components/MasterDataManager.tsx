@@ -94,7 +94,10 @@ export function MasterDataManager({
     [items],
   )
 
-  async function save(record: ReferenceMasterDataView) {
+  async function save(
+    record: ReferenceMasterDataView,
+    { showNotice = true }: { showNotice?: boolean } = {},
+  ) {
     if (pendingRecords.current.has(record.id)) return false
     pendingRecords.current.add(record.id)
     setSavingIds(new Set(pendingRecords.current))
@@ -107,10 +110,10 @@ export function MasterDataManager({
           ? [...current, record]
           : current.map((item) => (item.id === record.id ? record : item))
       })
-      setMessage('基础资料已保存；等待同步确认')
+      if (showNotice) setMessage('基础资料已保存；等待同步确认')
       return true
     } catch {
-      setMessage('保存被拒绝，请检查权限或关联资料')
+      if (showNotice) setMessage('保存被拒绝，请检查权限或关联资料')
       return false
     } finally {
       pendingRecords.current.delete(record.id)
@@ -864,7 +867,10 @@ function UnitEditor({
 }
 
 function useReferenceCreate(
-  save: (item: ReferenceMasterDataView) => Promise<boolean>,
+  save: (
+    item: ReferenceMasterDataView,
+    options?: { showNotice?: boolean },
+  ) => Promise<boolean>,
 ) {
   const inFlight = useRef(false)
   const [state, setState] = useState<'idle' | 'pending' | 'success' | 'error'>(
@@ -875,7 +881,7 @@ function useReferenceCreate(
     inFlight.current = true
     setState('pending')
     try {
-      const saved = await save(record())
+      const saved = await save(record(), { showNotice: false })
       setState(saved ? 'success' : 'error')
       return saved
     } catch {

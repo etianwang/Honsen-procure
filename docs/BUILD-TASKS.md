@@ -654,3 +654,5 @@ UI batch4 PARTIAL: attachment state/duplicate guards, small dictionary search/pa
 UI batch5 PARTIAL: execution/RFQ state, paged supplier manager and serialized requisition pending flows implemented; targeted write18/RFQ9/manager3/execution5 plus navigation scoped repairs PASS. Native gate BLOCKED_AUTH_INTERACTION; original parents open. See rollout/build fingerprint.
 
 UI batch6 PARTIAL: history/export guard, workflow reads/password busy, name edits and parent-country supplier search implemented. History27/workflow16/reference independent10/execution scoped10 PASS; Rust196PASS/7ignored; native BLOCKED_AUTH_INTERACTION. See rollout and build fingerprint, no parent closure.
+
+UI phase 2 batch 7: French search, scope labels, child workflow states and recovery rechecks are recorded in the design rollout. Parent gates remain open under `BLOCKED_NATIVE_CONTROL`.

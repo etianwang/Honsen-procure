@@ -240,6 +240,7 @@ export function ProcurementExecutionPage({
               orderId={selected.id}
               receiverId={receiverId}
               initialStatus={selected.workflowStatus}
+              receiptScope="market-parent"
               onChanged={refresh}
               lines={selected.lines.map((line) => ({
                 id: line.id,
@@ -271,6 +272,14 @@ export function ProcurementExecutionPage({
                 <SupplierChildTermsPanel
                   api={supplierOrderApi}
                   orderId={child.id}
+                  workflowStatus={child.workflowStatus ?? 'unknown'}
+                  parentAllowsIssue={
+                    selected.procurementMode === 'honsen_self_purchase' &&
+                    ['confirmed', 'approved', 'executing'].includes(
+                      selected.workflowStatus,
+                    )
+                  }
+                  onIssued={refresh}
                   lines={child.lines.map((line) => ({
                     id: line.id,
                     materialName: line.materialName,
@@ -281,7 +290,9 @@ export function ProcurementExecutionPage({
                   api={tauriReceiptApi}
                   orderId={child.id}
                   receiverId={receiverId}
-                  initialStatus={child.workflowStatus ?? 'sent'}
+                  initialStatus={child.workflowStatus ?? 'unknown'}
+                  receiptScope="supplier-child"
+                  onChanged={refresh}
                   lines={child.lines.map((line) => ({
                     id: line.id,
                     materialName: line.materialName,

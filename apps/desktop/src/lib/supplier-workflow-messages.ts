@@ -1,5 +1,13 @@
 import type { UiLocale } from './ui-locale'
 const messages = {
+  '子单条款仅在草稿状态可编辑；请在正式单据预览中查看已签发条款。': [
+    'Terms are editable only while the supplier order is a draft. Open the formal preview to see issued terms.',
+    'Les conditions sont modifiables uniquement dans un brouillon. Consultez le document officiel pour les conditions émises.',
+  ],
+  '父单当前状态不允许签发供应商子单。': [
+    'The parent order status does not allow issuing a supplier order.',
+    'L’état de la commande mère ne permet pas d’émettre la commande fournisseur.',
+  ],
   '印花税（手填，单据币种最小单位）': [
     'Stamp duty (manual, document currency minor units)',
     'Droit de timbre (manuel, unités minimales de la devise du document)',

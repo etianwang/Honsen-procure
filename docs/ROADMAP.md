@@ -534,3 +534,5 @@ UI phase2 batch4 remains PARTIAL with automated scope evidence; no current-build
 UI phase2 batch5 remains PARTIAL; direct automation verified, original functional/native UX gates and stopped supplier assertion evidence remain open. See design rollout.
 
 UI phase2 batch6 stays PARTIAL; automated scope verified, existing native and parent gates remain open. See design rollout.
+
+UI phase 2 batch 7: affected browser rechecks, unit tests and Windows build verified. Current native UI remains `BLOCKED_NATIVE_CONTROL`. See design rollout.

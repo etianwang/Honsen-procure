@@ -19,19 +19,27 @@ type ReceiptPanelProps = {
   receiverId: string
   lines: ReceiptLine[]
   initialStatus?: string
+  receiptScope?: 'supplier-child' | 'market-parent'
   onChanged?: () => void
 }
 
-function statusText(status?: string) {
-  return status === 'completed'
-    ? '已完成'
-    : status === 'completed_with_conditions'
-      ? '已完成（有条件）'
-      : status === 'executing'
-        ? '采购执行中'
-        : status === 'receiving'
-          ? '收货中'
-          : '已发送供应商'
+function statusText(status: string): ReceiptMessage {
+  switch (status) {
+    case 'completed':
+      return '已完成'
+    case 'completed_with_conditions':
+      return '已完成（有条件）'
+    case 'executing':
+      return '采购执行中'
+    case 'receiving':
+      return '收货中'
+    case 'sent':
+      return '已发送供应商'
+    case 'draft':
+      return '草稿'
+    default:
+      return '未知收货状态'
+  }
 }
 
 export function ReceiptPanel({
@@ -39,7 +47,10 @@ export function ReceiptPanel({
   orderId,
   receiverId,
   lines,
-  initialStatus,
+  initialStatus = 'sent',
+  receiptScope = initialStatus === 'executing' || initialStatus === 'receiving'
+    ? 'market-parent'
+    : 'supplier-child',
   onChanged,
 }: ReceiptPanelProps) {
   const { locale } = useUiLocale()
@@ -49,9 +60,12 @@ export function ReceiptPanel({
   )
   const [overReason, setOverReason] = useState('')
   const [closeReason, setCloseReason] = useState('')
-  const [status, setStatus] = useState(statusText(initialStatus))
-  useEffect(() => setStatus(statusText(initialStatus)), [initialStatus])
-  const terminal = status === '已完成' || status === '已完成（有条件）'
+  const [status, setStatus] = useState(initialStatus)
+  useEffect(() => setStatus(initialStatus), [initialStatus])
+  const allowed =
+    receiptScope === 'supplier-child'
+      ? status === 'sent'
+      : status === 'executing' || status === 'receiving'
   const [message, setMessage] = useState<ReceiptMessage | null>(null)
   const [messageType, setMessageType] = useState<'success' | 'error'>('error')
   const [receivedCount, setReceivedCount] = useState(0)
@@ -59,7 +73,7 @@ export function ReceiptPanel({
   const [busy, setBusy] = useState(false)
 
   async function record() {
-    if (submitting.current || terminal) return
+    if (submitting.current || !allowed) return
     setMessage(null)
     const items = lines
       .filter((line) => quantities[line.id].trim())
@@ -85,13 +99,7 @@ export function ReceiptPanel({
         attachmentIds: [],
         items,
       })
-      setStatus(
-        receipt.workflowStatus === 'completed'
-          ? '已完成'
-          : receipt.workflowStatus === 'receiving'
-            ? '收货中'
-            : '已发送供应商',
-      )
+      setStatus(receipt.workflowStatus)
       setReceivedCount(receipt.receivedItemCount)
       setQuantities(Object.fromEntries(lines.map((line) => [line.id, ''])))
       setMessageType('success')
@@ -107,7 +115,7 @@ export function ReceiptPanel({
   }
 
   async function closeWithConditions() {
-    if (submitting.current || terminal) return
+    if (submitting.current || !allowed) return
     setMessage(null)
     if (!closeReason.trim()) {
       setMessageType('error')
@@ -118,7 +126,7 @@ export function ReceiptPanel({
     setBusy(true)
     try {
       await api.closeSupplierOrderWithConditions(orderId, closeReason.trim())
-      setStatus('已完成（有条件）')
+      setStatus('completed_with_conditions')
       setMessageType('success')
       setMessage('订单已按有条件完成关闭，原因已写入审计。')
       onChanged?.()
@@ -135,10 +143,9 @@ export function ReceiptPanel({
     <Card className="card" title={t('收货登记')}>
       <p>
         {t('当前状态')}：
-        <strong aria-label={t('收货状态')}>
-          {t(status as ReceiptMessage)}
-        </strong>
+        <strong aria-label={t('收货状态')}>{t(statusText(status))}</strong>
       </p>
+      {!allowed && <p>{t('当前订单状态不允许登记收货或有条件完成。')}</p>}
       {busy && (
         <Alert
           role="status"
@@ -170,7 +177,7 @@ export function ReceiptPanel({
             <Input
               aria-label={`${line.materialName} ${t('实收数量')}`}
               inputMode="decimal"
-              disabled={busy || terminal}
+              disabled={busy || !allowed}
               value={quantities[line.id]}
               onChange={(event) =>
                 setQuantities((current) => ({
@@ -186,14 +193,16 @@ export function ReceiptPanel({
         {t('超收原因')}
         <Input
           aria-label={t('超收原因')}
-          disabled={busy || terminal}
+          disabled={busy || !allowed}
           value={overReason}
           onChange={(event) => setOverReason(event.target.value)}
         />
       </label>
       <Button
         type="primary"
-        disabled={busy || terminal}
+        aria-label={t('登记收货')}
+        aria-busy={busy}
+        disabled={busy || !allowed}
         loading={busy}
         onClick={() => void record()}
       >
@@ -204,13 +213,15 @@ export function ReceiptPanel({
         {t('有条件完成原因')}
         <Input
           aria-label={t('有条件完成原因')}
-          disabled={busy || terminal}
+          disabled={busy || !allowed}
           value={closeReason}
           onChange={(event) => setCloseReason(event.target.value)}
         />
       </label>
       <Button
-        disabled={busy || terminal}
+        aria-label={t('按有条件完成关闭')}
+        aria-busy={busy}
+        disabled={busy || !allowed}
         loading={busy}
         onClick={() => void closeWithConditions()}
       >
