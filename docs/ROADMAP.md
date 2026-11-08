@@ -460,3 +460,5 @@ BLOCKER Alpha: installed fresh/online login, upgrade/uninstall data preservation
 2026-11-08 partial update: independent T12 coordinate-root-cause recheck and real browser PDF matrix7PASS; native installed/file/printing gates remain OPEN. Optional payment compatibility candidate passes focused gates, but registry/UI/native sync remain OPEN. No parent closure; see memory.md and V1-REMOTE-ALPHA-ACCEPTANCE.md.
 
 2026-11-08 nativeExcel export/save and zhWPS reopen boundedPASS; T12/Alpha stillOPEN pending formalnativePDF/print, numericExceltypes, remainingdesign and independentclients. No milestoneclosure.
+
+2026-11-08 PDFonly continuation: nativeTESTcatalogtranslations prepared; T12nativePDF/officialheader/approvalfixture remainBLOCKED, no parentclosure or otherfeatureexpansion.
