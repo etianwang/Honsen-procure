@@ -2285,9 +2285,18 @@ test('authenticated desktop switches between cached authorization scopes', async
   )
   await page.getByRole('button', { name: '采购申请单' }).click()
   await expect(page.locator('.page-heading p')).toContainText('乙工地')
-  await expect(page.getByRole('list', { name: '请购历史' })).toContainText(
+  await expect(page.getByRole('table', { name: '请购历史' })).toContainText(
     'REQ-HISTORY-1',
   )
+  await expect(
+    page.getByRole('columnheader', { name: '金额', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('table', { name: '请购历史' })).toContainText(
+    '1,200',
+  )
+  await expect(
+    page.getByRole('columnheader', { name: '最后更新' }),
+  ).toBeVisible()
   await page.getByLabel('搜索单号、项目或工地').fill('REQ-HISTORY-1')
   await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
   await expect(page.getByLabel('Search number, project or site')).toHaveValue(
@@ -2297,7 +2306,7 @@ test('authenticated desktop switches between cached authorization scopes', async
     page.getByRole('button', { name: 'Export Excel', exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByRole('list', { name: 'Requisition history' }),
+    page.getByRole('table', { name: 'Requisition history' }),
   ).toContainText('Pending confirmation')
   await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
   await expect(

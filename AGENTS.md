@@ -121,3 +121,7 @@ When the user says **「收尾任务」**, perform the following only for the cu
 ## Definition of done
 
 Acceptance criteria pass, offline mode validated, sync retries safe, PDFs match saved order snapshot, migrations tested, no secrets committed, docs updated.
+
+## HONSEN Modern Industrial UI standards
+
+Desktop UI work must follow `docs/design/DESIGN-LANGUAGE.md`, `docs/design/DESIGN-TOKENS.md`, `docs/design/COMPONENT-GUIDELINES.md` and `docs/design/UX-ACCEPTANCE.md`. These define design targets and evidence requirements, not a claim that existing screens have passed acceptance. Preserve trusted authorization, offline transactions and immutable business snapshots throughout UI changes.

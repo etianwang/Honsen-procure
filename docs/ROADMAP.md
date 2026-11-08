@@ -469,7 +469,6 @@ BLOCKER Alpha: installed fresh/online login, upgrade/uninstall data preservation
 
 2026-11-08 nativeSandboxauthblocked despitepublicRustprobe200; retainT12/AlphaOPEN pendingrealGUIlogin andPDFfiles. NoPDFPASS transferredfromprobes.
 
-
 2026-11-08 T12 unified Print Engine partial candidate0.1.21: shared measured A4
 HPA/SPO/OPA pages, bilingual hierarchy, signed BigInt trilingual amount words
 and eight-item summary implemented. Unit71/generator18+7+visual-contract3 PASS;
@@ -481,7 +480,6 @@ output FAIL retained. No parent/milestone/Alpha closure; details and exact
 artifact hashes in V1-REMOTE-ALPHA-ACCEPTANCE.md and
 reviews/evidence/T12-PRINT-ENGINE-20261108.json.
 
-
 2026-11-08 T12: native0.1.21 HPA French/Chinese real PDF saves and file readback
 PASS within bounded scope, French native reader reopen observed. Full formal
 layout FAIL: default browser decoration. Independent controlled PDFs establish
@@ -491,14 +489,12 @@ output/SPO/OPA/multipage and listed adapters remain BLOCKER. No T12/Alpha
 closure or cloud/history mutation. See V1-REMOTE-ALPHA-ACCEPTANCE.md and
 evidence/T12-NATIVE-021-20261108.json.
 
-
 2026-11-08 T12 user requested left amount words/balanced shorter summary:
 production shared layout updated, generator18/Unit71/Typecheck/Lint/Build PASS;
 Poppler visual review PASS within generator scope. New native layout
 NOT_RUN;0.1.22 not installed because user changed layout before launch. Login
 online-first/single-CAPTCHA proposal requested, no authentication implementation
 or policy change approved/performed. Parent T12/Alpha stays OPEN.
-
 
 2026-11-08 approved T03/T13 online-first single-CAPTCHA slice implemented:
 cloud-only online, explicit local offline only on recognized network
@@ -509,7 +505,6 @@ acceptance NOT_RUN pending action-time install approval. Original T12/T14/Alpha
 gates remain OPEN; no cloud/migration/data mutation. Details in
 V1-REMOTE-ALPHA-ACCEPTANCE.md.
 
-
 2026-11-08 follow-up (source 233c500): approved 0.1.23 installed through real
 NSIS and launched. Installed EXE and manifest both 0.1.23. Native startup fetched
 one cloud CAPTCHA; no local challenge in connected state. Authenticated login
@@ -517,8 +512,11 @@ and new PDF output BLOCKED pending mandatory user authentication handoff;
 network/offline/reconnect NOT_RUN. Receipt ONLINE-FIRST-LOGIN-20261108.json.
 T12/T14/Alpha remain OPEN; no cloud/data changes. Toolbox identity unchanged.
 
-
 2026-11-08 0.1.23 bounded French HPA NATIVE_UI_PASS: normal preview, actual PDF
 save and reader reopen; left words/compact fees/clean headers, one A4 page,
 1100 XOF and immutable formal number verified. Receipt T12-NATIVE-023-20261108.json.
 No cloud/contract/data mutation; full T12/T14/Alpha and other native gates OPEN.
+
+## Modern Industrial design system — 2026-11-09
+
+IN PROGRESS: specifications, shared tokens/theme, initial history and account-feedback changes. Full native Windows, three-language/DPI, all-control and large-data acceptance remain open. See `design/ROLLOUT-20261109.md`; no original milestone is completed by this checkpoint.

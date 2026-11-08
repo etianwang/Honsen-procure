@@ -1,5 +1,72 @@
 import { expect, test, type Page } from '@playwright/test'
 
+test('username check gives immediate local feedback and preserves form on retry', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await openAccounts(page)
+  await page.evaluate(() => {
+    const host = window as Window & {
+      __TAURI__: {
+        core: { invoke: (command: string, args?: object) => Promise<unknown> }
+      }
+      __finishCheck?: (fail: boolean) => void
+    }
+    const original = host.__TAURI__.core.invoke
+    host.__TAURI__.core.invoke = (command, args) =>
+      command === 'find_managed_accounts'
+        ? new Promise((resolve, reject) => {
+            host.__finishCheck = (fail) =>
+              fail ? reject(new Error('Synthetic offline')) : resolve([])
+          })
+        : original(command, args)
+  })
+  await page.getByLabel('用户名', { exact: true }).fill('SyntheticRetry')
+  await page.getByLabel('姓名', { exact: true }).fill('合成姓名')
+  await page.getByLabel('临时密码', { exact: true }).fill('synthetic-temporary')
+  await page
+    .getByRole('button', { name: '检查账号是否存在', exact: true })
+    .click()
+  await expect(page.locator('#account-check-feedback')).toHaveText(
+    '正在查询账号，请稍候。',
+  )
+  await expect(page.getByLabel('用户名', { exact: true })).toBeDisabled()
+  await expect(page.getByLabel('用户名', { exact: true })).toHaveAttribute(
+    'aria-describedby',
+    'account-check-feedback',
+  )
+  await expect(
+    page.getByRole('button', { name: '正在检查…', exact: true }),
+  ).toBeDisabled()
+  await page.evaluate(() =>
+    (
+      window as Window & { __finishCheck?: (fail: boolean) => void }
+    ).__finishCheck?.(true),
+  )
+  await expect(page.locator('#account-check-feedback')).toContainText(
+    '无法查询账号',
+  )
+  await expect(page.getByLabel('临时密码', { exact: true })).toHaveValue(
+    'synthetic-temporary',
+  )
+  await expect(page.getByLabel('姓名', { exact: true })).toHaveValue('合成姓名')
+  await page
+    .getByRole('button', { name: '检查账号是否存在', exact: true })
+    .click()
+  await page.evaluate(() =>
+    (
+      window as Window & { __finishCheck?: (fail: boolean) => void }
+    ).__finishCheck?.(false),
+  )
+  await expect(page.locator('#account-check-feedback')).toContainText(
+    '账号可用',
+  )
+  await page.getByLabel('用户名', { exact: true }).fill('ChangedName')
+  await expect(page.locator('#account-check-feedback')).toBeEmpty()
+  expect(errors).toEqual([])
+})
+
 test('new usernames are ASCII alphanumeric while display names accept Chinese', async ({
   page,
 }) => {

@@ -1,6 +1,7 @@
 import { useUiLocale } from '../lib/ui-locale'
 import { historyText, historyAuditText } from '../lib/history-locale'
-import { Alert, Button, Card, Input, Select } from 'antd'
+import { Alert, Button, Card, Input, Select, Table, Tag } from 'antd'
+import { currencySchema, formatMoney } from '@honsen/shared'
 import { useEffect, useRef, useState } from 'react'
 import type {
   RequisitionApi,
@@ -60,6 +61,48 @@ export function RequisitionHistoryPanel({
     }
     return t(keys[state] ?? '未知状态')
   }
+  const labels = {
+    zh: [
+      '单据编号',
+      '项目',
+      '工地',
+      '金额',
+      '采购模式',
+      '最后更新',
+      '操作',
+      '未正式编号',
+    ],
+    en: [
+      'Document',
+      'Project',
+      'Site',
+      'Amount',
+      'Procurement mode',
+      'Last updated',
+      'Actions',
+      'Not formally numbered',
+    ],
+    fr: [
+      'Document',
+      'Projet',
+      'Chantier',
+      'Montant',
+      'Mode d’achat',
+      'Dernière mise à jour',
+      'Actions',
+      'Sans numéro officiel',
+    ],
+  }[locale]
+  const numberLabel = (displayNo: string, state: string) =>
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(
+      displayNo,
+    )
+      ? state === 'draft'
+        ? t('草稿')
+        : labels[7]
+      : displayNo || (state === 'draft' ? t('草稿') : labels[7])
+  const numberLocale =
+    locale === 'zh' ? 'zh-CN' : locale === 'fr' ? 'fr-FR' : 'en-US'
   const [records, setRecords] = useState<RequisitionHistoryPage['records']>([])
   const [cursor, setCursor] = useState<RequisitionHistoryCursor | null>(null)
   const [loading, setLoading] = useState(true)
@@ -305,24 +348,81 @@ export function RequisitionHistoryPanel({
           }
         />
       ) : null}
-      {!loading && records.length === 0 && !error ? (
-        <p>{t('暂无请购记录。')}</p>
-      ) : null}
-      {records.length > 0 ? (
-        <ul aria-label={t('请购历史')}>
-          {records.map((record) => (
-            <li key={record.id}>
-              {record.displayNo} · {record.projectName} · {record.site} ·{' '}
-              {statusText(record.workflowStatus)} · {record.totalMinor}{' '}
-              {record.primaryCurrency}{' '}
-              <Button onClick={() => void openDetail(record.id)}>
-                {t('查看详情：')}
-                {record.displayNo}
+      <Table
+        aria-label={t('请购历史')}
+        size="small"
+        rowKey="id"
+        loading={loading}
+        dataSource={records}
+        pagination={false}
+        scroll={{ x: 850 }}
+        locale={{
+          emptyText: error ? t('历史加载失败。') : t('暂无请购记录。'),
+        }}
+        columns={[
+          {
+            title: labels[0],
+            key: 'document',
+            render: (_, record) => (
+              <Button type="link" onClick={() => void openDetail(record.id)}>
+                {numberLabel(record.displayNo, record.workflowStatus)}
               </Button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+            ),
+          },
+          { title: labels[1], dataIndex: 'projectName' },
+          { title: labels[2], dataIndex: 'site' },
+          {
+            title: labels[3],
+            key: 'amount',
+            align: 'right',
+            render: (_, record) => {
+              const currency = currencySchema.safeParse(record.primaryCurrency)
+              return currency.success
+                ? formatMoney(
+                    { currency: currency.data, minor: record.totalMinor },
+                    numberLocale,
+                  )
+                : '—'
+            },
+          },
+          {
+            title: labels[4],
+            key: 'mode',
+            render: (_, record) =>
+              record.procurementMode === 'owner_self_purchase'
+                ? t('业主自购')
+                : record.procurementMode === 'honsen_self_purchase'
+                  ? t('Honsen自购')
+                  : t('历史模式未记录'),
+          },
+          {
+            title: t('请购状态'),
+            key: 'status',
+            render: (_, record) => (
+              <Tag>{statusText(record.workflowStatus)}</Tag>
+            ),
+          },
+          {
+            title: labels[5],
+            key: 'updated',
+            render: (_, record) =>
+              new Intl.DateTimeFormat(numberLocale, {
+                dateStyle: 'short',
+                timeStyle: 'short',
+              }).format(new Date(record.updatedAt * 1000)),
+          },
+          {
+            title: labels[6],
+            key: 'actions',
+            render: (_, record) => (
+              <Button size="small" onClick={() => void openDetail(record.id)}>
+                {t('查看详情：')}
+                {numberLabel(record.displayNo, record.workflowStatus)}
+              </Button>
+            ),
+          },
+        ]}
+      />
       {cursor ? (
         <Button loading={loading} onClick={() => void loadMore()}>
           {t('加载更多')}
@@ -343,7 +443,10 @@ export function RequisitionHistoryPanel({
       {detailLoading ? <p role="status">{t('正在读取详情…')}</p> : null}
       {detail ? (
         <section aria-label={t('请购详情')}>
-          <h3>{detail.displayNo}</h3>
+          <h3>
+            {detail.formalDocumentNo ??
+              numberLabel(detail.displayNo, detail.workflowStatus)}
+          </h3>
           {detail.formalDocumentNo ? (
             <FormalPrintPreview orderId={detail.id} />
           ) : null}

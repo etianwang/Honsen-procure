@@ -8,7 +8,7 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: #103d31;
+  background: var(--honsen-brand);
   color: #d9eee6;
   padding: 22px 14px;
 }
@@ -28,7 +28,7 @@
   height: 32px;
   border-radius: 9px;
   background: #74c9a6;
-  color: #103d31;
+  color: var(--honsen-brand);
 }
 .nav-label {
   margin: 20px 10px 8px;
@@ -42,7 +42,7 @@
   gap: 10px;
   align-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--honsen-radius-panel);
   padding: 11px 12px;
   background: transparent;
   color: inherit;
@@ -63,7 +63,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #f3f7f5;
+  background: var(--honsen-background);
 }
 .topbar {
   flex-shrink: 0;
@@ -449,7 +449,7 @@
   height: 34px;
   border-radius: 50%;
   background: #d7f0e5;
-  color: #176045;
+  color: var(--honsen-action);
   font-weight: 800;
 }
 .content {
@@ -457,7 +457,7 @@
   flex: 1;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 28px 30px 40px;
+  padding: var(--honsen-space-5) var(--honsen-space-6);
 }
 .page-heading {
   display: flex;
@@ -477,14 +477,15 @@
 .primary-button,
 .secondary-button {
   border: 1px solid;
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: var(--honsen-radius-panel);
+  min-height: var(--honsen-control-height);
+  padding: 4px 12px;
   font-weight: 750;
 }
 .primary-button {
-  border-color: #176045;
+  border-color: var(--honsen-action);
   color: white;
-  background: #176045;
+  background: var(--honsen-action);
 }
 .primary-button:disabled {
   cursor: not-allowed;
@@ -626,8 +627,8 @@
 }
 .metric {
   padding: 17px;
-  border: 1px solid #d8e8df;
-  border-radius: 12px;
+  border: 1px solid var(--honsen-border);
+  border-radius: var(--honsen-radius-panel);
   background: white;
 }
 .metric-label {
@@ -646,8 +647,8 @@
 }
 .card {
   overflow: hidden;
-  border: 1px solid #d8e8df;
-  border-radius: 12px;
+  border: 1px solid var(--honsen-border);
+  border-radius: var(--honsen-radius-panel);
   background: white;
 }
 .card + .card {
@@ -667,7 +668,7 @@
 }
 .text-button {
   border: 0;
-  color: #176045;
+  color: var(--honsen-action);
   background: transparent;
   font-weight: 750;
 }
@@ -677,14 +678,14 @@
   text-align: left;
 }
 .data-table th {
-  padding: 11px 18px;
+  padding: var(--honsen-space-2) var(--honsen-space-4);
   background: #f8fbf9;
   color: #6a857a;
   font-size: 12px;
   font-weight: 750;
 }
 .data-table td {
-  padding: 14px 18px;
+  padding: var(--honsen-space-2) var(--honsen-space-4);
   border-top: 1px solid #edf3ef;
   color: #315246;
   font-size: 13px;
@@ -741,7 +742,7 @@
   flex: 1;
   min-width: 180px;
   border: 1px solid #c9dcd2;
-  border-radius: 8px;
+  border-radius: var(--honsen-radius-panel);
   padding: 10px 12px;
   background: white;
 }
@@ -755,7 +756,7 @@
   place-items: center;
   width: 38px;
   height: 38px;
-  border-radius: 8px;
+  border-radius: var(--honsen-radius-panel);
   background: #e7f1ec;
   color: #578172;
 }
@@ -910,7 +911,7 @@
   gap: 8px;
   align-items: flex-start;
   padding: 9px;
-  border-radius: 8px;
+  border-radius: var(--honsen-radius-panel);
   background: #f4faf7;
 }
 .login-page {
@@ -944,7 +945,7 @@
   height: 46px;
   place-items: center;
   border-radius: 13px;
-  background: #176045;
+  background: var(--honsen-action);
   color: white;
   font-size: 21px;
   font-weight: 800;
@@ -965,15 +966,15 @@
   min-height: 100vh;
   padding: 24px;
   place-items: center;
-  background: #f3f7f5;
+  background: var(--honsen-background);
 }
 .money-preview-card {
   display: grid;
   width: min(100%, 420px);
   gap: 12px;
   padding: 32px;
-  border: 1px solid #d8e8df;
-  border-radius: 12px;
+  border: 1px solid var(--honsen-border);
+  border-radius: var(--honsen-radius-panel);
   background: white;
 }
 .money-preview-card h1 {
@@ -988,12 +989,12 @@
   min-height: 40px;
   padding: 8px;
   border: 1px solid #c9dcd2;
-  border-radius: 8px;
+  border-radius: var(--honsen-radius-panel);
   background: white;
 }
 .money-preview-card output {
   padding: 16px;
-  border-radius: 8px;
+  border-radius: var(--honsen-radius-panel);
   background: #edf7f2;
   color: #153f30;
   font-size: 26px;

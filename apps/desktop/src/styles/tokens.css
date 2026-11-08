@@ -1,0 +1,24 @@
+/* HONSEN Modern Industrial: semantic tokens shared by native controls and pages. */
+:root {
+  --honsen-brand: #123c32;
+  --honsen-action: #24755e;
+  --honsen-action-hover: #1c604d;
+  --honsen-background: #f5f7f6;
+  --honsen-surface: #ffffff;
+  --honsen-text: #24352f;
+  --honsen-muted: #536b60;
+  --honsen-border: #cbd8d1;
+  --honsen-subtle: #edf2ef;
+  --honsen-focus: #24755e;
+  --honsen-space-1: 4px;
+  --honsen-space-2: 8px;
+  --honsen-space-3: 12px;
+  --honsen-space-4: 16px;
+  --honsen-space-5: 20px;
+  --honsen-space-6: 24px;
+  --honsen-radius-control: 6px;
+  --honsen-radius-panel: 8px;
+  --honsen-font-body: 14px;
+  --honsen-font-small: 13px;
+  --honsen-control-height: 32px;
+}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import defaultAvatar from '../assets/default-avatar.svg'
 import { useUiLocale } from '../lib/ui-locale'
 import {
@@ -51,6 +51,7 @@ export function ManagedAccountForm({
   const [created, setCreated] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const checkGeneration = useRef(0)
   const labels = [
     t('基本信息', 'Basic information', 'Informations générales'),
     t('角色', 'Roles', 'Rôles'),
@@ -65,6 +66,7 @@ export function ManagedAccountForm({
   ]
   const roleValues = ['administrator', 'purchaser', 'engineer', 'viewer']
   const reset = () => {
+    checkGeneration.current += 1
     setPassword('')
     setUsername('')
     setDisplayName('')
@@ -77,6 +79,7 @@ export function ManagedAccountForm({
     setStep(0)
   }
   const check = async () => {
+    const generation = ++checkGeneration.current
     setBusy(true)
     onBusyChange(true)
     setMessage('')
@@ -85,6 +88,7 @@ export function ManagedAccountForm({
       const accounts = await invoke<
         { id: string; username: string; displayName?: string | null }[]
       >('find_managed_accounts', { username })
+      if (generation !== checkGeneration.current) return
       if (accounts.length) {
         setPassword('')
         setChecked(null)
@@ -112,7 +116,7 @@ export function ManagedAccountForm({
         )
       }
     } catch {
-      setPassword('')
+      if (generation !== checkGeneration.current) return
       setChecked(null)
       setMessage(
         t(
@@ -226,7 +230,9 @@ export function ManagedAccountForm({
                 value={username}
                 maxLength={100}
                 autoComplete="off"
+                aria-describedby="account-check-feedback"
                 onChange={(e) => {
+                  checkGeneration.current += 1
                   setUsername(e.target.value)
                   setChecked(null)
                   setExists(false)
@@ -237,14 +243,32 @@ export function ManagedAccountForm({
             <button
               type="button"
               disabled={!validUsername}
+              aria-describedby="account-check-feedback"
+              aria-busy={busy}
               onClick={() => void check()}
             >
-              {t(
-                '检查账号是否存在',
-                'Check account existence',
-                'Vérifier le compte',
-              )}
+              {busy
+                ? t('正在检查…', 'Checking…', 'Vérification…')
+                : t(
+                    '检查账号是否存在',
+                    'Check account existence',
+                    'Vérifier le compte',
+                  )}
             </button>
+            <p
+              id="account-check-feedback"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {busy
+                ? t(
+                    '正在查询账号，请稍候。',
+                    'Checking the username. Please wait.',
+                    'Vérification du nom utilisateur en cours. Veuillez patienter.',
+                  )
+                : message}
+            </p>
             <p>
               {t(
                 '用户名仅限英文字母和数字，大小写不敏感，并保留原始大小写。姓名可使用中文，姓名不能用于登录。',
@@ -399,7 +423,7 @@ export function ManagedAccountForm({
           </>
         )}
       </fieldset>
-      {message && (
+      {message && step !== 0 && (
         <p role="status" aria-live="polite">
           {message}
         </p>

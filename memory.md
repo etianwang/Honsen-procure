@@ -1224,7 +1224,6 @@ Nativeissue_cloud_captcha currentlycollapsesbuild/send/non2xx/decodeerrors toSyn
 
 Diagnosticexample releasebuildPASS/cargofmt/diffPASS; productionRust/renderer/Cargo unchanged against3af38f0 (emptydiff), so exactunchangedbusinessboundary reuses189RustPASS/desktop34/browserPDF7 candidateevidence, notnativeacceptance. No extraunrelatedtests needed for standalonepublicGETdiagnostic. Existinginstalled0.1.20EXE unaffected. Lastcheckpointa946422; containingdiagnosticcheckpointpartial, expectedclean aftercommitpush.
 
-
 ### 2026-11-08 unified Print Engine candidate 0.1.21 — PARTIAL, native upgrade pending
 
 Scope A/D: approved T12 French/Chinese/English primary-secondary presentation,
@@ -1331,9 +1330,7 @@ editor status; no history, original3300XOF payment/reversal or formal numbers
 altered. No cloud changes. Selected tracked source/tests/docs form this
 checkpoint; ignored artifacts retained. No PR merge or release publish.
 
-
 Source checkpoint 838fcaf pushed to codex/t12-native-export-20261108; application/test tree clean. Selected T12 remains PARTIAL/BLOCKED for native0.1.21 action-time install approval and the explicitly listed remaining business adapters/configuration. New package hash is unchanged. GitHub connector returned no workflow runs/statuses for this commit; CI is NOT RUN, not PASS. Code Prettier check PASS; only appended documentation was formatted to avoid rewriting pre-existing whole-file formatting debt (whole-file docs check still warns). Changed references/statuses and git diff --check passed. No cloud or historical data change. Ignored output packages/PDFs/screenshots remain local.
-
 
 ### 2026-11-08 native0.1.21 HPA files and browser decoration defect
 
@@ -1411,7 +1408,6 @@ mutation this continuation. T12/Alpha gates remain open. Last code
 checkpoint838fcaf, prior evidencea8924be; containing minimal fix checkpoint to
 be committed/pushed, expected tracked tree clean afterward.
 
-
 ### 2026-11-08 user-approved left amount words and balanced settlement
 
 Continued from2410121. User approved0.1.22 installation, then before it was
@@ -1452,7 +1448,6 @@ cloud/deployment/migration/order/payment writes. Lastsource2410121; this
 selected PDF layout checkpoint is partial, expected clean tracked tree after
 commit/push. No further native actions until matching candidate is built and
 action-time approved.
-
 
 ### 2026-11-08 approved online-first single-CAPTCHA login candidate0.1.23
 
@@ -1537,7 +1532,6 @@ references/status/diff checked without unrelated mass-formatting. Containing
 source checkpoint to be committed/pushed, tracked tree expected clean; ignored
 build/evidence logs retained. No PR merge/release/cloud action.
 
-
 ### 2026-11-08 — Native 0.1.23 installation checkpoint (source 233c500)
 
 User action-time approval received for the exact package. Real NSIS welcome,
@@ -1556,7 +1550,6 @@ DEFERRED: paused payment extension. WARNING: existing lint/Markdown debt and
 historical installer warning retained; no such warning observed in this install.
 T12/T14/Alpha remain OPEN. Evidence-only JSON/reference/status/diff checks;
 unchanged application suites not rerun. Task branch checkpoint, no merge/release.
-
 
 ### 2026-11-08 — 0.1.23 French HPA native output accepted
 
@@ -1590,3 +1583,15 @@ DEFERRED payment extensions remain paused. WARNING historical lint/format debt.
 T12/T14/Alpha remain OPEN, no ALPHA_INTERNAL_TEST_READY claim. No cloud,
 migration, financial, frozen snapshot or formal number mutation. Task branch
 checkpoint committed/pushed; tracked tree clean after commit.
+
+## 2026-11-09 Modern Industrial partial implementation checkpoint
+
+User approved continuing from full-client T12 source `55a3570` because origin/main `5139cc8` lacks installed UI features. Branch `codex/modern-industrial-20261109`; checkpoint is the containing commit. Original T12 worktree retained; original release-assets preserved; transfer backup retained in Git stash `ui-design-baseline-transfer`. No schema/migration/API/cloud/installer/update/data mutation.
+
+Implemented four docs/design specifications and AGENTS references; CSS semantic tokens and Ant Design theme; history compact table with localized money/mode/status/time and UUID-safe primary labels; account lookup inline loading/result, ARIA, retry input preservation and stale-result guard. Exact file list and partial coverage are in docs/design/ROLLOUT-20261109.md.
+
+Fresh checks: npm ci Node24.18.0; lint PASS existing warnings; strict typecheck and build PASS; desktop unit71/shared46/server111 PASS, server144 SKIPPED because isolated TEST_DATABASE_URL not configured (database integration gate unverified). Changed-file format and diff checks PASS. Full format FAIL inherited DECISIONS/Toolbox integration/Alpha acceptance/TEST-RULES/memory formatting; no claim of complete gates. First e2e153/156 passed; duplicate empty text fixed and focused test PASS; two overlapping-run artifact ENOENT failures require serial rerun, recorded separately below.
+
+BLOCKER: post-change native Windows functional/screenshots/DPI/keyboard and all-page UX acceptance NOT_RUN; no new candidate binary installed. DEFERRED: remaining page/control conversions, scalable pickers, history missing applicant/date projections and full filters, realistic data performance and complete three-language native matrix. WARNING: inherited formatting/effect lint/chunk-size warnings. All parent product/T12/Alpha gates remain open. No full acceptance claimed; this is a partial checkpoint. Selected changes only expected clean after commit; no push/PR/merge/deployment inferred until separately recorded.
+
+Final serial DOM rerun: `npm run e2e` PASS 156/156 (4.3 minutes). This supersedes the earlier run for DOM regression only; native/DPI/performance gates remain open. Strict typecheck/build final rerun PASS. Source checkpoint is the containing commit on codex/modern-industrial-20261109; user explicitly authorized Commit + Push, no PR/merge/deployment.

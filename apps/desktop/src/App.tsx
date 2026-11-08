@@ -11,6 +11,7 @@ import {
   type SyncState,
 } from './lib/sync-lifecycle'
 import { ConfigProvider } from 'antd'
+import { honsenTheme } from './styles/theme'
 import { calculateDraftTotals } from '@honsen/shared'
 import {
   AppShell,
@@ -414,14 +415,7 @@ function App() {
   return (
     <ConfigProvider
       locale={locale === 'zh' ? zhCN : locale === 'en' ? enUS : frFR}
-      theme={{
-        token: {
-          colorPrimary: '#176045',
-          borderRadius: 8,
-          fontFamily:
-            'Inter, Microsoft YaHei, Noto Sans SC, system-ui, sans-serif',
-        },
-      }}
+      theme={honsenTheme}
     >
       {isSyncConflictFixture ? (
         <SyncConflictFixturePage />
