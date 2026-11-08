@@ -88,7 +88,7 @@ export function RequisitionHistoryPanel({
           ...api,
           listOrderComments: (workflowApi ?? tauriWorkflowApi)
             .listOrderComments,
-          getFormalPrintDocument: async (orderId) => {
+          getInternalExportDocument: async (orderId) => {
             const invoke = (
               window as Window & {
                 __TAURI__?: {
@@ -99,7 +99,7 @@ export function RequisitionHistoryPanel({
               }
             ).__TAURI__?.core?.invoke
             if (!invoke) throw Error('Desktop unavailable')
-            return invoke('get_formal_print_document', { orderId })
+            return invoke('get_internal_export_document', { orderId })
           },
         },
         filter,

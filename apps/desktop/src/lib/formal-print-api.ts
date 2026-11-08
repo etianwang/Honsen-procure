@@ -3,7 +3,7 @@ import { currencySchema } from '@honsen/shared'
 export type FormalPrintDocument = z.infer<typeof documentSchema>
 
 const minor = z.string().regex(/^-?\d+$/)
-export const documentSchema = z
+export const internalExportDocumentSchema = z
   .object({
     formalDocumentNo: z.string().min(1),
     documentType: z.enum(['OPA', 'HPA', 'SPO']),
@@ -54,15 +54,18 @@ export const documentSchema = z
       .min(1),
   })
   .strict()
-  .refine(
-    (document) =>
-      document.lines.every((line) =>
-        document.languagePair === 'zh_en'
-          ? Boolean(line.nameEn?.trim())
-          : Boolean(line.nameFr?.trim()),
-      ),
-    { message: 'Missing frozen document translation' },
-  )
+
+// Internal workbooks may identify missing historical translations. Formal
+// printing remains subject to the original bilingual completeness gate.
+export const documentSchema = internalExportDocumentSchema.refine(
+  (document) =>
+    document.lines.every((line) =>
+      document.languagePair === 'zh_en'
+        ? Boolean(line.nameEn?.trim())
+        : Boolean(line.nameFr?.trim()),
+    ),
+  { message: 'Missing frozen document translation' },
+)
 export function formatPrintMoney(value: string, currency: string): string {
   if (!/^-?\d+$/.test(value)) throw new Error('Invalid minor amount')
   const amount = BigInt(value)

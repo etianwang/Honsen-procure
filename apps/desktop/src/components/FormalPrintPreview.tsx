@@ -16,6 +16,16 @@ function FormalDocumentSheet({ document }: { document: FormalPrintDocument }) {
   const label = (fr: string, en: string) => (english ? en : fr)
   return (
     <article className="formal-print-sheet">
+      <header className="formal-document-heading">
+        <p className="formal-document-brand">HONSEN Procure</p>
+        <h1>
+          {document.documentType === 'SPO'
+            ? `采购订单 / ${label('Bon de commande', 'Purchase order')}`
+            : document.documentType === 'HPA'
+              ? `弘盛自采单 / ${label('Achat Honsen', 'Honsen purchase')}`
+              : `业主采购申请 / ${label('Demande d’achat du maître d’ouvrage', 'Owner purchase application')}`}
+        </h1>
+      </header>
       <h2>
         {document.documentType} · {document.formalDocumentNo}
       </h2>
@@ -118,6 +128,9 @@ function FormalDocumentSheet({ document }: { document: FormalPrintDocument }) {
         审批人签字 / {label('Signature approbateur', 'Approver signature')}:
         ____________________
       </p>
+      <footer className="formal-document-footer">
+        HONSEN Procure · {document.formalDocumentNo} · {document.documentType}
+      </footer>
     </article>
   )
 }
@@ -154,6 +167,7 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
     const finish = () => setPrintSnapshot(null)
     window.addEventListener('afterprint', finish)
     window.document.body.classList.add('honsen-printing-formal')
+    window.scrollTo(0, 0)
     void window.document.fonts.ready.then(() => {
       if (cancelled) return
       frame = window.requestAnimationFrame(() => {

@@ -77,6 +77,16 @@ test('formal bilingual preview rejects failures then renders trusted escaped sna
   await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
   await expect(page.getByText('SPO · CI-P1-20261104-SPO-TEST-1')).toBeVisible()
   await expect(page.getByText('Matériau électrique accentué')).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: '采购订单 / Bon de commande' }),
+  ).toBeVisible()
+  await expect(page.locator('.formal-document-brand')).toHaveText(
+    'HONSEN Procure',
+  )
+  await expect(page.locator('.formal-document-footer')).toContainText(
+    'CI-P1-20261104-SPO-TEST-1',
+  )
+  await expect(page.locator('tbody td').last()).toHaveCSS('text-align', 'right')
   await expect(page.getByText('123.45 EUR').first()).toBeVisible()
   await expect(page.locator('article script')).toHaveCount(0)
   expect(errors).toEqual([])

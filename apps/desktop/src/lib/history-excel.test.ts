@@ -99,7 +99,7 @@ describe('authorized XLSX history export', () => {
           ...detail,
           formalDocumentNo: formal.formalDocumentNo,
         }),
-        getFormalPrintDocument: async () => formal,
+        getInternalExportDocument: async () => formal,
       },
       {},
       'fr-FR',
@@ -117,6 +117,91 @@ describe('authorized XLSX history export', () => {
       'Numéro officiel',
     )
   })
+  it.each(['zh_fr', 'zh_en'] as const)(
+    'marks missing %s frozen translations without weakening financial validation',
+    async (languagePair) => {
+      const formal = {
+        formalDocumentNo: 'TEST-HPA-MISSING',
+        documentType: 'HPA',
+        languagePair,
+        projectId: '10000000-0000-4000-8000-000000000002',
+        site: 'Frozen',
+        orderDate: '2026-11-08',
+        deliveryAddress: 'Frozen',
+        expectedDeliveryDate: null,
+        notes: null,
+        currency: 'XOF',
+        subtotalMinor: '3300',
+        lineDiscountMinor: '0',
+        orderDiscountMinor: '0',
+        freightMinor: '0',
+        taxMinor: '0',
+        totalMinor: '3300',
+        taxRateBasisPoints: 0,
+        selfApproved: false,
+        supplier: null,
+        lines: [
+          {
+            nameZh: 'TEST frozen',
+            nameFr: null,
+            nameEn: null,
+            model: null,
+            specification: null,
+            quantity: '3',
+            unit: 'PCS',
+            currency: 'XOF',
+            unitPriceMinor: '1100',
+            lineTotalMinor: '3300',
+          },
+        ],
+      }
+      const api = {
+        listOrderComments: async () => [],
+        listRequisitionHistory: async () => ({
+          records: [record],
+          nextCursor: null,
+        }),
+        getRequisitionDetail: async () => ({
+          ...detail,
+          formalDocumentNo: formal.formalDocumentNo,
+        }),
+        getInternalExportDocument: async () => formal,
+      }
+      const bytes = await buildHistoryWorkbook(api, {}, 'en-US')
+      const book = new Workbook()
+      await book.xlsx.load(bytes)
+      expect(book.getWorksheet('Lines')?.getCell('D2').value).toBe(
+        '[Missing frozen translation]',
+      )
+      expect(book.getWorksheet('Orders')?.getCell('H2').value).toBe('3300')
+      expect(formal.lines[0].nameFr).toBeNull()
+      expect(formal.lines[0].nameEn).toBeNull()
+      await expect(
+        buildHistoryWorkbook(
+          {
+            ...api,
+            getInternalExportDocument: async () => ({
+              ...formal,
+              totalMinor: '3.3',
+            }),
+          },
+          {},
+        ),
+      ).rejects.toThrow()
+      await expect(
+        buildHistoryWorkbook(
+          {
+            ...api,
+            getInternalExportDocument: async () => ({
+              ...formal,
+              unexpected: 'private',
+            }),
+          },
+          {},
+        ),
+      ).rejects.toThrow()
+    },
+  )
   it('retains frozen English material names when UI export locale is French', async () => {
     const formal = {
       formalDocumentNo: 'TEST-HPA-1',
@@ -164,7 +249,7 @@ describe('authorized XLSX history export', () => {
           ...detail,
           formalDocumentNo: formal.formalDocumentNo,
         }),
-        getFormalPrintDocument: async () => formal,
+        getInternalExportDocument: async () => formal,
       },
       {},
       'fr-FR',
@@ -193,7 +278,7 @@ describe('authorized XLSX history export', () => {
           nextCursor: null,
         }),
         getRequisitionDetail: async () => detail,
-        getFormalPrintDocument: async () => {
+        getInternalExportDocument: async () => {
           throw Error('draft must not issue')
         },
       },
@@ -228,7 +313,7 @@ describe('authorized XLSX history export', () => {
           getRequisitionDetail: async () => {
             throw Error('forbidden')
           },
-          getFormalPrintDocument: async () => null,
+          getInternalExportDocument: async () => null,
         },
         {},
       ),
@@ -244,7 +329,7 @@ describe('authorized XLSX history export', () => {
             nextCursor: { id: 'cursor', updatedAt: 1 },
           }),
           getRequisitionDetail: async () => detail,
-          getFormalPrintDocument: async () => null,
+          getInternalExportDocument: async () => null,
         },
         {},
       ),
@@ -258,7 +343,7 @@ describe('authorized XLSX history export', () => {
             nextCursor: null,
           }),
           getRequisitionDetail: async () => ({ ...detail, totalMinor: '1' }),
-          getFormalPrintDocument: async () => null,
+          getInternalExportDocument: async () => null,
         },
         {},
       ),

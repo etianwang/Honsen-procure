@@ -1,3 +1,56 @@
+@font-face {
+  font-family: 'Honsen Document';
+  src: url('/fonts/NotoSansSC-VF.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+.formal-print-sheet {
+  --formal-ink: #18334f;
+  --formal-rule: #cbd3dd;
+  color: #152333;
+  background: #fff;
+  font-family: 'Honsen Document', sans-serif;
+  padding: 18mm;
+  line-height: 1.4;
+}
+
+.formal-document-heading {
+  display: flow-root;
+  border-bottom: 2px solid var(--formal-ink);
+  padding-bottom: 5mm;
+  margin-bottom: 5mm;
+  color: var(--formal-ink);
+  break-inside: avoid;
+}
+
+.formal-document-brand {
+  font-size: 12pt;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.formal-document-heading h1 {
+  font-size: 17pt;
+  line-height: 1.25;
+  margin: 3mm 0 0;
+}
+
+.formal-print-sheet h2 {
+  font-size: 10pt;
+  overflow-wrap: anywhere;
+}
+
+.formal-document-footer {
+  border-top: 1px solid var(--formal-rule);
+  color: var(--formal-ink);
+  font-size: 8pt;
+  margin-top: 8mm;
+  padding-top: 3mm;
+  overflow-wrap: anywhere;
+}
+
 .formal-print-sheet table {
   width: 100%;
   border-collapse: collapse;
@@ -6,9 +59,25 @@
 
 .formal-print-sheet th,
 .formal-print-sheet td {
-  border: 1px solid #888;
+  border: 1px solid var(--formal-rule);
   padding: 6px;
   overflow-wrap: anywhere;
+}
+
+.formal-print-sheet th {
+  color: var(--formal-ink);
+  background: #e9eef4;
+  text-align: left;
+}
+
+.formal-print-sheet tbody tr:nth-child(even) {
+  background: #f5f7fa;
+}
+
+.formal-print-sheet td:nth-child(n + 2),
+.formal-print-sheet th:nth-child(n + 2) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .formal-print-sheet th:first-child {

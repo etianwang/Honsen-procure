@@ -7,6 +7,21 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<serde_json::Value, AuthError> {
+        self.read_export_document(order_id, now, true)
+    }
+    pub fn get_internal_export_document(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<serde_json::Value, AuthError> {
+        self.read_export_document(order_id, now, false)
+    }
+    fn read_export_document(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+        strict_translation: bool,
+    ) -> Result<serde_json::Value, AuthError> {
         let mut connection = self.historical_order_connection(order_id, now)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         let current: RemotePurchaseOrderPayload =
@@ -19,11 +34,19 @@ impl LocalAuthService {
         let raw = current
             .formal_snapshot_json
             .ok_or(AuthError::InvalidInput)?;
-        project(&number, &kind, &raw)
+        project_for_export(&number, &kind, &raw, strict_translation)
     }
 }
 
 fn project(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, AuthError> {
+    project_for_export(number, kind, raw, true)
+}
+fn project_for_export(
+    number: &str,
+    kind: &str,
+    raw: &str,
+    strict_translation: bool,
+) -> Result<serde_json::Value, AuthError> {
     let mut snapshot: RemotePurchaseOrderPayload =
         serde_json::from_str(raw).map_err(|_| AuthError::InvalidInput)?;
     if !matches!(snapshot.language_pair.as_str(), "zh_fr" | "zh_en")
@@ -92,10 +115,11 @@ fn project(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, Aut
         snapshot.freight_minor = totals["freightMinor"].as_str().unwrap().to_owned();
         snapshot.tax_minor = totals["taxMinor"].as_str().unwrap().to_owned();
         snapshot.total_minor = totals["totalMinor"].as_str().unwrap().to_owned();
-        let mut projected = project(
+        let mut projected = project_for_export(
             number,
             "HPA",
             &serde_json::to_string(&snapshot).map_err(|_| AuthError::InvalidInput)?,
+            strict_translation,
         )?;
         projected["documentType"] = serde_json::json!("OPA");
         projected["supplier"] = serde_json::Value::Null;
@@ -157,7 +181,7 @@ fn project(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, Aut
     let lines = snapshot.lines.iter().enumerate().map(|(index,line)| {
         let material: serde_json::Value = serde_json::from_str(&line.material_snapshot_json).map_err(|_| AuthError::InvalidInput)?;
         let required = |key| material.get(key).and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned).ok_or(AuthError::InvalidInput);
-        Ok(serde_json::json!({"nameZh":required("nameZh")?, "nameFr": if snapshot.language_pair == "zh_fr" { Some(required("nameFr")?) } else { None }, "nameEn": if snapshot.language_pair == "zh_en" { Some(required("nameEn")?) } else { None }, "model":material.get("model"), "specification":material.get("specification"), "quantity":line.quantity, "unit":line.unit, "currency":if kind == "OPA" { &snapshot.primary_currency } else { &snapshot.currency }, "unitPriceMinor":if kind == "OPA" { line.owner_final_unit_price_minor.as_ref().ok_or(AuthError::InvalidInput)? } else { &line.unit_price_minor }, "lineTotalMinor":owner_totals.as_ref().map(|v| &v.0[index]).unwrap_or(&line.line_total_minor)}))
+        Ok(serde_json::json!({"nameZh":required("nameZh")?, "nameFr": if snapshot.language_pair == "zh_fr" { if strict_translation { Some(required("nameFr")?) } else { material.get("nameFr").and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned) } } else { None }, "nameEn": if snapshot.language_pair == "zh_en" { if strict_translation { Some(required("nameEn")?) } else { material.get("nameEn").and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned) } } else { None }, "model":material.get("model"), "specification":material.get("specification"), "quantity":line.quantity, "unit":line.unit, "currency":if kind == "OPA" { &snapshot.primary_currency } else { &snapshot.currency }, "unitPriceMinor":if kind == "OPA" { line.owner_final_unit_price_minor.as_ref().ok_or(AuthError::InvalidInput)? } else { &line.unit_price_minor }, "lineTotalMinor":owner_totals.as_ref().map(|v| &v.0[index]).unwrap_or(&line.line_total_minor)}))
     }).collect::<Result<Vec<_>,AuthError>>()?;
     let mut result = serde_json::json!({"formalDocumentNo":number,"documentType":kind,"languagePair":snapshot.language_pair,"projectId":snapshot.project_id,"site":snapshot.site,"orderDate":snapshot.order_date,"deliveryAddress":snapshot.delivery_address,"expectedDeliveryDate":snapshot.expected_delivery_date,"notes":snapshot.notes,"currency":if kind == "SPO" { &snapshot.currency } else { &snapshot.primary_currency },"subtotalMinor":owner_totals.as_ref().map(|v| &v.1).unwrap_or(&snapshot.subtotal_minor),"taxMinor":owner_totals.as_ref().map(|v| &v.2).unwrap_or(&snapshot.tax_minor),"totalMinor":owner_totals.as_ref().map(|v| &v.3).unwrap_or(&snapshot.total_minor),"supplier":supplier,"lineDiscountMinor":snapshot.line_discount_minor,"orderDiscountMinor":snapshot.order_discount_minor,"freightMinor":snapshot.freight_minor,"taxRateBasisPoints":snapshot.tax_rate_basis_points,"selfApproved":snapshot.self_approved,"lines":lines});
     if let Some(stamp) = &snapshot.manual_stamp_duty_minor {
@@ -204,6 +228,28 @@ mod tests {
         owner_raw["orderFreightJson"] = serde_json::json!(r#"{"kind":"fixed_minor","minor":"20"}"#);
         owner_raw["taxRateBasisPoints"] = serde_json::json!(500);
         let parsed: RemotePurchaseOrderPayload = serde_json::from_value(owner_raw.clone()).unwrap();
+        assert!(validate_issue_translations(&parsed).is_ok());
+        for pair in ["zh_fr", "zh_en"] {
+            let mut missing = raw.clone();
+            missing["languagePair"] = serde_json::json!(pair);
+            missing["lines"][0]["materialSnapshotJson"] =
+                serde_json::json!(r#"{"nameZh":"Frozen source","nameFr":null,"nameEn":null}"#);
+            let missing_payload: RemotePurchaseOrderPayload =
+                serde_json::from_value(missing.clone()).unwrap();
+            assert_eq!(
+                validate_issue_translations(&missing_payload),
+                Err(AuthError::MissingDocumentTranslation)
+            );
+            assert_eq!(
+                project("TEST-HPA", "HPA", &missing.to_string()),
+                Err(AuthError::InvalidInput)
+            );
+            let internal =
+                project_for_export("TEST-HPA", "HPA", &missing.to_string(), false).unwrap();
+            assert!(internal["lines"][0]["nameFr"].is_null());
+            assert!(internal["lines"][0]["nameEn"].is_null());
+            assert_eq!(missing["totalMinor"], internal["totalMinor"]);
+        }
         let totals = owner_print_totals::calculate_owner_print_totals(
             &parsed,
             &AdjustmentInput::PercentBasisPoints { basis_points: 1000 },
@@ -221,6 +267,33 @@ mod tests {
         assert!(owner["supplier"].is_null());
         assert!(!owner.to_string().contains("USD"));
         assert!(!owner.to_string().contains("ownerLockedExchangeRateDecimal"));
+        for language in ["zh_fr", "zh_en"] {
+            let mut missing_owner = owner_raw.clone();
+            missing_owner["languagePair"] = serde_json::json!(language);
+            missing_owner["lines"][0]["materialSnapshotJson"] = serde_json::json!(
+                r#"{"nameZh":"Frozen owner material","nameFr":null,"nameEn":null}"#
+            );
+            let frozen_missing = missing_owner.to_string();
+            assert_eq!(
+                project("TEST-OPA-1", "OPA", &frozen_missing),
+                Err(AuthError::InvalidInput)
+            );
+            let internal = project_for_export("TEST-OPA-1", "OPA", &frozen_missing, false).unwrap();
+            assert!(internal["lines"][0]["nameFr"].is_null());
+            assert!(internal["lines"][0]["nameEn"].is_null());
+            assert_eq!(internal["documentType"], "OPA");
+            assert_eq!(internal["totalMinor"], "2594");
+            assert_eq!(internal["lines"][0]["unitPriceMinor"], "1000");
+            assert_eq!(internal["currency"], "EUR");
+            assert!(internal["supplier"].is_null());
+            assert!(!internal.to_string().contains("USD"));
+            assert!(
+                !internal
+                    .to_string()
+                    .contains("ownerLockedExchangeRateDecimal")
+            );
+            assert_eq!(missing_owner.to_string(), frozen_missing);
+        }
         let frozen = owner_raw.to_string();
         assert_eq!(project("TEST-OPA-1", "OPA", &frozen).unwrap(), owner);
         owner_raw["ownerPrintTotalsJson"] = serde_json::json!("{}");
@@ -232,4 +305,32 @@ mod tests {
             Err(AuthError::InvalidInput)
         );
     }
+}
+
+/// Validate only frozen language fields before irreversible formal-number allocation.
+pub(super) fn validate_issue_translations(
+    snapshot: &RemotePurchaseOrderPayload,
+) -> Result<(), AuthError> {
+    let key = match snapshot.language_pair.as_str() {
+        "zh_fr" => "nameFr",
+        "zh_en" => "nameEn",
+        _ => return Err(AuthError::InvalidInput),
+    };
+    if snapshot.lines.is_empty() {
+        return Err(AuthError::InvalidInput);
+    }
+    for line in &snapshot.lines {
+        let material: serde_json::Value = serde_json::from_str(&line.material_snapshot_json)
+            .map_err(|_| AuthError::InvalidInput)?;
+        for field in ["nameZh", key] {
+            if !material
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|name| !name.trim().is_empty())
+            {
+                return Err(AuthError::MissingDocumentTranslation);
+            }
+        }
+    }
+    Ok(())
 }

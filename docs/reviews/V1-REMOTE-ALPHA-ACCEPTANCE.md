@@ -1,78 +1,95 @@
-# V1 业务收尾及远程 Alpha 验收 — 2026-11-07
+# V1 remote Alpha native acceptance — 2026-11-08
 
-判定：**ALPHA_INTERNAL_TEST_BLOCKED**。本轮已交付可运行修复和完整升级候选，尚不能分发为公司内测就绪版，更不等同生产上线。真实云端没有被修改。
+Current run only; historical local harness evidence does not establish remote acceptance.
 
-## 唯一候选及现场基线
+| Item                                                    | Result         | Evidence / limit                                                                                                      |
+| ------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Windows install and first launch                        | NATIVE_UI_PASS | NSIS 0.1.18 success screen, installed HonsenProcure.exe window                                                        |
+| admin login                                             | NATIVE_UI_PASS | User completed authentication; desktop shows admin / super administrator and successful pull. UUID continuity NOT_RUN |
+| Zhanghekai creation                                     | BLOCKED        | Native username check returned available; no account submitted                                                        |
+| ceshi1 creation                                         | BLOCKED        | Native username available; name and engineer selected; CI / Bethel2 selected; department list empty                   |
+| Employee login / password change                        | NOT_RUN        | Neither test account created                                                                                          |
+| Project isolation / revocation                          | NOT_RUN        | Missing account prerequisite                                                                                          |
+| Supplier / quotes / procurement / SPO / HPA / receiving | NOT_RUN        | Missing employee accounts and lawful organizational scope                                                             |
+| Independent Windows clients and sync                    | NOT_RUN        | Separate Windows profiles and credential isolation not demonstrated                                                   |
+| PDF / Excel / COS / upgrade / uninstall preservation    | NOT_RUN        | Installation success does not cover these gates                                                                       |
 
-- 最终应用源码：`248f06c95294eabf6337edd7f1f39f6e1f91f677`，任务分支 `codex/v1-business-closure-20261107`，已 Push。后续仅测试控制器和证据记录变更不改变该运行源码。
-- [该源码 GitHub quality PASS](https://github.com/etianwang/Honsen-procure/actions/runs/42375225871)：格式、lint、typecheck、单元/真实 PostgreSQL、build、部署门禁、126 项 Playwright、完整 Linux 包流水线成功。
-- 现场程序来源 `6b18850ee2e426fb68ac138fef866c4e4c718954` 已由真实 Manifest、原完整包及2232程序文件散列确认。包内014是包证据；本轮没有查询云端数据库台账。
-- 现场 starter SHA256 `dd3c4406fdc456f565529ff6640a99c17756c17c16630b503df2666f695e469b`，保持其加载现有绝对路径.env的方式。上传的现场ZIP含.env，其内容未读取、复用或交付。
-- 员工安装版固定 API：`https://api-pr.honsen.africa/v1`。编译 features=[]；不依赖用户环境变量，不向员工提供地址配置；真实安装版在线登录仍未验收。
+Installer SHA256: f89b74c71b215ac37e0b4547eb7701a2002ebae22865c3b4b7ed8c3a572e296e.
+Installed path: `C:\Program Files\Honsen Program\Honsen Procure\HonsenProcure.exe`.
+Runtime source previously recorded as 248f06c; this run did not rebuild it.
 
-## 功能贯通与修复
+Native observations: account scope reload did not restore departments. Country CI
+and Bethel2 project were selectable (earlier accessibility disabled interpretation
+was corrected). Master data > Departments also displayed no data and exposed a
+maintenance form. No lawful department/team definition was supplied or invented.
+The account page pulls sync then reads local master data; missing remote records
+versus pull/projection omission remains unresolved. No authenticated raw API payload
+was captured, so this is not proof that PostgreSQL contains no departments.
 
-| 范围         | 本轮结果                                                                                                                             | 实际边界                                                                          |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| 账号管理     | 创建/查询及新增详情、CAS修改、角色替换、启停、解锁贯通UI→Rust→API→PG；审计、永久admin、大小写唯一、旧用户名兼容及显示姓名分离有回归  | 本地真实API/PG及HTTPS升级演练PASS；云端仍旧版，无新账号创建声明                   |
-| 授权及同步   | 修复已认证请求在撤角色/停用/撤会话后仍可写的竞态；事务内锁定并复验实时角色、具体会话、installation、有效期；在幂等返回前拒绝失效权限 | 真实PG竞态从RED到PASS；C独立34项PASS；旧Outbox不因重试获得权限                    |
-| 供应商及价格 | 复用原库/IPC/PushPull；联系地址、启停、多供应商多币种、追加历史、比较、备注；修复停用材料无法恢复、新建残留及分类静默清空            | 正常页面、可信SQLite及两原生客户端HTTPS/PG链PASS；备注是实际新增字段，不只是UI    |
-| 采购执行     | 保持RFQ可选、直接选择现有报价；修复切换父单残留拆单状态；SPO/HPA签发、第二客户端冻结快照和重启/重放验证PASS                          | OPA完整公网链、全部人工异常路径未全量验收，原正式门禁保持OPEN                     |
-| 收货及金额   | 修复收货双击重复提交；父单已有子单时Rust与云端均拒绝父单收货；显示真实子单终态并禁用动作；保留付款/冲销金额及审计约束                | Rust/真实PG金额、冲销、冻结、状态回归PASS；没有把它们称为安装版全流程PASS         |
-| 六币种与三语 | RFQ复用既有六币种，新增XAF/ETB回归；材料/供应商/账号和采购界面三语有页面回归                                                         | 中法英及Excel/打印预览为真实renderer测试，多数自动UI测试mock IPC，不能替代原生API |
-| 登录逻辑     | 修复云验证码延迟完成时清空新本地验证码答案的竞态，保留错误信息/改密入口及授权提示原边界                                              | deferred-cloud页面回归5PASS、独立1PASS；原生SPO正常界面重新登录后完成             |
+Plugin guidance was read and left unchanged. Project preferences are documented in
+ALPHA-NATIVE-AUTOMATION.md; no plugin configuration loader was modified. No business
+code repair, deployment, migration, seed, admin reset or cloud business write occurred.
 
-用户名仅对新账号执行英文字母/数字；保留原始显示大小写，服务端大小写唯一。旧中文登录用户名/UUID/密码哈希不重命名。升级隔离库经正常管理API创建 Zhanghekai（张和凯，管理员+采购员）和ceshi1（测试1，工程申请人），分配同项目实际范围、首次改密及大小写登录PASS。运行时随机测试密码未写入源码或报告；这不是远程两账号已创建的证据。
+BLOCKER: lawful department/team scope unavailable to the installed client.
+DEFERRED: determine remote master-data versus sync cause using authorized evidence;
+complete employee and remaining native gates after that prerequisite is resolved.
+WARNING: native accessibility snapshots can lag rendered state; refresh before claims.
 
-材料是既有全局目录；供应商按国家，订单按项目/部门/班组过滤。没有另建供应商数据库，也没有把全局材料变更误报为项目数据泄漏。
+Decision: ALPHA_INTERNAL_TEST_READY is not achieved.
 
-## 迁移和部署兼容性
+## Authorized organization supplementation (2026-11-08)
 
-- PostgreSQL原有015保护管理员、016账号身份迁移保持校验不变，无新增017。兼容旧014结构的真实完整包升级已在隔离环境运行，不能据此假定云端真实ledger。
-- SQLite新增 `0064_supplier_notes.sql`，仅加nullable备注列。旧payload缺notes保留现值，显式null清空；本地事务、Outbox、服务端JSON、第二端Pull均有实际覆盖。
-- 共享JSON增加可选supplier.notes、material.categoryId声明，以及账号生命周期端点。新客户端备注同步需要本次服务端；旧6b服务端不应被当成匹配新功能的最终验收环境。
-- 精确增加 `DELETE ON user_roles` 用于角色替换，保留原honsen_api，不增加usersDELETE或任意业务表DELETE。
-- [中文完整包升级说明](../../deploy/baota/UPGRADE-6B18850.zh-CN.md) 已包含校验、备份、受控NOLOGIN/LOGIN栅栏、snapshot→增量migrate→grant、保留.env/start、停止后完整目录切换和失败停止。不Seed、不重置admin、不自动回滚不兼容数据库。
-- 旧607KB Patch不适用。以后只有实际成功部署并重新采证的版本才能成为Patch BASE。本轮完整包是唯一推荐部署候选，**需要用户另行批准实际远程部署**。
+User supplied exact approved seed department/team definitions and authorized normal audited maintenance only. Native installed admin UI saved PRJ / 项目部 and PROC / 采购部, then PRJ-CIVIL / 土建施工组 linked to 项目部; PRJ-HVAC / 暖通施工组 submitted. UI reports saved, awaiting sync confirmation; no server acknowledgment payload or independent-client pull evidence collected. Remaining four teams and employee accounts incomplete. No project import, Bootstrap, SQL or deployment. Local save is not remote or dual-client PASS.
 
-## 实际测试证据
+## Native continuation after 1ebbee6
 
-| 检查                        | 结果与限制                                                                                                                                                                                                             | 证据                                                                 |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Format/Lint/Typecheck/Build | PASS；desktop三条lint warning（App/Attachment既有，Receipt终态同步一条），无error                                                                                                                                      | .cache/v1-business-closure；上述quality                              |
-| Desktop / Shared            | 30 / 31 PASS                                                                                                                                                                                                           | quality及本地日志                                                    |
-| Server + PostgreSQL         | 244 PASS，5 SKIP；3为无专用COS配置，2为旧082原SQL opt-in未注入路径。本轮另有实际6b完整包升级PASS                                                                                                                       | .cache/v1-business-a/server-final3.log                               |
-| Rust / SQLite               | 186 PASS，7原有ignored（六个需人工原生更新对话框、一个canonical网络probe），不是PASS                                                                                                                                   | .cache/v1-business-closure/rust-integrated.log                       |
-| Playwright                  | 最终源码CI126/126 PASS。Windows本地最后125PASS/1供应商下拉未选中，原断言未改，独立定向重跑1PASS；更早冷模块超时及失败保留                                                                                              | e2e-final.log、supplier-quote-recheck.log、quality                   |
-| 双SQLite HTTPS / PG         | 原生AB账号隔离、伪造installation不采信、Push响应故障后重试幂等、冲突两版本保留PASS                                                                                                                                     | native-smoke-20261107153003.test.json                                |
-| 原生供应商/HPA/SPO          | 两独立EXE/SQLite；离线登录写、重启保留、双供应商/四报价及大整数、备注兼容、启停、HTTPS Push/PG/Pull；12冻结字段、SPO草稿不提前签发、签发失败重试、更新价格不改快照、第二端重启和重放PASS                               | native-smoke-20261107153007.test.json，testedSha248、sourceDirty空   |
-| 原生控制器                  | 新增目录链增加一次合法issuer重启，总4进程；旧控制器仍断言3而拒绝了PASS结果。仅测试改为目录模式精确4且校验9项目录结果；对已保存结果重新核验PASS                                                                         | tests/native/run-native-https-smoke.ps1；原失败日志保留              |
-| 完整Linux升级               | Ubuntu24.04 / Node24.22.1 / PG16.15，原6b完整包→248完整包；BASE只seed一次；备份可读/归档比较；仅015016、目标不seed、同role保留；旧身份/密码哈希/角色/审计/历史表快照完全相等；新账号首改密登录及正式历史幂等不可变PASS | .cache/v1-business-a/upgrade-248f06c-final.log；A执行、C独立日志复核 |
-| Linux文件/链接/密钥路径     | 2248 regular files、11内部相对symlink、Linux类型/0644与0755权限、19SQL各hash及所有目标文件checksum PASS；无.env/私钥/业务数据路径                                                                                      | .cache/v1-business-closure/zip-audit.log                             |
-| Windows NSIS                | 真实0.1.18 installer build PASS，主程序/Runner/安装器PE版本一致，固定URL和features核验；通用凭据模式扫描未命中，扫描不是绝对不存在凭据的数学证明                                                                       | .cache/alpha-candidate-v1closure-018/build-receipt.json              |
-| 打印 / PDF                  | 真实原生冻结SPO一页打印预览（纸型未核）及Windows保存PDF对话框已观察；工具无法正确选择WebView保存窗口，未生成PDF。该Hold运行最终等待关闭失败；另一次无Hold在CDP pages就绪前超时，均不能算整体PASS                       | .cache/v1closure-offline-248/OBSERVATION.json                        |
-| 安装/升级/卸载保留          | NOT RUN，不能安全接管既有未知Windows Sandbox；没有在用户主机安装/卸载来伪造隔离验收                                                                                                                                    | C安装记录                                                            |
-| COS上传下载SHA256           | NOT RUN，缺专用受控测试配置；没有读取上传ZIP的真实.env或操作历史对象                                                                                                                                                   | COS原门禁OPEN                                                        |
-| 公网员工安装版登录 / 双端   | NOT RUN：真实云端仍6b，本轮禁止升级；无混版本最终验收                                                                                                                                                                  | 本轮边界                                                             |
-| Toolbox更新                 | NOT RUN；stable源、注册契约、appId/Runner参数均未更改                                                                                                                                                                  | 原Toolbox门禁OPEN                                                    |
+Normal UI created PRJ-ELEC, PRJ-PLB, PRJ-FINITION under PRJ. Read-only installed SQLite inspection found exactly PRJ/PROC and five PRJ teams, each version1. All seven outbox upserts have non-null acknowledged_at, null rejected_at and retry_count0. Local create audits identify actor82fe1128-acfa-4155-8937-6daeb5f825fe. This is client acknowledgment/local audit evidence, not direct PostgreSQL/API/server-audit or second-client acceptance. No credentials read. PROC-CFA remains pending business-structure clarification and was not created/granted. Only Administrator Windows profile loaded; no second independently authenticated Windows desktop established. Existing Sandbox accounts are not proof of isolated clients.
+ceshi1 again returned available; formal UI confirmation prepared: 测试1 / engineer / CI / Bethel2办公楼 / PRJ / PRJ-CIVIL / 中文. Submission pending mandatory immediate account-creation confirmation under plugin policy. Password only entered into protected runtime field; no password evidence persisted. Original department-choice blocker resolved in UI; account submission and independent remote/two-client evidence remain BLOCKER. Zhanghekai and employee business gates NOT_RUN. No product source fix or deployment. Untracked release-assets preserved.
 
-所有合成数据均只在本地隔离测试库/测试SQLite。没有真实采购或付款，没有云端数据库写入。一次性PG Compose、匿名卷、keeper、升级数据库/角色/容器及敏感临时文件已清理；证据和原包保留。
+## ceshi1 actual creation and remote readback
 
-## 最终交付
+After explicit immediate approval, submitted installed Windows creation form. UI returned 已创建；首次登录必须改密. Switched to managed accounts and queried ceshi1 through normal authorized flow: enabled, display name测试1, and remote scope CI / Bethel2办公楼 / 项目部 / 土建施工组; UI returned 已读取云端授权范围. Creation NATIVE_UI_PASS; creation summary engineer only. Employee authentication, password change, session invalidation and effective role enforcement remain NOT_RUN. No duplicate creation/admin password reset. Initial click geometry failure recovered by activating window and scrolling; no duplicate HTTP submission inferred. Account UUID not exposed in observed UI. Zhanghekai remains uncreated.
 
-本地交付目录：`H:\Honsen\Honsen-Procure\.cache\v1-final-delivery-248f06c\`。
+## ceshi1 native employee session (2026-11-08)
 
-| 文件                                                                  | 大小            | SHA-256                                                          |
-| --------------------------------------------------------------------- | --------------- | ---------------------------------------------------------------- |
-| honsen-procure-server-v1-248f06c95294eabf6337edd7f1f39f6e1f91f677.zip | 3,566,202 bytes | 15f9976d17a5eb15783975765f72a9b63bec6164d541b402a2c54a7056c75fc9 |
-| Honsen-Procure-0.1.18-Alpha-Candidate-Setup.exe                       | 7,528,237 bytes | f89b74c71b215ac37e0b4547eb7701a2002ebae22865c3b4b7ed8c3a572e296e |
+User completed employee login and reports initial password changed. Observed installed0.1.18 window: 测试1(ceshi1)/工程师, no first-password prompt. Read-only local_accounts confirms UUID98152e88-1a46-434a-8b0e-5937d8a08a95, roles engineer only, enabled1, requires_password_change0. Login landing NATIVE_UI_PASS (user-assisted); password-change interaction user-reported with resulting cache state verified, not autonomously observed. New-password relogin and old-session rejection NOT_RUN. After sync, Bethel2/项目部/土建施工组 selectable; initial missing-scope banner cleared, no defect inferred. Account-management navigation absent; trusted-boundary denial still NOT_RUN.
+Actual UI opened new requisition REQ-6455fbe7-0916-4ad8-af47-e2e92ff05859 but material selector returned no data. Material library shows0items/read-only engineer guidance; read-only SQLite local_materials count0. No save or submission, no TEST business record created and no user history altered. BLOCKER controlled TEST material/catalog prerequisite; create through administrator/purchaser normal UI before retry. No code repair justified by empty catalog alone. Independent-client/server-persistence/other Alpha gates remain open.
 
-同目录提供SHA256SUMS、中文升级说明、Alpha已知问题及使用/反馈说明。745早期安装器和旧Patch仅保留历史，不交付为最终候选。没有创建Release/Prerelease、推stable或修改Toolbox源。
+## Zhanghekai prepared through native admin UI
 
-## 剩余放行门禁
+Normal online existence check returned available. Real creation summary: Zhanghekai / 张和凯 / administrator+purchaser only / CI / Bethel2办公楼 / PRJ / PRJ-CIVIL / 中文. No super administrator selected. Protected runtime password entered without evidence output. Final creation remains pending mandatory action-time approval; no account creation PASS yet. No repeat ceshi1 creation or password reset. Current native window preserved at confirmation page.
 
-- **BLOCKER**：安装版全新启动/在线登录、历史版本升级及卸载保留，真实PDF保存/打印、COS上传下载完整性，以及匹配服务器部署后的真实公网两业务账号/双客户端验收尚未通过。
-- **DEFERRED（单独授权）**：真实宝塔升级；本轮明确禁止，需按备份/兼容性和唯一PM2边界另行批准，不是本轮已执行动作。
-- **WARNING**：本地DOM/原生驱动原失败保留，CI最终126PASS；测试控制器末尾启动次数修正为目录扩展实际次数，不改变产品行为。旧opt-in更新人工对话框和Toolbox完整正式门禁保持开放。
+## Zhanghekai actual creation and authorized readback
 
-不自动关闭M0–M4/T00–T15任何尚缺完整验收的父任务。可交技术人员审阅/准备部署候选，**尚不允许标为公司内部测试就绪**。
+Following existing explicit immediate approval and user resume after Escape stop, installed native UI submitted creation and returned 已创建；首次登录必须改密. Managed-account normal remote query then returned enabled Zhanghekai, display张和凯, scope CI/Bethel2办公楼/项目部/土建施工组 and 已读取云端授权范围. Summary administrator+purchaser, no super administrator. Creation NATIVE_UI_PASS. Effective trusted role enforcement, account UUID, employee login/firstchange/relogin and independent-client tests remain NOT_RUN. User authentication handoff pending under plugin rules. No duplicate ceshi1, resets, deployment, SQL writes or product source edits. Geometry/viewport failures recovered by fresh observation and scrolling, not duplicate account creation.
+
+## Native Zhanghekai catalog workflow
+
+Observed installed0.1.18 authenticated张和凯(Zhanghekai), Bethel2/PRJ/PRJ-CIVIL. Read-only local account UUID739a1cec-4106-4aaf-8e0f-15925ea26481 roles administrator+purchaser, requires_password_change0. Login landing observed; password-change interactions/relogin/session invalidation not observed.
+Created via actual GUI suppliers TEST-ALPHA-20261108-A/B (TEST Alpha 合成供应商 A/B), material TEST-ALPHA-20261108-M01 (TEST Alpha 合成验收材料, TEST-MODEL-01, TEST100mm, PCS). Entered synthetic XOF integer quotes A1000/B1200; saved new A1100. Native material table displays A1100/B1200. Read-only SQLite retains A1000 inactive id4b3c6004-d7d4-463b-a1ed-2c6c91726f58, A1100 active6d703735-bf08-4a3a-9820-5dc3529a3069, B1200 activeb1555a75-3c18-44d6-911c-61d3ea55f8c4, all version1. Six catalog outbox events acknowledged, no rejection/retries. NATIVE_UI_PASS for bounded create/quote update; local history retention verified. Direct server read/audit and independent-client pull still unverified; no full sync PASS. No real supplier prices altered. Await employee authentication handoff to verify readonly prices and submit TEST requisition. No product code/schema/deploy changes.
+
+## ceshi1 native TEST requisition submitted
+
+Observed ceshi1 engineer view sees TEST material and A1100/B1200 XOF; only view-all-quotes control, no material/price edit controls or account-management nav. UI-only readonly evidence; trusted rejection not tested. Used real procurement page to choose TEST material, quantity3 PCS at catalogA1100, saved then submitted. UI returned待确认 and disabled line edits. Order UUIDabd2c2c4-a227-49fb-8491-f0cff3382740, display REQ-1b1d727f-202d-424e-8a43-e409f3683fd1, total3300XOF, honsen_self_purchase, workflow_status pending_confirmation, version6. Legacy status remains draft; workflow_status is distinct, no defect inferred. Read-only SQLite line catalog_price_id6d703735-bf08-4a3a-9820-5dc3529a3069 and qty3/unit1100/total3300 verified. All six applicant order events acknowledged/null rejection/retries0, final payload workflow pending_confirmation. NATIVE_UI_PASS for bounded save/submit, client acknowledgment evidence only; server independent read and second-client pull unverified. TEST material identifies synthetic order; no non-test business changed. No source fix/schema/deploy. Await purchaser login handoff for review.
+
+## Native Zhanghekai approval, formal HPA and partial receipt
+
+Continued same authenticated purchaser session without another identity switch. Existing TEST request approved through actual confirm-order control; native audit adds审批已确认. Formal HPA issued through native button: CI-BETHEL2-20261107-HPA-4NM1JMPR-1, execution status采购执行中, audit正式单据已签发. This Honsen-self-purchase path is not SPO/supplier split acceptance. Through execution page registered1PCS of3; native status收货中 and cumulative1/pending2. Bounded approval/HPA issuance/partial receipt NATIVE_UI_PASS; immutable snapshot challenge, duplicate receipt, direct PostgreSQL and independent-client proof still NOT_RUN. Observed order date2026-11-07 although client date2026-11-08; retained as WARNING pending timezone/date verification, no silent source repair. Synthetic payment entry prepared TEST payee/1000XOF, not submitted; immediate financial-action confirmation pending. No real payment executed. UI geometry/out-of-bounds issues recovered by refreshed observations and scrolling; source unchanged.
+
+## Native TEST payment and remaining receipt
+
+After immediate user approval, registered1000XOF TEST simulated payment via real GUI. UI cumulative1000, unpaid2300, original entry retained with reversal button and missing-voucher notice. Payment is Staging ledger only, no bank transfer. Registered remaining2PCS through native receipt form. UI已完成 and receipt controls removed; read-only local order workflow completed version10, formal number unchanged. Latest procurement_expenditure, both receipt events and relevant order events acknowledged/no rejection/retries. Payment registration and remaining receipt bounded NATIVE_UI_PASS; duplicate-request rejection and receipt-sum independent check not yet proven. Reversal pending immediate approval; not submitted. Server direct read/independent clients/PDF/COS remain NOT_RUN. No source/schema/deploy changes; client default business dates remain Nov7 warning.
+
+## Native TEST reversal and actual export failures
+
+After explicit immediate approval, native reversal dialog reason TEST Alpha验收 was submitted. UI retains original+1000XOF and separate-1000XOF, paid0/unpaid3300. Latest procurement_expenditure outbox acknowledged/null rejection. Bounded reversal NATIVE_UI_PASS, no bank transaction. Clicked native Excel export: FAIL explicit 导出失败，未下载部分结果. Formal HPA preview: FAIL 无法预览：请检查授权、正式签发状态及冻结文档翻译. No PDF generated, no Excel PASS. Read-only SQLite confirms language_pair zh_fr with material frozen nameFr/null and nameEn/null. Source248 history-excel calls get_formal_print_document for issued records, so both failures may share translation prerequisite; exact runtime error not exposed, root cause remains candidate until independently rechecked. Do not rewrite formal snapshot. Missing translations in synthetic fixture are retained evidence, not proof of authorization defect. Original source/tools unchanged. DEFERRED valid multilingual fixture and fresh order, export diagnosis, PDF/COS/SPO/independentWindows gates.
+
+## T12 local repair candidate — 2026-11-08
+
+Worktree H:/Honsen/Honsen-Procure-t12, branch codex/t12-native-export-20261108, based on runtimefdf908a (248 runtime) with this historical Alpha report preserved fromc7654b4. All native evidence above remains exact old installed0.1.18; it is not transferred to this changed candidate.
+Implemented trusted internal-export projection using the same historical authorization, formal identity and frozen redacted amounts as formal print; only missing translated labels may remain null and receive explicit missingtranslation cells in internal XLSX. Formal print stays strict. Preissue HPA/OPA/SPO rejects missingrequired frozen names before allocating numbers/outbox; structured missing_document_translation returned. Existing historical snapshots untouched. OPA recursive frozen-owner-total export found during independent review and repaired with dedicated redaction/amount regression. New navy A4 template, separate HPA/SPO/OPA bilingual headings and bundled licensed NotoSansSC font are candidate changes, not accepted design.
+Evidence: desktop32PASS; focusedExcel8PASS; typecheck/lint/build/format/diffchecksPASS (3existing lint warnings and bundle-size warning). Excel Chromium2DOM downloads and real exceljs reopensPASS using isolated output; these are synthetic browser samples, NOT native Windows acceptance. Earlier shared-output cancellation and ENOENT failures preserved. Print French/English2DOMPASS; pagination FAIL root y=-94 instead0 after three repair attempts, screenshot/trace retained test-results/formal-print-pagination-on-eeb5c--without-hidden-shell-pages-chromium. No testassertion weakened. Windows release EXE compilation passed before final OPA review correction; superseded build, no final native claim. Rust final results and containing checkpoint recorded in memory.
+BLOCKER current T12 acceptance: unresolved pagination after3repairs, full native install/save/reopen/print evidence absent. Original historical HPA remains strictly blocked by missing frozen French name; no fake translation/cashreversal/renumbering. SPO/OPA native printNOTRUN. Company-logo/header config and HPA payment/receipt projections absent from current frozenprint contract; not invented. Exact large-money Excel values remain text to avoid precision loss; numericcelltype requirement still open. Parent/draft print, embedded-font PDF structure, physicalA4, PDF text extraction, paymentreceipt print fields, config freezing and real file persistence remain NOTRUN, no T12closure.
+DEFERRED approved lightweight transfer expansion: existing cash/bank_transfer/mobile_payment/other schema, UI defaultsother. No transferdata code or migration implemented in this selected T12 slice. Server strict unknownfield validation prevents shipping newdetailpayloads to unchanged Staging; separate compatible servercandidate needed, no deployment permitted. WARNING dependency audit4 vulnerabilities, no automaticdependencychanges; source package-lock unchanged. Toolbox contract/identity/Runner untouched, original integration gates remain open.
+
+Final candidate Rust recheck186PASS0FAIL7originalignored; final Windows release EXE buildPASS after OPA correction, SHA256 532930c5a7e402cc254a50da86c22b8da91a3d74f5991f88b9f978fc499e29c4. It is an uninstalled local binary, not a release/installed acceptance. No final installer run. Browser synthetic missingtranslation XLSX sample .cache/t12-evidence/historical-missing-translation-browser.xlsx SHA25697a8dbae58c75b56bc4697bec339240feca22ac52d44d977a3652ca22f5bc0c3, reopened by exceljs; not native business export. All Rust logs relocated .cache/t12-evidence. T12 stillBLOCKED.

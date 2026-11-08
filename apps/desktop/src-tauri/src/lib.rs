@@ -1349,6 +1349,8 @@ pub enum AuthError {
     QuoteUnavailable,
     #[error("invalid input")]
     InvalidInput,
+    #[error("required frozen document translation is missing")]
+    MissingDocumentTranslation,
     #[error("business code cannot change")]
     ImmutableBusinessCode,
     #[error("synchronization transport error")]
@@ -3957,6 +3959,10 @@ impl LocalAuthService {
                 )
                 .map_err(|_| AuthError::Database)?;
         }
+        let issue_payload: RemotePurchaseOrderPayload =
+            serde_json::from_str(&order_sync_payload(&transaction, order_id)?)
+                .map_err(|_| AuthError::InvalidInput)?;
+        formal_print::validate_issue_translations(&issue_payload)?;
         let (installation_id, persisted_short_code, sequence): (String, String, i64) = transaction.query_row(
             "SELECT installation_id, installation_short_code, next_formal_sequence FROM local_sync_state WHERE singleton = 1",
             [],
@@ -7510,6 +7516,7 @@ pub mod commands {
                 AuthError::Forbidden => "forbidden",
                 AuthError::Database => "local_storage_error",
                 AuthError::InvalidInput => "invalid_input",
+                AuthError::MissingDocumentTranslation => "missing_document_translation",
                 AuthError::QuoteUnavailable => "quote_unavailable",
                 AuthError::ImmutableBusinessCode => "immutable_business_code",
                 AuthError::PasswordHashing | AuthError::SecureStorage => "credential_storage_error",
@@ -7521,6 +7528,14 @@ pub mod commands {
         }
     }
 
+    #[tauri::command]
+    pub fn get_internal_export_document(
+        auth: State<'_, LocalAuthService>,
+        order_id: Uuid,
+    ) -> Result<serde_json::Value, CommandError> {
+        auth.get_internal_export_document(order_id, SystemTime::now())
+            .map_err(Into::into)
+    }
     #[tauri::command]
     pub fn get_formal_print_document(
         auth: State<'_, LocalAuthService>,
@@ -16676,6 +16691,13 @@ mod tests {
                 let counts:(i64,i64,i64)=tx.query_row("SELECT next_formal_sequence,(SELECT count(*) FROM local_sync_outbox),(SELECT count(*) FROM local_order_audit_entries) FROM local_sync_state",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
                 (snapshot, counts)
             };
+            let missing_state = state();
+            assert_eq!(
+                service.issue_honsen_formal_order(parent, now),
+                Err(AuthError::MissingDocumentTranslation)
+            );
+            assert_eq!(state(), missing_state);
+            service.connection.lock().unwrap().execute("UPDATE local_purchase_order_items SET material_snapshot_json=?2 WHERE id=?1", params![item.to_string(), r#"{"nameZh":"frozen HPA material","nameFr":"Matériau HPA figé","nameEn":"Frozen HPA material","model":"old","specification":"old"}"#]).unwrap();
             let before = state();
             for (change, restore) in [
                 ("requires_password_change=1", "requires_password_change=0"),
@@ -16935,6 +16957,7 @@ mod tests {
                 let counts:(i64,i64,i64)=tx.query_row("SELECT next_formal_sequence,(SELECT count(*) FROM local_sync_outbox),(SELECT count(*) FROM local_order_audit_entries) FROM local_sync_state",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
                 (snapshot, counts)
             };
+            service.connection.lock().unwrap().execute("UPDATE local_purchase_order_items SET material_snapshot_json=json_set(material_snapshot_json,'$.nameFr','Matériau parent figé') WHERE order_id=?1", [original_parent.to_string()]).unwrap();
             if cross_currency {
                 service
                     .issue_honsen_formal_order(original_parent, now)
@@ -17328,7 +17351,7 @@ mod tests {
         connection.execute("INSERT INTO local_exchange_rates (id, from_currency, to_currency, rate_decimal, effective_at, source, version) VALUES (?1, 'CNY', 'XOF', '76.5', '2026-10-12', 'public_daily', 1)", [Uuid::new_v4().to_string()]).unwrap();
         connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'OP-1', ?2, ?3, 'site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'pending_confirmation', 'confirmed', 'normal', '2026-10-12', 'address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![order_id.to_string(), country_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), purchaser_id.to_string()]).unwrap();
         for (item_id, currency) in [(catalog_item_id, "CNY"), (manual_item_id, "XOF")] {
-            connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, '{\"nameZh\":\"owner material\"}', ?4, '1', 'pcs', 0, 0, ?5, 0, 0)", params![item_id.to_string(), order_id.to_string(), material_id.to_string(), currency, if item_id == catalog_item_id { 0 } else { 1 }]).unwrap();
+            connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, '{\"nameZh\":\"owner material\",\"nameFr\":\"Matériau propriétaire\"}', ?4, '1', 'pcs', 0, 0, ?5, 0, 0)", params![item_id.to_string(), order_id.to_string(), material_id.to_string(), currency, if item_id == catalog_item_id { 0 } else { 1 }]).unwrap();
         }
         let legacy_mode: Option<String> = connection
             .query_row(
@@ -17603,7 +17626,7 @@ mod tests {
         let missing_rate_item_id = Uuid::new_v4();
         let connection = service.connection.lock().unwrap();
         connection.execute("INSERT INTO local_purchase_orders (id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, currency, primary_currency, language_pair, status, workflow_status, procurement_mode, urgency, order_date, delivery_address, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, version, created_at, updated_at) VALUES (?1, 'OP-MISSING-RATE', ?2, ?3, 'site', ?4, ?5, ?6, 'XOF', 'XOF', 'zh_fr', 'pending_confirmation', 'confirmed', 'owner_self_purchase', 'normal', '2026-10-12', 'address', 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)", params![missing_rate_order_id.to_string(), country_id.to_string(), project_id.to_string(), department_id.to_string(), team_id.to_string(), purchaser_id.to_string()]).unwrap();
-        connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, owner_quote_source, owner_source_unit_price_minor, owner_converted_reference_unit_minor, owner_markup_json, owner_final_unit_price_minor, created_at, updated_at) VALUES (?1, ?2, ?3, '{\"nameZh\":\"owner material\"}', 'XOF', '1', 'pcs', 0, 0, 0, 'manual_reference', 100, 100, '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', 100, 0, 0)", params![missing_rate_item_id.to_string(), missing_rate_order_id.to_string(), material_id.to_string()]).unwrap();
+        connection.execute("INSERT INTO local_purchase_order_items (id, order_id, material_id, material_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_total_minor, sort_order, owner_quote_source, owner_source_unit_price_minor, owner_converted_reference_unit_minor, owner_markup_json, owner_final_unit_price_minor, created_at, updated_at) VALUES (?1, ?2, ?3, '{\"nameZh\":\"owner material\",\"nameFr\":\"Matériau propriétaire\"}', 'XOF', '1', 'pcs', 0, 0, 0, 'manual_reference', 100, 100, '{\"kind\":\"fixed_minor\",\"minor\":\"0\"}', 100, 0, 0)", params![missing_rate_item_id.to_string(), missing_rate_order_id.to_string(), material_id.to_string()]).unwrap();
         let outbox_before_missing_rate: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM local_sync_outbox WHERE entity_id = ?1",
@@ -19287,7 +19310,7 @@ mod tests {
             sku: Some("FIXTURE-M16".into()),
             category_id: None,
             name_zh: "测试材料".into(),
-            name_fr: None,
+            name_fr: Some("Matériau de test".into()),
             name_en: Some("Frozen English material".into()),
             aliases: vec!["fixture alias".into()],
             brand: None,

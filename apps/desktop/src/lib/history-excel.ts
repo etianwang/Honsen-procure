@@ -1,4 +1,7 @@
-import { documentSchema, formatPrintMoney } from './formal-print-api'
+import {
+  internalExportDocumentSchema,
+  formatPrintMoney,
+} from './formal-print-api'
 import type { OrderCommentView } from './workflow-api'
 import type {
   RequisitionApi,
@@ -9,7 +12,7 @@ type ExportApi = Pick<
   RequisitionApi,
   'listRequisitionHistory' | 'getRequisitionDetail'
 > & {
-  getFormalPrintDocument(orderId: string): Promise<unknown>
+  getInternalExportDocument(orderId: string): Promise<unknown>
   listOrderComments(orderId: string): Promise<OrderCommentView[]>
 }
 
@@ -143,6 +146,11 @@ export async function buildHistoryWorkbook(
     if (!names) throw Error('Unsupported export status')
     return names[locale === 'zh-CN' ? 0 : locale === 'fr-FR' ? 1 : 2]
   }
+  const missingTranslation = {
+    'zh-CN': '[缺少冻结译名]',
+    'fr-FR': '[Traduction figée manquante]',
+    'en-US': '[Missing frozen translation]',
+  }[locale]
   const fixedFilter = { ...filter }
   const { Workbook } = await import('exceljs')
   const book = new Workbook()
@@ -271,7 +279,9 @@ export async function buildHistoryWorkbook(
       )
         throw new Error('Export changed while reading; retry')
       const formal = detail.formalDocumentNo
-        ? documentSchema.parse(await api.getFormalPrintDocument(record.id))
+        ? internalExportDocumentSchema.parse(
+            await api.getInternalExportDocument(record.id),
+          )
         : null
       if (formal && formal.formalDocumentNo !== detail.formalDocumentNo)
         throw new Error('Formal number changed')
@@ -313,8 +323,12 @@ export async function buildHistoryWorkbook(
           'nameZh' in line ? line.nameZh : line.materialName,
           'nameFr' in line
             ? formal?.languagePair === 'zh_en'
-              ? (line.nameEn ?? '')
-              : line.nameFr
+              ? line.nameEn?.trim()
+                ? line.nameEn
+                : missingTranslation
+              : line.nameFr?.trim()
+                ? line.nameFr
+                : missingTranslation
             : '',
           line.model,
           line.specification,

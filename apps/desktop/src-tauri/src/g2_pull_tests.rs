@@ -546,6 +546,11 @@ fn g2_pull_production_issue_outbox_reaches_second_file_without_changing_issuer_n
     let (producer, _, now) = service();
     dependencies(&producer, true);
     let mut incoming = approved();
+    for line in incoming["lines"].as_array_mut().unwrap() {
+        line["materialSnapshotJson"] = serde_json::json!(
+            r#"{"nameZh":"Frozen test material","nameFr":"Matériau de test figé"}"#
+        );
+    }
     incoming["orderDiscountJson"] = serde_json::json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
     incoming["orderFreightJson"] = serde_json::json!(r#"{"kind":"fixed_minor","minor":"0"}"#);
     producer

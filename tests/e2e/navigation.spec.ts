@@ -2156,7 +2156,10 @@ test('authenticated desktop switches between cached authorization scopes', async
                       ],
                 nextCursor: null,
               })
-            if (command === 'get_formal_print_document')
+            if (
+              command === 'get_formal_print_document' ||
+              command === 'get_internal_export_document'
+            )
               return Promise.resolve({
                 formalDocumentNo: 'TEST-OPA-20261013-OPA-ABCDEFGH-1',
                 documentType: 'OPA',
