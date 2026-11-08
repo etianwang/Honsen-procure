@@ -582,3 +582,5 @@ BLOCKER: native new-package installation, actual Windows preview/save/reopen/Pri
 2026-11-08 T12 bounded native evidence: installed0.1.19 history Excel zh/en/fr actualsave+reopen verified, Chinese openedWPS. FullExcel numerictypes/companydesign and formalPDF/nativeprint remain OPEN. HistoricalHPA strictblocked missingFR; selfapprovaldisabled/nootherissuedfixture. See remoteAlpha report. Parentunchecked.
 
 2026-11-08 PDFonly: TESTcatalog FR/EN nowvalid/version2 acknowledged; oldHPA frozenunchanged. Independent7browserPDFPASS does notacceptnative. BLOCKER normaldistinctapplicantapprovalpath + approvedlegalheader/name/logo (useranswerspending); no newHPA/SPO/nativePDF yet. T12unchecked; wallets/Excelpaused.
+
+2026-11-08 T12approved frozencompanyheader implementedcandidate0.1.20 (newdraft→approval→children→snapshot→print); desktop34/Rust189/browserPDF7PASS notnative. IndependentSandboxreal0.1.13found; two-endupgradeapprovalpending. NativeHPA/SPO/multipagePDF/printing remainOPEN. No parentclosure; remoteAlpha report owns evidence.

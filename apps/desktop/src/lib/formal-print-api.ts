@@ -3,8 +3,43 @@ import { currencySchema } from '@honsen/shared'
 export type FormalPrintDocument = z.infer<typeof documentSchema>
 
 const minor = z.string().regex(/^-?\d+$/)
+export const approvedPrintLogo = {
+  assetId: 'honsen-approved-logo-v1',
+  sha256: '0f733cc13c7086deb17668e9e7103e798d006493370f3b66340e9214e7b70751',
+  path: '/print/honsen-approved-logo-v1.png',
+} as const
+export const printProfileSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    profileVersion: z.literal('v1-20261108'),
+    legalNameZh: z.string().trim().min(1).max(255),
+    logo: z
+      .object({
+        assetId: z.literal(approvedPrintLogo.assetId),
+        sha256: z.literal(approvedPrintLogo.sha256),
+        mimeType: z.literal('image/png'),
+      })
+      .strict(),
+  })
+  .strict()
+
+export async function verifyPrintProfileAsset(
+  profile: z.infer<typeof printProfileSchema>,
+) {
+  printProfileSchema.parse(profile)
+  const response = await fetch(approvedPrintLogo.path)
+  if (!response.ok) throw new Error('Approved print logo unavailable')
+  const bytes = await response.arrayBuffer()
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const hash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
+  if (hash !== profile.logo.sha256)
+    throw new Error('Approved print logo checksum mismatch')
+}
 export const internalExportDocumentSchema = z
   .object({
+    printProfile: printProfileSchema.optional(),
     formalDocumentNo: z.string().min(1),
     documentType: z.enum(['OPA', 'HPA', 'SPO']),
     languagePair: z.enum(['zh_fr', 'zh_en']),

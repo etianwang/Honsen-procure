@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
 
 for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
   for (const languagePair of ['zh_fr', 'zh_en'] as const) {
@@ -27,6 +27,17 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
               core: {
                 invoke: async () => ({
                   formalDocumentNo: `TEST-${kind}-${languagePair}`,
+                  printProfile: {
+                    schemaVersion: 1,
+                    profileVersion: 'v1-20261108',
+                    legalNameZh: '深圳市弘盛优创机电工程设计有限公司',
+                    logo: {
+                      assetId: 'honsen-approved-logo-v1',
+                      sha256:
+                        '0f733cc13c7086deb17668e9e7103e798d006493370f3b66340e9214e7b70751',
+                      mimeType: 'image/png',
+                    },
+                  },
                   documentType: kind,
                   languagePair,
                   projectId: '10000000-0000-4000-8000-000000000001',
@@ -83,6 +94,13 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
         .getByRole('button', { name: '正式单据预览 / Aperçu', exact: true })
         .click()
       await expect(page.locator('tbody tr')).toHaveCount(64)
+      await expect(page.locator('.formal-company-name')).toHaveText(
+        '深圳市弘盛优创机电工程设计有限公司',
+      )
+      await expect(page.locator('.formal-company-logo')).toHaveAttribute(
+        'src',
+        '/print/honsen-approved-logo-v1.png',
+      )
       await page
         .getByRole('button', { name: '打印 / Imprimer · PDF', exact: true })
         .click()
@@ -104,6 +122,8 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
       const loadingTask = getDocument({ data: new Uint8Array(pdf) })
       const parsed = await loadingTask.promise
       expect(parsed.numPages).toBe(pageCount)
+      const firstOperators = await (await parsed.getPage(1)).getOperatorList()
+      expect(firstOperators.fnArray).toContain(OPS.paintImageXObject)
       const pageTexts: string[] = []
       for (let number = 1; number <= parsed.numPages; number++) {
         const printed = await parsed.getPage(number)
@@ -116,6 +136,9 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
         )
       }
       const text = pageTexts.join('\n')
+      expect(text.normalize('NFKC').replace(/\s/g, '')).toContain(
+        '深圳市弘盛优创机电工程设计有限公司',
+      )
       expect(text).toContain(`TEST-${kind}-${languagePair}`)
       expect(text).toContain(
         languagePair === 'zh_fr'

@@ -2,6 +2,8 @@ import { useUiLocale } from '../lib/ui-locale'
 import { historyText } from '../lib/history-locale'
 import {
   documentSchema,
+  approvedPrintLogo,
+  verifyPrintProfileAsset,
   formatPrintMoney,
   type FormalPrintDocument,
 } from '../lib/formal-print-api'
@@ -17,6 +19,18 @@ function FormalDocumentSheet({ document }: { document: FormalPrintDocument }) {
   return (
     <article className="formal-print-sheet">
       <header className="formal-document-heading">
+        {document.printProfile && (
+          <div className="formal-company-header">
+            <img
+              src={approvedPrintLogo.path}
+              alt="HONSEN"
+              className="formal-company-logo"
+            />
+            <p className="formal-company-name">
+              {document.printProfile.legalNameZh}
+            </p>
+          </div>
+        )}
         <p className="formal-document-brand">HONSEN Procure</p>
         <h1>
           {document.documentType === 'SPO'
@@ -168,17 +182,32 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
     window.addEventListener('afterprint', finish)
     window.document.body.classList.add('honsen-printing-formal')
     window.scrollTo(0, 0)
-    void window.document.fonts.ready.then(() => {
-      if (cancelled) return
-      frame = window.requestAnimationFrame(() => {
-        try {
-          window.print()
-        } catch {
+    const images = Array.from(
+      window.document.querySelectorAll<HTMLImageElement>(
+        '.honsen-print-root img',
+      ),
+    )
+    void Promise.all([
+      window.document.fonts.ready,
+      ...images.map((image) => image.decode()),
+    ])
+      .then(() => {
+        if (cancelled) return
+        frame = window.requestAnimationFrame(() => {
+          try {
+            window.print()
+          } catch {
+            setFailed(true)
+            finish()
+          }
+        })
+      })
+      .catch(() => {
+        if (!cancelled) {
           setFailed(true)
           finish()
         }
       })
-    })
     return () => {
       cancelled = true
       window.cancelAnimationFrame(frame)
@@ -201,11 +230,12 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
         }
       ).__TAURI__?.core?.invoke
       if (!invoke) throw new Error('Desktop unavailable')
-      setDocument(
-        documentSchema.parse(
-          await invoke<unknown>('get_formal_print_document', { orderId }),
-        ),
+      const parsed = documentSchema.parse(
+        await invoke<unknown>('get_formal_print_document', { orderId }),
       )
+      if (parsed.printProfile)
+        await verifyPrintProfileAsset(parsed.printProfile)
+      setDocument(parsed)
     } catch {
       setFailed(true)
     }

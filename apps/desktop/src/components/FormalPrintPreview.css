@@ -31,6 +31,24 @@
   letter-spacing: 0.06em;
 }
 
+.formal-company-header {
+  display: flex;
+  align-items: center;
+  gap: 6mm;
+}
+.formal-company-logo {
+  width: 26mm;
+  height: 18mm;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.formal-company-name {
+  font-size: 13pt;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
 .formal-document-heading h1 {
   font-size: 17pt;
   line-height: 1.25;

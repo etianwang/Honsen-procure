@@ -183,9 +183,16 @@ fn project_for_export(
         let required = |key| material.get(key).and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned).ok_or(AuthError::InvalidInput);
         Ok(serde_json::json!({"nameZh":required("nameZh")?, "nameFr": if snapshot.language_pair == "zh_fr" { if strict_translation { Some(required("nameFr")?) } else { material.get("nameFr").and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned) } } else { None }, "nameEn": if snapshot.language_pair == "zh_en" { if strict_translation { Some(required("nameEn")?) } else { material.get("nameEn").and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned) } } else { None }, "model":material.get("model"), "specification":material.get("specification"), "quantity":line.quantity, "unit":line.unit, "currency":if kind == "OPA" { &snapshot.primary_currency } else { &snapshot.currency }, "unitPriceMinor":if kind == "OPA" { line.owner_final_unit_price_minor.as_ref().ok_or(AuthError::InvalidInput)? } else { &line.unit_price_minor }, "lineTotalMinor":owner_totals.as_ref().map(|v| &v.0[index]).unwrap_or(&line.line_total_minor)}))
     }).collect::<Result<Vec<_>,AuthError>>()?;
+    if let Some(profile) = &snapshot.print_profile {
+        profile.validate()?;
+    }
     let mut result = serde_json::json!({"formalDocumentNo":number,"documentType":kind,"languagePair":snapshot.language_pair,"projectId":snapshot.project_id,"site":snapshot.site,"orderDate":snapshot.order_date,"deliveryAddress":snapshot.delivery_address,"expectedDeliveryDate":snapshot.expected_delivery_date,"notes":snapshot.notes,"currency":if kind == "SPO" { &snapshot.currency } else { &snapshot.primary_currency },"subtotalMinor":owner_totals.as_ref().map(|v| &v.1).unwrap_or(&snapshot.subtotal_minor),"taxMinor":owner_totals.as_ref().map(|v| &v.2).unwrap_or(&snapshot.tax_minor),"totalMinor":owner_totals.as_ref().map(|v| &v.3).unwrap_or(&snapshot.total_minor),"supplier":supplier,"lineDiscountMinor":snapshot.line_discount_minor,"orderDiscountMinor":snapshot.order_discount_minor,"freightMinor":snapshot.freight_minor,"taxRateBasisPoints":snapshot.tax_rate_basis_points,"selfApproved":snapshot.self_approved,"lines":lines});
     if let Some(stamp) = &snapshot.manual_stamp_duty_minor {
         result["manualStampDutyMinor"] = serde_json::json!(stamp);
+    }
+    if let Some(profile) = snapshot.print_profile {
+        result["printProfile"] =
+            serde_json::to_value(profile).map_err(|_| AuthError::InvalidInput)?;
     }
     Ok(result)
 }
@@ -211,7 +218,12 @@ mod tests {
                 "lineTotalMinor":"250","sortOrder":0,"createdAt":1,"updatedAt":1
             }]
         });
+        let legacy_print = project("TEST-SPO-1", "SPO", &raw.to_string()).unwrap();
+        assert!(legacy_print.get("printProfile").is_none());
+        raw["printProfile"] =
+            serde_json::from_str(&print_profile::approved_profile_json().unwrap()).unwrap();
         let print = project("TEST-SPO-1", "SPO", &raw.to_string()).unwrap();
+        assert_eq!(print["printProfile"], raw["printProfile"]);
         assert_eq!(print["languagePair"], "zh_en");
         assert_eq!(print["lines"][0]["nameEn"], "Frozen material");
         assert!(print["lines"][0]["nameFr"].is_null());

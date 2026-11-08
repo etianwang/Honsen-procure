@@ -33,6 +33,7 @@ mod attachments;
 mod expenditures;
 pub mod formal_print;
 mod owner_print_totals;
+mod print_profile;
 mod settlement_details;
 pub mod supplier_history;
 pub use attachments::{AttachmentInput, AttachmentTarget, AttachmentView, ProcurementSyncReport};
@@ -830,6 +831,8 @@ struct SyncPullEnvelope {
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct RemotePurchaseOrderPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    print_profile: Option<print_profile::PrintProfile>,
     parent_order_id: Option<Uuid>,
     procurement_mode: Option<String>,
     display_no: String,
@@ -4263,6 +4266,7 @@ impl LocalAuthService {
                     params![child_order_id.to_string(), parent_order_id.to_string(), display_no, parent.0, parent.1, parent.2, parent.3, parent.4, parent.5, supplier_id.to_string(), supplier_snapshot, currency, parent.6, exchange_rate, parent.7, parent.8, parent.9, parent.10, parent.11, parent.12, parent.13, source_total, unix_seconds(now)],
                 )
                 .map_err(|_| AuthError::Database)?;
+            transaction.execute("UPDATE local_purchase_orders SET print_profile_json=(SELECT print_profile_json FROM local_purchase_orders WHERE id=?2) WHERE id=?1", params![child_order_id.to_string(),parent_order_id.to_string()]).map_err(|_| AuthError::Database)?;
             for (sort_order, (parent_item_id, line_total)) in child_items.into_iter().enumerate() {
                 let child_item_id = Uuid::new_v4();
                 transaction
@@ -5290,6 +5294,11 @@ impl LocalAuthService {
         {
             return Err(AuthError::InvalidInput);
         }
+        let new_print_profile = if prior.is_none() {
+            Some(print_profile::approved_profile_json()?)
+        } else {
+            None
+        };
         let previous_snapshot = if is_revision {
             Some(order_audit_snapshot(&transaction, draft.id)?)
         } else {
@@ -5319,6 +5328,14 @@ impl LocalAuthService {
                 ],
             )
             .map_err(|_| AuthError::Database)?;
+        if let Some(profile) = new_print_profile {
+            transaction
+                .execute(
+                    "UPDATE local_purchase_orders SET print_profile_json=?2 WHERE id=?1",
+                    params![draft.id.to_string(), profile],
+                )
+                .map_err(|_| AuthError::Database)?;
+        }
         transaction.execute("UPDATE local_purchase_orders SET order_discount_json=?2, order_freight_json=?3, owner_print_totals_json=NULL WHERE id=?1", params![draft.id.to_string(), serde_json::to_string(&draft.order_discount).map_err(|_| AuthError::InvalidInput)?, serde_json::to_string(&draft.order_freight).map_err(|_| AuthError::InvalidInput)?]).map_err(|_| AuthError::Database)?;
         for line in &calculated.lines {
             if line.input.material_id.is_some()
@@ -8763,6 +8780,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
             "0065_payment_settlement_details",
             include_str!("../migrations/0065_payment_settlement_details.sql"),
         ),
+        (
+            "0066_order_print_profile",
+            include_str!("../migrations/0066_order_print_profile.sql"),
+        ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
         let recorded_checksum = connection
@@ -9869,6 +9890,16 @@ fn project_remote_purchase_order_change(
         let order: RemotePurchaseOrderPayload =
             serde_json::from_value(change.payload.clone()).map_err(|_| AuthError::InvalidInput)?;
         validate_remote_purchase_order(&order)?;
+        let retained: Option<String> = transaction
+            .query_row(
+                "SELECT print_profile_json FROM local_purchase_orders WHERE id=?1",
+                [change.entity_id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| AuthError::Database)?
+            .flatten();
+        print_profile::validate_retained(retained.as_deref(), order.print_profile.as_ref())?;
         Some(order)
     } else {
         None
@@ -10094,6 +10125,20 @@ fn project_remote_purchase_order_change(
                     .manual_stamp_duty_minor
                     .as_deref()
                     .map(str::parse::<i64>)
+                    .transpose()
+                    .map_err(|_| AuthError::InvalidInput)?
+            ],
+        )
+        .map_err(|_| AuthError::Database)?;
+    transaction
+        .execute(
+            "UPDATE local_purchase_orders SET print_profile_json=?2 WHERE id=?1",
+            params![
+                change.entity_id.to_string(),
+                order
+                    .print_profile
+                    .as_ref()
+                    .map(serde_json::to_string)
                     .transpose()
                     .map_err(|_| AuthError::InvalidInput)?
             ],
@@ -10457,6 +10502,9 @@ fn remote_order_references_exist(
 }
 
 fn validate_remote_purchase_order(order: &RemotePurchaseOrderPayload) -> Result<(), AuthError> {
+    if let Some(profile) = &order.print_profile {
+        profile.validate()?;
+    }
     if let Some(stamp) = &order.manual_stamp_duty_minor {
         as_i64(parse_manual_stamp(stamp)?)?;
     }
@@ -11210,7 +11258,7 @@ fn installation_short_code(installation_id: Uuid) -> String {
 }
 
 fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<String, AuthError> {
-    let header = transaction
+    let mut header = transaction
         .query_row(
             "SELECT parent_order_id, display_no, country_id, project_id, site, department_id, team_id, applicant_id, supplier_id, supplier_snapshot_json, currency, primary_currency, locked_exchange_rate_decimal, language_pair, status, workflow_status, urgency, urgency_reason, order_date, delivery_address, expected_delivery_date, notes, subtotal_minor, line_discount_minor, order_discount_minor, freight_minor, tax_rate_basis_points, tax_minor, total_minor, confirmed_by, confirmed_at, rejection_reason, self_approved, supplier_terms_completed_at, procurement_mode, document_type, formal_document_no, formal_installation_id, formal_sequence, formally_issued_at, formal_snapshot_json, order_discount_json, order_freight_json, owner_print_totals_json, manual_stamp_duty_minor FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL",
             [order_id.to_string()],
@@ -11264,6 +11312,20 @@ fn order_sync_payload(transaction: &Transaction<'_>, order_id: Uuid) -> Result<S
             Ok(value) },
         )
         .map_err(|_| AuthError::Database)?;
+    let profile: Option<String> = transaction
+        .query_row(
+            "SELECT print_profile_json FROM local_purchase_orders WHERE id=?1",
+            [order_id.to_string()],
+            |r| r.get(0),
+        )
+        .map_err(|_| AuthError::Database)?;
+    if let Some(raw) = profile {
+        let profile: print_profile::PrintProfile =
+            serde_json::from_str(&raw).map_err(|_| AuthError::InvalidInput)?;
+        profile.validate()?;
+        header["printProfile"] =
+            serde_json::to_value(profile).map_err(|_| AuthError::InvalidInput)?;
+    }
     let lines = transaction
         .prepare("SELECT id, material_id, material_snapshot_json, supplier_snapshot_json, currency, quantity_decimal, unit, unit_price_minor, line_discount_json, line_freight_json, freight_included, line_total_minor, sort_order, created_at, updated_at, owner_quote_source, owner_catalog_price_id, owner_manual_reference_reason, owner_manual_reference_actor_id, owner_manual_reference_at, owner_source_unit_price_minor, owner_locked_exchange_rate_decimal, owner_converted_reference_unit_minor, owner_markup_json, owner_final_unit_price_minor, catalog_price_id, price_source FROM local_purchase_order_items WHERE order_id = ?1 ORDER BY sort_order, id")
         .map_err(|_| AuthError::Database)?
@@ -16663,6 +16725,81 @@ mod tests {
     }
 
     #[test]
+    fn print_profile_survives_sync_and_rejects_mixed_version_drop_atomically() {
+        let (service, now, order, item, supplier, _, rfq) = rfq_pull_fixture();
+        let project = Uuid::parse_str(rfq["projectId"].as_str().unwrap()).unwrap();
+        seed_rfq_pull_dependencies(&service, order, item, supplier, project);
+        let mut db = service.connection.lock().unwrap();
+        let tx = db.transaction().unwrap();
+        let legacy: serde_json::Value =
+            serde_json::from_str(&order_sync_payload(&tx, order).unwrap()).unwrap();
+        assert!(legacy.get("printProfile").is_none());
+        let profile = print_profile::approved_profile_json().unwrap();
+        tx.execute(
+            "UPDATE local_purchase_orders SET print_profile_json=?2 WHERE id=?1",
+            params![order.to_string(), profile],
+        )
+        .unwrap();
+        let before = order_sync_payload(&tx, order).unwrap();
+        let before_json: serde_json::Value = serde_json::from_str(&before).unwrap();
+        assert_eq!(
+            before_json["printProfile"]["legalNameZh"],
+            "深圳市弘盛优创机电工程设计有限公司"
+        );
+        let retained: RemotePurchaseOrderPayload = serde_json::from_str(&before).unwrap();
+        assert_eq!(
+            serde_json::to_value(&retained).unwrap()["printProfile"],
+            before_json["printProfile"]
+        );
+        let accepted = SyncPullChangeInput {
+            cursor: "1".into(),
+            entity_type: "purchase_order".into(),
+            entity_id: order,
+            operation: "upsert".into(),
+            version: 2,
+            payload: before_json.clone(),
+            changed_at: "2026-11-08T00:00:00Z".into(),
+        };
+        assert_eq!(
+            project_remote_purchase_order_change(&tx, &accepted, now),
+            Ok(true)
+        );
+        let before = order_sync_payload(&tx, order).unwrap();
+        let mut dropped = before_json.clone();
+        dropped.as_object_mut().unwrap().remove("printProfile");
+        let change = SyncPullChangeInput {
+            cursor: "1".into(),
+            entity_type: "purchase_order".into(),
+            entity_id: order,
+            operation: "upsert".into(),
+            version: 2,
+            payload: dropped,
+            changed_at: "2026-11-08T00:00:00Z".into(),
+        };
+        assert_eq!(
+            project_remote_purchase_order_change(&tx, &change, now),
+            Err(AuthError::InvalidInput)
+        );
+        assert_eq!(order_sync_payload(&tx, order).unwrap(), before);
+        assert!(
+            tx.execute(
+                "UPDATE local_purchase_orders SET print_profile_json=NULL WHERE id=?1",
+                [order.to_string()]
+            )
+            .is_err()
+        );
+        assert!(
+            tx.execute(
+                "UPDATE local_purchase_orders SET print_profile_json='{}' WHERE id=?1",
+                [order.to_string()]
+            )
+            .is_err()
+        );
+        assert_eq!(order_sync_payload(&tx, order).unwrap(), before);
+        tx.commit().unwrap();
+    }
+
+    #[test]
     fn hpa_issue_is_authorized_atomic_and_keeps_approved_snapshots_with_existing_children() {
         for with_children in [false, true] {
             let path = std::env::temp_dir().join(format!("honsen-hpa-{}.sqlite", Uuid::new_v4()));
@@ -16713,6 +16850,14 @@ mod tests {
             {
                 let db = service.connection.lock().unwrap();
                 db.execute("UPDATE local_purchase_orders SET procurement_mode='honsen_self_purchase',subtotal_minor=1250,total_minor=1250,confirmed_by=?2,confirmed_at=1 WHERE id=?1", params![parent.to_string(),actor.to_string()]).unwrap();
+                db.execute(
+                    "UPDATE local_purchase_orders SET print_profile_json=?2 WHERE id=?1",
+                    params![
+                        parent.to_string(),
+                        print_profile::approved_profile_json().unwrap()
+                    ],
+                )
+                .unwrap();
                 db.execute("UPDATE local_purchase_order_items SET unit_price_minor=1250,line_total_minor=1250,price_source='manual',material_snapshot_json='{\"nameZh\":\"frozen HPA material\",\"model\":\"old\",\"specification\":\"old\"}' WHERE id=?1", [item.to_string()]).unwrap();
             }
             if with_children {
@@ -16737,6 +16882,32 @@ mod tests {
                 let counts:(i64,i64,i64)=tx.query_row("SELECT next_formal_sequence,(SELECT count(*) FROM local_sync_outbox),(SELECT count(*) FROM local_order_audit_entries) FROM local_sync_state",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
                 (snapshot, counts)
             };
+            {
+                let db = service.connection.lock().unwrap();
+                let parent_profile: String = db
+                    .query_row(
+                        "SELECT print_profile_json FROM local_purchase_orders WHERE id=?1",
+                        [parent.to_string()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    parent_profile,
+                    print_profile::approved_profile_json().unwrap()
+                );
+                let different_children: i64 = db.query_row("SELECT count(*) FROM local_purchase_orders WHERE parent_order_id=?1 AND print_profile_json IS NOT ?2",params![parent.to_string(),parent_profile],|r|r.get(0)).unwrap();
+                assert_eq!(different_children, 0);
+                if with_children {
+                    let count: i64 = db
+                        .query_row(
+                            "SELECT count(*) FROM local_purchase_orders WHERE parent_order_id=?1",
+                            [parent.to_string()],
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    assert!(count > 0);
+                }
+            }
             let missing_state = state();
             assert_eq!(
                 service.issue_honsen_formal_order(parent, now),
@@ -16803,6 +16974,12 @@ mod tests {
             let payload: serde_json::Value = serde_json::from_str(&after.0).unwrap();
             assert_eq!(payload["workflowStatus"], "executing");
             assert_eq!(payload["formalSnapshotJson"], before.0);
+            let approved_snapshot: serde_json::Value = serde_json::from_str(&before.0).unwrap();
+            assert_eq!(payload["printProfile"], approved_snapshot["printProfile"]);
+            assert_eq!(
+                service.get_formal_print_document(parent, now).unwrap()["printProfile"],
+                approved_snapshot["printProfile"]
+            );
             assert_eq!(after.1.0, before.1.0 + 1);
             assert_eq!(after.1.1, before.1.1 + 1);
             assert_eq!(
@@ -19636,6 +19813,22 @@ mod tests {
         };
         let totals = service.save_requisition_draft(draft.clone(), now).unwrap();
         assert_eq!(totals.total_minor, "3564");
+        {
+            let db = service.connection.lock().unwrap();
+            let frozen: String = db
+                .query_row(
+                    "SELECT print_profile_json FROM local_purchase_orders WHERE id=?1",
+                    [requisition_id.to_string()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(frozen, print_profile::approved_profile_json().unwrap());
+            let outbox: String = db.query_row("SELECT payload_json FROM local_sync_outbox WHERE entity_id=?1 ORDER BY rowid DESC LIMIT 1",[requisition_id.to_string()],|r|r.get(0)).unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&outbox).unwrap()["printProfile"],
+                serde_json::from_str::<serde_json::Value>(&frozen).unwrap()
+            );
+        }
         let frozen: String = service
             .connection
             .lock()

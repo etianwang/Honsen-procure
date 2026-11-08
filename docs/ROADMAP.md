@@ -462,3 +462,5 @@ BLOCKER Alpha: installed fresh/online login, upgrade/uninstall data preservation
 2026-11-08 nativeExcel export/save and zhWPS reopen boundedPASS; T12/Alpha stillOPEN pending formalnativePDF/print, numericExceltypes, remainingdesign and independentclients. No milestoneclosure.
 
 2026-11-08 PDFonly continuation: nativeTESTcatalogtranslations prepared; T12nativePDF/officialheader/approvalfixture remainBLOCKED, no parentclosure or otherfeatureexpansion.
+
+2026-11-08 PDFonly: approvedcompanyname/logo frozenprofile candidate0.1.20 built, actualindependentWindowsSandboxidentified; installedtwo-endnativePDF/print acceptance stillpending. T12/AlphastayOPEN.
