@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 
 test('only the selected frozen document prints in body flow without hidden shell pages', async ({
   page,
@@ -122,7 +123,17 @@ test('only the selected frozen document prints in body flow without hidden shell
   )
   await page.emulateMedia({ media: 'print' })
   await expect(page.locator('#synthetic-shell')).toBeHidden()
-  expect((await page.locator('.honsen-print-root').boundingBox())?.y).toBe(0)
+  // boundingBox is viewport-relative. A longer document may retain browser
+  // scroll after the second preview button is clicked; printing uses document
+  // coordinates, so assert normal-flow origin without assuming scrollY is zero.
+  const printOrigin = await page
+    .locator('.honsen-print-root')
+    .evaluate((root) => ({
+      top: root.getBoundingClientRect().top + window.scrollY,
+      left: root.getBoundingClientRect().left + window.scrollX,
+      position: getComputedStyle(root).position,
+    }))
+  expect(printOrigin).toEqual({ top: 0, left: 0, position: 'static' })
   const evidence = resolve('.cache/formal-print-pagination', randomUUID())
   mkdirSync(evidence, { recursive: true })
   const pdf = await page.pdf({
@@ -130,6 +141,20 @@ test('only the selected frozen document prints in body flow without hidden shell
     preferCSSPageSize: true,
   })
   expect(pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)?.length).toBe(1)
+  const loadingTask = getDocument({ data: new Uint8Array(pdf) })
+  const parsed = await loadingTask.promise
+  const printedPage = await parsed.getPage(1)
+  expect(printedPage.view[2]).toBeCloseTo(595, 0)
+  expect(printedPage.view[3]).toBeCloseTo(842, 0)
+  const printedText = (await printedPage.getTextContent()).items
+    .map((item) => ('str' in item ? item.str : ''))
+    .join(' ')
+  expect(printedText).toContain('SYNTHETIC-SPO-A')
+  expect(printedText).not.toContain('SYNTHETIC-SPO-B')
+  expect(printedText).toContain('Câble synthétique 1')
+  expect(printedText).toContain('Câble synthétique 2')
+  expect(printedText).toContain('Total: 200 XOF')
+  await loadingTask.destroy()
   await page.emulateMedia({ media: 'screen' })
   await page.evaluate(() => window.dispatchEvent(new Event('afterprint')))
   await expect(page.locator('body > .honsen-print-root')).toHaveCount(0)

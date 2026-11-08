@@ -104,7 +104,12 @@
 }
 
 @media print {
+  html {
+    background: #fff !important;
+  }
+
   body.honsen-printing-formal {
+    background: #fff !important;
     display: block !important;
     height: auto !important;
     min-height: 0 !important;

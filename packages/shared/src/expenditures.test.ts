@@ -56,3 +56,91 @@ describe('payment metadata compatibility', () => {
     ).toBe(false)
   })
 })
+
+describe('optional settlement classification', () => {
+  const bank = {
+    kind: 'BANK_TRANSFER',
+    recipientType: 'company',
+    bankChannel: 'SWIFT',
+    bankName: 'TEST bank',
+    accountReference: 'TEST123',
+    swiftBic: 'TESTCIAB',
+    transactionReference: 'TEST-TX',
+  }
+  const mobile = {
+    kind: 'MOBILE_PAYMENT',
+    recipientType: 'individual',
+    transactionReference: 'TEST-TX',
+    channelId: id,
+    channelCode: 'TEST',
+    countryCode: 'CI',
+    channelNameSnapshot: 'TEST channel',
+    recipientReference: 'TEST recipient',
+  }
+  it.each([
+    { method: 'cash', details: { kind: 'CASH' } },
+    { method: 'bank_transfer', details: bank },
+    {
+      method: 'other',
+      details: {
+        kind: 'REMITTANCE',
+        recipientType: 'individual',
+        providerCode: 'WESTERN_UNION',
+        providerName: 'Western Union',
+        reference: '1234567890',
+        transactionReference: 'TEST-TX',
+      },
+    },
+    { method: 'mobile_payment', details: mobile },
+    { method: 'other', details: { kind: 'OTHER', description: 'TEST' } },
+  ])('retains validated $method details', ({ method, details }) => {
+    expect(
+      procurementExpenditureSchema.parse({
+        ...base,
+        paymentMethod: method,
+        settlementDetails: details,
+      }).settlementDetails,
+    ).toEqual(details)
+  })
+  it('keeps absent historical classification absent', () =>
+    expect(procurementExpenditureSchema.parse(base)).not.toHaveProperty(
+      'settlementDetails',
+    ))
+  it.each([
+    { ...bank, swiftBic: undefined },
+    { ...bank, bankChannel: 'IBAN', iban: undefined },
+    { ...bank, bankChannel: 'OTHER', accountReference: undefined },
+    { ...bank, transactionReference: '' },
+    { ...mobile, channelId: 'invented' },
+    { ...mobile, countryCode: 'ci' },
+    { ...mobile, pin: 'secret' },
+    {
+      kind: 'REMITTANCE',
+      recipientType: 'individual',
+      providerCode: 'WESTERN_UNION',
+      providerName: 'WU',
+      reference: '123',
+      transactionReference: 'TEST',
+    },
+  ])('rejects incomplete or unsafe details %#', (settlementDetails) =>
+    expect(
+      procurementExpenditureSchema.safeParse({
+        ...base,
+        paymentMethod:
+          settlementDetails.kind === 'MOBILE_PAYMENT'
+            ? 'mobile_payment'
+            : settlementDetails.kind === 'REMITTANCE'
+              ? 'other'
+              : 'bank_transfer',
+        settlementDetails,
+      }).success,
+    ).toBe(false),
+  )
+  it('rejects inconsistent legacy method', () =>
+    expect(
+      procurementExpenditureSchema.safeParse({
+        ...base,
+        settlementDetails: bank,
+      }).success,
+    ).toBe(false))
+})

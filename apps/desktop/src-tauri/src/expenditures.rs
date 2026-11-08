@@ -12,6 +12,8 @@ pub(super) struct CounterpartySnapshot {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct PaymentPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settlement_details: Option<settlement_details::SettlementDetails>,
     pub id: Uuid,
     pub order_id: Uuid,
     pub project_id: Uuid,
@@ -67,16 +69,24 @@ pub(super) fn read_payment(
                 .map_err(|_| AuthError::Database);
         }
     }
-    let value: Option<String> = connection.query_row(
-        "SELECT json_object('id',e.id,'orderId',e.order_id,'projectId',e.project_id,'countryId',o.country_id,'supplierId',e.supplier_id,'receiptId',e.receipt_id,'counterpartyType',e.counterparty_type,'counterpartySnapshot',json(NULLIF(e.counterparty_snapshot_json,'{}')),'voucherAttachmentIds',json((SELECT json_group_array(attachment_id) FROM (SELECT attachment_id FROM local_procurement_expenditure_vouchers WHERE expenditure_id=e.id ORDER BY attachment_id))),'payeeName',e.payee_name,'currency',e.currency,'amountMinor',CAST(e.amount_minor AS TEXT),'paymentDate',e.payment_date,'paymentType',e.payment_type,'paymentMethod',e.payment_method,'paymentHandlerId',e.payment_handler_id,'voucherReference',e.voucher_reference,'notes',e.notes,'status',e.status,'correctsExpenditureId',e.corrects_expenditure_id,'correctionReason',e.correction_reason,'createdBy',e.created_by,'createdAt',e.created_at) FROM local_procurement_expenditures e JOIN local_purchase_orders o ON o.id=e.order_id WHERE e.id=?1",
-        [id.to_string()], |row| row.get(0),
-    ).optional().map_err(|_| AuthError::Database)?;
+    let has_details: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('local_procurement_expenditures') WHERE name='settlement_details_json')", [], |r|r.get(0)).map_err(|_|AuthError::Database)?;
+    let mut select = "SELECT json_object('settlementDetails',json(e.settlement_details_json),'id',e.id,'orderId',e.order_id,'projectId',e.project_id,'countryId',o.country_id,'supplierId',e.supplier_id,'receiptId',e.receipt_id,'counterpartyType',e.counterparty_type,'counterpartySnapshot',json(NULLIF(e.counterparty_snapshot_json,'{}')),'voucherAttachmentIds',json((SELECT json_group_array(attachment_id) FROM (SELECT attachment_id FROM local_procurement_expenditure_vouchers WHERE expenditure_id=e.id ORDER BY attachment_id))),'payeeName',e.payee_name,'currency',e.currency,'amountMinor',CAST(e.amount_minor AS TEXT),'paymentDate',e.payment_date,'paymentType',e.payment_type,'paymentMethod',e.payment_method,'paymentHandlerId',e.payment_handler_id,'voucherReference',e.voucher_reference,'notes',e.notes,'status',e.status,'correctsExpenditureId',e.corrects_expenditure_id,'correctionReason',e.correction_reason,'createdBy',e.created_by,'createdAt',e.created_at) FROM local_procurement_expenditures e JOIN local_purchase_orders o ON o.id=e.order_id WHERE e.id=?1".to_owned();
+    if !has_details {
+        select = select.replace("json(e.settlement_details_json)", "NULL");
+    }
+    let value: Option<String> = connection
+        .query_row(&select, [id.to_string()], |row| row.get(0))
+        .optional()
+        .map_err(|_| AuthError::Database)?;
     value
         .map(|json| serde_json::from_str(&json).map_err(|_| AuthError::Database))
         .transpose()
 }
 
 pub(super) fn validate(payment: &PaymentPayload) -> Result<i64, AuthError> {
+    if let Some(details) = &payment.settlement_details {
+        details.validate(&payment.payment_method)?;
+    }
     let amount = as_i64(parse_non_negative_minor(&payment.amount_minor)?)?;
     if amount <= 0
         || amount.to_string() != payment.amount_minor
@@ -243,6 +253,7 @@ fn insert_payment(
             || original.payment_date != payment.payment_date
             || original.payment_type != payment.payment_type
             || original.payment_method != payment.payment_method
+            || original.settlement_details != payment.settlement_details
             || payment.receipt_id.is_some() && payment.receipt_id != original.receipt_id
             || payment.counterparty_type.is_some()
                 && payment.counterparty_type != original.counterparty_type
@@ -252,7 +263,7 @@ fn insert_payment(
             return Err(AuthError::InvalidInput);
         }
     }
-    transaction.execute("INSERT INTO local_procurement_expenditures (id,order_id,project_id,supplier_id,payee_name,currency,amount_minor,payment_date,payment_type,payment_method,payment_handler_id,voucher_reference,notes,status,corrects_expenditure_id,correction_reason,created_by,created_at,counterparty_type,counterparty_snapshot_json,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?18)",params![payment.id.to_string(),payment.order_id.to_string(),project,payment.supplier_id.map(|id|id.to_string()).or(supplier.clone()),payment.payee_name,payment.currency,amount,payment.payment_date,payment.payment_type,payment.payment_method,payment.payment_handler_id.to_string(),payment.voucher_reference,payment.notes,payment.status,payment.corrects_expenditure_id.map(|v|v.to_string()),payment.correction_reason,payment.created_by.to_string(),payment.created_at,payment.counterparty_type.as_deref().unwrap_or(if payment.supplier_id.is_some() || supplier.is_some() { "registered_supplier" } else { "market_casual" }),payment.counterparty_snapshot.as_ref().map(serde_json::to_string).transpose().map_err(|_|AuthError::Database)?.unwrap_or_else(||"{}".into())]).map_err(|_|AuthError::InvalidInput)?;
+    transaction.execute("INSERT INTO local_procurement_expenditures (id,order_id,project_id,supplier_id,payee_name,currency,amount_minor,payment_date,payment_type,payment_method,payment_handler_id,voucher_reference,notes,status,corrects_expenditure_id,correction_reason,created_by,created_at,counterparty_type,counterparty_snapshot_json,updated_at,settlement_details_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?18,?21)",params![payment.id.to_string(),payment.order_id.to_string(),project,payment.supplier_id.map(|id|id.to_string()).or(supplier.clone()),payment.payee_name,payment.currency,amount,payment.payment_date,payment.payment_type,payment.payment_method,payment.payment_handler_id.to_string(),payment.voucher_reference,payment.notes,payment.status,payment.corrects_expenditure_id.map(|v|v.to_string()),payment.correction_reason,payment.created_by.to_string(),payment.created_at,payment.counterparty_type.as_deref().unwrap_or(if payment.supplier_id.is_some() || supplier.is_some() { "registered_supplier" } else { "market_casual" }),payment.counterparty_snapshot.as_ref().map(serde_json::to_string).transpose().map_err(|_|AuthError::Database)?.unwrap_or_else(||"{}".into()),payment.settlement_details.as_ref().map(serde_json::to_string).transpose().map_err(|_|AuthError::InvalidInput)?]).map_err(|_|AuthError::InvalidInput)?;
     persist_payload(transaction, payment)?;
     for attachment in payment.voucher_attachment_ids.as_deref().unwrap_or(&[]) {
         transaction.execute("INSERT OR IGNORE INTO local_procurement_expenditure_vouchers(expenditure_id,attachment_id) VALUES(?1,?2)",params![payment.id.to_string(),attachment.to_string()]).map_err(|_|AuthError::Database)?;
@@ -268,7 +279,7 @@ fn insert_payment(
         },
         payment.correction_reason.as_deref(),
         None,
-        Some(&serde_json::to_string(payment).map_err(|_| AuthError::InvalidInput)?),
+        Some(&audit_payload(payment)?),
         UNIX_EPOCH + Duration::from_secs(payment.created_at as u64),
     )?;
     Ok(true)
@@ -1528,4 +1539,13 @@ mod resolution_tests {
         drop(service);
         std::fs::remove_file(path).unwrap();
     }
+}
+
+pub(super) fn audit_payload(payment: &PaymentPayload) -> Result<String, AuthError> {
+    let mut value = serde_json::to_value(payment).map_err(|_| AuthError::InvalidInput)?;
+    value
+        .as_object_mut()
+        .ok_or(AuthError::InvalidInput)?
+        .remove("settlementDetails");
+    serde_json::to_string(&value).map_err(|_| AuthError::InvalidInput)
 }

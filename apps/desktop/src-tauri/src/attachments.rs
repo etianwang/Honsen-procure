@@ -1167,6 +1167,7 @@ mod tests {
         service
             .record_procurement_expenditure(
                 RecordProcurementExpenditureInput {
+                    settlement_details: None,
                     id: payment_id,
                     order_id: order,
                     payee_name: "Synthetic payee".into(),

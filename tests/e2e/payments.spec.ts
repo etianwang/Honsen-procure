@@ -16,6 +16,7 @@ test('production payment screen records three payments and reverses once with a 
       amountMinor: string
       paymentDate: string
       paymentType: string
+      paymentMethod: string
       status: string
       correctsExpenditureId?: string
     }[] = []
@@ -61,6 +62,8 @@ test('production payment screen records three payments and reverses once with a 
               ])
             }
             if (command === 'record_procurement_expenditure' && args?.input) {
+              if (args.input.paymentMethod !== 'cash')
+                return Promise.reject(new Error('Expected default cash method'))
               records.push({ ...args.input, status: 'recorded' })
               return Promise.resolve()
             }

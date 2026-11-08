@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import {
   exchangeRateSchema,
   categoryRepairRequestSchema,
@@ -286,6 +287,13 @@ export class SyncService {
       )
         return false
       const payment = parsed.data
+      // A new mobile channel cannot be trusted until the authoritative registry ships.
+      // Historical reversals retain their attested snapshot even after channel disablement.
+      if (
+        payment.status === 'recorded' &&
+        payment.settlementDetails?.kind === 'MOBILE_PAYMENT'
+      )
+        return false
       const order = await this.store.getEntityPayload(
         'purchase_order',
         payment.orderId,
@@ -355,7 +363,14 @@ export class SyncService {
             'paymentDate',
             'paymentType',
             'paymentMethod',
-          ].some((key) => original[key] !== event.payload[key])
+            'settlementDetails',
+          ].some(
+            (key) =>
+              !isDeepStrictEqual(
+                original[key] ?? null,
+                event.payload[key] ?? null,
+              ),
+          )
         )
           return false
       }

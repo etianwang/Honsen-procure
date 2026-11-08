@@ -108,6 +108,57 @@ describe.skipIf(!url)('PostgreSQL payment ledger', () => {
       } as Record<string, unknown>,
     }
   }
+
+  it('preserves optional settlement JSON, idempotency and reversal identity in the trusted transaction', async () => {
+    const seed = payment(children[0]!)
+    const original = {
+      ...seed,
+      payload: {
+        ...seed.payload,
+        paymentMethod: 'other',
+        settlementDetails: {
+          kind: 'OTHER',
+          description: 'TEST frozen settlement',
+        },
+      },
+    }
+    const put = (event: typeof original) =>
+      store.pushEvent({ actorId: actor.id, installationId: deviceId, event })
+    expect(await put(original)).toMatchObject({ status: 'accepted' })
+    expect(await put(original)).toMatchObject({ status: 'accepted' })
+    const id = randomUUID()
+    const reversal = {
+      ...original,
+      eventId: randomUUID(),
+      entityId: id,
+      payload: {
+        ...original.payload,
+        id,
+        status: 'reversed',
+        correctsExpenditureId: original.entityId,
+        correctionReason: 'TEST reverse',
+      },
+    }
+    expect(
+      await put({
+        ...reversal,
+        payload: {
+          ...reversal.payload,
+          settlementDetails: { kind: 'OTHER', description: 'tampered' },
+        },
+      }),
+    ).toMatchObject({ status: 'validation_error' })
+    expect(await put({ ...reversal, eventId: randomUUID() })).toMatchObject({
+      status: 'accepted',
+    })
+    const saved = await pool.query(
+      'SELECT payload_json FROM procurement_expenditures WHERE id=$1',
+      [original.entityId],
+    )
+    expect(saved.rows[0]?.payload_json.settlementDetails).toEqual(
+      original.payload.settlementDetails,
+    )
+  })
   it('persists three payments, retries safely, protects immutable rows and serializes duplicate reversals', async () => {
     const first = payment(children[0]!),
       second = payment(children[0]!, '200'),

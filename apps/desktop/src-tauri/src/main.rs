@@ -177,6 +177,7 @@ fn main() {
             commands::get_requisition_detail,
             commands::get_formal_print_document,
             commands::get_internal_export_document,
+            commands::get_procurement_settlement_details,
             commands::withdraw_requisition,
             commands::list_requisition_history,
             commands::list_confirmed_procurement_orders,

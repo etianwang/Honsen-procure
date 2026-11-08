@@ -33,6 +33,7 @@ mod attachments;
 mod expenditures;
 pub mod formal_print;
 mod owner_print_totals;
+mod settlement_details;
 pub mod supplier_history;
 pub use attachments::{AttachmentInput, AttachmentTarget, AttachmentView, ProcurementSyncReport};
 mod seed;
@@ -666,8 +667,10 @@ pub struct ReceiptView {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RecordProcurementExpenditureInput {
+    #[serde(default)]
+    pub settlement_details: Option<settlement_details::SettlementDetails>,
     pub id: Uuid,
     pub order_id: Uuid,
     pub receipt_id: Option<Uuid>,
@@ -4960,10 +4963,19 @@ impl LocalAuthService {
         {
             return Err(AuthError::InvalidInput);
         }
+        if let Some(details) = &input.settlement_details {
+            details.validate(&input.payment_method)?;
+        }
         let actor_id = self.active_session_user_id()?;
         let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
         require_order_write_scope(&transaction, input.order_id, actor_id, now)?;
+        if matches!(
+            input.settlement_details,
+            Some(settlement_details::SettlementDetails::MobilePayment { .. })
+        ) {
+            return Err(AuthError::Forbidden);
+        }
         let (project_id, _country_id, supplier_id, order_currency, mode, parent_id, workflow): (String, String, Option<String>, String, Option<String>, Option<String>, String) = transaction.query_row("SELECT project_id, country_id, supplier_id, currency, procurement_mode, parent_order_id, workflow_status FROM local_purchase_orders WHERE id = ?1 AND deleted_at IS NULL", [input.order_id.to_string()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).map_err(|_| AuthError::Forbidden)?;
         let parent_mode: Option<String> = parent_id
             .as_ref()
@@ -5057,7 +5069,7 @@ impl LocalAuthService {
         }
         let counterparty_snapshot = serde_json::json!({"type":counterparty_type,"supplierId":input.supplier_id.map(|id|id.to_string()).or(supplier_id.clone()),"name":supplier_name}).to_string();
         let created_at = unix_seconds(now);
-        transaction.execute("INSERT INTO local_procurement_expenditures (id, order_id, project_id, supplier_id, payee_name, currency, amount_minor, payment_date, payment_type, payment_method, payment_handler_id, voucher_reference, notes, status, created_by, created_at, receipt_id, counterparty_type, counterparty_snapshot_json, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'recorded', ?18, ?14, ?15, ?16, ?17, ?14)", params![input.id.to_string(), input.order_id.to_string(), project_id, input.supplier_id.map(|id|id.to_string()).or(supplier_id.clone()), input.payee_name, input.currency, amount, input.payment_date, input.payment_type, input.payment_method, input.payment_handler_id.unwrap_or(actor_id).to_string(), input.voucher_reference, input.notes, created_at, input.receipt_id.map(|id| id.to_string()), counterparty_type, counterparty_snapshot, actor_id.to_string()]).map_err(|_| AuthError::InvalidInput)?;
+        transaction.execute("INSERT INTO local_procurement_expenditures (id, order_id, project_id, supplier_id, payee_name, currency, amount_minor, payment_date, payment_type, payment_method, payment_handler_id, voucher_reference, notes, status, created_by, created_at, receipt_id, counterparty_type, counterparty_snapshot_json, updated_at, settlement_details_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'recorded', ?18, ?14, ?15, ?16, ?17, ?14, ?19)", params![input.id.to_string(), input.order_id.to_string(), project_id, input.supplier_id.map(|id|id.to_string()).or(supplier_id.clone()), input.payee_name, input.currency, amount, input.payment_date, input.payment_type, input.payment_method, input.payment_handler_id.unwrap_or(actor_id).to_string(), input.voucher_reference, input.notes, created_at, input.receipt_id.map(|id| id.to_string()), counterparty_type, counterparty_snapshot, actor_id.to_string(), input.settlement_details.as_ref().map(serde_json::to_string).transpose().map_err(|_|AuthError::InvalidInput)?]).map_err(|_| AuthError::InvalidInput)?;
         for attachment_id in &input.voucher_attachment_ids {
             transaction.execute("INSERT INTO local_procurement_expenditure_vouchers(expenditure_id,attachment_id) VALUES (?1,?2)", params![input.id.to_string(),attachment_id.to_string()]).map_err(|_| AuthError::Database)?;
         }
@@ -5084,7 +5096,7 @@ impl LocalAuthService {
             "payment_recorded",
             None,
             None,
-            Some(&payload),
+            Some(&expenditures::audit_payload(&payment)?),
             now,
         )?;
         transaction.commit().map_err(|_| AuthError::Database)?;
@@ -5103,6 +5115,28 @@ impl LocalAuthService {
             voucher_reference: input.voucher_reference,
             notes: input.notes,
         })
+    }
+
+    /// Sensitive settlement details are never included in ordinary execution views.
+    pub fn get_procurement_settlement_details(
+        &self,
+        expenditure_id: Uuid,
+        now: SystemTime,
+    ) -> Result<Option<settlement_details::SettlementDetails>, AuthError> {
+        if !self.require_order_mutation(now)? {
+            return Err(AuthError::Forbidden);
+        }
+        let payment = expenditures::read_payment(
+            &*self.connection.lock().map_err(|_| AuthError::Database)?,
+            expenditure_id,
+        )?
+        .ok_or(AuthError::InvalidInput)?;
+        self.require_active_scope_for_order(payment.order_id, now)?;
+        let actor = self.active_session_user_id()?;
+        let mut connection = self.connection.lock().map_err(|_| AuthError::Database)?;
+        let tx = connection.transaction().map_err(|_| AuthError::Database)?;
+        require_order_write_scope(&tx, payment.order_id, actor, now)?;
+        Ok(payment.settlement_details)
     }
 
     pub fn reverse_procurement_expenditure(
@@ -7529,6 +7563,14 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn get_procurement_settlement_details(
+        auth: State<'_, LocalAuthService>,
+        expenditure_id: Uuid,
+    ) -> Result<Option<super::settlement_details::SettlementDetails>, CommandError> {
+        auth.get_procurement_settlement_details(expenditure_id, SystemTime::now())
+            .map_err(Into::into)
+    }
+    #[tauri::command]
     pub fn get_internal_export_document(
         auth: State<'_, LocalAuthService>,
         order_id: Uuid,
@@ -8716,6 +8758,10 @@ fn migrate(connection: &mut Connection) -> Result<(), AuthError> {
         (
             "0064_supplier_notes",
             include_str!("../migrations/0064_supplier_notes.sql"),
+        ),
+        (
+            "0065_payment_settlement_details",
+            include_str!("../migrations/0065_payment_settlement_details.sql"),
         ),
     ] {
         let checksum = format!("{:x}", Sha256::digest(migration.1.as_bytes()));
@@ -20762,6 +20808,7 @@ mod tests {
         let first = service
             .record_procurement_expenditure(
                 RecordProcurementExpenditureInput {
+                    settlement_details: Some(settlement_details::SettlementDetails::Cash {}),
                     id: Uuid::new_v4(),
                     order_id,
                     payment_type: "other".into(),
@@ -20782,9 +20829,25 @@ mod tests {
             )
             .unwrap();
         assert!(first.voucher_warning);
+        assert_eq!(
+            service
+                .get_procurement_settlement_details(first.id, now)
+                .unwrap(),
+            Some(settlement_details::SettlementDetails::Cash {})
+        );
         let second = service
             .record_procurement_expenditure(
                 RecordProcurementExpenditureInput {
+                    settlement_details: Some(settlement_details::SettlementDetails::BankTransfer {
+                        recipient_type: "company".into(),
+                        bank_channel: "IBAN".into(),
+                        bank_name: None,
+                        account_holder: None,
+                        account_reference: None,
+                        iban: Some("FR7630006000011234567890189".into()),
+                        swift_bic: None,
+                        transaction_reference: "TEST-REFERENCE".into(),
+                    }),
                     id: Uuid::new_v4(),
                     order_id,
                     payment_type: "other".into(),
@@ -20796,7 +20859,7 @@ mod tests {
                     currency: "XOF".into(),
                     amount_minor: "800".into(),
                     payment_date: "2026-10-15".into(),
-                    payment_method: "mobile_payment".into(),
+                    payment_method: "bank_transfer".into(),
                     payment_handler_id: Some(purchaser.id),
                     notes: Some("balance".into()),
                     voucher_attachment_ids: vec![],
@@ -20813,6 +20876,41 @@ mod tests {
         ).unwrap();
         assert_eq!(counts, (2, 2, 0));
         drop(connection);
+        let original_details = service
+            .get_procurement_settlement_details(second.id, now)
+            .unwrap();
+        assert!(
+            matches!(&original_details, Some(settlement_details::SettlementDetails::BankTransfer { iban: Some(value), .. }) if value == "FR7630006000011234567890189")
+        );
+        let wire = serde_json::to_value(original_details.as_ref().unwrap()).unwrap();
+        assert!(wire.get("bankName").is_none());
+        assert!(wire.get("accountReference").is_none());
+        assert!(wire.get("swiftBic").is_none());
+        let reversal = service
+            .reverse_procurement_expenditure(
+                ReverseProcurementExpenditureInput {
+                    id: Uuid::new_v4(),
+                    expenditure_id: second.id,
+                    reason: "TEST settlement reversal".into(),
+                },
+                now,
+            )
+            .unwrap();
+        assert_eq!(
+            service
+                .get_procurement_settlement_details(reversal.id, now)
+                .unwrap(),
+            original_details
+        );
+        assert_eq!(
+            service
+                .get_procurement_settlement_details(second.id, now)
+                .unwrap(),
+            original_details
+        );
+        let audit: String=service.connection.lock().unwrap().query_row("SELECT next_json FROM local_order_audit_entries WHERE action='payment_recorded' AND json_extract(next_json,'$.id')=?1",[second.id.to_string()],|r|r.get(0)).unwrap();
+        assert!(!audit.contains("FR763"));
+
         service.connection.lock().unwrap().execute(
             "UPDATE local_purchase_orders SET procurement_mode = 'owner_self_purchase' WHERE id = ?1",
             [order_id.to_string()],
@@ -20820,6 +20918,7 @@ mod tests {
         assert_eq!(
             service.record_procurement_expenditure(
                 RecordProcurementExpenditureInput {
+                    settlement_details: None,
                     id: Uuid::new_v4(),
                     order_id,
                     payment_type: "other".into(),
@@ -20831,7 +20930,7 @@ mod tests {
                     currency: "XOF".into(),
                     amount_minor: "1".into(),
                     payment_date: "2026-10-15".into(),
-                    payment_method: "cash".into(),
+                    payment_method: "bank_transfer".into(),
                     payment_handler_id: Some(purchaser.id),
                     notes: None,
                     voucher_attachment_ids: vec![],
@@ -20866,7 +20965,7 @@ mod tests {
         ] {
             let mut service = LocalAuthService::open_in_memory().unwrap();
             let connection = service.connection.get_mut().unwrap();
-            connection.execute_batch("DROP TABLE local_procurement_expenditure_vouchers; DROP TABLE local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version IN ('0032_procurement_expenditures','0033_expenditure_immutability','0045_procurement_expenditures','0056_expenditure_branch_compat');").unwrap();
+            connection.execute_batch("DROP TABLE local_procurement_expenditure_vouchers; DROP TABLE local_procurement_expenditures; DELETE FROM local_schema_migrations WHERE version IN ('0032_procurement_expenditures','0033_expenditure_immutability','0045_procurement_expenditures','0056_expenditure_branch_compat','0065_payment_settlement_details');").unwrap();
             seed_expenditure_migration_order(connection);
             connection.execute_batch(sql).unwrap();
             connection.execute_batch(insert).unwrap();

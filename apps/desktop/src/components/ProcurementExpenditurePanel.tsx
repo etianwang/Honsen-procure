@@ -33,7 +33,7 @@ export function ProcurementExpenditurePanel({
   const [paymentType, setPaymentType] =
     useState<RecordProcurementExpenditureInput['paymentType']>('progress')
   const [paymentMethod, setPaymentMethod] =
-    useState<RecordProcurementExpenditureInput['paymentMethod']>('other')
+    useState<RecordProcurementExpenditureInput['paymentMethod']>('cash')
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [reversalId, setReversalId] = useState<string | null>(null)

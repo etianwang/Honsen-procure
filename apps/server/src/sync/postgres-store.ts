@@ -1096,6 +1096,9 @@ export class PostgresSyncStore implements SyncStore {
         )
         if (
           !parsed.success ||
+          (parsed.success &&
+            parsed.data.status === 'recorded' &&
+            parsed.data.settlementDetails?.kind === 'MOBILE_PAYMENT') ||
           input.event.operation !== 'upsert' ||
           parsed.data.id !== input.event.entityId ||
           parsed.data.createdBy !== input.actorId
@@ -1240,6 +1243,7 @@ export class PostgresSyncStore implements SyncStore {
               'paymentDate',
               'paymentType',
               'paymentMethod',
+              'settlementDetails',
               'receiptId',
               'counterpartyType',
               'counterpartySnapshot',

@@ -138,3 +138,88 @@ describe('payment sync validation', () => {
     expect(await push(service, payload())).toBe('validation_error')
   })
 })
+
+it('rejects settlement mutation in an append-only reversal, accepts exact snapshot', async () => {
+  const { store, order, service } = fixture()
+  const original = {
+    ...payload(),
+    paymentMethod: 'other',
+    settlementDetails: { kind: 'OTHER', description: 'TEST immutable' },
+  }
+  store.getEntityPayload = async (type) =>
+    type === 'purchase_order' ? order : original
+  const reversal = {
+    ...original,
+    id: randomUUID(),
+    status: 'reversed',
+    correctsExpenditureId: original.id,
+    correctionReason: 'TEST reversal',
+  }
+  expect(await push(service, reversal)).toBe('accepted')
+  expect(
+    await push(service, {
+      ...reversal,
+      settlementDetails: { kind: 'OTHER', description: 'tampered' },
+    }),
+  ).toBe('validation_error')
+})
+
+it('fails closed for new unregistered mobile channels while keeping legacy mobile payments valid', async () => {
+  const { service } = fixture()
+  expect(
+    await push(service, { ...payload(), paymentMethod: 'mobile_payment' }),
+  ).toBe('accepted')
+  expect(
+    await push(service, {
+      ...payload(),
+      paymentMethod: 'mobile_payment',
+      settlementDetails: {
+        kind: 'MOBILE_PAYMENT',
+        recipientType: 'individual',
+        transactionReference: 'TEST',
+        channelId: randomUUID(),
+        channelCode: 'CI_WAVE',
+        countryCode: 'CI',
+        channelNameSnapshot: 'TEST candidate',
+        recipientReference: 'TEST',
+      },
+    }),
+  ).toBe('validation_error')
+})
+
+it('allows an exact attested historical mobile reversal despite unavailable registry', async () => {
+  const { store, order, service } = fixture()
+  const original = {
+    ...payload(),
+    paymentMethod: 'mobile_payment',
+    settlementDetails: {
+      kind: 'MOBILE_PAYMENT',
+      recipientType: 'individual',
+      transactionReference: 'TEST',
+      channelId: randomUUID(),
+      channelCode: 'TEST_DISABLED',
+      countryCode: 'CI',
+      channelNameSnapshot: 'TEST historical',
+      recipientReference: 'TEST',
+    },
+  }
+  store.getEntityPayload = async (type) =>
+    type === 'purchase_order' ? order : original
+  const reversal = {
+    ...original,
+    id: randomUUID(),
+    status: 'reversed',
+    correctsExpenditureId: original.id,
+    correctionReason: 'TEST',
+  }
+  expect(await push(service, reversal)).toBe('accepted')
+  expect(
+    await push(service, {
+      ...reversal,
+      settlementDetails: {
+        ...original.settlementDetails,
+        channelCode: 'TAMPER',
+      },
+    }),
+  ).toBe('validation_error')
+})
