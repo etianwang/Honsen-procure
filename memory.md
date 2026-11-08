@@ -1330,3 +1330,6 @@ payment-channel expansion. WARNING driver raster output, new lint warning, stale
 editor status; no history, original3300XOF payment/reversal or formal numbers
 altered. No cloud changes. Selected tracked source/tests/docs form this
 checkpoint; ignored artifacts retained. No PR merge or release publish.
+
+
+Source checkpoint 838fcaf pushed to codex/t12-native-export-20261108; application/test tree clean. Selected T12 remains PARTIAL/BLOCKED for native0.1.21 action-time install approval and the explicitly listed remaining business adapters/configuration. New package hash is unchanged. GitHub connector returned no workflow runs/statuses for this commit; CI is NOT RUN, not PASS. Code Prettier check PASS; only appended documentation was formatted to avoid rewriting pre-existing whole-file formatting debt (whole-file docs check still warns). Changed references/statuses and git diff --check passed. No cloud or historical data change. Ignored output packages/PDFs/screenshots remain local.
