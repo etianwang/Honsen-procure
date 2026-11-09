@@ -242,7 +242,6 @@ Read-onlyguestmetadata independentlyconfirms WDAGUtilityAccount, installed0.1.20
 
 Server-only immutableprintProfilecandidate additionallyrejectsdrop/replace inserviceandunderPGrowlock, semanticJSONequalpermitkeyreordering, historicalabsent+childinheritanceallowed. Focusedservice23PASS; actualdisposablePG16test1PASS (42unrelatedfiltered); fullserver111PASS/144explicitPGoroptinskips withoutDBenv; typecheck/lint/build/format/diffPASS. InitialWSLlifetimeECONNREFUSED andfixtureUUIDcastfailure retainedthenfixed; ownedWSLkeeper/disposableCompose volumes/network/testcredentials cleaned. NoPGmigration/serverdeployment. Deployedoldserver remainswithoutthisnewguard; candidatemustnotbeclaimedcloudPASS. Desktoppackage3af38f0 unaffectedbyserver-onlyguard. Containingcheckpointpartial, noAlpha/T12closure. DEFERREDotherfeaturespaused; currentselectedfiles4server+progressdocs untilcheckpoint, expectedclean afterward.
 
-
 2026-11-08 T12-only0.1.21 candidate: ordered five upstream preflight read from
 .cache/toolbox-preflight current main clone (direct curl failed connection
 reset). Existing release builder produced unsigned
@@ -251,14 +250,12 @@ SHA2561bfd81934f559449b4c3849a916a50333a6d2520c823318c613cd3abb98e6dbf. No
 installer/Runner/manifest/registry/identity/uninstall logic changed. Native
 installation pending fresh confirmation; existing integration holds not closed.
 
-
 2026-11-08 native0.1.21 install/start observed, EXE and manifest version0.1.21.
 Installer copy-failed warning retained; installed Runner hash matches built
 Runner, raw target main EXE hash differs from installed and no equality PASS
 claimed.0.1.22 T12-only output-decoration candidate built, not installed. No
 identity/installer/Runner contract edits; original integration gates remain
 open. Details in V1-REMOTE-ALPHA-ACCEPTANCE.md.
-
 
 2026-11-08 candidate0.1.23 includes approved online-first auth and left-amount
 PDF adjustments. Existing release builder, immutable appId/path/main
@@ -267,14 +264,12 @@ SHA256facf906da4ec18fa98bee929599ba90ab6898fdffd8e19de50f207782ff6236c;
 notinstalled. No new Toolbox acceptance or Release publish. Existing integration
 gaps retained.
 
-
 2026-11-08 follow-up (source 233c500): approved 0.1.23 installed through real
 NSIS and launched. Installed EXE and manifest both 0.1.23. Native startup fetched
 one cloud CAPTCHA; no local challenge in connected state. Authenticated login
 and new PDF output BLOCKED pending mandatory user authentication handoff;
 network/offline/reconnect NOT_RUN. Receipt ONLINE-FIRST-LOGIN-20261108.json.
 T12/T14/Alpha remain OPEN; no cloud/data changes. Toolbox identity unchanged.
-
 
 2026-11-08 0.1.23 bounded French HPA NATIVE_UI_PASS: normal preview, actual PDF
 save and reader reopen; left words/compact fees/clean headers, one A4 page,

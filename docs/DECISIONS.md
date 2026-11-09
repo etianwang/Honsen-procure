@@ -61,7 +61,6 @@ User's final decision supersedes earlier test username测试1: new login usernam
 
 User explicitly rejects a V1 group bank-account management subsystem. Preserve existing payment/reversal/attachment flow; default cash. Reuse bank_transfer for optional per-payment transfer details: recipient personal/company and name, channel SWIFT/IBAN/WesternUnion/UnionPay/other, applicable bank/account/IBAN/BIC/MTCN/recipientidentifier/transactionreference. Channel-dependent validation must not require all fields; payment confirmation remains explicit and audit-bound. Keep immutable append-only corrections, multiple mixed payments per HPA, owner-mode payment prohibition, multilingual UI and purpose-aware masking. No changes to supplier/material/order core identity. This approved scope is not implementation or acceptance evidence. Strict old server payload validation requires an additive compatible server candidate and isolated tests before rollout; no remote deployment authorized. T12 remains required and its current failures are not waived.
 
-
 2026-11-08 USER APPROVED: replace dual CAPTCHA login with online-first single
 cloud CAPTCHA; after bounded8sec HTTPS network failure explicitly offer local
 offline sign-in or reconnect. Offline still requires local CAPTCHA and an

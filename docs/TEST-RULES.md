@@ -101,5 +101,4 @@ Follow-up: user cleared Steam54329 and firewall prerequisites. Full current-cand
 [ ] Database backup and rollback plan documented
 [ ] No credentials in repo or packaged frontend
 
-
 Approved 2026-11-08 online-first login acceptance: exactly one cloud CAPTCHA online, one local CAPTCHA only after explicit offline selection on network unavailability; initial/retry HTTPS authentication attempts timeout after 8 seconds. Verify no automatic fallback for credentials/lockout/retired API/rate-limit/TLS/protocol errors, delayed-response isolation, no duplicate startup request, three UI languages, runtime-only credential retention and unchanged offline enabled/24-hour/lockout checks. DOM fixtures are regression evidence only; actual installed Windows login is a separate gate.
