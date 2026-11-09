@@ -1,6 +1,27 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 const countryA = '00000000-0000-4000-8000-000000000101'
 const countryB = '00000000-0000-4000-8000-000000000102'
+
+async function selectSupplierB105(page: Page, picker: Locator) {
+  const name = 'SYNTH-B-105 · Synthetic supplier B 105'
+  await picker.click()
+  await picker.fill('105')
+  await expect(picker).toHaveAttribute('aria-controls', /.+/)
+  const listId = await picker.getAttribute('aria-controls')
+  const popup = page.locator('.ant-select-dropdown:visible').filter({
+    has: page.locator(`[id="${listId}"]`),
+  })
+  await expect(popup.getByText(name, { exact: true })).toBeVisible()
+  await picker.press('ArrowDown')
+  await picker.press('Enter')
+  await expect(picker).toHaveAttribute('aria-expanded', 'false')
+  await expect(
+    page.locator('.ant-select').filter({ has: picker }).getByText(name, {
+      exact: true,
+    }),
+  ).toBeVisible()
+}
+
 async function boot(page: Page, locale: string, deferred: boolean) {
   await page.addInitScript(
     ({ locale, deferred, countryA, countryB }) => {
@@ -421,15 +442,7 @@ for (const language of languages) {
         name: language.rfq,
         exact: true,
       })
-      await rfq.click()
-      await rfq.fill('105')
-      await expect(
-        page.getByText('SYNTH-B-105 · Synthetic supplier B 105', {
-          exact: true,
-        }),
-      ).toBeVisible()
-      await rfq.press('ArrowDown')
-      await rfq.press('Enter')
+      await selectSupplierB105(page, rfq)
       await page
         .getByLabel(language.number, { exact: true })
         .fill('SYNTH-RFQ-B')
@@ -454,15 +467,7 @@ for (const language of languages) {
         name: 'Demand-B ' + language.supplier,
         exact: true,
       })
-      await allocation.click()
-      await allocation.fill('105')
-      await expect(
-        page
-          .locator('.ant-select-dropdown:visible')
-          .getByText('SYNTH-B-105 · Synthetic supplier B 105', { exact: true }),
-      ).toBeVisible()
-      await allocation.press('ArrowDown')
-      await allocation.press('Enter')
+      await selectSupplierB105(page, allocation)
       await page
         .getByLabel('Demand-B ' + language.child, { exact: true })
         .fill('SYNTH-CHILD-B')
@@ -524,15 +529,7 @@ test('same parent losing country blocks old supplier dispatch while retaining RF
   await boot(page, 'zh', false)
   await page.getByRole('button', { name: 'SYNTH-EXEC-B', exact: true }).click()
   const rfq = page.getByRole('combobox', { name: 'RFQ 供应商', exact: true })
-  await rfq.click()
-  await rfq.fill('105')
-  await expect(
-    page
-      .locator('.ant-select-dropdown:visible')
-      .getByText('SYNTH-B-105 · Synthetic supplier B 105', { exact: true }),
-  ).toBeVisible()
-  await rfq.press('ArrowDown')
-  await rfq.press('Enter')
+  await selectSupplierB105(page, rfq)
   await page
     .getByLabel('询价单编号', { exact: true })
     .fill('SYNTH-RETAINED-RFQ')
@@ -540,15 +537,7 @@ test('same parent losing country blocks old supplier dispatch while retaining RF
     name: 'Demand-B 供应商',
     exact: true,
   })
-  await allocation.click()
-  await allocation.fill('105')
-  await expect(
-    page
-      .locator('.ant-select-dropdown:visible')
-      .getByText('SYNTH-B-105 · Synthetic supplier B 105', { exact: true }),
-  ).toBeVisible()
-  await allocation.press('ArrowDown')
-  await allocation.press('Enter')
+  await selectSupplierB105(page, allocation)
   await page
     .getByLabel('Demand-B 子单编号', { exact: true })
     .fill('SYNTH-RETAINED-CHILD')
