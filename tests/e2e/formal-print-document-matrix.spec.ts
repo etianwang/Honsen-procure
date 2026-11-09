@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { readPdfText } from './pdf-text'
+import { pdfGlyphs, readPdfText } from './pdf-text'
 
 for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
   for (const languagePair of ['zh_fr', 'zh_en'] as const) {
@@ -134,18 +134,18 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
         pageTexts.push(await readPdfText(printed))
       }
       const text = pageTexts.join('\n').replace(/\s+/g, ' ')
-      expect(text.replace(/\s/g, '')).toContain(
-        '深圳市弘盛优创机电工程设计有限公司',
+      const glyphs = pdfGlyphs(text)
+      expect(glyphs).toContain('深圳市弘盛优创机电工程设计有限公司')
+      expect(glyphs).toContain(`TEST-${kind}-${languagePair}`)
+      expect(glyphs).toContain(
+        pdfGlyphs(
+          languagePair === 'zh_fr'
+            ? 'TEST Matériau électrique accentué numéro 64'
+            : 'TEST long electrical material number 64',
+        ),
       )
-      expect(text).toContain(`TEST-${kind}-${languagePair}`)
-      expect(text).toContain(
-        languagePair === 'zh_fr'
-          ? 'TEST Matériau électrique accentué numéro 64'
-          : 'TEST long electrical material number 64',
-      )
-      expect(text).toMatch(/(?:TOTAL TTC|TOTAL)[\s\S]{0,40}6400 XOF/)
-      expect(text).toContain('6400 XOF')
-      expect(text).not.toContain('NaN')
+      expect(glyphs).toMatch(/TOTAL(?:TTC)?[^\d]{0,40}6400XOF/)
+      expect(glyphs).not.toContain('NaN')
       await loadingTask.destroy()
       writeFileSync(
         resolve(output, 'receipt.json'),

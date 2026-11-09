@@ -10,3 +10,9 @@ export async function readPdfText(page: PDFPageProxy): Promise<string> {
     .join('')
     .normalize('NFKC')
 }
+
+// The Linux PDF extractor can also infer spaces inside one run from glyph
+// positions. Compare content tokens independently of those inferred gaps.
+export function pdfGlyphs(text: string): string {
+  return text.replace(/\s/g, '')
+}

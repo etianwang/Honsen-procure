@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { readPdfText } from './pdf-text'
+import { pdfGlyphs, readPdfText } from './pdf-text'
 
 // Generator acceptance only: browser directly mounts the production layout.
 // This fixture does not prove Windows installation, business authorization or native save.
@@ -151,9 +151,9 @@ for (const [li, language] of (['fr', 'zh', 'en'] as const).entries()) {
         const p = await pdf.getPage(i)
         expect(p.view[2]).toBeCloseTo(595, -1)
         expect(p.view[3]).toBeCloseTo(842, -1)
-        const text = (await readPdfText(p)).replace(/\s+/g, ' ')
+        const text = pdfGlyphs(await readPdfText(p))
         expect(
-          text.match(new RegExp(`Page ${i} / ${pages}`, 'g')),
+          text.match(new RegExp(`Page${i}/${pages}(?!\\d)`, 'g')),
         ).toHaveLength(2)
         expect(text).toContain(`TEST-${kind}-${language}-${count}`)
         expect(text).not.toContain('10000000-0000')
