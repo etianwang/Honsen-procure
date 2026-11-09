@@ -160,6 +160,7 @@ describe.skipIf(!url)('PostgreSQL payment ledger', () => {
     )
   })
   it('persists three payments, retries safely, protects immutable rows and serializes duplicate reversals', async () => {
+    const baseline = await service.pull(actor, { cursor: '0', limit: 500 })
     const first = payment(children[0]!),
       second = payment(children[0]!, '200'),
       third = payment(children[1]!, '50')
@@ -230,14 +231,26 @@ describe.skipIf(!url)('PostgreSQL payment ledger', () => {
       (await store.getEntityPayload('purchase_order', children[0]!))
         ?.totalMinor,
     ).toBe('1000')
-    const page = await service.pull(actor, { cursor: '0', limit: 500 })
+    const page = await service.pull(actor, {
+      cursor: baseline.nextCursor,
+      limit: 500,
+    })
+    const acceptedReversal =
+      results[0]?.[0]?.status === 'accepted' ? reversal : duplicate
     expect(
-      page.changes.filter(
-        (c) =>
-          c.entityType === 'procurement_expenditure' &&
-          c.payload.projectId === projectId,
-      ),
-    ).toHaveLength(4)
+      page.changes
+        .filter(
+          (c) =>
+            c.entityType === 'procurement_expenditure' &&
+            c.payload.projectId === projectId,
+        )
+        .map((c) => c.entityId)
+        .sort(),
+    ).toEqual(
+      [first, second, third, acceptedReversal]
+        .map((event) => event.entityId)
+        .sort(),
+    )
     expect(
       (await service.pull(actor, { cursor: page.nextCursor, limit: 500 }))
         .changes,
