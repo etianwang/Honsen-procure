@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { readPdfText } from './pdf-text'
 
 test('only the selected frozen document prints in body flow without hidden shell pages', async ({
   page,
@@ -146,9 +147,7 @@ test('only the selected frozen document prints in body flow without hidden shell
   const printedPage = await parsed.getPage(1)
   expect(printedPage.view[2]).toBeCloseTo(595, 0)
   expect(printedPage.view[3]).toBeCloseTo(842, 0)
-  const printedText = (await printedPage.getTextContent()).items
-    .map((item) => ('str' in item ? item.str : ''))
-    .join(' ')
+  const printedText = (await readPdfText(printedPage)).replace(/\s+/g, ' ')
   expect(printedText).toContain('SYNTHETIC-SPO-A')
   expect(printedText).not.toContain('SYNTHETIC-SPO-B')
   expect(printedText).toContain('Câble synthétique 1')

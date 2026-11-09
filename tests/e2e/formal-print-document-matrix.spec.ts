@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { readPdfText } from './pdf-text'
 
 for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
   for (const languagePair of ['zh_fr', 'zh_en'] as const) {
@@ -130,14 +131,10 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
         const printed = await parsed.getPage(number)
         expect(printed.view[2]).toBeCloseTo(595, 0)
         expect(printed.view[3]).toBeCloseTo(842, 0)
-        pageTexts.push(
-          (await printed.getTextContent()).items
-            .map((item) => ('str' in item ? item.str : ''))
-            .join(' '),
-        )
+        pageTexts.push(await readPdfText(printed))
       }
-      const text = pageTexts.join('\n')
-      expect(text.normalize('NFKC').replace(/\s/g, '')).toContain(
+      const text = pageTexts.join('\n').replace(/\s+/g, ' ')
+      expect(text.replace(/\s/g, '')).toContain(
         '深圳市弘盛优创机电工程设计有限公司',
       )
       expect(text).toContain(`TEST-${kind}-${languagePair}`)
