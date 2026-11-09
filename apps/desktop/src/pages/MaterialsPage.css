@@ -1,0 +1,75 @@
+.materials-search {
+  display: flex;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: var(--honsen-space-1, 4px);
+  min-width: 0;
+}
+
+.materials-toolbar {
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.materials-toolbar .materials-search .search {
+  width: 100%;
+  min-width: 0;
+}
+
+.materials-catalog-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.materials-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.materials-data-table {
+  min-width: 920px;
+  width: 100%;
+}
+
+.materials-data-table th,
+.materials-data-table td {
+  overflow-wrap: anywhere;
+}
+
+.materials-data-table th:first-child {
+  min-width: 150px;
+}
+
+.materials-data-table th:nth-child(4) {
+  min-width: 260px;
+}
+
+.materials-data-table th:last-child {
+  min-width: 190px;
+}
+
+.materials-data-table td:last-child {
+  white-space: normal;
+}
+
+.materials-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--honsen-space-2, 8px);
+  margin-block: var(--honsen-space-3, 12px);
+}
+
+.materials-supplier-table {
+  min-width: 760px;
+}
+
+.materials-supplier-table th:nth-child(2) {
+  min-width: 180px;
+}
+
+.materials-supplier-table th:last-child {
+  min-width: 100px;
+}

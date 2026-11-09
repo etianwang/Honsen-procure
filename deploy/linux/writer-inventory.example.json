@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "host": "REPLACE_WITH_HOSTNAME_FQDN",
+  "apiManager": "systemd:honsen-procure.service",
+  "ingress": "bt-nginx-only",
+  "oldRole": "old_application_login",
+  "newRole": "new_application_login",
+  "administrationFrozen": false,
+  "otherWritersReviewed": false,
+  "otherWriters": []
+}

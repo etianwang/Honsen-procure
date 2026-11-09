@@ -1,0 +1,545 @@
+# V1 remote Alpha native acceptance — 2026-11-08
+
+Current run only; historical local harness evidence does not establish remote acceptance.
+
+| Item                                                    | Result         | Evidence / limit                                                                                                      |
+| ------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Windows install and first launch                        | NATIVE_UI_PASS | NSIS 0.1.18 success screen, installed HonsenProcure.exe window                                                        |
+| admin login                                             | NATIVE_UI_PASS | User completed authentication; desktop shows admin / super administrator and successful pull. UUID continuity NOT_RUN |
+| Zhanghekai creation                                     | BLOCKED        | Native username check returned available; no account submitted                                                        |
+| ceshi1 creation                                         | BLOCKED        | Native username available; name and engineer selected; CI / Bethel2 selected; department list empty                   |
+| Employee login / password change                        | NOT_RUN        | Neither test account created                                                                                          |
+| Project isolation / revocation                          | NOT_RUN        | Missing account prerequisite                                                                                          |
+| Supplier / quotes / procurement / SPO / HPA / receiving | NOT_RUN        | Missing employee accounts and lawful organizational scope                                                             |
+| Independent Windows clients and sync                    | NOT_RUN        | Separate Windows profiles and credential isolation not demonstrated                                                   |
+| PDF / Excel / COS / upgrade / uninstall preservation    | NOT_RUN        | Installation success does not cover these gates                                                                       |
+
+Installer SHA256: f89b74c71b215ac37e0b4547eb7701a2002ebae22865c3b4b7ed8c3a572e296e.
+Installed path: `C:\Program Files\Honsen Program\Honsen Procure\HonsenProcure.exe`.
+Runtime source previously recorded as 248f06c; this run did not rebuild it.
+
+Native observations: account scope reload did not restore departments. Country CI
+and Bethel2 project were selectable (earlier accessibility disabled interpretation
+was corrected). Master data > Departments also displayed no data and exposed a
+maintenance form. No lawful department/team definition was supplied or invented.
+The account page pulls sync then reads local master data; missing remote records
+versus pull/projection omission remains unresolved. No authenticated raw API payload
+was captured, so this is not proof that PostgreSQL contains no departments.
+
+Plugin guidance was read and left unchanged. Project preferences are documented in
+ALPHA-NATIVE-AUTOMATION.md; no plugin configuration loader was modified. No business
+code repair, deployment, migration, seed, admin reset or cloud business write occurred.
+
+BLOCKER: lawful department/team scope unavailable to the installed client.
+DEFERRED: determine remote master-data versus sync cause using authorized evidence;
+complete employee and remaining native gates after that prerequisite is resolved.
+WARNING: native accessibility snapshots can lag rendered state; refresh before claims.
+
+Decision: ALPHA_INTERNAL_TEST_READY is not achieved.
+
+## Authorized organization supplementation (2026-11-08)
+
+User supplied exact approved seed department/team definitions and authorized normal audited maintenance only. Native installed admin UI saved PRJ / 项目部 and PROC / 采购部, then PRJ-CIVIL / 土建施工组 linked to 项目部; PRJ-HVAC / 暖通施工组 submitted. UI reports saved, awaiting sync confirmation; no server acknowledgment payload or independent-client pull evidence collected. Remaining four teams and employee accounts incomplete. No project import, Bootstrap, SQL or deployment. Local save is not remote or dual-client PASS.
+
+## Native continuation after 1ebbee6
+
+Normal UI created PRJ-ELEC, PRJ-PLB, PRJ-FINITION under PRJ. Read-only installed SQLite inspection found exactly PRJ/PROC and five PRJ teams, each version1. All seven outbox upserts have non-null acknowledged_at, null rejected_at and retry_count0. Local create audits identify actor82fe1128-acfa-4155-8937-6daeb5f825fe. This is client acknowledgment/local audit evidence, not direct PostgreSQL/API/server-audit or second-client acceptance. No credentials read. PROC-CFA remains pending business-structure clarification and was not created/granted. Only Administrator Windows profile loaded; no second independently authenticated Windows desktop established. Existing Sandbox accounts are not proof of isolated clients.
+ceshi1 again returned available; formal UI confirmation prepared: 测试1 / engineer / CI / Bethel2办公楼 / PRJ / PRJ-CIVIL / 中文. Submission pending mandatory immediate account-creation confirmation under plugin policy. Password only entered into protected runtime field; no password evidence persisted. Original department-choice blocker resolved in UI; account submission and independent remote/two-client evidence remain BLOCKER. Zhanghekai and employee business gates NOT_RUN. No product source fix or deployment. Untracked release-assets preserved.
+
+## ceshi1 actual creation and remote readback
+
+After explicit immediate approval, submitted installed Windows creation form. UI returned 已创建；首次登录必须改密. Switched to managed accounts and queried ceshi1 through normal authorized flow: enabled, display name测试1, and remote scope CI / Bethel2办公楼 / 项目部 / 土建施工组; UI returned 已读取云端授权范围. Creation NATIVE_UI_PASS; creation summary engineer only. Employee authentication, password change, session invalidation and effective role enforcement remain NOT_RUN. No duplicate creation/admin password reset. Initial click geometry failure recovered by activating window and scrolling; no duplicate HTTP submission inferred. Account UUID not exposed in observed UI. Zhanghekai remains uncreated.
+
+## ceshi1 native employee session (2026-11-08)
+
+User completed employee login and reports initial password changed. Observed installed0.1.18 window: 测试1(ceshi1)/工程师, no first-password prompt. Read-only local_accounts confirms UUID98152e88-1a46-434a-8b0e-5937d8a08a95, roles engineer only, enabled1, requires_password_change0. Login landing NATIVE_UI_PASS (user-assisted); password-change interaction user-reported with resulting cache state verified, not autonomously observed. New-password relogin and old-session rejection NOT_RUN. After sync, Bethel2/项目部/土建施工组 selectable; initial missing-scope banner cleared, no defect inferred. Account-management navigation absent; trusted-boundary denial still NOT_RUN.
+Actual UI opened new requisition REQ-6455fbe7-0916-4ad8-af47-e2e92ff05859 but material selector returned no data. Material library shows0items/read-only engineer guidance; read-only SQLite local_materials count0. No save or submission, no TEST business record created and no user history altered. BLOCKER controlled TEST material/catalog prerequisite; create through administrator/purchaser normal UI before retry. No code repair justified by empty catalog alone. Independent-client/server-persistence/other Alpha gates remain open.
+
+## Zhanghekai prepared through native admin UI
+
+Normal online existence check returned available. Real creation summary: Zhanghekai / 张和凯 / administrator+purchaser only / CI / Bethel2办公楼 / PRJ / PRJ-CIVIL / 中文. No super administrator selected. Protected runtime password entered without evidence output. Final creation remains pending mandatory action-time approval; no account creation PASS yet. No repeat ceshi1 creation or password reset. Current native window preserved at confirmation page.
+
+## Zhanghekai actual creation and authorized readback
+
+Following existing explicit immediate approval and user resume after Escape stop, installed native UI submitted creation and returned 已创建；首次登录必须改密. Managed-account normal remote query then returned enabled Zhanghekai, display张和凯, scope CI/Bethel2办公楼/项目部/土建施工组 and 已读取云端授权范围. Summary administrator+purchaser, no super administrator. Creation NATIVE_UI_PASS. Effective trusted role enforcement, account UUID, employee login/firstchange/relogin and independent-client tests remain NOT_RUN. User authentication handoff pending under plugin rules. No duplicate ceshi1, resets, deployment, SQL writes or product source edits. Geometry/viewport failures recovered by fresh observation and scrolling, not duplicate account creation.
+
+## Native Zhanghekai catalog workflow
+
+Observed installed0.1.18 authenticated张和凯(Zhanghekai), Bethel2/PRJ/PRJ-CIVIL. Read-only local account UUID739a1cec-4106-4aaf-8e0f-15925ea26481 roles administrator+purchaser, requires_password_change0. Login landing observed; password-change interactions/relogin/session invalidation not observed.
+Created via actual GUI suppliers TEST-ALPHA-20261108-A/B (TEST Alpha 合成供应商 A/B), material TEST-ALPHA-20261108-M01 (TEST Alpha 合成验收材料, TEST-MODEL-01, TEST100mm, PCS). Entered synthetic XOF integer quotes A1000/B1200; saved new A1100. Native material table displays A1100/B1200. Read-only SQLite retains A1000 inactive id4b3c6004-d7d4-463b-a1ed-2c6c91726f58, A1100 active6d703735-bf08-4a3a-9820-5dc3529a3069, B1200 activeb1555a75-3c18-44d6-911c-61d3ea55f8c4, all version1. Six catalog outbox events acknowledged, no rejection/retries. NATIVE_UI_PASS for bounded create/quote update; local history retention verified. Direct server read/audit and independent-client pull still unverified; no full sync PASS. No real supplier prices altered. Await employee authentication handoff to verify readonly prices and submit TEST requisition. No product code/schema/deploy changes.
+
+## ceshi1 native TEST requisition submitted
+
+Observed ceshi1 engineer view sees TEST material and A1100/B1200 XOF; only view-all-quotes control, no material/price edit controls or account-management nav. UI-only readonly evidence; trusted rejection not tested. Used real procurement page to choose TEST material, quantity3 PCS at catalogA1100, saved then submitted. UI returned待确认 and disabled line edits. Order UUIDabd2c2c4-a227-49fb-8491-f0cff3382740, display REQ-1b1d727f-202d-424e-8a43-e409f3683fd1, total3300XOF, honsen_self_purchase, workflow_status pending_confirmation, version6. Legacy status remains draft; workflow_status is distinct, no defect inferred. Read-only SQLite line catalog_price_id6d703735-bf08-4a3a-9820-5dc3529a3069 and qty3/unit1100/total3300 verified. All six applicant order events acknowledged/null rejection/retries0, final payload workflow pending_confirmation. NATIVE_UI_PASS for bounded save/submit, client acknowledgment evidence only; server independent read and second-client pull unverified. TEST material identifies synthetic order; no non-test business changed. No source fix/schema/deploy. Await purchaser login handoff for review.
+
+## Native Zhanghekai approval, formal HPA and partial receipt
+
+Continued same authenticated purchaser session without another identity switch. Existing TEST request approved through actual confirm-order control; native audit adds审批已确认. Formal HPA issued through native button: CI-BETHEL2-20261107-HPA-4NM1JMPR-1, execution status采购执行中, audit正式单据已签发. This Honsen-self-purchase path is not SPO/supplier split acceptance. Through execution page registered1PCS of3; native status收货中 and cumulative1/pending2. Bounded approval/HPA issuance/partial receipt NATIVE_UI_PASS; immutable snapshot challenge, duplicate receipt, direct PostgreSQL and independent-client proof still NOT_RUN. Observed order date2026-11-07 although client date2026-11-08; retained as WARNING pending timezone/date verification, no silent source repair. Synthetic payment entry prepared TEST payee/1000XOF, not submitted; immediate financial-action confirmation pending. No real payment executed. UI geometry/out-of-bounds issues recovered by refreshed observations and scrolling; source unchanged.
+
+## Native TEST payment and remaining receipt
+
+After immediate user approval, registered1000XOF TEST simulated payment via real GUI. UI cumulative1000, unpaid2300, original entry retained with reversal button and missing-voucher notice. Payment is Staging ledger only, no bank transfer. Registered remaining2PCS through native receipt form. UI已完成 and receipt controls removed; read-only local order workflow completed version10, formal number unchanged. Latest procurement_expenditure, both receipt events and relevant order events acknowledged/no rejection/retries. Payment registration and remaining receipt bounded NATIVE_UI_PASS; duplicate-request rejection and receipt-sum independent check not yet proven. Reversal pending immediate approval; not submitted. Server direct read/independent clients/PDF/COS remain NOT_RUN. No source/schema/deploy changes; client default business dates remain Nov7 warning.
+
+## Native TEST reversal and actual export failures
+
+After explicit immediate approval, native reversal dialog reason TEST Alpha验收 was submitted. UI retains original+1000XOF and separate-1000XOF, paid0/unpaid3300. Latest procurement_expenditure outbox acknowledged/null rejection. Bounded reversal NATIVE_UI_PASS, no bank transaction. Clicked native Excel export: FAIL explicit 导出失败，未下载部分结果. Formal HPA preview: FAIL 无法预览：请检查授权、正式签发状态及冻结文档翻译. No PDF generated, no Excel PASS. Read-only SQLite confirms language_pair zh_fr with material frozen nameFr/null and nameEn/null. Source248 history-excel calls get_formal_print_document for issued records, so both failures may share translation prerequisite; exact runtime error not exposed, root cause remains candidate until independently rechecked. Do not rewrite formal snapshot. Missing translations in synthetic fixture are retained evidence, not proof of authorization defect. Original source/tools unchanged. DEFERRED valid multilingual fixture and fresh order, export diagnosis, PDF/COS/SPO/independentWindows gates.
+
+## T12 local repair candidate — 2026-11-08
+
+Worktree H:/Honsen/Honsen-Procure-t12, branch codex/t12-native-export-20261108, based on runtimefdf908a (248 runtime) with this historical Alpha report preserved fromc7654b4. All native evidence above remains exact old installed0.1.18; it is not transferred to this changed candidate.
+Implemented trusted internal-export projection using the same historical authorization, formal identity and frozen redacted amounts as formal print; only missing translated labels may remain null and receive explicit missingtranslation cells in internal XLSX. Formal print stays strict. Preissue HPA/OPA/SPO rejects missingrequired frozen names before allocating numbers/outbox; structured missing_document_translation returned. Existing historical snapshots untouched. OPA recursive frozen-owner-total export found during independent review and repaired with dedicated redaction/amount regression. New navy A4 template, separate HPA/SPO/OPA bilingual headings and bundled licensed NotoSansSC font are candidate changes, not accepted design.
+Evidence: desktop32PASS; focusedExcel8PASS; typecheck/lint/build/format/diffchecksPASS (3existing lint warnings and bundle-size warning). Excel Chromium2DOM downloads and real exceljs reopensPASS using isolated output; these are synthetic browser samples, NOT native Windows acceptance. Earlier shared-output cancellation and ENOENT failures preserved. Print French/English2DOMPASS; pagination FAIL root y=-94 instead0 after three repair attempts, screenshot/trace retained test-results/formal-print-pagination-on-eeb5c--without-hidden-shell-pages-chromium. No testassertion weakened. Windows release EXE compilation passed before final OPA review correction; superseded build, no final native claim. Rust final results and containing checkpoint recorded in memory.
+BLOCKER current T12 acceptance: unresolved pagination after3repairs, full native install/save/reopen/print evidence absent. Original historical HPA remains strictly blocked by missing frozen French name; no fake translation/cashreversal/renumbering. SPO/OPA native printNOTRUN. Company-logo/header config and HPA payment/receipt projections absent from current frozenprint contract; not invented. Exact large-money Excel values remain text to avoid precision loss; numericcelltype requirement still open. Parent/draft print, embedded-font PDF structure, physicalA4, PDF text extraction, paymentreceipt print fields, config freezing and real file persistence remain NOTRUN, no T12closure.
+DEFERRED approved lightweight transfer expansion: existing cash/bank_transfer/mobile_payment/other schema, UI defaultsother. No transferdata code or migration implemented in this selected T12 slice. Server strict unknownfield validation prevents shipping newdetailpayloads to unchanged Staging; separate compatible servercandidate needed, no deployment permitted. WARNING dependency audit4 vulnerabilities, no automaticdependencychanges; source package-lock unchanged. Toolbox contract/identity/Runner untouched, original integration gates remain open.
+
+Final candidate Rust recheck186PASS0FAIL7originalignored; final Windows release EXE buildPASS after OPA correction, SHA256 532930c5a7e402cc254a50da86c22b8da91a3d74f5991f88b9f978fc499e29c4. It is an uninstalled local binary, not a release/installed acceptance. No final installer run. Browser synthetic missingtranslation XLSX sample .cache/t12-evidence/historical-missing-translation-browser.xlsx SHA25697a8dbae58c75b56bc4697bec339240feca22ac52d44d977a3652ca22f5bc0c3, reopened by exceljs; not native business export. All Rust logs relocated .cache/t12-evidence. T12 stillBLOCKED.
+
+# 2026-11-08 independent T12 review and payment compatibility checkpoint
+
+This entry supersedes the earlier pagination blocker only for browser-generated PDF evidence. It does not close native Windows acceptance or T12.
+
+- Independent review reproduced `rect.top = -94` with `window.scrollY = 94`: the old assertion compared viewport coordinates with print-page coordinates. The actual one-page PDF was intact. The corrected regression asserts document coordinates and reads the generated PDF, rather than changing historical business data or making a fourth speculative layout repair.
+- Seven focused print regressions pass: single-page isolation plus HPA/SPO/OPA × Chinese/French and Chinese/English, with 64 long material rows. PDF.js reopens actual files and checks A4 pages, formal number, final row, translation, and 6,400 XOF total. Rendered first/last HPA pages were inspected; a genuine gray page-background defect was fixed with print-only white backgrounds. Repeated table headers, totals and page numbers remain visible.
+- Example browser-generated synthetic artifact: `.cache/t12-print-matrix/HPA-zh_fr/document.pdf`, SHA256 `59317605e9d72434f4d01a4da92f60b3f5d2c6d4795a5308d95477f0f92e0efc`. This is not an installed-app export, Windows printer result, or staging historical HPA PDF. Existing historical HPA still fails strict T12 translation requirements, as approved.
+- Payment candidate adds optional strict per-payment settlement details across Shared Contract, Rust, nullable SQLite migration 0065, JSONB sync validation and immutable reversal handling. Existing records remain unchanged; absent details remain absent. Cash is the renderer default. Bank/remittance details are backend candidates only; dynamic entry UI is incomplete. New wallet details fail closed until an authoritative channel registry exists. No provider is silently enabled and no payment gateway is called.
+- Migration regression exposed a real compatibility dependency: migration 0058 reads payments before 0065 creates the new column. Read projection now checks column presence and projects SQL NULL for old schemas. No installed business database was migrated during these tests.
+- Fresh gates: desktop 32 PASS; shared 46 PASS; server expenditure 15 PASS / 5 PostgreSQL SKIPPED (TEST_DATABASE_URL absent); Rust 187 PASS / 7 original ignored; workspace typecheck, lint and production build PASS; focused print 7 PASS; default-cash renderer regression 1 PASS; changed-file Prettier PASS. Existing lint and bundle warnings remain. Opt-in PostgreSQL tests and independent old-server compatibility are not accepted by these results.
+
+| Required acceptance                                        | Actual status                                                                                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| T12 installed HPA/SPO/OPA preview, PDF/Excel and printing  | BLOCKED — browser file checks pass; updated native package not yet installed/tested; parent/company/payment print scope remains incomplete |
+| Expanded payment methods and configurable wallets          | BLOCKED — compatibility layer only; registry, dynamic UI, print projection and native workflows incomplete                                 |
+| Windows actual file save/reopen and Microsoft Print to PDF | BLOCKED — no new native evidence                                                                                                           |
+| Independent Windows SQLite clients and live HTTPS sync     | BLOCKED — no independently authenticated second client established                                                                         |
+
+No cloud deployment, PostgreSQL migration, Bootstrap, admin reset, repeated payment/reversal, or historical snapshot change occurred. ALPHA_INTERNAL_TEST_READY is not reached.
+
+### Local Windows candidate 0.1.19 (not installed or released)
+
+Existing release builder completed x64 NSIS successfully. Installer: H:/Honsen/Honsen-Procure/.cache/alpha-candidate-v1closure-018/release/bundle/nsis/Honsen-Procure-0.1.19-Setup.exe. SHA256 a8c05208770f2d5c4567eaec8341d9121c3a4e031a22bfe536e3524b37a394af. EXE ProductVersion/FileVersion and generated honsen.app.json both0.1.19; appId honsen.procure, executable HonsenProcure.exe and HonsenUpdateRunner.exe unchanged. No manifest/Runner/registry/uninstall contract changes; existing Toolbox acceptance gaps remain open. New package is unsigned and not installed/run/published; Windows native save/print acceptance remains BLOCKED pending mandatory action-time installation approval. No release or cloud deployment. Corrected actual-IBAN regression focused1PASS/full187PASS7originalignored after replacing an inadequate empty-detail assertion; prior inadequate evidence retained in logs. Containing checkpoint is partial, not Alpha acceptance. Transient logs relocated under.cache; no remaining selected dirt expected after checkpoint.
+
+### 2026-11-08 native 0.1.19 upgrade observed
+
+Following explicit action-time approval, computer-use launched the exact approved NSIS installer and completed the real wizard with the existing Program Files directory and Honsen Program shortcut folder. Wizard reported installation successful; checked Run option launched installed HonsenProcure.exe. Installed FileVersion/ProductVersion0.1.19, EXE SHA2562360b72c471fcd317216be94ed764cc7df2fd6615cf5884c817c246167f97a73. Native UI shows normal password/CAPTCHA login, no startup exception observed. Bounded install/launch NATIVE_UI_PASS; business login/export/printing not yet accepted.
+
+Read-only installed SQLite evidence: migration0065 recorded; TEST order abd2c2c4-a227-49fb-8491-f0cff3382740 retains CI-BETHEL2-20261107-HPA-4NM1JMPR-1,3300XOF,completed. Original payment a56d254a-d182-48f1-b200-d052902360a1 remains1000recorded; reversal d738d1b8-62d5-4fb8-a5a9-c187a6b3b5d6 remains1000reversed referencing original (net0 under existing reversal semantics); both new settlement fields NULL. No repeated payment/reversal or business write. This bounded record-retention check is not full upgrade/uninstall or dual-client acceptance.
+
+Checkpoint source e572541 pushed, no runtime source change this continuation. BLOCKER native business export: awaiting user online login under mandatory guidance.md authentication automation prohibition. BLOCKER remaining T12/company/parent/print and paymentregistry/UI/sync remain as recorded. Windows PrintToPDF, native Excel/PDF save/reopen and independentclient tests NOTRUN; cannot infer PASS from earlier browser files. No cloud action, release or uninstall. Pending evidence-only containing commit; no unrelated dirt.
+
+### 2026-11-08 installed 0.1.19 native Excel acceptance (bounded)
+
+After user-assisted online login, native UI confirms Zhanghekai / Bethel2 / PRJ / PRJ-CIVIL and sync status acknowledged with pending0. Real application history Export Excel produced three actual Downloads XLSX files. Chinese file was double-clicked in File Explorer and opened successfully in installed WPS Office; formal number, completed status and3300XOF visible. All three actual native outputs were independently reopened with ExcelJS and checked for formal number CI-BETHEL2-20261107-HPA-4NM1JMPR-1, TEST material,3300 and XOF. Five localized worksheets retained. French output marks [Traduction figée manquante]; English marks [Missing frozen translation]; no fabricated translation or historical snapshot change.
+
+| Native output under .cache/t12-evidence | Bytes | SHA256                                                           |
+| --------------------------------------- | ----- | ---------------------------------------------------------------- |
+| native-019-history-zh.xlsx              | 11241 | a53015c7f8c9dff4b3099f4d5fb7510394114c2500700d20b7dcc86242a4f36d |
+| native-019-history-en.xlsx              | 11144 | e797bebb2358c2d485bed522dd548ac59ec9922fd4d260706fa2a04a6c588711 |
+| native-019-history-fr.xlsx              | 11184 | 51c347fdba6f30801e2d04b49d9955229a878dd957590a0a7b0aa248695116e4 |
+
+Receipt native-019-history-all-receipt.json and target-window screenshots native-019-excel-wps-reopen.jpg/native-019-hpa-strict-preview.jpg are local evidence, not Git financial attachments. NATIVE_UI_PASS applies only to actual history export/save and Chinese WPS reopen; file readback passes all3 languages. Full Excel design acceptance remains incomplete: quantity and raw amounts are strings, not numeric cells; professional company/title/payment fields remain open.
+
+Real historical HPA Preview returns '无法预览：请检查授权、正式签发状态及冻结文档翻译。' Thus formal historical PDF remains BLOCKED under approved strict T12. Read-only local policy allow_self_approval0; no other issued document exists. A new bilingual TEST order requires normal separate applicant/approver workflow before successful formal-native PDF can be tested. Do not change approval policy or signed snapshot. Windows PrintToPDF/SPO/OPA native PDF NOTRUN (no valid issued fixture); independentclient sync BLOCKED (second independently authenticated client not established). T12/payments/Alpha parent gates stay open.
+
+No code/schema change, new order save, payment/reversal, cloud deployment or server modification this continuation. Source e572541; previous installation evidence10cfa00. Documentation-only format/reference/status checks required; no unrelated application suites rerun. BLOCKER: native formal PDF fixture/approval prerequisite and outstanding T12 design/types; DEFERRED: wallet registry/dynamicUI and independentclient workflow. WARNING: navigation generated an unsaved blank requisition form only; no save/submit clicked. Zhanghekai session remains logged in at historical HPA detail. Containing evidence checkpoint to be committed/pushed; expected trackedtree clean.
+
+### 2026-11-08 PDF-only continuation after8e8b8d4 — prerequisites prepared, no PDF accepted
+
+User paused wallets/Excel/non-PDF development. Preserved installed0.1.19 Zhanghekai session (user requested0.1.18, actual approvedupgrade0.1.19 reported explicitly); no downgrade. Independent read-only Agent reran existing seven real-browser-PDF file regressions at8e8b8d4:7PASS, log.cache/t12-pdf-independent-8e8b8d4.log. No fourth speculative pagination repair. T12 BUILD-TASKS193 and SPECS4 retain missingtranslation printblock; historical fallback is not authorized. No repeat attempt on invalid historicalHPA.
+
+Real native material edit saved only TEST-ALPHA-20261108-M01 catalog translations: nameEn TEST Alpha synthetic acceptance material; nameFr TEST Matériau synthétique de réception Alpha. IDadbd4ddb-3542-4cff-a26d-6574bd806ab8 nowversion2. Eventc6629ab8-30f6-4b5c-82e9-c90c5887ac41 base1 acknowledged1794104284, retry0, no rejection. This is local acknowledged-sync evidence, not direct PostgreSQL inspection. Existing quotes1100/1200 unchanged. Historical HPA formalNo CI-BETHEL2-20261107-HPA-4NM1JMPR-1,total3300XOF retains nullnameFr/nameEn; snapshotSHA2560b41d14edd68283f0ee6893c058e2d74a58ae1448ad9f7a8e9b53bfdb3eca342. No directSQLwrite, payment/reversal or oldsnapshotwrite. Receipt.cache/t12-evidence/native-019-catalog-translations.json.
+
+Independent code/config inspection found project printdefaults departmentTitle/companyAddress/companyContact but no companylegalname/logo config or frozen projection. Actual projectdefaults: 项目部/Riviera Golf D30/contactNULL/zh_fr; departmenttitle is not evidence of legalcompanyname. Asked user for approved legalname/logo location; answer pending. No invented company identity or fakeLogo used.
+
+BLOCKER PDF acceptance: no valid issued fixture; selfapprovalpolicy0 and no other issuedorders. User requires retainZhang session. Asked user to choose independentceshi1client normalapplication flow or concentrated authorizedaccountswitch; authentication must be userperformed under mandatory computer-use guidance. Pending answer is not approval. BLOCKER legalheader: approvedname/logo/config projection unresolved. HPA/SPO/multipage nativePDF actualsave/reopen/Windowsprinter remain NOTRUN; no filepaths falsely delivered. No new source/schema changes thisattempt, no clouddeployment/Seed/migration, no approvalpolicychange. DEFERRED wallets/Excel and nonPDF work explicitlypaused. WARNING1280width table actions clipped; recovered via freshstateandvisiblecoordinate, no layoutscope expansion. Originalroot untrackedreleaseassets preserved. Lastcodecheckpoint e572541, evidence8e8b8d4; current containing documentationcheckpoint partial, expectedclean aftercommitpush. Next action dependent on pending businessidentity and normalapprovalpath answers; never closeT12/Alpha parent.
+
+### 2026-11-08 approved frozen company header candidate0.1.20
+
+User approved actual legal issuer 深圳市弘盛优创机电工程设计有限公司 and H:/Honsen/Honsen-Procure/logo.ico, and chose independentceshi1client. OriginalICO retained SHA25631b1c44b46086282eb1b4cd8530f4eedaa380aed32917c66ac538d80e25428c6. Exact embedded256PNG extracted (no visualalteration) to public/print/honsen-approved-logo-v1.png, SHA2560f733cc13c7086deb17668e9e7103e798d006493370f3b66340e9214e7b70751. Versioned config/print-company-profile.json owns the approved issuer; no fabricated legaltranslations/contact.
+
+Newdraft saves optionalprintProfile before approval, in business/outbox transaction; children inherit exact profile; read/Pull retain it and reject drop/change; newlocalmigration0066 nullable/nohistoricalbackfill prevents replacing profile or attaching one to an alreadyissued oldrecord. Formal projection allowlists frozen profile. Renderer verifies exact bundledlogo bytes/hash, awaitsfont/image decoding and renders legalname+logo. Legacyabsentprofile remains absent, stricttranslations unchanged. Rust189PASS/7originalignored; desktop34PASS/typecheck/lint/buildPASS;7actualbrowserPDFcasesPASS with image/text/A4/finalrow/amount assertions. These are candidate checks, notnativePDFacceptance. Existingwarnings remain.
+
+Existingreleasebuilder generated0.1.20 x64NSIS at H:/Honsen/Honsen-Procure/.cache/alpha-candidate-v1closure-018/release/bundle/nsis/Honsen-Procure-0.1.20-Setup.exe, SHA2568ff5f2f93e0a4f7e4a326ac90274d55e03a89aaf33237b4cca9d99789a1237f1. EXEversion0.1.20; notinstalled/published. OrderedToolboxfivepreflight reread; noidentity/registry/Runner/manifest/uninstallcontract changes. Original integrationholds remainopen.
+
+Actual secondWindowsdesktop found: WindowsSandbox283a80d3-ca0e-4799-963f-8d2a9eaa74d5 initiallylauncher reportedonlyoneinstance; connectedexistinginstance via documentedwsbconnect withoutstopping/resettingit. Realdesktopshortcut launchedHonsenProcure tologin. Read-only guestmetadata shows WDAGUtilityAccount / computerF8C74B6B-ACBF-4, installed0.1.13, independentDB C:/Users/WDAGUtilityAccount/AppData/Local/Honsen Program/honsen.procure/honsen.procure.sqlite exists. NoDBcopied, noAPI scripts substituted. HostZhang0.1.19session preserved. Sharedonly taskevidence/installerfolder, no credentials/businessDB. Initialguestloginactionhandedoff thenpaused afterversioncheck toavoidrepeatlogin; no secondloginPASS claimed.
+
+BLOCKERnativePDF: action-time approval pending toinstall0.1.20 onhostandguest, then userauthhandoff required both; noPDFfiles delivered asnativeyet. BLOCKERfullmixedversioncloudguard: olddeployedserver canaccept preformal profiledrop byoldclient; minimalservercandidate tests pending, nodeploymentauthorized. Pairednewclientsnormalpath is separatefromuniversal mixedversionguarantee. DEFERRED wallets/Excel/nonPDFscope paused. Nohistory/order/financialwrites, cloudSQL/Seed/migration/deployment oradminreset. Sourcechanges selectedT12only; eventualcontainingcheckpointpartialuntilnativefiles/printproved.
+
+### 2026-11-08 actual two-end0.1.20 installation and CAPTCHA diagnosis
+
+User reported Sandbox outdatedlanguageUI/noonlineCAPTCHA; read-only confirmed oldguest0.1.13, notcurrentcandidate. Prior loginhandoff beforeversioncheck was premature. User gave explicit immediate two-end0.1.20install/runapproval. Hostinstaller launched; nextobservation found noinstallerwindow, installedEXEversion0.1.20 SHA2563bdd5a003d07b05c31d3ab10e742d10c817ca1f856087dbb27efaa2864b6d553 and nativeZhanghekaiworkbench. Intermediatehostwizard/login steps notobserved; don'tclaimautonomouslogin.
+
+OriginalSandbox283a80d3-ca0e-4799-963f-8d2a9eaa74d5 unexpectedlyterminated0x80370106 (windowsshot.cache/native-sandbox-evidence/sandbox-80370106.jpg); noownedstop/resetissued. Existinginstance thenabsentfromwsblist. StartednewSandbox56444806-304e-4a2d-a0a5-8b9585c99977, connectedrealdesktop, mappedonlytaskevidence/installerfolder. Through actualguestFileExplorer andmouse/keyboard launchedapprovedNSIS, completedwelcome/path/startmenufolder/install/success/Runfinish. FreshnativeappopenednormalLogin withnewlanguageUI. This isfreshSandboxinstallation, notoldguestupgrade/dataretentionPASS. NoSQLitecopy, mock orAPIlogin.
+
+Read-onlyguestmetadata independentlyconfirms WDAGUtilityAccount, installed0.1.20 andEXESHA256 exactlyequalhost. Public HTTPS GET/v1/api/auth/captcha insideguestreturns200 (body/challengeanswer notlogged); receipt.cache/native-sandbox-evidence/client020-health.json. UIonlinechallenge appearsafternormalGetCAPTCHA succeeds, codeLoginPage.refreshCaptcha callsbothlocal/cloud; HTTP200 alone isnotnativechallenge/loginPASS. Login/captchaGUIautomationforbiddenbyplugin, so handedoffonceshi1login nowcorrectversion. HostZhangworkbenchpreserved. BLOCKERnativeHPA/SPO/multipagePDF remains normalapplicantlogin/validfixture; noPDFaccepted yet.
+
+Server-only immutableprintProfilecandidate additionallyrejectsdrop/replace inserviceandunderPGrowlock, semanticJSONequalpermitkeyreordering, historicalabsent+childinheritanceallowed. Focusedservice23PASS; actualdisposablePG16test1PASS (42unrelatedfiltered); fullserver111PASS/144explicitPGoroptinskips withoutDBenv; typecheck/lint/build/format/diffPASS. InitialWSLlifetimeECONNREFUSED andfixtureUUIDcastfailure retainedthenfixed; ownedWSLkeeper/disposableCompose volumes/network/testcredentials cleaned. NoPGmigration/serverdeployment. Deployedoldserver remainswithoutthisnewguard; candidatemustnotbeclaimedcloudPASS. Desktoppackage3af38f0 unaffectedbyserver-onlyguard. Containingcheckpointpartial, noAlpha/T12closure. DEFERREDotherfeaturespaused; currentselectedfiles4server+progressdocs untilcheckpoint, expectedclean afterward.
+
+### 2026-11-08 Sandbox native CAPTCHA failure retained (not resolved by HTTP probe)
+
+User screenshot oncurrent0.1.20 shows realcloudCAPTCHAfailurebanner; localchallengeworks andonlinebuttondisabled. This invalidates any implication that guestPowerShellHTTP200 provesnativeauthworks. No CAPTCHAanswer/passwordread, entered, solved orlogged byagent.
+
+Built publicendpoint-only examples/captcha_transport_probe.rs usingexactreqwest0.13.5features/https_only(true)/20sectimeout andfixed/v1/api/auth/captcha. It writesstage/errors/status andbooleanUUID/question-shapechecks only, neverchallengevalues/body/credentials. Actualsameprobe onhostandindependentguestbothcompletedHTTP200 withvalidId/hasQuestiontrue. Receipts.cache/native-sandbox-evidence/{host,guest}-rust-transport.json have sameSHA256c90f32650217ddef1a6fb9ea8d483c85c1aaffe9dd20a646e980568eee25141a. ThereforecurrentRusttransport/responsepathcanwork, butoriginalUIrequestfailurecause remainsunproven; no guessedTLS/proxyrepair orrootcertchange. WindowsRust verifier includeschain/revocation retrieval, freshcachetiming onlyhypothesis. No verificationdisabled, authbypassed, rate-limitweakened orcloudchange.
+
+Nativeissue_cloud_captcha currentlycollapsesbuild/send/non2xx/decodeerrors toSyncTransport; no phaseevidencefromfailedUIrequestexists. HandedoffsingleuserretryoncurrentloginUI underguidance.md mandatoryauthenticationautomationdeny; pendingreply mayestablishwhetherfailuretransient. Ifstillfails,nextsafeactionaddsanitizedstageinstrumentationbeforeanotherrepair, notdeclarePASS. BLOCKER independentceshi1nativeauth andvalidTESTapproval/PDFremain. HPA/SPO/multipage nativePDF notgenerated. HostZhangsessionpreserved. DEFERRED otherfeaturespaused.
+
+Diagnosticexample releasebuildPASS/cargofmt/diffPASS; productionRust/renderer/Cargo unchanged against3af38f0 (emptydiff), so exactunchangedbusinessboundary reuses189RustPASS/desktop34/browserPDF7 candidateevidence, notnativeacceptance. No extraunrelatedtests needed for standalonepublicGETdiagnostic. Existinginstalled0.1.20EXE unaffected. Lastcheckpointa946422; containingdiagnosticcheckpointpartial, expectedclean aftercommitpush.
+
+### 2026-11-08 unified Print Engine candidate 0.1.21 — PARTIAL, native upgrade pending
+
+Scope A/D: approved T12 French/Chinese/English primary-secondary presentation,
+integer amount words and measured single-page-first A4 engine. Continued task
+branch codex/t12-native-export-20261108 from a2f9edf; origin/main fetched, prior
+work preserved. No database schema, Rust business/API contract, cloud deployment
+or immutable historical snapshot change.
+
+Production FormalPrintPreview now uses one PrintEngine component and
+print-engine.ts policy for HPA/SPO/OPA. Central tokens own A4 margins, reserved
+header/footer, readable fonts, summary ratio, spacing and page policy.
+Font-loaded actual DOM measurements choose standard, whitespace-dense then
+compact 9pt (secondary minimum 8pt), then allocate whole material rows;
+identical calculated pages feed preview and native window.print. Each page
+repeats company/legal identity, type/number, table header where applicable, and
+Page X / Y in both header and footer. Two-column metadata omits internal UUIDs;
+full-width materials, right summary with all eight items including zero stamp
+duty, paired amount words and horizontal signatures remain together. Logo
+remains checksum-verified approved asset. No screenshot-to-PDF generator
+introduced.
+
+Print selection stays inside frozen zh_fr or zh_en; selected language and
+document are captured together for print. CI-/CM- immutable formal-number
+prefixes default zh_fr presentation to French; other zh_fr documents preserve
+Chinese default, zh_en English. This is a presentation default, NOT a persisted
+project language setting or mutation of old snapshots. The old deployed
+server/clients reject extra profile fields, so no incompatible primaryLanguage
+field was pushed.
+
+Independent amount module uses BigInt signed-i64 minor units: XOF/BCEAO and
+XAF/BEAC zero decimals; CNY/USD/EUR/approved ETB two decimals. Chinese financial
+words, French hyphenation/plurals/de at exact millions and English words tested
+with zero, negatives, cents, grouping gaps and limits. XLSX keeps existing
+sheets/values and appends issuer, primary language and all three amount-word
+columns to formal terms, with real XLSX write/read regression. Existing native
+Excel evidence is not re-labelled for changed export.
+
+Evidence/root causes retained: previous top=-94 was viewport scroll, not PDF
+page loss (historical independent review). Initial new-engine tests counted
+eight summary rows as material rows: narrowed selector preserves exact
+64-material assertion. Hidden print portal initially measured zero: now screen
+measurement is offscreen visible layout, while actual print is normal body flow.
+Inline variables initially prevented compact measurement matching output:
+removed. Five-row tests exposed about 5px overflow; measured compact summary
+whitespace reduced without shrinking below readable limits. Independent review
+caught capacity including top padding and live-language race; both fixed and
+rechecked. Font loading explicitly requested before metrics. Skia embeds
+searchable Type3 glyph programs with CharProcs/ToUnicode for this font; tests
+accept those or FontFile embedded programs, and still require text/font
+operators. No claim that FontFile is always present.
+
+Validation: desktop Unit 71 PASS; strict Typecheck PASS; Lint exit0 with
+existing warnings plus PrintEngine set-state-in-effect warning; Vite production
+Build PASS. Generator matrix 18 PASS (1/5/10/20/50 rows, three primary modes,
+five currencies, maximum EUR signed-i64), plus original seven PDF/file/lifecycle
+cases PASS. Initial combined run 25 PASS/3 label-locator failures retained;
+three updated visual-contract tests and print lifecycle rerun 4 PASS. Assertions
+retain material/amount/security checks, scope exact repeated number and new
+hierarchical headings. Full 18 matrix repeated after final density change PASS
+in combined run. Independent source recheck found no further confirmed defect;
+five-row French XAF PDF rendered with Poppler and visually inspected. These are
+GENERATOR PASS, not NATIVE_UI_PASS. Exact files/hashes/pages:
+reviews/evidence/T12-PRINT-ENGINE-20261108.json. No unrelated
+Rust/server/migration suites rerun: unchanged against a2f9edf, release Rust
+compilation performed; no new cloud acceptance inferred.
+
+Actual prior 0.1.20 native workflow completed: independent Sandbox ceshi1
+created REQ-57b87743-ef4c-442c-b8ee-a4435d57658e, Push; host Zhanghekai
+Pull/approval/formal HPA issue CI-BETHEL2-20261108-HPA-4NM1JMPR-2 total1100XOF.
+Guest home freshly reads executing/pending0, preserving separate SQLite;
+screenshot .cache/native-pdf-020/ceshi1-independent-approved-pull.png. This
+bounds two-way independent-client propagation, not
+restart/offline/revocation/full-sync acceptance. Editor retained stale pending
+status until navigation; nonblocking stale-view finding, not sync-data failure.
+
+Native0.1.20 HPA preview/save/searchable-file read/reopen observed:
+.cache/native-pdf-020/TEST-HPA-CI-BETHEL2-20261108-2-searchable.pdf, 369485
+bytes, SHA256 afb8e6ef9af238ec951628dd9a7b7c79ebee289a8d2b84324ac129c464e42dfa,
+A4 one page, legal issuer, bilingual material, formal number and1100XOF.
+Separate PDF reader actual window opened/reviewed; bounded screenshot
+HPA-reader-open.png. Earlier browser-URL confidence tool stop retained,
+recovered only in a later user turn. Microsoft Print to PDF driver file is a
+full-page raster (SHA
+ecef4ffc73208b7ee6157effed9818df45489ca3da4eee948952ae1568c51597): FAIL
+searchable requirement. Built-in Save as PDF succeeds; do not conflate outputs.
+This old template does NOT pass the new layout specification.
+
+Existing Windows release builder produced0.1.21 at
+H:/Honsen/Honsen-Procure/.cache/alpha-candidate-v1closure-018/release/bundle/nsis/Honsen-Procure-0.1.21-Setup.exe,
+SHA2561bfd81934f559449b4c3849a916a50333a6d2520c823318c613cd3abb98e6dbf,
+unsigned. Not installed yet: action-time computer-use installation confirmation
+is required. Ordered upstream Toolbox preflight read from current clone after
+curl reset; existing integration gaps remain, no
+appId/EXE/manifest/Runner/registry/uninstall contract change.
+
+BLOCKER for completing requested T12: native0.1.21 upgrade/save/reopen/Windows
+print and native SPO/OPA/multipage files; REQ parent dedicated trusted adapter;
+HPA payment/reversal/receiving modules; persisted project print-language
+configuration. Existing formal projector lacks those business modules, so engine
+does not invent data. Full Alpha gates remain OPEN. BLOCKER legacy old HPA
+missing frozen translation still strict. DEFERRED explicitly paused
+payment-channel expansion. WARNING driver raster output, new lint warning, stale
+editor status; no history, original3300XOF payment/reversal or formal numbers
+altered. No cloud changes. Selected tracked source/tests/docs form this
+checkpoint; ignored artifacts retained. No PR merge or release publish.
+
+Source checkpoint 838fcaf pushed to codex/t12-native-export-20261108; application/test tree clean. Selected T12 remains PARTIAL/BLOCKED for native0.1.21 action-time install approval and the explicitly listed remaining business adapters/configuration. New package hash is unchanged. GitHub connector returned no workflow runs/statuses for this commit; CI is NOT RUN, not PASS. Code Prettier check PASS; only appended documentation was formatted to avoid rewriting pre-existing whole-file formatting debt (whole-file docs check still warns). Changed references/statuses and git diff --check passed. No cloud or historical data change. Ignored output packages/PDFs/screenshots remain local.
+
+### 2026-11-08 native0.1.21 HPA files and browser decoration defect
+
+User action-time approved0.1.21 install/run. Installer launched through
+computer-use; initial snapshot recovery used stale lexical binding (old app
+owner), corrected with fresh returned-window binding. First valid view was
+installation-complete, so intermediate wizard actions are not claimed
+agent-observed. Finish/Run was operated normally. Read-only installed
+EXE/manifest versions0.1.21; appId/path unchanged. Installer details included
+"copy failed": retained WARNING, installed Runner
+SHA9f6a0b302fb42a2de3378ba73b9d4b27846616a5bfbaf4faf781f5312e2835f7 matches
+candidate Runner. Installed main EXE
+SHAa17f3deef47bb0f9453376a8ba22dba47f7421a576a5ce385376bbafa41c9867; raw target
+EXE hash differs, so no exact raw-target binary-equality PASS claimed.
+Installation version/startup is observed; full installer/update gates remain
+open.
+
+User completed Zhanghekai online login under mandatory authentication handoff.
+No agent password/CAPTCHA input or saved authentication screenshot. Existing
+old3300XOF and new1100XOF records still visible after upgrade; this bounds data
+retention to those records, not system-reboot/uninstall acceptance. Sandbox
+ceshi1 retained independently, no account switching/reset.
+
+Actual native0.1.21 HPA-fr preview -> built-in Save as PDF -> actual409077-byte
+searchable A4 one-page file .cache/native-pdf-021/TEST-HPA-021-fr.pdf,
+SHA256a1c3a5e567691be32dfff910270741dae420fc3f23edb29e01c8efa3b7d7a30e. Download
+flyout mouse ownership rejected as msedgewebview2; normal Ctrl+J/Tab to observed
+file/Enter successfully opened separate native WebView2 PDF reader. Reader
+screenshot .cache/native-pdf-021/HPA-fr-reader.png inspected: hierarchy, real
+text, full-width table, summary, words, signatures. This is observed native
+reopen, not generator inference. Explorer WPS association attempt did not
+establish reopen and is not PASS.
+
+Actual selector changed to Chinese primary inside frozen zh_fr pair; native save
+produced438254-byte .cache/native-pdf-021/TEST-HPA-021-zh.pdf,
+SHA256074b1f117f2e24ad0249337f2238f0cc1b1a0c5514da1803c98612d4348c033c. PDFJS
+file read confirms same frozen number
+CI-BETHEL2-20261108-HPA-4NM1JMPR-2,1100XOF, Chinese 西非法郎壹仟壹佰整 / French
+mille-cent francs CFA BCEAO, all8fees inclzero, Page1/1twice and no internal
+projectUUID. Both native files searchable/embedded font programs, actual A4.
+Chinese reader reopen NOT_RUN; English/SPO/OPA/multipage native NOT_RUN, no
+invented language fallback.
+
+Full formal-layout result remains FAIL at0.1.21: WebView2 default print adds
+timestamp/desktop/tauri.localhost and its own1/1 outside our header/footer. Its
+native print UI exposes A4/100%/background only, no header/footer checkbox.
+Independent controlled real-PDF comparison
+.cache/header-margin-review/{baseline,empty,none,brand}.pdf + results.json
+proves six @page margin boxes content:'' suppress default decorations;
+content:none does not. Prior0.1.20 margin-box headings also suppressed them.
+Minimal production fix only adds six empty page-margin boxes; existing body
+header/footer and all business values unchanged. Not a new pagination algorithm
+or snapshot edit.
+
+Focused matrix18PASS now forces displayHeaderFooter:true and verifies no browser
+host/title metadata while preserving both PageX/Y counters, fonts, all
+rows,8summaryitems,A4. Unit71PASS;
+Format/Lint(exit0existingwarnings)/Typecheck/ViteBuildPASS. Existing
+Rust/API/schema unchanged; no unrelated suites repeated. Exact native receipts:
+reviews/evidence/T12-NATIVE-021-20261108.json. Generator artifacts in
+.cache/print-engine-layout were regenerated for this new boundary; earlier
+receipt hashes remain historical and must not be reused as current file hashes.
+
+Windows0.1.22 candidate built via unchanged release builder:
+H:/Honsen/Honsen-Procure/.cache/alpha-candidate-v1closure-018/release/bundle/nsis/Honsen-Procure-0.1.22-Setup.exe
+SHA25616e5dd44305e93983c1ea19fa6a4a2bf4a0b65ea31fa4d7bf7be65a275f84a0f,
+unsigned/not installed. Fresh action-time installation approval required by
+confirmations.md;0.1.21 approval cannot be transferred. BLOCKER: native
+fixed-decoration recheck and outstanding nativeSPO/OPA/multipage; parentREQ
+adapter, HPA settlement modules, persisted project-language config remain open.
+DEFERRED payment-channel scope remains paused. WARNING installer copy message
+and raw-built/installed main-exe hash difference retained; do not silently
+repair installer/Runner. No cloud/server/migration/order/payment/reversal
+mutation this continuation. T12/Alpha gates remain open. Last code
+checkpoint838fcaf, prior evidencea8924be; containing minimal fix checkpoint to
+be committed/pushed, expected tracked tree clean afterward.
+
+### 2026-11-08 user-approved left amount words and balanced settlement
+
+Continued from2410121. User approved0.1.22 installation, then before it was
+launched requested amount words on left and shorter/balanced summary; old0.1.22
+was intentionally not installed. Production Settlement now places notes+paired
+words left and complete8-item summary right. Central summary width52%, standard
+vertical cellpadding0.55mm and lineheight1.2; fonts/minimum8pt, zeros, frozen
+total/number/snapshot and immutable financial records unchanged. Uses existing
+measured engine, so the whole settlement/signatures pagination remains shared.
+
+Targeted matrix18PASS with actual PDF readback, three languages/five
+currencies/1/5/10/20/50 rows/maxwords, new geometric assertions words left of
+summary and no duplicate right word block, browser decoration suppression.
+Unit71PASS; Format/Lint(exit0existingwarnings)/Typecheck/ViteBuildPASS. Actual
+generated .cache/print-engine-layout/HPA-fr-XOF-1-false.pdf rendered through
+Poppler to .cache/print-engine-balanced-preview.png and visually inspected: left
+words, allzero fees, balanced columns, nooverlap; GENERATOR_ONLY. Native new
+arrangement NOT_RUN; no new candidate package built/installed in this bounded
+continuation. Existing0.1.21 native files remain exact prior evidence, not
+reused as this layout PASS.
+
+Latest user asked for a login-flow proposal first. Read actual
+LoginPage.refreshCaptcha creates local then cloud challenge; Rust online_login
+consumes local before posting cloud challenge. Therefore removing one visible
+input requires trusted Rust flow change, not hiding a field. No login/auth code,
+PRD/security rules or server changed. Proposed (UNAPPROVED): online-first one
+cloud CAPTCHA; transport failure asks offline vs retry; offline only cached
+enabled <=24h account with local CAPTCHA; known auth failure/lock/disable never
+triggers offline fallback. Existing mandatory local-CAPTCHA-every-launch rule
+needs explicit narrow approved revision before implementation. Keep fresh retry
+available, no password persistence. Login proposal does not waive T12 gates.
+
+BLOCKER: updated native layout and clean browser-decoration check plus remaining
+T12 document adapters/modules/config. DEFERRED: login implementation pending
+user's proposal review, payment expansion stillpaused. WARNING: existing lint
+warnings and prior installer warnings retained. No
+cloud/deployment/migration/order/payment writes. Lastsource2410121; this
+selected PDF layout checkpoint is partial, expected clean tracked tree after
+commit/push. No further native actions until matching candidate is built and
+action-time approved.
+
+### 2026-11-08 approved online-first single-CAPTCHA login candidate0.1.23
+
+User explicitly approved the proposed login flow. Selected bounded T03/T13
+authentication UX change (D), continuing6fb2da1 on
+codex/t12-native-export-20261108; origin/main fetched, clean starting tree.
+Previous ordered Toolbox preflight reused for unchanged
+identity/installer/Runner contract; no contract edits. T12 left-word
+layout6fb2da1 remains included, not redeveloped. User-approved0.1.22 was not
+launched because subsequent layout/auth steering superseded that candidate.
+
+Production LoginPage automatically requests cloud CAPTCHA once (StrictMode
+deferred microtask avoids duplicate startup request). Shows one cloud
+challenge/input and online submit only. Only Rust network_unavailable offers
+explicit Use offline / Retry. Offline selection generates one local CAPTCHA,
+makes no cloud challenge request, and retains username/password only in
+component memory. Reconnect resets only challenge/answer; generation counters
+ignore obsolete completions. Successful login clears password state and hands
+session/mode to existing App. Known online auth, lockout, API retirement,
+rate-limit, storage/protocol errors never offer offline fallback in that mounted
+login; original error survives a failed challenge refresh. Explicit retry
+remains available. Chinese/English/French strings supplied; language switch
+preserves entered values.
+
+Trusted Rust online_login and its Tauri request require
+username/password/cloudCaptchaId/cloudCaptchaAnswer only. Removed local
+challenge generation/consume from online test helper/callers; server POST body
+remains exactly existing cloud contract, no server change. Auth GET/POST
+have8-second request timeout; normal sync remains20sec. New sanitized codes
+network_unavailable (timeout/recognized connectivity/DNS/5xx),
+auth_retry_later(429), auth_protocol_error(unknown/TLS/protocol/non2xx/decode).
+Existing401/423 denied and410upgrade behavior retained. No TLS validation
+disabled. DNS matching is narrow known resolver source text, unrecognized
+transport fails closed. Offline production
+verifier/CAPTCHA/lockout/enabled-cache/24-hour policy unchanged. Cloud
+unsuccessful HTTP/JSON cannot activate cached login. No plaintext
+passwords/tokens added to source, files or logs.
+
+User approval updates normative
+AGENTS/PRD/SPECS/SECURITY/DECISIONS/ARCHITECTURE/TEST-RULES to exactly one
+mode-appropriate CAPTCHA. This is approved policy change, not hiding or
+bypassing the old local guard. Existing public registration/device-credential
+prohibition, role/project boundaries, first-change handling, vault and cloud
+session rules retained. No migrations/schema/data/cloud deployment, admin reset,
+financial or historical order writes.
+
+Validation: desktopUnit71PASS; strictTypecheck/ViteBuild/Prettier code
+checksPASS; Lint exit0 retains prior warnings plus cancellation-counter-ref
+cleanup warning. Rust full192PASS/7originalignored, cargo fmtPASS, cargo
+clippy--all-targets exit0existingwarnings and main-bincheckPASS. First Rust
+run190PASS/1fixture expectationfailure/7ignored retained, unrelated offline
+InvalidCredentials assertion restored; final192PASS. Relevant DOM fixture suite
+initial92PASS/1stale410disabled-button expectation failure (newUI omits submit
+entirely); stronger no-submit/no-offline+retry assertion fixed, focused
+api-upgrade2PASS. Thus all93 distinct relevant test cases covered by
+initial+focused rerun; no claim single93-clean run. Additional10direct
+login/localization casesPASS including exactly one startup request, no local
+online fields, explicit offline, expired-cache error, retry/credential retention
+and known-denial fallback prevention. Ten existing business test files changed
+only login setup, core business assertions retained. DOM mocks are not native
+acceptance. Independent read-only Rust/UI security rechecks found no new
+confirmed defect within changed boundary.
+
+Native real online login,8-second elapsed network failure,
+offline-switch/reconnect and installed regression for0.1.23 NOT_RUN. No
+old0.1.21 or simulated result transferred as newnativePASS. Build
+candidate0.1.23 succeeded at
+H:/Honsen/Honsen-Procure/.cache/alpha-candidate-v1closure-018/release/bundle/nsis/Honsen-Procure-0.1.23-Setup.exe,
+SHA256facf906da4ec18fa98bee929599ba90ab6898fdffd8e19de50f207782ff6236c,
+unsigned/notinstalled. Fresh action-time install/run confirmation required by
+computer-use confirmations.md, and user authentication handoff remains
+mandatory; no plugin changes/bypass.
+
+BLOCKER for selected flow final acceptance: installed native
+login/mode/error/reconnect proof after approved install. BLOCKER original T12
+gates remain
+nativeleft-layout/cleanheader/SPO/OPA/multipage/parentREQ/paymentmodules/projectlanguage,
+not closed by login work. DEFERRED paymentscopepaused. WARNING existing Rust/TS
+lint warnings, whole-file historical Markdown formatting debt and original
+installer warnings retained. Changed source/docs formatted where edited and
+references/status/diff checked without unrelated mass-formatting. Containing
+source checkpoint to be committed/pushed, tracked tree expected clean; ignored
+build/evidence logs retained. No PR merge/release/cloud action.
+
+### 2026-11-08 — Native 0.1.23 installation checkpoint (source 233c500)
+
+User action-time approval received for the exact package. Real NSIS welcome,
+existing directory, Start Menu, running-app close prompt, success and Run/Finish
+were observed and operated. Installed EXE FileVersion/ProductVersion and
+honsen.app.json all read 0.1.23. Native app automatically obtained a cloud
+CAPTCHA; read-only UI showed exactly one cloud challenge and online login,
+with no local challenge in connected state. This proves startup/UI only.
+No credentials or authentication screenshots saved. No cloud deployment,
+migration or historical/financial mutation.
+
+BLOCKER: authenticated login and native PDF save/reopen await user login under
+computer-use guidance.md mandatory authentication-dialog prohibition.
+NOT_RUN: native network failure/offline/reconnect, balanced PDF and clean header.
+DEFERRED: paused payment extension. WARNING: existing lint/Markdown debt and
+historical installer warning retained; no such warning observed in this install.
+T12/T14/Alpha remain OPEN. Evidence-only JSON/reference/status/diff checks;
+unchanged application suites not rerun. Task branch checkpoint, no merge/release.
+
+### 2026-11-08 — 0.1.23 French HPA native output accepted
+
+After user authentication handoff, real workspace showed Zhanghekai and
+acknowledged synchronization with zero pending events. Used normal history,
+existing valid TEST HPA preview, native Save as PDF/file dialog, and download
+card keyboard navigation to reopen the saved file in the actual PDF reader.
+NATIVE_UI_PASS for this bounded French-primary HPA flow, left amount words,
+compact right fees and clean browser decorations. No business writes performed.
+
+File: H:/Honsen/Honsen-Procure-t12/.cache/native-pdf-023/TEST-HPA-023-fr.pdf
+SHA256: ebd5b7a6f97dd6e32e764ae97f0603475aa1b050c19646b4f4ab22ae748d46ce
+390099 bytes, one A4 page 594.95996 x 841.91998 pt. Formal number
+CI-BETHEL2-20261108-HPA-4NM1JMPR-2, quantity 1 PCS, total 1100 XOF,
+mille-cent francs CFA BCEAO / 西非法郎壹仟壹佰整. All eight fees including
+zero amounts, header/footer Page 1 / 1, no internal UUID/browser URL/date header.
+Words x=48.41 pt, right summary x=294.08 pt. PDFJS readback and full-page
+Poppler rendering independently checked; real reader screenshot retained.
+Initial raw CJK string check failed because extracted compatibility radicals
+were separated by font runs; NFKC/whitespace canonicalization confirmed the
+unchanged text. Initial PDFJS cleanup used wrong destroy object, corrected to
+loadingTask.destroy; no PDF alteration or business-rule change.
+
+Receipt: docs/reviews/evidence/T12-NATIVE-023-20261108.json. Source 233c500;
+this evidence checkpoint contains documentation only. JSON formatting and
+git diff --check pass; unchanged application suites not rerun.
+BLOCKER for full T12 remains other native language/type/multipage gates,
+REQ/payment modules and project language setting. Native network/offline retry,
+physical printing and full dual-client lifecycle NOT_RUN in this checkpoint.
+DEFERRED payment extensions remain paused. WARNING historical lint/format debt.
+T12/T14/Alpha remain OPEN, no ALPHA_INTERNAL_TEST_READY claim. No cloud,
+migration, financial, frozen snapshot or formal number mutation. Task branch
+checkpoint committed/pushed; tracked tree clean after commit.

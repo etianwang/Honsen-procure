@@ -1,0 +1,73 @@
+{
+  "base": "dbfe03b",
+  "candidateSha256": "87F48F731C582EE774AF9D8DE3EF9529C0ADA8F731555619F895B10ECA37F510",
+  "candidatePath": ".cache/ui-native-build-batch1/debug/HonsenProcure.exe",
+  "browser": "BROWSER_PASS (affected rechecks)",
+  "unit": "UNIT_PASS",
+  "build": "BUILD_PASS",
+  "native": "BLOCKED_NATIVE_CONTROL",
+  "checks": [
+    "Initial full browser suite: 334 passed, 21 failed",
+    "Recovery set: 64/68 passed, then 23/23 supplier recheck and 1/1 execution recheck",
+    "Desktop strict typecheck, lint and 76 unit tests passed",
+    "Rust formatting and locked library tests: 196 passed, 7 ignored"
+  ],
+  "sourceHashes": [
+    {
+      "path": "apps/desktop/src-tauri/Cargo.toml",
+      "sha256": "438C6F51FD3DFA566E877A4C8B54E656768A8BD97CB197BEF62CDDDA9B1E9C09"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/catalog_maintenance_tests.rs",
+      "sha256": "A93BAE803C76C755813BE5BDFB3ACF06B2ACC3BAA274AE848ED83655B42339CD"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/lib.rs",
+      "sha256": "02A9325D3517E0CE053BCF5ADB03342C773FA72C8CF0647A98D46B7ABA69DCBE"
+    },
+    {
+      "path": "apps/desktop/src/components/AppShell.tsx",
+      "sha256": "9A23F8613217650BB243A58744175BD815B6ADBB78291AD5419B38C4BF68A49C"
+    },
+    {
+      "path": "apps/desktop/src/components/AuthorizationContextSelect.tsx",
+      "sha256": "91B80335386519E4838C6F20889F8DEB2F115AD09438E6A7AE4E64CE5AD70F63"
+    },
+    {
+      "path": "apps/desktop/src/components/CatalogMaintenanceFields.tsx",
+      "sha256": "B3A46751A5F70E6A35BB9CE5B8D08226EF95DCB665B87EA03928AFFC083A5A43"
+    },
+    {
+      "path": "apps/desktop/src/components/MasterDataManager.tsx",
+      "sha256": "38EF3B0D3DCFF5E1B89359182A4409E16F3D4F19CA8E2ABA7EDDD77026933EEC"
+    },
+    {
+      "path": "apps/desktop/src/components/ReceiptPanel.tsx",
+      "sha256": "13EF1DB8B8C52EA7A614FD9F9A1E5A9278A6FF92C55EC359FB6D30BBB78A11C0"
+    },
+    {
+      "path": "apps/desktop/src/components/ReferenceDataTable.tsx",
+      "sha256": "92992AE4AA43A620744880D5F8D4890B0FDFF482198B1DCDF9B6D7AE134761B4"
+    },
+    {
+      "path": "apps/desktop/src/components/SupplierChildTermsPanel.tsx",
+      "sha256": "A8C8C9042A52186F854001FA8D01CE2E6ACECF5F676E24FFB7FD97E71093E73D"
+    },
+    {
+      "path": "apps/desktop/src/lib/receipt-messages.ts",
+      "sha256": "825D0F197E2BFF5C877984C6871BA3F98BD191D78C4EF5B772E56479C0F2E4F2"
+    },
+    {
+      "path": "apps/desktop/src/lib/supplier-workflow-messages.ts",
+      "sha256": "3816E822029A33F8BB083E2BE3E0283448C80872EDF32D63C73A94DFA07421F9"
+    },
+    {
+      "path": "apps/desktop/src/pages/ProcurementExecutionPage.tsx",
+      "sha256": "BDC450A4080DA55A131547B0A8B8426367377B9D4094E96D0501738EA9E9C1C4"
+    },
+    {
+      "path": "apps/desktop/src/pages/SuppliersPricesPage.tsx",
+      "sha256": "935C2BB1E35FED7C79F74AD200B1B9246D8F69BCBFDA10D71239C0D68CD187DC"
+    }
+  ]
+}

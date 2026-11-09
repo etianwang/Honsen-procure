@@ -1,0 +1,106 @@
+{
+  "negativeChecks": {
+    "version": "0.1.6",
+    "scope": "installed Runner negative checks only",
+    "completedUtc": "2026-11-04T08:11:55.8099919Z",
+    "results": [
+      {
+        "exitCode": 1,
+        "case": "hash",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "ca5819b4-5d06-4a26-9580-15717f3f7578",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.6",
+          "step": "hash-validation",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "installer checksum does not match",
+          "completedAtUtc": "2026-11-04T08:11:55Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      },
+      {
+        "exitCode": 1,
+        "case": "target",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "5594de59-ca4c-4d8f-ab46-13a08a71c62e",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.6",
+          "step": "identity-validation",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "registered target directory does not match",
+          "completedAtUtc": "2026-11-04T08:11:55Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      },
+      {
+        "exitCode": 1,
+        "case": "pid",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "f6742dd9-ff67-4893-9196-4c9821311128",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.6",
+          "step": "wait-process",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "the registered application did not exit",
+          "completedAtUtc": "2026-11-04T08:11:55Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      }
+    ],
+    "runResult": "PASS",
+    "installerSha256": "C0B5D756A76656BBF393CC6301EFE147873DFECAAA996FD4F03E362491AED639",
+    "failureMessage": null
+  },
+  "summary": {
+    "sourceSha": "100011d41383bac4a7533c388572b4ac65bb97ee",
+    "version": "0.1.6",
+    "installerSha256": "C0B5D756A76656BBF393CC6301EFE147873DFECAAA996FD4F03E362491AED639",
+    "installedFiles": {
+      "honsen.app.json": "9722FE4FC7C9CF8327CF05544258D3F123418BC654E15F37378A86EBD944656C",
+      "HonsenProcure.exe": "31ED016A264D046B427CE692ED33F70CB325206E91BBA8C21F1C1D89F76B7A34",
+      "HonsenUpdateRunner.exe": "5C494F36999D5949DD47339A9EFEF15AAE86AC36A2741D0DBD3B699497A2984C"
+    },
+    "sqliteHash": "920641BD096D5F14E710B3B2F35F3A68E36270E3FBFBC78EB99E889D2C194526",
+    "markerHash": "DC75FE2F8AF26630844E041D39FC8E013D461148567EFC53F4B331BC1A869AF3",
+    "completedUtc": "2026-11-04T08:11:55.8767236Z",
+    "markerPreserved": true,
+    "status": "PASS",
+    "os": "Microsoft Windows NT 10.0.26100.0",
+    "previousVersion": "0.1.5",
+    "sqlitePreserved": true,
+    "scope": "real Runner apply single-directory upgrade and synthetic-file preservation, no authenticated business/Toolbox caller acceptance",
+    "installDirectoryPreserved": true,
+    "previousInstallerSha256": "3FF34D19FC9DEFEB45141A39961639BD9108C440D5C97E226ACB3AF1B38D940C"
+  },
+  "apply": {
+    "appId": "honsen.procure",
+    "operationId": "b01990b5-6cb7-4e3e-bf1d-6bfeaed63346",
+    "status": "success",
+    "source": "toolbox",
+    "fromVersion": "0.1.5",
+    "toVersion": "0.1.6",
+    "step": null,
+    "installerExitCode": 0,
+    "installerLogPath": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Temp\\honsen-procure-b01990b5-6cb7-4e3e-bf1d-6bfeaed63346.log",
+    "message": "更新完成",
+    "completedAtUtc": "2026-11-04T08:11:54Z",
+    "installLocation": "C:\\Honsen Upgrade Synthetic\\Honsen Procure",
+    "executablePath": "C:\\Honsen Upgrade Synthetic\\Honsen Procure\\HonsenProcure.exe"
+  },
+  "bootstrapSha256": "8fdb017238f7d8b7d1493d8f130a81650e32a75a066bc459cbd4512925a9d011"
+}

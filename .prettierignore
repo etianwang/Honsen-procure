@@ -9,3 +9,7 @@ apps/desktop/package-lock.json
 apps/desktop/src-tauri/gen/
 package-lock.json
 **/*.ico
+
+/.cache/
+/.honsen-native-qa/
+/cos.txt

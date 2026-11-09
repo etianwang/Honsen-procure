@@ -1,0 +1,17 @@
+# Runner replacement P1 — integrated implementation and actual acceptance
+
+Status: **implementation complete; scoped defect repairs PASS; full P1/update acceptance OPEN**. User approved RUNNER-REPLACEMENT-P1-PLAN-20261104.md A+B and isolated acceptance. Tested final production source **05e84ccf78761a3c187d04fc59886f55e62ee5f3**, local package0.1.12, pushed. This report and any later evidence-only commit are not a replacement source SHA.
+
+Actual comprehensive record: [WINDOWS-CANDIDATE-012-20261104.md](WINDOWS-CANDIDATE-012-20261104.md) and adjacent safe JSON. Source3c2ceac/011 retains its partial replacement PASS and actual cleanup FAIL in WINDOWS-CANDIDATE-011-20261104.md/json. Historical90/010 false success remains FAIL.
+
+Implemented: unique final external Runner payload, guarded same-directory UUID rename without releasing synchronous parents, CREATE_NEW publication and complete bytes/PE check before registration, held new-file guard to Finish, exact private owner receipts and guarded cleanup. Newworker checks fixed Runner path/reparse/actual PE version before success/restart; strict3/4-part numeric comparison fixes1.0.0 equivalence. Actual installed011 cleanup exposed a stale NSIS error flag; two ClearErrors before enumeration fix it, independently reproduced RED→GREEN and rechecked in actual012 repair.
+
+PASS at final012: old019 real publicapply replacement/exact payload, new012 same-version cleanup, actual file-sharing refusal/failed result/no restart, explicit released-lock retry, actual uninstall retaining data/unknown records. Wrong-PE newworker refusal was actually executed on unchanged3c2ceac/011 worker code and reused only after an empty owning-code diff, not mislabeled as012 execution. All synthetic SQLite/marker hashes and original upgrade directory were retained.
+
+BLOCKED_ENV: fresh012 installation rejected twice by automatic approval review, reason only blocked by policy; neither command ran and no alternative mechanism retried it. Read-only final state proved retained files and absent new directory. Strict live three-layer launch/qualified stable asset and interactive UAC-cancel tests also remain unperformed with explicit environment requirements. Existing helper/fakehost tests cannot close them.
+
+Checks: targeted Rust12PASS, full library144PASS/7opt-in ignored, CLI4PASS, fmt/Clippy exit0 with warnings; actual file compare8cases, lifecycle pin guard, mapped image, strict owner/reparse/sentinel and actual rename/copy failure probes. No new comparator/Rust change after3c2ceac; final05e84cc actual package build passed with exact source inputs. Details and safe raw paths remain in INSTALLER/WORKER reports and012 record. Known credential comparison15 artifact/frontend/log files found0 matches; staged evidence receives a separate scan before commit.
+
+No public protocol/identity, old installation-directory contract, build script/Tauri configuration, dependency, data/schema/business/outbox/COS mutation or automatic rollback. Original directory P1 evidence reused only for its unchanged boundary. Guest stopped, no active Sandbox. No main modification, PR merge, Release or production deployment.
+
+BLOCKER: the explicit fresh/live-chain/UAC gates above; full P1 and parentT15 stay unchecked. DEFERRED: unapproved cross-repository Toolbox scope3 and original V1 security/recovery/export/language gates. WARNING: chunk elapsed checks are not IO cancellation; retained compiler/style warnings. Independent final QA readiness remains **NO**.

@@ -1,0 +1,164 @@
+{
+  "date": "2026-11-09",
+  "sourceHead": "5c22d4a",
+  "sourceDirty": true,
+  "nativeObservedSha256": "EF118687409CDFA2A858C6BA1D2C92F61FEC1B961DB1CC8E724CAB6E36ED93C0",
+  "rebuiltAwaitingRecheckSha256": "81CBEE9DD8A6DD2DE0E09738EBE0CE835DB49C7E2388FEBD29907C60F8FF7D4C",
+  "profile": "isolated debug test",
+  "username": "purchaser",
+  "observed": [
+    "native title TEST PROFILE and target/debug executable verified",
+    "unit required labels and initially disabled submit",
+    "saved synthetic UX-UNIT-20261109 through real GUI",
+    "saved row visible; pending sync 1; no synced claim",
+    "duplicate code rejected with values retained",
+    "English switch retained route/data/draft",
+    "Escape closes dialog"
+  ],
+  "failures": [
+    "duplicate rejection message generic: fixed in source, new native recheck pending",
+    "dialog submit lacked primary style: fixed in source, new native recheck pending"
+  ],
+  "notRun": [
+    "other three dictionary native workflows",
+    "French native dialogs",
+    "resolution and DPI matrix",
+    "relaunch persistence readback"
+  ],
+  "screenshots": [
+    "unit-saved-zh.png",
+    "unit-rejected-before-final.png",
+    "unit-dialog-en-before-final.png"
+  ],
+  "acceptance": "PARTIAL; no complete-page FUNCTIONAL_PASS/UX_PASS",
+  "nativeContinuation": {
+    "observedSha256": "81CBEE9DD8A6DD2DE0E09738EBE0CE835DB49C7E2388FEBD29907C60F8FF7D4C",
+    "observed": [
+      "existing valid purchaser session; no automated authentication",
+      "unit prior record visible after relaunch",
+      "duplicate code field-specific message and disabled save observed",
+      "green primary submit observed; second unit saved",
+      "French department saved",
+      "French team saved with explicit UX department association",
+      "category create correctly rejected by Rust for purchaser; source visibility mismatch repaired afterward",
+      "actual window resized from 1282x832 to 1282x720"
+    ],
+    "readOnlySQLite": [
+      "two UX units, one department, one linked team, zero UX categories",
+      "four pending outbox events: unit2 department1 team1"
+    ],
+    "nativeLimitations": [
+      "current source has later independent changes not present in observed EXE",
+      "category positive admin test BLOCKED_AUTH_INTERACTION",
+      "1366/1920 native and DPI matrix NOT_RUN",
+      "financial submit requires action-time confirmation and is not attempted unattended"
+    ]
+  },
+  "implementationBuild": {
+    "path": ".cache/ui-native-build-batch1/debug/HonsenProcure.exe",
+    "sha256": "70A9AA5B4736F20F732D4F3DEAC9F264AEA3799483A3D989343F3DA1CC7CE13B",
+    "sourceFiles": [
+      {
+        "path": "apps/desktop/package.json",
+        "sha256": "D81881399B1227CFC5FCD729C5FF8769EC49E94A94D679DF23071395A8A1BD84"
+      },
+      {
+        "path": "apps/desktop/src-tauri/src/catalog_maintenance_tests.rs",
+        "sha256": "82B0817C53AFB004437E968223FC8C3E8E2CA64E5E5C6EC08900E3A0A9986C37"
+      },
+      {
+        "path": "apps/desktop/src-tauri/src/lib.rs",
+        "sha256": "699FB31EB85E6BFDA345FDF5543109FA60EA54BBD88A63BA2DA2E80BDDA8576E"
+      },
+      {
+        "path": "apps/desktop/src-tauri/src/main.rs",
+        "sha256": "4F786F9CA6CBB7D847E033B057F8E1ABAB7E4BC25B9F281EBC338DCC908DC2C2"
+      },
+      {
+        "path": "apps/desktop/src/App.tsx",
+        "sha256": "76FAF5D20ACA2F05E4F2FA79D14FB19249F202AD42950CF157ACF3B7131EF7AC"
+      },
+      {
+        "path": "apps/desktop/src/components/AppShell.tsx",
+        "sha256": "364C847979015C3FD803EEE8AE263F3AA3B04F96672F5505D3F80A4C5BF02E96"
+      },
+      {
+        "path": "apps/desktop/src/components/AppShellToolbar.css",
+        "sha256": "CB8099A9F4AE73C12AB7A1616690E3A3E811BF2B49C9F405F9CDE5B768832551"
+      },
+      {
+        "path": "apps/desktop/src/components/ExchangeRateEditor.tsx",
+        "sha256": "59FD81DC47ED41DF293BC91BB342BFD4D27F868D83E740AEAE143BD5686F7ECE"
+      },
+      {
+        "path": "apps/desktop/src/components/FormField.css",
+        "sha256": "831CD1931BED28A7EFDBA333012A8E82AD53642610D829C5A5D8D9155C4320F7"
+      },
+      {
+        "path": "apps/desktop/src/components/FormField.tsx",
+        "sha256": "E46CAC2C47419F9920C9E71844518BF6D3C41C601BEA9EE6C3F97205EA1E86DE"
+      },
+      {
+        "path": "apps/desktop/src/components/MasterDataManager.tsx",
+        "sha256": "14E96ED3A936F58B8705D9510B9EAA759881759D64CE299931EA5F833893BE26"
+      },
+      {
+        "path": "apps/desktop/src/components/MaterialPicker.tsx",
+        "sha256": "8959E990654EBB948D65D9D19306E7AFF2AA8DFF04C76AA8ABCEE063B237EC82"
+      },
+      {
+        "path": "apps/desktop/src/components/ProcurementExpenditurePanel.tsx",
+        "sha256": "CECC53F6D0C82E68704F5BF2CF100CB4C1DE3E4DDA4661D2687D3E0BF6343608"
+      },
+      {
+        "path": "apps/desktop/src/components/ReceiptPanel.tsx",
+        "sha256": "368990BED4FB5EE05EF5C7082EC1BF52D91FDB0F5A4505E781D660A6EF4B1930"
+      },
+      {
+        "path": "apps/desktop/src/components/RequisitionHistoryPanel.tsx",
+        "sha256": "C83D7B861D92A0395DB1A948BBBEE844EF86677693681F14193FF694E8824E60"
+      },
+      {
+        "path": "apps/desktop/src/components/RfqPanel.tsx",
+        "sha256": "BEDB7895184ADAF17FB65904F7023B05FE766091FB01B33DE24CE69483464885"
+      },
+      {
+        "path": "apps/desktop/src/components/SyncStatusDetails.tsx",
+        "sha256": "A5D90ECC8B9CC843BE6A2489599DC146CDB33981374BA9EDD977B78B9DD0D79E"
+      },
+      {
+        "path": "apps/desktop/src/components/TaxTemplateEditor.tsx",
+        "sha256": "45BFE0CCC0E42BA7458569077E51EB86E543BB6A336C28887F41CA56679FFA7D"
+      },
+      {
+        "path": "apps/desktop/src/lib/catalog-api.ts",
+        "sha256": "48DFD63003A50CB9917E015D5A5D2D70FFBB62E89BB334D2E3AB7864C827F95E"
+      },
+      {
+        "path": "apps/desktop/src/lib/master-data-messages.ts",
+        "sha256": "6694D2E3F199A339FB4B5E18EE0C67F3DB212BE4DD4DBD1F94E42200EAD52EE2"
+      },
+      {
+        "path": "apps/desktop/src/pages/HomePage.tsx",
+        "sha256": "CCBD4B74268CA2CCBA36977938B1CB9CF0424FE6F5648C8BFE2B28E8B2724EB7"
+      },
+      {
+        "path": "apps/desktop/src/pages/MasterDataFixturePage.tsx",
+        "sha256": "5DABAFA37D1CA9ADB6E0B775C4D440076BF37A423FB81AF73B1F6218E630DEE1"
+      },
+      {
+        "path": "apps/desktop/src/pages/MasterDataPage.tsx",
+        "sha256": "6A5CCCBF103028CB0278E5ECAF555A4843CA50DA226C9A941D9E81290DB708DB"
+      },
+      {
+        "path": "apps/desktop/src/pages/ProcurementExecutionPage.tsx",
+        "sha256": "FF55C0D3CDC93598A61D5B4D9688E2CE8B1EEBFB65CABD864D0528CCA7192905"
+      },
+      {
+        "path": "apps/desktop/src/pages/RequisitionPage.tsx",
+        "sha256": "788E86BD41A10E5525DD150AF27E575186897576777366F5A516E724EEFF3580"
+      }
+    ],
+    "nativeStatus": "NOT_RUN_NEW_BUILD; auth interaction required; no user interruption requested"
+  }
+}

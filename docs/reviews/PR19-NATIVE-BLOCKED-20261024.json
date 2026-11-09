@@ -1,0 +1,91 @@
+{
+  "mode": "t09-t11-native-chain",
+  "orderId": "10327374-88a5-4491-9f4f-a4c1b3b4f017",
+  "profiles": [
+    "E:\\Honsen-T09A\\native-20261024144354\\a.test.sqlite",
+    "E:\\Honsen-T09A\\native-20261024144354\\b.test.sqlite"
+  ],
+  "exePids": [8804, 43076],
+  "calls": [
+    {
+      "phase": "login-and-order",
+      "command": "issue_local_captcha",
+      "ok": true
+    },
+    {
+      "phase": "login-and-order",
+      "command": "issue_cloud_captcha",
+      "ok": true
+    },
+    {
+      "phase": "login-and-order",
+      "command": "online_login",
+      "ok": false,
+      "error": {
+        "code": "credential_storage_error"
+      }
+    },
+    {
+      "phase": "login-and-order",
+      "command": "issue_local_captcha",
+      "ok": true
+    },
+    {
+      "phase": "login-and-order",
+      "command": "issue_cloud_captcha",
+      "ok": true
+    },
+    {
+      "phase": "login-and-order",
+      "command": "online_login",
+      "ok": false,
+      "error": {
+        "code": "credential_storage_error"
+      }
+    }
+  ],
+  "seedErrors": [
+    {
+      "index": 0,
+      "error": "test profile: secure credential storage error"
+    },
+    {
+      "index": 1,
+      "error": "test profile: secure credential storage error"
+    }
+  ],
+  "exeHash": "c399f1355b64d02e802982fcd28fbcbd2e7dcd6fac5c650756e648cc86d6ac3d",
+  "installations": [
+    "082e69cf-3488-4f4f-9252-2fe33ff87dbe",
+    "61ca48d4-8afe-434b-89d2-dd13a9433ea5"
+  ],
+  "nativeLoginFailures": [
+    {
+      "index": 0,
+      "error": "login-and-order/online_login: {\"code\":\"credential_storage_error\"}"
+    },
+    {
+      "index": 1,
+      "error": "login-and-order/online_login: {\"code\":\"credential_storage_error\"}"
+    }
+  ],
+  "result": "BLOCKED_ENV",
+  "phase": "login-and-order",
+  "failure": "BLOCKED_ENV: Windows secure credential storage failed during test-profile seeding and native online login",
+  "baseSha": "369532c4d2fe5e738b9e5cf7d8d6163a40a1faca",
+  "workingTreeDirty": true,
+  "artifactBoundary": "exeHash identifies the exact tested executable; baseSha does not identify uncommitted source changes",
+  "serverEvidence": {
+    "authenticatedSessions": [
+      {
+        "installation_id": "082e69cf-3488-4f4f-9252-2fe33ff87dbe",
+        "user_id": "10000000-0000-4000-8000-000000000013"
+      },
+      {
+        "installation_id": "61ca48d4-8afe-434b-89d2-dd13a9433ea5",
+        "user_id": "10000000-0000-4000-8000-000000000013"
+      }
+    ],
+    "selectedOrderCount": 0
+  }
+}

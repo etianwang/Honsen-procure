@@ -1,0 +1,197 @@
+{
+  "installedSource": "21491c5f4ccfbb668425b302f9be6e0523e1d1df",
+  "installerVersion": "0.1.13",
+  "installerSha256": "19f4648d0fd2269ebaf46620d5ad1ef533d5061f0a41442136f62297619c1f7b",
+  "currentCheckout": "9f3aa764fea3613f477e0764f4135465e4b44e10",
+  "backendOwningComparison": "apps/server and packages/shared unchanged against installed source",
+  "offlineConfiguration": {
+    "networking": "Disable",
+    "guestId": "b0663e3a-99e2-4119-976a-545f172b95d0"
+  },
+  "previousNetworkConfiguration": {
+    "networking": "Enable",
+    "guestId": "1ca169f7-588e-469f-b784-215d1a8e2a35",
+    "ip": "172.18.187.218"
+  },
+  "userPublicObservation": {
+    "ip": "172.18.179.246",
+    "gateway": "172.18.176.1",
+    "microsoft443": "USER_REPORTED_PASS"
+  },
+  "freshGuest": {
+    "id": "dd3adece-9887-4f34-b31d-381d8a095c84",
+    "networking": "Enable",
+    "probes": {
+      "public": {
+        "port": 443,
+        "host": "www.microsoft.com",
+        "connected": true
+      },
+      "isolatedApi": {
+        "port": 3444,
+        "host": "172.18.176.1",
+        "error": "5s timeout",
+        "connected": false
+      },
+      "routes": [
+        {
+          "NextHop": "172.18.176.1",
+          "InterfaceIndex": 205
+        }
+      ],
+      "user": "WDAGUtilityAccount",
+      "ipv4": [
+        {
+          "IPAddress": "172.18.190.164",
+          "InterfaceIndex": 205
+        },
+        {
+          "IPAddress": "127.0.0.1",
+          "InterfaceIndex": 200
+        }
+      ],
+      "utc": "2026-11-05T03:08:39.3332218Z"
+    }
+  },
+  "packetEvidence": {
+    "matchedPackets": 3,
+    "hostReceivePackets": 3,
+    "hostResponsePackets": 0,
+    "dropComponent": "TCP/IPv4 L3/L4",
+    "dropReason": "INET: 接受检查",
+    "traceStopped": true,
+    "ownedFiltersRemoved": true
+  },
+  "wfpIdentity": {
+    "filterId": "76539",
+    "exists": true,
+    "wfpAppId": "\\device\\harddiskvolume8\\users\\administrator\\appdata\\local\\packages\\openai.codex_2p2nqsd0c76g0\\localcache\\roaming\\fnm\\node-versions\\v24.18.0\\installation\\node.exe",
+    "aliasHash": "9A4EB5F1C29C6A2E93852EAD46B999E284A6A5CA8BAB4D4E241D587D025A52DE",
+    "eventTime": "2026-11-05T03:17:12.083Z",
+    "physicalPath": "C:\\users\\administrator\\appdata\\local\\packages\\openai.codex_2p2nqsd0c76g0\\localcache\\roaming\\fnm\\node-versions\\v24.18.0\\installation\\node.exe",
+    "reportedAlias": "C:\\Users\\Administrator\\AppData\\Roaming\\fnm\\node-versions\\v24.18.0\\installation\\node.exe",
+    "layer": "44",
+    "physicalHash": "9A4EB5F1C29C6A2E93852EAD46B999E284A6A5CA8BAB4D4E241D587D025A52DE"
+  },
+  "temporaryExactRule": {
+    "port": 3444,
+    "createdUtc": "2026-11-05T03:21:20.1316493Z",
+    "reason": "Same previously approved Node binary; bind exact actual MSIX image path and sole current test guest",
+    "ruleName": "HonsenProcure-QA-013-3444-ActualNode-20261105",
+    "programSha256": "9A4EB5F1C29C6A2E93852EAD46B999E284A6A5CA8BAB4D4E241D587D025A52DE",
+    "remoteAddress": "172.18.190.164",
+    "program": "C:\\users\\administrator\\appdata\\local\\packages\\openai.codex_2p2nqsd0c76g0\\localcache\\roaming\\fnm\\node-versions\\v24.18.0\\installation\\node.exe",
+    "localAddress": "172.18.176.1"
+  },
+  "apiTcpAfterCorrection": {
+    "port": 3444,
+    "host": "172.18.176.1",
+    "utc": "2026-11-05T03:22:05.1915011Z",
+    "connected": true,
+    "completedUtc": "2026-11-05T03:22:05.2309633Z"
+  },
+  "ruleCleanup": {
+    "ruleName": "HonsenProcure-QA-013-3444-ActualNode-20261105",
+    "reason": "TCP diagnosis completed; subsequent CA/install action rejected by automatic approval review",
+    "remaining": 0,
+    "removedUtc": "2026-11-05T03:25:43.1197858Z"
+  },
+  "hostBackend": {
+    "backendOwningDiff": [],
+    "keeperSession": 53402,
+    "strictHostTlsCaptchaStatus": 200,
+    "guestTransportStatus": "not yet observed",
+    "installedApplicationSource": "21491c5f4ccfbb668425b302f9be6e0523e1d1df",
+    "publicInternetStatus": "user reported PASS; not equivalent to host API transport",
+    "runtimeCheckout": "9f3aa764fea3613f477e0764f4135465e4b44e10",
+    "listeners": [
+      {
+        "LocalAddress": "172.18.176.1",
+        "LocalPort": 3444,
+        "OwningProcess": 8928
+      },
+      {
+        "LocalAddress": "127.0.0.1",
+        "LocalPort": 3443,
+        "OwningProcess": 31548
+      }
+    ]
+  },
+  "serverAfterTcp": {
+    "source": "21491c5f4ccfbb668425b302f9be6e0523e1d1df",
+    "at": "2026-11-05T03:25:30.585Z",
+    "phase": "after-tcp-pass-before-policy-block",
+    "scope": "isolated synthetic purchaser server metadata; no passwords/tokens",
+    "roles": ["administrator", "purchaser"],
+    "active_project_bindings": 1,
+    "active_scope_bindings": 1,
+    "sessions_total": 0,
+    "sessions_active": 0,
+    "sessions_revoked": 0
+  },
+  "nextStep": {
+    "status": "NOT_RUN_AUTOMATIC_APPROVAL_REJECTED",
+    "reason": "blocked by policy; no finer reason returned",
+    "operation": "prepare/map public synthetic CA and verified013 installer; guest CA trust, strictHTTPS probe, installation and Release launch",
+    "executed": false,
+    "retriedByOtherMechanism": false,
+    "caThumbprint": "EA450575942FD681A41157146726D8E4E448F92B",
+    "approval": "Explicit user confirmation requested to resubmit same concrete operation"
+  },
+  "sameGuestProgramPathControl": {
+    "conditions": "Same guest190.164, host176.1 TCP3444, Default Switch, same Node file hash; only Program path differs; one rule active at a time",
+    "firstPhysical": {
+      "port": 3444,
+      "host": "172.18.176.1",
+      "utc": "2026-11-05T03:22:05.1915011Z",
+      "connected": true,
+      "completedUtc": "2026-11-05T03:22:05.2309633Z"
+    },
+    "alias": {
+      "completedUtc": "2026-11-05T03:35:47.746666Z",
+      "case": "alias program control",
+      "utc": "2026-11-05T03:35:42.7061258Z",
+      "error": "5s timeout",
+      "connected": false,
+      "host": "172.18.176.1",
+      "port": 3444
+    },
+    "secondPhysical": {
+      "completedUtc": "2026-11-05T03:37:58.6496973Z",
+      "case": "physical program recheck",
+      "utc": "2026-11-05T03:37:58.6082362Z",
+      "connected": true,
+      "host": "172.18.176.1",
+      "port": 3444
+    },
+    "aliasDropFilter": "Query User 76539 at03:35:42/43/45Z",
+    "finalCleanup": {
+      "physicalRuleRemaining": 0,
+      "aliasRuleRemaining": 0,
+      "removedUtc": "2026-11-05T03:38:29.9168456Z",
+      "phase": "B2 completed; all owned diagnostic rules removed"
+    }
+  },
+  "explicitApprovalResubmission": {
+    "recordedUtc": "2026-11-05T06:26:28.8104535Z",
+    "guestId": "dd3adece-9887-4f34-b31d-381d8a095c84",
+    "guestAddress": "172.18.190.164",
+    "endpoint": "https://172.18.176.1:3444",
+    "packageSource": "21491c5f4ccfbb668425b302f9be6e0523e1d1df",
+    "packageVersion": "0.1.13",
+    "packageSha256": "19f4648d0fd2269ebaf46620d5ad1ef533d5061f0a41442136f62297619c1f7b",
+    "caThumbprint": "EA450575942FD681A41157146726D8E4E448F92B",
+    "explicitUserApproval": true,
+    "toolApproval": "REJECTED",
+    "toolReason": "CreateProcess rejected: blocked by policy",
+    "rejectionSpecificReasonProvided": false,
+    "combinedOperationExecuted": false,
+    "strictTls": "NOT RUN",
+    "installedLogin": "NOT RUN",
+    "roleScopeSessionRevocation": "NOT RUN",
+    "retriesAfterRenewedRejection": 0,
+    "alternateMechanismUsed": false,
+    "ruleCleanup": "controller approved-resume-cleanup.json remaining0 at06:25:43Z",
+    "guestDisposition": "preserved pending user manual action or tool policy resolution"
+  }
+}

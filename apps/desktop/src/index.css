@@ -1,7 +1,11 @@
+@import './styles/tokens.css';
+
 :root {
   font-family: Inter, 'Microsoft YaHei', 'Noto Sans SC', system-ui, sans-serif;
-  color: #10251e;
-  background: #f3f7f5;
+  color: var(--honsen-text);
+  background: var(--honsen-background);
+  font-size: var(--honsen-font-body);
+  line-height: 1.5;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -14,14 +18,18 @@ body {
   min-height: 100vh;
 }
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 button {
   cursor: pointer;
 }
 button:focus-visible,
-input:focus-visible {
-  outline: 3px solid #8ed8bd;
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--honsen-focus);
   outline-offset: 2px;
 }

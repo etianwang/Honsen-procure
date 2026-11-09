@@ -24,7 +24,11 @@ const account: LoginAccount = {
 
 class FixtureStore implements AuthStore {
   failures = 0
-  sessions: Array<{ accountId: string; tokenHash: string }> = []
+  sessions: Array<{
+    accountId: string
+    tokenHash: string
+    installationId: string
+  }> = []
   locked = false
 
   async findAccountByUsername(username: string): Promise<LoginAccount | null> {
@@ -36,9 +40,10 @@ class FixtureStore implements AuthStore {
       : null
   }
 
-  async findActiveSession(tokenHash: string): Promise<LoginAccount | null> {
-    return this.sessions.some((session) => session.tokenHash === tokenHash)
-      ? account
+  async findActiveSession(tokenHash: string) {
+    const session = this.sessions.find((item) => item.tokenHash === tokenHash)
+    return session
+      ? { ...account, installationId: session.installationId }
       : null
   }
 
@@ -51,6 +56,7 @@ class FixtureStore implements AuthStore {
   async createSession(input: {
     accountId: string
     tokenHash: string
+    installationId: string
   }): Promise<void> {
     this.sessions.push(input)
   }

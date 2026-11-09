@@ -1,11 +1,12 @@
 import argon2 from 'argon2'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
+import { newUsernameSchema } from '@honsen/shared'
 import { runMigrations } from '../db/migration-runner.js'
 import { createPostgresPool, waitForDatabase } from '../db/pool.js'
 
 const inputSchema = z.object({
-  username: z.string().trim().min(1).max(128),
+  username: newUsernameSchema,
   password: z.string().min(12).max(1024),
   businessCode: z.string().trim().min(1).max(64),
 })

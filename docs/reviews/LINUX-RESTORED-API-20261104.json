@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "sourceSha": "db2ad11988050583ae70b76c834b7eb8cbb1985d",
+  "runtime": "v24.18.0",
+  "captchaStatus": 200,
+  "missingBearerStatus": 400,
+  "invalidBearerSyncStatus": 401,
+  "authorizationContextStatus": 401,
+  "scope": "actual restored database API startup and unauthenticated read denial; isolated HTTP loopback only, not native or TLS acceptance"
+}

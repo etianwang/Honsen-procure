@@ -1,0 +1,112 @@
+{
+  "base": "1bf4578",
+  "candidateSha256": "E63F630B48A3CE6479101D9843C36205933AB5B01E85F4D2DB2F7F51CD6A6A5F",
+  "candidatePath": ".cache/ui-native-build-batch1/debug/HonsenProcure.exe",
+  "native": "BLOCKED_AUTH_INTERACTION",
+  "functional": "SCOPED_AUTOMATED_PASS_EXCEPT_SUPPLIER_SELECTION_ASSERTION",
+  "ux": "DOM_SCOPED_PASS_NATIVE_NOT_RUN",
+  "checks": [
+    "desktop unit73 PASS",
+    "Rust195 PASS /7 ignored",
+    "integrated DOM51 PASS",
+    "supplier layout3 PASS"
+  ],
+  "sourceHashes": [
+    {
+      "path": "apps/desktop/src-tauri/src/catalog_maintenance_tests.rs",
+      "sha256": "5F80D2EC4E0F2B0CADC3BD865C012F6029703131440938AB6CF0C631EE158A68"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/lib.rs",
+      "sha256": "855D16A28686E976BD4B89DB64CC41E08E7AFDB223A5665EF79377B2C4962A5D"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/main.rs",
+      "sha256": "1A158EEB8C6F050225A9CC85A2A517362A8DE64C0512640958CD6492E0CBD098"
+    },
+    {
+      "path": "apps/desktop/src/App.tsx",
+      "sha256": "9C911099A68AE65950A3C7F0E938454C6FA5BFAC4CD1FAF9E850BDB5B7F50301"
+    },
+    {
+      "path": "apps/desktop/src/components/AppShell.tsx",
+      "sha256": "BCB846471734F8DCB807C0F3262CB6B8EEA2C012A218CF274F6D6B164EA327D9"
+    },
+    {
+      "path": "apps/desktop/src/components/AppShellToolbar.css",
+      "sha256": "83EC9BBAD59A57396DA4317D9CC773D661286C629DC1A239DD7315A0DA7FA19E"
+    },
+    {
+      "path": "apps/desktop/src/components/CatalogMaintenanceFields.tsx",
+      "sha256": "9BDC3B8A50FE935C965E5C08EFB1929408C59AE42E34CF629E2E59FD005B8DA3"
+    },
+    {
+      "path": "apps/desktop/src/components/MaterialPicker.tsx",
+      "sha256": "DF76AD5FEE5420BB5A72A701DF2A2CD58F2897BCBD52FBE20D13AA78CE59D04E"
+    },
+    {
+      "path": "apps/desktop/src/components/OrderWorkflowPanel.tsx",
+      "sha256": "D7677E5EC06CB0C3906B2CE7F9A0828625D364DACB9A1BBE3E04C3FD4DFC681A"
+    },
+    {
+      "path": "apps/desktop/src/components/ProcurementExpenditurePanel.tsx",
+      "sha256": "699D81D85679AAC8B0C0D0E1D2D2293BA3E608324D5A7D103527148210E7E356"
+    },
+    {
+      "path": "apps/desktop/src/components/ReceiptPanel.tsx",
+      "sha256": "F62A6AF7CD24AC7A316A816F973E141CB2DAC7B14F6BBC83BA6F604B5B07C1A4"
+    },
+    {
+      "path": "apps/desktop/src/components/RequisitionHistoryPanel.tsx",
+      "sha256": "B956D2ED1D63BE22CC13160ACB430BBE339F0CE463B9AFFE465A2FFD4294423D"
+    },
+    {
+      "path": "apps/desktop/src/components/SupplierAllocationPanel.tsx",
+      "sha256": "A5054DDC4D352512CF8A35E384CB1F33679D8658F67AD673A5F191AFA462F4E2"
+    },
+    {
+      "path": "apps/desktop/src/components/SupplierChildTermsPanel.tsx",
+      "sha256": "4DED7891967CD5F3F3CC7A7A289B7E9345958673E8A69F634D3280AFFAE2B454"
+    },
+    {
+      "path": "apps/desktop/src/lib/catalog-api.ts",
+      "sha256": "6EEF273E338DBA3D5BEF954D358CB94D31BEE6CDB8AE61FD6EA637831F3D89A5"
+    },
+    {
+      "path": "apps/desktop/src/lib/history-locale.ts",
+      "sha256": "6127FD1E0E426B963497FB046C5BEE9F0BFDB8663D5E72978ABE0FE47B6299C1"
+    },
+    {
+      "path": "apps/desktop/src/lib/requisition-api.ts",
+      "sha256": "71674C2FC511B2E0B3653EC1F363FE17D06F26E8C487B4293A8D9A238117F9F6"
+    },
+    {
+      "path": "apps/desktop/src/lib/supplier-prices-messages.ts",
+      "sha256": "58785B22F5A9E65193C3A8066B8D1B0A38DC31625F169402E2E3FA204DC1F7D9"
+    },
+    {
+      "path": "apps/desktop/src/pages/SuppliersPricesPage.tsx",
+      "sha256": "5D8101BE34394AFC23D5260FD68478ECDDA84CA6082B637D39E1F8D010E71580"
+    },
+    {
+      "path": "apps/desktop/src/components/AuthorizationContextSelect.tsx",
+      "sha256": "817D918FA6B860E8BC848B76E974BF349D88D4C9BB1F5858E299F332674DFB0F"
+    },
+    {
+      "path": "apps/desktop/src/components/RequisitionHistoryPanel.css",
+      "sha256": "BCB543C042D47289C38F079E825E71DCCE4F40D66DB4CFC6BEB0CED64AB6F58D"
+    },
+    {
+      "path": "apps/desktop/src/components/SupplierPicker.test.tsx",
+      "sha256": "8929120C070D647D08DBF3AE0C67942B76EB3DA28069EC7123A79583499BE3F4"
+    },
+    {
+      "path": "apps/desktop/src/components/SupplierPicker.tsx",
+      "sha256": "FA27E6300D55C63B3253C508A8B59CEC81AB699AAD33FFCF524B424C55CF4327"
+    },
+    {
+      "path": "apps/desktop/src/pages/SuppliersPricesPage.css",
+      "sha256": "D78EF9850F8FEB5E6E5C5D9DFB4760C2B76EF1222AE3DC9253D1DD6B91094CA4"
+    }
+  ]
+}

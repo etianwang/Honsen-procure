@@ -1,17 +1,24 @@
+import { AuthenticationError } from '../auth/service.js'
 import { Pool } from 'pg'
-import type { AuthStore, LoginAccount } from '../auth/types.js'
+import type {
+  AuthStore,
+  AuthenticatedAccount,
+  LoginAccount,
+} from '../auth/types.js'
 
 export class PostgresAuthStore implements AuthStore {
   constructor(private readonly pool: Pool) {}
 
   async findAccountByUsername(username: string): Promise<LoginAccount | null> {
     return this.findAccount(
-      `SELECT u.id, u.username, u.password_hash, u.ui_locale, u.is_enabled,
+      `SELECT u.id, u.username, u.display_name, u.password_hash, u.ui_locale, u.is_enabled,
               u.locked_until, u.requires_password_change,
+              (EXISTS(SELECT 1 FROM audit_entries a WHERE a.actor_id=u.id AND a.action='initial_super_administrator_provisioned' AND a.reason='V1 bootstrap; password change recommended')
+               AND NOT EXISTS(SELECT 1 FROM audit_entries a WHERE a.entity_id=u.id AND a.entity_type='user' AND a.action IN ('password_changed','admin_password_recovered'))) AS password_change_recommended,
               COALESCE(array_agg(ur.role ORDER BY ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
        FROM users u
        LEFT JOIN user_roles ur ON ur.user_id = u.id
-       WHERE u.username = $1 AND u.deleted_at IS NULL
+       WHERE translate(u.username,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=translate($1,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz') AND u.deleted_at IS NULL
        GROUP BY u.id`,
       [username],
     )
@@ -20,18 +27,49 @@ export class PostgresAuthStore implements AuthStore {
   async findActiveSession(
     tokenHash: string,
     now: Date,
-  ): Promise<LoginAccount | null> {
-    return this.findAccount(
-      `SELECT u.id, u.username, u.password_hash, u.ui_locale, u.is_enabled,
+  ): Promise<AuthenticatedAccount | null> {
+    const result = await this.pool.query<{
+      id: string
+      username: string
+      display_name: string | null
+      password_hash: string
+      roles: LoginAccount['roles']
+      ui_locale: LoginAccount['locale']
+      is_enabled: boolean
+      locked_until: Date | null
+      requires_password_change: boolean
+      password_change_recommended: boolean
+      installation_id: string
+    }>(
+      `SELECT u.id, u.username, u.display_name, u.password_hash, u.ui_locale, u.is_enabled,
               u.locked_until, u.requires_password_change,
+              (EXISTS(SELECT 1 FROM audit_entries a WHERE a.actor_id=u.id AND a.action='initial_super_administrator_provisioned' AND a.reason='V1 bootstrap; password change recommended')
+               AND NOT EXISTS(SELECT 1 FROM audit_entries a WHERE a.entity_id=u.id AND a.entity_type='user' AND a.action IN ('password_changed','admin_password_recovered'))) AS password_change_recommended,
+              s.installation_id,
               COALESCE(array_agg(ur.role ORDER BY ur.role) FILTER (WHERE ur.role IS NOT NULL), '{}') AS roles
        FROM account_sessions s
        JOIN users u ON u.id = s.user_id
        LEFT JOIN user_roles ur ON ur.user_id = u.id
        WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2 AND u.deleted_at IS NULL
-       GROUP BY u.id`,
+       GROUP BY u.id, s.installation_id`,
       [tokenHash, now],
     )
+    const row = result.rows.length === 1 ? result.rows[0] : undefined
+    return row
+      ? {
+          id: row.id,
+          username: row.username,
+          displayName: row.display_name ?? row.username,
+          passwordHash: row.password_hash,
+          roles: row.roles,
+          locale: row.ui_locale,
+          isEnabled: row.is_enabled,
+          lockedUntil: row.locked_until,
+          requiresPasswordChange: row.requires_password_change,
+          passwordChangeRecommended: row.password_change_recommended,
+          installationId: row.installation_id,
+        }
+      : null
   }
 
   private async findAccount(
@@ -41,24 +79,28 @@ export class PostgresAuthStore implements AuthStore {
     const result = await this.pool.query<{
       id: string
       username: string
+      display_name: string | null
       password_hash: string
       roles: LoginAccount['roles']
       ui_locale: LoginAccount['locale']
       is_enabled: boolean
       locked_until: Date | null
       requires_password_change: boolean
+      password_change_recommended: boolean
     }>(query, values)
-    const row = result.rows[0]
+    const row = result.rows.length === 1 ? result.rows[0] : undefined
     return row
       ? {
           id: row.id,
           username: row.username,
+          displayName: row.display_name ?? row.username,
           passwordHash: row.password_hash,
           roles: row.roles,
           locale: row.ui_locale,
           isEnabled: row.is_enabled,
           lockedUntil: row.locked_until,
           requiresPasswordChange: row.requires_password_change,
+          passwordChangeRecommended: row.password_change_recommended,
         }
       : null
   }
@@ -67,7 +109,7 @@ export class PostgresAuthStore implements AuthStore {
     await this.pool.query(
       `UPDATE users
        SET failed_login_attempts = failed_login_attempts + 1,
-           locked_until = CASE WHEN failed_login_attempts + 1 >= 5 THEN $2 + interval '15 minutes' ELSE locked_until END,
+           locked_until = CASE WHEN failed_login_attempts + 1 >= 5 THEN $2::timestamptz + interval '15 minutes' ELSE locked_until END,
            updated_at = $2
        WHERE id = $1`,
       [accountId, now],
@@ -89,13 +131,21 @@ export class PostgresAuthStore implements AuthStore {
     tokenHash: string
     installationId: string
     expiresAt: Date
+    expectedPasswordHash?: string
   }): Promise<void> {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
-      await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [
-        input.accountId,
-      ])
+      const current = await client.query<{ password_hash: string }>(
+        'SELECT password_hash FROM users WHERE id=$1 AND is_enabled=TRUE AND deleted_at IS NULL FOR UPDATE',
+        [input.accountId],
+      )
+      if (
+        !current.rows[0] ||
+        (input.expectedPasswordHash !== undefined &&
+          current.rows[0].password_hash !== input.expectedPasswordHash)
+      )
+        throw new AuthenticationError('INVALID_LOGIN')
       await client.query(
         `UPDATE account_sessions
          SET revoked_at = NOW()

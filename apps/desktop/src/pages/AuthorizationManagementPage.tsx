@@ -1,4 +1,17 @@
-import { useState } from 'react'
+import { ManagedAccountEditor } from '../components/ManagedAccountEditor'
+import { useEffect, useRef, useState } from 'react'
+import { ManagedAccountForm } from '../components/ManagedAccountForm'
+import {
+  accountScopeNames,
+  emptyAccountScope,
+  validAccountScope,
+  type AccountScope,
+  type AccountScopeOptions,
+} from '../lib/account-scope'
+import { AuthorizationScopePicker } from '../components/AuthorizationScopePicker'
+import { useUiLocale } from '../lib/ui-locale'
+import type { ReferenceMasterDataView } from '../lib/master-data-api'
+import type { UserRole } from '../lib/permissions'
 
 type Binding = {
   projectId: string
@@ -6,203 +19,516 @@ type Binding = {
   teamId: string
   site: string
 }
-
+type Account = { id: string; username: string; displayName?: string | null }
 type Invoke = <T>(command: string, args?: object) => Promise<T>
-
-function getInvoke(): Invoke | undefined {
-  return (window as Window & { __TAURI__?: { core?: { invoke?: Invoke } } })
-    .__TAURI__?.core?.invoke
+function invoke<T>(command: string, args?: object) {
+  const call = (
+    window as Window & { __TAURI__?: { core?: { invoke?: Invoke } } }
+  ).__TAURI__?.core?.invoke
+  return call
+    ? call<T>(command, args)
+    : Promise.reject(new Error('Desktop required'))
 }
 
-const isUuid = (value: string) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+const feedback = {
+  notFound: [
+    '未找到该账号。请检查用户名，或切换到创建账号。',
+    'Account not found. Check the username or switch to account creation.',
+    'Compte introuvable. Vérifiez le nom ou passez à la création.',
+  ],
+  loaded: [
+    '已读取云端授权范围。',
+    'Cloud authorization scopes loaded.',
+    'Périmètres serveur chargés.',
+  ],
+  lookupFailed: [
+    '查询失败。请检查在线连接、登录状态与管理权限。',
+    'Lookup failed. Check the connection, sign-in and management permissions.',
+    'Échec de recherche. Vérifiez la connexion et les droits de gestion.',
+  ],
+  unconfirmed: [
+    '云端操作未确认；请重新查询账号确认最终状态。',
+    'Cloud operation not confirmed. Search the account again to verify the final state.',
+    'Opération non confirmée. Recherchez à nouveau le compte pour vérifier son état.',
+  ],
+  revoked: ['授权已撤销。', 'Authorization revoked.', 'Autorisation révoquée.'],
+  assigned: [
+    '授权已分配或更新。',
+    'Authorization assigned or updated.',
+    'Autorisation attribuée ou modifiée.',
+  ],
+} as const
 
-export function AuthorizationManagementPage() {
-  const [accountId, setAccountId] = useState('')
+export function AuthorizationManagementPage({
+  role = 'administrator',
+}: {
+  role?: UserRole
+}) {
+  const { locale } = useUiLocale()
+  const t = (zh: string, en: string, fr: string) =>
+    locale === 'zh' ? zh : locale === 'fr' ? fr : en
+  const [mode, setMode] = useState<'create' | 'manage'>('create')
+  const [account, setAccount] = useState<Account | null>(null)
+  const [username, setUsername] = useState('')
   const [bindings, setBindings] = useState<Binding[]>([])
-  const [projectId, setProjectId] = useState('')
-  const [departmentId, setDepartmentId] = useState('')
-  const [teamId, setTeamId] = useState('')
+  const [scope, setScope] = useState<AccountScope>(emptyAccountScope)
   const [editing, setEditing] = useState<Binding | null>(null)
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
-
-  const load = async () => {
-    const invoke = getInvoke()
-    if (!invoke || !isUuid(accountId)) {
-      setMessage('请输入有效的账户 UUID，并连接云端。')
-      return
-    }
-    setBusy(true)
-    try {
-      const result = await invoke<Binding[]>('list_managed_authorizations', {
-        accountId,
+  const [searching, setSearching] = useState(false)
+  const searchPending = useRef(false)
+  const [wizardBusy, setWizardBusy] = useState(false)
+  const [message, setMessage] = useState<keyof typeof feedback | ''>('')
+  const [rawOptions, setOptions] = useState<AccountScopeOptions>({
+    records: [],
+    allowed: [],
+  })
+  const [loadedRole, setLoadedRole] = useState<UserRole | null>(null)
+  const options: AccountScopeOptions =
+    loadedRole === role ? rawOptions : { records: [], allowed: [] }
+  const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [reload, setReload] = useState(0)
+  useEffect(() => {
+    let active = true
+    void invoke('pull_sync')
+      .then(async () => {
+        const [records, allowed] = await Promise.all([
+          invoke<ReferenceMasterDataView[]>('list_reference_master_data'),
+          role === 'super_administrator'
+            ? Promise.resolve(null)
+            : invoke<AccountScopeOptions['allowed']>(
+                'list_authorization_contexts',
+              ),
+        ])
+        if (active) {
+          setLoadedRole(role)
+          setScope(emptyAccountScope)
+          setEditing(null)
+          setOptions({
+            records: records.filter((record) => record.is_active),
+            allowed,
+          })
+          setLoading(false)
+          setLoadFailed(false)
+        }
       })
+      .catch(() => {
+        if (active) {
+          setLoadedRole(role)
+          setScope(emptyAccountScope)
+          setEditing(null)
+          setOptions({ records: [], allowed: [] })
+          setLoading(false)
+          setLoadFailed(true)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [reload, role])
+  const assignAccount = (id: string, name: string, displayName?: string) => {
+    setAccount({ id, username: name, displayName })
+    setUsername(name)
+    setBindings([])
+    setEditing(null)
+    setScope(emptyAccountScope)
+  }
+  const search = async () => {
+    if (searchPending.current) return
+    searchPending.current = true
+    setSearching(true)
+    setBusy(true)
+    setMessage('')
+    setBindings([])
+    setAccount(null)
+    setEditing(null)
+    setScope(emptyAccountScope)
+    try {
+      const accounts = await invoke<Account[]>('find_managed_accounts', {
+        username,
+      })
+      if (!accounts.length) {
+        setMessage('notFound')
+        return
+      }
+      const selected = accounts[0]
+      const result = await invoke<Binding[]>('list_managed_authorizations', {
+        accountId: selected.id,
+      })
+      setAccount(selected)
       setBindings(result)
-      setMessage(`已读取 ${result.length} 个云端授权范围。`)
+      setMessage('loaded')
     } catch {
-      setMessage('查询失败。请检查在线连接、登录状态与管理权限。')
+      setMessage('lookupFailed')
     } finally {
+      searchPending.current = false
+      setSearching(false)
       setBusy(false)
     }
   }
-
+  const scopeFromBinding = (binding: Binding): AccountScope => {
+    const project = options.records.find(
+      (r) => r.kind === 'project' && r.id === binding.projectId,
+    )
+    return {
+      countryId: project?.kind === 'project' ? project.country_id : '',
+      projectId: binding.projectId,
+      departmentId: binding.departmentId,
+      teamId: binding.teamId,
+    }
+  }
   const change = async (binding: Binding, revoke: boolean) => {
-    const invoke = getInvoke()
-    if (!invoke || !isUuid(accountId)) return
+    if (!account) return
     setBusy(true)
+    setMessage('')
     try {
-      await invoke<void>('change_managed_authorization', {
-        accountId,
-        binding: {
-          projectId: binding.projectId,
-          departmentId: binding.departmentId,
-          teamId: binding.teamId,
-        },
-        revoke,
-      })
-      const result = await invoke<Binding[]>('list_managed_authorizations', {
-        accountId,
-      })
-      setBindings(result)
-      setMessage(revoke ? '授权已撤销。' : '授权已分配或更新。')
-    } catch {
-      setMessage('云端操作失败；请重新查询确认最终状态。')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const save = async () => {
-    const invoke = getInvoke()
-    if (!invoke || !canSave) return
-    if (!editing) {
-      await change(newBinding, false)
-      return
-    }
-    setBusy(true)
-    try {
-      await invoke<void>('replace_managed_authorization', {
-        accountId,
-        replacement: {
-          oldScope: {
-            projectId: editing.projectId,
-            departmentId: editing.departmentId,
-            teamId: editing.teamId,
+      if (editing && !revoke) {
+        await invoke('replace_managed_authorization', {
+          accountId: account.id,
+          replacement: {
+            oldScope: {
+              projectId: editing.projectId,
+              departmentId: editing.departmentId,
+              teamId: editing.teamId,
+            },
+            newScope: {
+              projectId: binding.projectId,
+              departmentId: binding.departmentId,
+              teamId: binding.teamId,
+            },
           },
-          newScope: { projectId, departmentId, teamId },
-        },
-      })
+        })
+      } else {
+        await invoke('change_managed_authorization', {
+          accountId: account.id,
+          binding: {
+            projectId: binding.projectId,
+            departmentId: binding.departmentId,
+            teamId: binding.teamId,
+          },
+          revoke,
+        })
+      }
       setBindings(
-        await invoke<Binding[]>('list_managed_authorizations', { accountId }),
+        await invoke<Binding[]>('list_managed_authorizations', {
+          accountId: account.id,
+        }),
       )
       setEditing(null)
-      setMessage('授权范围已原子修改。')
+      setScope(emptyAccountScope)
+      setMessage(revoke ? 'revoked' : 'assigned')
     } catch {
-      setMessage('修改失败；原授权保持不变。请重新查询云端状态。')
+      setAccount(null)
+      setBindings([])
+      setEditing(null)
+      setScope(emptyAccountScope)
+      setMessage('unconfirmed')
     } finally {
       setBusy(false)
     }
   }
-
-  const newBinding = { projectId, departmentId, teamId, site: '' }
-  const canSave =
-    isUuid(accountId) &&
-    isUuid(projectId) &&
-    isUuid(departmentId) &&
-    isUuid(teamId) &&
-    !busy
-
   return (
     <section
       className="auth-management"
       aria-labelledby="auth-management-title"
     >
-      <h2 id="auth-management-title">在线授权管理</h2>
-      <p>仅管理员在线操作；离线缓存不能分配或撤销权限。</p>
-      <div className="auth-management-form">
-        <label htmlFor="managed-account-id">账户 UUID</label>
-        <input
-          id="managed-account-id"
-          value={accountId}
-          onChange={(event) => setAccountId(event.target.value.trim())}
-          autoComplete="off"
-        />
+      <header className="account-page-header">
+        <h2 id="auth-management-title">
+          {t(
+            '账号与授权',
+            'Accounts and authorization',
+            'Comptes et autorisations',
+          )}
+        </h2>
+        <p>
+          {t(
+            '在线管理账号及授权范围。所有变更均由云端验证。',
+            'Manage accounts and scope online. The server verifies every change.',
+            'Gérez les comptes et périmètres en ligne. Le serveur vérifie chaque modification.',
+          )}
+        </p>
+      </header>
+      <div
+        className="account-mode-tabs"
+        role="group"
+        aria-label={t('账号操作', 'Account actions', 'Actions du compte')}
+      >
         <button
           type="button"
-          disabled={busy || !isUuid(accountId)}
-          onClick={() => void load()}
+          aria-pressed={mode === 'create'}
+          disabled={busy || wizardBusy}
+          onClick={() => {
+            setMode('create')
+            setMessage('')
+          }}
         >
-          查询云端授权
+          {t('创建账号', 'Create account', 'Créer le compte')}
+        </button>
+        <button
+          type="button"
+          aria-pressed={mode === 'manage'}
+          disabled={busy || wizardBusy}
+          onClick={() => {
+            setMode('manage')
+            setMessage('')
+          }}
+        >
+          {t(
+            '管理已有账号',
+            'Manage existing account',
+            'Gérer le compte existant',
+          )}
         </button>
       </div>
-      <ul aria-label="已授权范围">
-        {bindings.map((binding) => (
-          <li
-            key={`${binding.projectId}:${binding.departmentId}:${binding.teamId}`}
-          >
-            <span>
-              {binding.site || binding.projectId} · {binding.departmentId} ·{' '}
-              {binding.teamId}
-            </span>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setEditing(binding)
-                setProjectId(binding.projectId)
-                setDepartmentId(binding.departmentId)
-                setTeamId(binding.teamId)
+      <div className="scope-refresh">
+        <button
+          type="button"
+          disabled={loading || busy || wizardBusy}
+          onClick={() => {
+            setLoading(true)
+            setOptions({ records: [], allowed: [] })
+            setScope(emptyAccountScope)
+            setReload((value) => value + 1)
+          }}
+        >
+          {t(
+            '重新加载授权选项',
+            'Reload scope options',
+            'Recharger les périmètres',
+          )}
+        </button>
+        {loading && (
+          <p role="status">
+            {t(
+              '正在从云端刷新组织资料…',
+              'Refreshing organization data from the server…',
+              'Actualisation des données de l’organisation…',
+            )}
+          </p>
+        )}
+        {loadFailed && (
+          <p role="alert">
+            {t(
+              '无法刷新组织资料。请检查连接与权限后重新加载；当前不能选择授权范围。',
+              'Cannot refresh organization data. Check the connection and permissions, then reload; scope selection is unavailable.',
+              'Actualisation impossible. Vérifiez la connexion et les droits, puis rechargez ; aucun périmètre ne peut être choisi.',
+            )}
+          </p>
+        )}
+      </div>
+      <section className="account-management-panel">
+        {mode === 'create' ? (
+          <ManagedAccountForm
+            key={`${reload}:${role}`}
+            onBusyChange={setWizardBusy}
+            options={options}
+            canGrantPrivileged={role === 'super_administrator'}
+            onAccount={assignAccount}
+            onExisting={() => {
+              setMode('manage')
+              void search()
+            }}
+          />
+        ) : (
+          <>
+            <form
+              className="account-search"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void search()
               }}
             >
-              修改
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void change(binding, true)}
+              <label>
+                {t('查找用户名', 'Find username', 'Rechercher un utilisateur')}
+                <input
+                  value={username}
+                  maxLength={100}
+                  autoComplete="off"
+                  aria-describedby="managed-account-search-feedback"
+                  disabled={busy}
+                  onChange={(e) => {
+                    setUsername(e.target.value)
+                    setMessage('')
+                    setAccount(null)
+                    setBindings([])
+                    setEditing(null)
+                    setScope(emptyAccountScope)
+                  }}
+                />
+              </label>
+              <button
+                aria-busy={searching}
+                aria-describedby="managed-account-search-feedback"
+                disabled={
+                  busy || !username.trim() || username.trim() !== username
+                }
+              >
+                {searching
+                  ? t('正在查询…', 'Searching…', 'Recherche…')
+                  : t(
+                      '查询账号授权',
+                      'Find account authorization',
+                      'Rechercher les autorisations',
+                    )}
+              </button>
+            </form>
+            <p
+              id="managed-account-search-feedback"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
             >
-              撤销
-            </button>
-          </li>
-        ))}
-      </ul>
-      <fieldset className="auth-management-form">
-        <legend>{editing ? '修改授权范围' : '分配授权范围'}</legend>
-        <label htmlFor="managed-project-id">项目 UUID</label>
-        <input
-          id="managed-project-id"
-          value={projectId}
-          onChange={(event) => setProjectId(event.target.value.trim())}
-        />
-        <label htmlFor="managed-department-id">部门 UUID</label>
-        <input
-          id="managed-department-id"
-          value={departmentId}
-          onChange={(event) => setDepartmentId(event.target.value.trim())}
-        />
-        <label htmlFor="managed-team-id">班组 UUID</label>
-        <input
-          id="managed-team-id"
-          value={teamId}
-          onChange={(event) => setTeamId(event.target.value.trim())}
-        />
-        <button type="button" disabled={!canSave} onClick={() => void save()}>
-          {editing ? '保存修改' : '分配授权'}
-        </button>
-        {editing && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => setEditing(null)}
-          >
-            取消修改
-          </button>
+              {searching
+                ? t(
+                    '正在查询账号授权，请稍候。',
+                    'Loading account authorization. Please wait.',
+                    'Chargement des autorisations du compte. Veuillez patienter.',
+                  )
+                : (message === 'loaded' ||
+                    message === 'notFound' ||
+                    message === 'lookupFailed') &&
+                  feedback[message][
+                    locale === 'zh' ? 0 : locale === 'fr' ? 2 : 1
+                  ]}
+            </p>
+            {account && (
+              <>
+                <ManagedAccountEditor
+                  key={account.id}
+                  accountId={account.id}
+                  role={role}
+                />
+                <h3>{account.displayName || account.username}</h3>
+                {account.displayName &&
+                  account.displayName !== account.username && (
+                    <p>
+                      {t(
+                        '登录账号',
+                        'Login username',
+                        'Identifiant de connexion',
+                      )}{' '}
+                      : {account.username}
+                    </p>
+                  )}
+                <ul
+                  className="account-binding-list"
+                  aria-label={t(
+                    '已授权范围',
+                    'Authorized scopes',
+                    'Périmètres autorisés',
+                  )}
+                >
+                  {bindings.map((binding) => {
+                    const names = accountScopeNames(
+                      scopeFromBinding(binding),
+                      options.records,
+                    )
+                    return (
+                      <li
+                        key={`${binding.projectId}:${binding.departmentId}:${binding.teamId}`}
+                      >
+                        <span>
+                          {names.every(Boolean)
+                            ? names.join(' · ')
+                            : t(
+                                '范围名称尚未加载，请重新加载组织资料。',
+                                'Scope names unavailable. Reload organization data.',
+                                'Noms indisponibles. Rechargez les données de l’organisation.',
+                              )}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={busy || loading || !names.every(Boolean)}
+                          onClick={() => {
+                            setEditing(binding)
+                            setScope(scopeFromBinding(binding))
+                          }}
+                        >
+                          {t('修改', 'Edit', 'Modifier')}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void change(binding, true)}
+                        >
+                          {t('撤销', 'Revoke', 'Révoquer')}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+                <fieldset disabled={busy || loading || loadFailed}>
+                  <legend>
+                    {editing
+                      ? t('修改授权范围', 'Edit scope', 'Modifier le périmètre')
+                      : t(
+                          '分配授权范围',
+                          'Assign scope',
+                          'Attribuer un périmètre',
+                        )}
+                  </legend>
+                  <AuthorizationScopePicker
+                    value={scope}
+                    onChange={setScope}
+                    options={options}
+                  />
+                  <div className="wizard-actions">
+                    <button
+                      type="button"
+                      disabled={!validAccountScope(scope, options)}
+                      onClick={() =>
+                        void change(
+                          {
+                            projectId: scope.projectId,
+                            departmentId: scope.departmentId,
+                            teamId: scope.teamId,
+                            site: '',
+                          },
+                          false,
+                        )
+                      }
+                    >
+                      {editing
+                        ? t('保存修改', 'Save changes', 'Enregistrer')
+                        : t(
+                            '分配授权',
+                            'Assign authorization',
+                            'Attribuer l’autorisation',
+                          )}
+                    </button>
+                    {editing && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditing(null)
+                          setScope(emptyAccountScope)
+                        }}
+                      >
+                        {t(
+                          '取消修改',
+                          'Cancel edit',
+                          'Annuler la modification',
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </fieldset>
+              </>
+            )}
+            {(message === 'revoked' ||
+              message === 'assigned' ||
+              message === 'unconfirmed') && (
+              <p role="status" aria-live="polite">
+                {
+                  feedback[message][
+                    locale === 'zh' ? 0 : locale === 'fr' ? 2 : 1
+                  ]
+                }
+              </p>
+            )}
+          </>
         )}
-      </fieldset>
-      <p role="status" aria-live="polite">
-        {message}
-      </p>
+      </section>
     </section>
   )
 }

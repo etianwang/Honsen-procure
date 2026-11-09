@@ -1,3 +1,5 @@
+import { CosStorage } from './attachments/cos.js'
+import { AttachmentService } from './attachments/service.js'
 import argon2 from 'argon2'
 import { createApp } from './app.js'
 import { AuthService } from './auth/service.js'
@@ -9,6 +11,7 @@ import { PostgresSyncStore } from './sync/postgres-store.js'
 import { SyncService } from './sync/service.js'
 import { PostgresAuthorizationStore } from './authorization/postgres-store.js'
 import { AuthorizationService } from './authorization/service.js'
+import { registerAccounts } from './auth/accounts.js'
 
 const databaseUrl = process.env.POSTGRES_URL
 if (!databaseUrl)
@@ -16,6 +19,7 @@ if (!databaseUrl)
 
 const pool = createPostgresPool(databaseUrl)
 await waitForDatabase(pool)
+const cos = CosStorage.fromEnvironment(process.env)
 const app = createApp(
   new AuthService(new PostgresAuthStore(pool), {
     verify: argon2.verify,
@@ -23,7 +27,21 @@ const app = createApp(
   new MasterDataService(new PostgresMasterDataStore(pool)),
   new SyncService(new PostgresSyncStore(pool)),
   new AuthorizationService(new PostgresAuthorizationStore(pool)),
+  cos ? new AttachmentService(pool, cos) : undefined,
 )
 
 app.addHook('onClose', async () => pool.end())
+registerAccounts(
+  app,
+  new AuthService(new PostgresAuthStore(pool), { verify: argon2.verify }),
+  pool,
+)
+
+import { registerPasswordChange } from './auth/password-change.js'
+registerPasswordChange(
+  app,
+  new AuthService(new PostgresAuthStore(pool), { verify: argon2.verify }),
+  pool,
+)
+
 await app.listen({ host: '127.0.0.1', port: 3000 })

@@ -1,0 +1,70 @@
+{
+  "mode": "t09-t11-native-chain",
+  "baseSha": "100011d41383bac4a7533c388572b4ac65bb97ee",
+  "workingTreeDirty": true,
+  "artifactBoundary": "exeHash identifies the exact tested executable; baseSha does not identify uncommitted source changes",
+  "result": "PASS",
+  "exeHash": "fde98259b5b31c2ffab97b40a104ffa6f3ef24490a172a80973feb956221d190",
+  "installations": [
+    "7c6c2f59-2f0c-47b4-8b77-209863a44470",
+    "b677b21d-a3f9-45d5-932d-0c1dcaf058d1"
+  ],
+  "reversalPostCommitRetry": true,
+  "paymentConflict": {
+    "id": "7fd38351-2657-4f81-a2dd-bd22bdabbaf8",
+    "eventId": "1864e75c-8e20-42ff-84bb-6d624fcdff2a",
+    "winner": "74a91c6a-9a55-45d6-8a19-45e3b2572a3c",
+    "loser": "972d8f84-24b5-432e-a18c-5c458b911071",
+    "originalsPreserved": true,
+    "acknowledged": true,
+    "bothPaidMinor": "250"
+  },
+  "files": [
+    {
+      "id": "d77854d3-3664-461b-8c98-94166c4c0914",
+      "ownerType": "procurement_expenditure",
+      "byteLength": 42,
+      "sha256": "35267608f8f600b32184dcaeb9996429ee5596f8b50698cacb208432091f88cd",
+      "sourceType": "application/pdf"
+    },
+    {
+      "id": "eb3dfe78-9867-48ef-9582-c935e5a8ee8e",
+      "ownerType": "receipt",
+      "byteLength": 323,
+      "sha256": "b5a87ffa0e8b17e7c2ade11bf875d1edb518d9c0a8eb66e67a3055f7e75c633b",
+      "sourceType": "image/png"
+    },
+    {
+      "id": "a1f1e0a5-8c3d-4170-b2fa-ad1a4d8a2648",
+      "ownerType": "receipt",
+      "byteLength": 18098,
+      "sha256": "b871e368eb980720f33b7880ec43740d7568667ff4dd82b34aee3feb7110ee80",
+      "sourceType": "image/heic",
+      "originalPreserved": true,
+      "sourceAttachmentId": "7eccaa8b-e598-41cd-9e5e-b2d23f8ebaff"
+    }
+  ],
+  "nativeDomVerified": true,
+  "snapshotReceiptUnchanged": true,
+  "serverLedgerCount": 6,
+  "storage": {
+    "bucket": "honsen-materials-1308426049",
+    "region": "eu-frankfurt",
+    "authorizedPrefix": "honsen-procure-tests/496d1d0b-41df-4ae4-b4cc-c5719039fa9c/",
+    "databaseOwnedObjectCount": 4,
+    "cleanup": {
+      "cleanup": "PASS",
+      "objects": 4
+    },
+    "sourceSha": "100011d41383bac4a7533c388572b4ac65bb97ee"
+  },
+  "rawEvidence": ".cache/native-20261104081113/evidence.test.json",
+  "scope": "Same-host two independent native debug-test-profile Windows clients; real IPC HTTPS PostgreSQL COS, not installed release package",
+  "readOnlyRecheck": {
+    "result": "PASS",
+    "rawSafeResultAndExecutableHashMatch": true,
+    "authorizedPrefixMatchesDatabaseReadback": true,
+    "cleanupLogMatchesFourDatabaseOwnedObjects": true,
+    "scope": "Read-only saved evidence; no new COS request, object listing or live PG query"
+  }
+}

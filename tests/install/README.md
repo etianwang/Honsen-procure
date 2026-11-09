@@ -1,0 +1,5 @@
+# Isolated P1 observation
+
+`observe-p1.ps1` refuses execution outside Windows Sandbox and refuses existing Procure registration. It installs one digest-verified candidate and records first-install directory consistency only. Run separate fresh guests for explicit Unicode/space and former-default directories. Default interactive installation, Runner apply upgrade, failure/restart behavior and uninstall/data retention remain separate NOT RUN gates until actually observed.
+
+Host staging must be a newly created dedicated directory containing only this script, the fixed candidate setup and its SHA-256 sidecar. Map that directory read-only and a separate empty evidence directory writable. Never map the repository, user profile, COS configuration, `cos.txt`, databases or credential directories. Verify actual staged names and hashes before starting a guest. Do not install on the host. Root orchestrates candidate SHA/build and Sandbox lifecycle; this script does not publish or invoke a production service.

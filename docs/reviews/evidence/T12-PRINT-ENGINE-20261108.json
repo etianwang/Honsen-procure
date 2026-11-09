@@ -1,0 +1,145 @@
+{
+  "baseline": "a2f9edf",
+  "records": [
+    {
+      "path": ".cache/print-engine-layout/HPA-fr-CNY-10-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 302321,
+      "sha256": "3a3dfc8ce85bc6ff4ff0f7b12551b33267f12a602f70dfc83a9e31ba52d40c09",
+      "pages": 2
+    },
+    {
+      "path": ".cache/print-engine-layout/HPA-fr-EUR-1-true.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 323624,
+      "sha256": "1d15e18591f0878e786372fe4c20a2fd228d91e51d3f0a320c3349b794b94357",
+      "pages": 1
+    },
+    {
+      "path": ".cache/print-engine-layout/HPA-fr-EUR-50-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 358901,
+      "sha256": "dc40f05e2d34a484d38c331c0655fa0995f62080aad85064dc1b287e44b4a1f7",
+      "pages": 7
+    },
+    {
+      "path": ".cache/print-engine-layout/HPA-fr-USD-20-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 344954,
+      "sha256": "8f79c886d22df19203d22d1d97c5835ad3a6071b87444dde1f297974826513c5",
+      "pages": 4
+    },
+    {
+      "path": ".cache/print-engine-layout/HPA-fr-XAF-5-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 300952,
+      "sha256": "88a5230c32f2e29bf9ce5cb469178a180f0c426d7abba727a9ebfa9734908e69",
+      "pages": 1
+    },
+    {
+      "path": ".cache/print-engine-layout/HPA-fr-XOF-1-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 299995,
+      "sha256": "5314365732041fbf8c9320632b40bcefd8b77376db5f1c5b005457987590ad9d",
+      "pages": 1
+    },
+    {
+      "path": ".cache/print-engine-layout/OPA-en-CNY-10-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 294105,
+      "sha256": "f67ccdc982fbd4386cb32d40280b2dbb040abf74345c65fb51dc1e403b92640d",
+      "pages": 2
+    },
+    {
+      "path": ".cache/print-engine-layout/OPA-en-EUR-1-true.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 318290,
+      "sha256": "770f108ed24b50b421e932fedda83ab62dc3405c2b01b92725c29361a0b3839e",
+      "pages": 1
+    },
+    {
+      "path": ".cache/print-engine-layout/OPA-en-EUR-50-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 339870,
+      "sha256": "5ef507d58a1872f938bf96c6e6cb722230621c14123ccb2cefc2ba858f215fea",
+      "pages": 5
+    },
+    {
+      "path": ".cache/print-engine-layout/OPA-en-USD-20-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 330009,
+      "sha256": "129a2445a767b74afb302834a288ca97e09c776b76322c0e11db634f626dec05",
+      "pages": 3
+    },
+    {
+      "path": ".cache/print-engine-layout/OPA-en-XAF-5-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 295481,
+      "sha256": "6982462afe60b97dad423a5ab3c7a8e91ed56eec8dd30999ccb6fe4bf6c5eed7",
+      "pages": 1
+    },
+    {
+      "path": ".cache/print-engine-layout/OPA-en-XOF-1-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 293534,
+      "sha256": "c2d1efba2977f15e3343c69a5de83badf4ffdd93d9b1de93698ee2476c4bc378",
+      "pages": 1
+    },
+    {
+      "path": ".cache/print-engine-layout/SPO-zh-CNY-10-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 343262,
+      "sha256": "5ed70571069964a18717aeedcb874cfd9a9fb49f8056072f9526ff7b4f99749d",
+      "pages": 2
+    },
+    {
+      "path": ".cache/print-engine-layout/SPO-zh-EUR-1-true.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 366971,
+      "sha256": "f66dd9b9e796710c22f5c1a2a2f3931e6ded4c4dc0f02bcfae3e3219192c3ffb",
+      "pages": 1
+    },
+    {
+      "path": ".cache/print-engine-layout/SPO-zh-EUR-50-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 407314,
+      "sha256": "3e4db27c18021199d332623f131f6d72329f2a416b966dd4204f28003e41a6e7",
+      "pages": 8
+    },
+    {
+      "path": ".cache/print-engine-layout/SPO-zh-USD-20-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 386748,
+      "sha256": "f3efa3979ec5cd377830e81b633bf7ddeb979151457cf00762d272eb3928376e",
+      "pages": 4
+    },
+    {
+      "path": ".cache/print-engine-layout/SPO-zh-XAF-5-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 337084,
+      "sha256": "e3fad2baec571f35daa6e35935cc1bbcae2e2391423bc36100511080b8e8261a",
+      "pages": 1
+    },
+    {
+      "path": ".cache/print-engine-layout/SPO-zh-XOF-1-false.pdf",
+      "scope": "GENERATOR_ONLY",
+      "bytes": 339394,
+      "sha256": "464aa0a8f71c421cb974ac8806afaf18e07f9fc16a6dfe9838eee254a2eb676d",
+      "pages": 1
+    }
+  ],
+  "native020": {
+    "path": ".cache/native-pdf-020/TEST-HPA-CI-BETHEL2-20261108-2-searchable.pdf",
+    "sha256": "afb8e6ef9af238ec951628dd9a7b7c79ebee289a8d2b84324ac129c464e42dfa",
+    "pages": 1,
+    "totalMinor": "1100",
+    "currency": "XOF",
+    "formalNo": "CI-BETHEL2-20261108-HPA-4NM1JMPR-2",
+    "scope": "NATIVE_0.1.20_SAVE_READ_OPEN_ONLY_NOT_NEW_LAYOUT"
+  },
+  "candidate": {
+    "version": "0.1.21",
+    "sha256": "1bfd81934f559449b4c3849a916a50333a6d2520c823318c613cd3abb98e6dbf",
+    "installed": false
+  }
+}

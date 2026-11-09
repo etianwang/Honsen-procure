@@ -1,0 +1,85 @@
+{
+  "negativeChecks": {
+    "version": "0.1.4",
+    "scope": "installed Runner negative checks only",
+    "completedUtc": "2026-11-04T06:59:55.5380323Z",
+    "results": [
+      {
+        "exitCode": 1,
+        "case": "hash",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "dd96c87d-f3c4-41ae-be5b-40e1c4201be8",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.4",
+          "step": "hash-validation",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "installer checksum does not match",
+          "completedAtUtc": "2026-11-04T06:59:55Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      },
+      {
+        "exitCode": 1,
+        "case": "target",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "eebeea69-be0d-4667-85a2-e5514a66cc4e",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.4",
+          "step": "identity-validation",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "registered target directory does not match",
+          "completedAtUtc": "2026-11-04T06:59:55Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      },
+      {
+        "exitCode": 1,
+        "case": "pid",
+        "result": {
+          "appId": "honsen.procure",
+          "operationId": "140d5a0d-36c1-416c-8f0e-5b180d7f0008",
+          "status": "failed",
+          "source": "toolbox",
+          "fromVersion": "unknown",
+          "toVersion": "0.1.4",
+          "step": "wait-process",
+          "installerExitCode": null,
+          "installerLogPath": null,
+          "message": "the registered application did not exit",
+          "completedAtUtc": "2026-11-04T06:59:55Z"
+        },
+        "filesAndRegistrationUnchanged": true,
+        "passed": true
+      }
+    ],
+    "runResult": "PASS",
+    "installerSha256": "70671EB69E832B0E8DBA5CB536FAE1004557572996C461FCC9E685BECF634E1B",
+    "failureMessage": null
+  },
+  "summary": {
+    "completedUtc": "2026-11-04T06:59:55.6598076Z",
+    "version": "0.1.4",
+    "installerSha256": "70671EB69E832B0E8DBA5CB536FAE1004557572996C461FCC9E685BECF634E1B",
+    "os": "Microsoft Windows NT 10.0.26100.0",
+    "cleanup": "Synthetic guest install retained until Sandbox closes; no host install or user data changed",
+    "scope": "installed Runner negative checks only, not full application security",
+    "remaining": "authentication/roles/projects/attachments/HTTPS/Toolbox joint caller not tested",
+    "sourceSha": "2812631593cfec5a06375567ae6fe50aee049c4f",
+    "status": "PASS",
+    "installedFiles": {
+      "honsen.app.json": "5AF3E37F270FE6E979266398461993EA17A89A0FF07BE7F4300841B15916E7E2",
+      "HonsenProcure.exe": "1EAA02EEE86B89FD3D9B532543F8019F6C020F047F26A31F157FB9A647EB2654",
+      "HonsenUpdateRunner.exe": "AF4E7DC5E9A4907D9140147234431B9DA4B25D223AA582E96C25DD2630C6BA22"
+    }
+  }
+}

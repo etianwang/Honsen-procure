@@ -1,0 +1,78 @@
+{
+  "sourceSha": "3c2ceac0cd27c5ea389127611b88362ec4d5727f",
+  "version": "0.1.11",
+  "artifactRoot": "H:/Honsen/artifacts/windows/3c2ceac-011",
+  "installerSha256": "d3e46dd0bf90b05e096f535cb0c9f4022b9dc0111093c8141628a12d6cb8544c",
+  "effectiveRunnerSha256": "fb3a8c5a56d667205ff0b51d857c4bff895249298417e536fda87929591855a3",
+  "installedMainSha256": "bf9db1233260dcdc89a765897fd894793703f88dd782cb3c428428d95bd31277",
+  "upgrade": {
+    "status": "PASS bounded old019 public apply and payload replacement",
+    "actual": {
+      "version": "0.1.11",
+      "markerHash": "EDB0346CA4E77EB705081F52C4D49652783B814AD995670CB828650C602862BD",
+      "exitCode": 0,
+      "clientCount": 0,
+      "operationId": "d123afc1-0d75-42a2-89d2-1f12df47ff8c",
+      "manifestVersion": "0.1.11",
+      "sqliteHash": "EE79CF39D38B965138E462E0490253B73621561F3BEB3F902E30063661E09E97",
+      "privateFiles": [
+        ".honsen-runner-inuse-09766B55-AFD1-45C0-90EE-D7490A67B554.exe",
+        ".honsen-runner-inuse-09766B55-AFD1-45C0-90EE-D7490A67B554.owner.ini"
+      ],
+      "runnerHash": "FB3A8C5A56D667205FF0B51D857C4BFF895249298417E536FDA87929591855A3",
+      "runnerVersion": "0.1.11",
+      "mainVersion": "0.1.11",
+      "mainHash": "BF9DB1233260DCDC89A765897FD894793703F88DD782CB3C428428D95BD31277",
+      "directory": "C:\\Honsen Security Synthetic\\Honsen Procure"
+    }
+  },
+  "sameVersionCleanup": {
+    "status": "FAIL old completed-parent pair retained",
+    "actual": {
+      "markerHash": "EDB0346CA4E77EB705081F52C4D49652783B814AD995670CB828650C602862BD",
+      "runnerHash": "FB3A8C5A56D667205FF0B51D857C4BFF895249298417E536FDA87929591855A3",
+      "operationId": "81f60a75-8587-49a3-988c-1e660dd33ef4",
+      "newPrivateFiles": [
+        ".honsen-runner-inuse-09766B55-AFD1-45C0-90EE-D7490A67B554.exe",
+        ".honsen-runner-inuse-09766B55-AFD1-45C0-90EE-D7490A67B554.owner.ini",
+        ".honsen-runner-inuse-9625968C-C856-4D3C-94E6-F26CC7059B4E.exe",
+        ".honsen-runner-inuse-9625968C-C856-4D3C-94E6-F26CC7059B4E.owner.ini"
+      ],
+      "oldPrivateFilesAllGone": false,
+      "sqliteHash": "EE79CF39D38B965138E462E0490253B73621561F3BEB3F902E30063661E09E97",
+      "clientCount": 0,
+      "exitCode": 0,
+      "oldPrivateFiles": [
+        ".honsen-runner-inuse-09766B55-AFD1-45C0-90EE-D7490A67B554.exe",
+        ".honsen-runner-inuse-09766B55-AFD1-45C0-90EE-D7490A67B554.owner.ini"
+      ]
+    }
+  },
+  "wrongRunner": {
+    "status": "PASS actual newworker rejected installerexit0 with oldRunner PE; no restart",
+    "actual": {
+      "version": "0.1.11",
+      "exitCode": 1,
+      "runnerVersion": "0.1.9",
+      "runnerHash": "1943CAC8E7BD8726F2F5ED6E0AD419D289BC82B2F3E946BCE523D2E806F87F40",
+      "operationId": "fd8df3f4-b428-4527-b5e9-598a800fc914",
+      "clientCount": 0,
+      "mainVersion": "0.1.11"
+    },
+    "result": {
+      "appId": "honsen.procure",
+      "operationId": "fd8df3f4-b428-4527-b5e9-598a800fc914",
+      "status": "failed",
+      "source": "toolbox",
+      "fromVersion": "unknown",
+      "toVersion": "0.1.11",
+      "step": "runner",
+      "installerExitCode": null,
+      "installerLogPath": null,
+      "message": "installed executable version does not match target version",
+      "completedAtUtc": "2026-11-04T11:40:13Z"
+    },
+    "adapterEvidence": "p1-wrong-runner-adapter.log"
+  },
+  "fullUpdateGate": "OPEN; cleanup failure requires new source/package acceptance; live canonical/three-layer launch chain unavailable"
+}

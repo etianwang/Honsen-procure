@@ -28,6 +28,8 @@
 
 ### users and master data
 
+New login usernames contain ASCII letters/digits only, are globally unique under ASCII case folding, and preserve their original spelling. `display_name TEXT nullable` carries the separate Unicode name; management creation requires it, while legacy/bootstrap records may omit it. Existing non-ASCII usernames remain valid for authentication and are never renamed. The protected `admin` identity remains permanent. Case-collision migrations stop without changing existing identities.
+
 `users`: UUID, immutable business code, username, password hash, employee photo reference, `mobile_tail_last4` nullable, `totp_enabled BOOLEAN`, `ui_locale ENUM(zh-CN,fr-FR,en-US)`, enabled state, failed-attempt/lock fields, first-login completion, timestamps. Roles are many-to-many and additive: `super_administrator`, `administrator`, `purchaser`, `engineer`, `viewer`. User-project, user-department and user-team bindings are versioned/soft-deleted. At least two enabled super administrators must remain. Mobile tail is a display-only recognition cue, never an authentication factor. TOTP secrets are encrypted and kept out of ordinary SQLite data/API responses; an enabled account requires its current code on every login.
 
 `security_policy_audit`: UUID, policy key, old value, new value, mandatory reason, actor ID and timestamp. `allow_self_approval` defaults to false and may be changed only by a super administrator. Approved orders retain `is_self_approved` and approver identity in their immutable approval/audit snapshot.
@@ -87,7 +89,7 @@
 - Backend: modal password unlock, auto-lock after configurable inactivity, manual lock button.
 - Search works offline using SQLite indexes/FTS as appropriate; diacritic-insensitive French search where feasible.
 - Clear empty, loading, offline and error states; never show stale cloud status as live.
-- Login requires password and local image/arithmetic CAPTCHA. Lock after 30 minutes idle and save drafts. Enforce user/project scope independently of what the UI hides.
+- Login requires password and one mode-appropriate CAPTCHA: cloud online, local image/arithmetic offline. Start with an 8-second cloud request; only network unavailability offers explicit offline selection and reconnect. Lock after 30 minutes idle and save drafts. Enforce user/project scope independently of what the UI hides.
 - UI strings use complete `zh-CN`, `fr-FR` and `en-US` message catalogs; no visible application label may be hardcoded in a component. The user switches one active UI locale from the top bar/profile settings. Missing translated material/document values follow the print-language validation rules rather than silently changing the UI locale.
 
 ## 4. Printing
@@ -115,3 +117,7 @@ Reserved `/api/integrations/suppliers/*` disabled until future implementation.
 - Local save success must not depend on network; pending outbox visible.
 - Server retries must be idempotent using event IDs and transactional writes.
 - Account/session APIs enforce one online device session per user, five-failure/15-minute lock, forced first password change and administrator unlock.
+
+## 2026-11-06 manual stamp extension
+
+Purchase-order sync payload optionally carries `manualStampDutyMinor`, a canonical nonnegative integer string bounded by signed64-bit minor units in the document currency. It is persisted in SQLite `manual_stamp_duty_minor` by0062 and server `sync_entities` JSON; no new PostgreSQL business column is introduced. Missing legacy fields remain missing, not backfilled. Explicit zero is allowed before issue; omission of an existing field on upsert retains a conflict. Formal snapshots/totals freeze the field. Percentage VAT is calculated independently, then manual stamp is added to total.

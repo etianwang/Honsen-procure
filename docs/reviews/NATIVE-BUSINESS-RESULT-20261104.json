@@ -1,0 +1,809 @@
+{
+  "date": "2026-11-04 Asia/Shanghai",
+  "testedSource": "a3c995b124f89862033a2ae9019772302c542587",
+  "scope": "Two copied real Windows EXEs on one host, distinct installation IDs and SQLite profiles; debug-only test configuration; production IPC/HTTPS, disposable PostgreSQL and authorized COS; not two physical machines or installed-release acceptance",
+  "executableSha256": "5272b695f7037c3588b0763149d3d03669f5d2c16cda2813e1544cf303c13856",
+  "profileToolSha256": "cb5440b52c8abb08dec460f828bd2f252d2e8ffc753e215c37384d061a262c1b",
+  "database": {
+    "engine": "PostgreSQL",
+    "endpoint": "127.0.0.1:54329",
+    "compose": "compose.test.yaml",
+    "version": "16.15",
+    "persistentVolume": false
+  },
+  "payment": {
+    "result": "PASS",
+    "sourceClean": true,
+    "run": "native-20261104022746",
+    "localRawEvidence": ".cache/native-20261104022746/evidence.test.json",
+    "installations": [
+      "bf7e62a5-a032-463e-8c84-f54bef0ccd8a",
+      "aa8785d2-82b5-4175-a211-9c69cef1f6b9"
+    ],
+    "orderId": "50f35565-57fa-453b-a7b6-e357790fa4da",
+    "exeHash": "5272b695f7037c3588b0763149d3d03669f5d2c16cda2813e1544cf303c13856",
+    "paymentConflict": {
+      "id": "7ba0e435-2505-4bab-8aee-1e461c9da68c",
+      "eventId": "d351a699-b92f-4619-9356-2d2657b3cfc8",
+      "winner": "f41b2ad0-b02d-417f-8ce3-b25a8ef5bc69",
+      "loser": "eedf8935-ccea-4c06-bf7b-a0f4f5de0442",
+      "originalsPreserved": true,
+      "acknowledged": true,
+      "bothPaidMinor": "250"
+    },
+    "reversalPostCommitRetry": true,
+    "files": [
+      {
+        "id": "156e4952-69d4-47f1-b300-98e463b8e885",
+        "ownerType": "procurement_expenditure",
+        "byteLength": 42,
+        "sha256": "35267608f8f600b32184dcaeb9996429ee5596f8b50698cacb208432091f88cd",
+        "sourceType": "application/pdf"
+      },
+      {
+        "id": "2dbe8110-844c-43e5-8284-a5792edb14d8",
+        "ownerType": "receipt",
+        "byteLength": 323,
+        "sha256": "b5a87ffa0e8b17e7c2ade11bf875d1edb518d9c0a8eb66e67a3055f7e75c633b",
+        "sourceType": "image/png"
+      },
+      {
+        "id": "02591f58-5d19-4415-8ef7-76a0e74fd113",
+        "ownerType": "receipt",
+        "byteLength": 18098,
+        "sha256": "b871e368eb980720f33b7880ec43740d7568667ff4dd82b34aee3feb7110ee80",
+        "sourceType": "image/heic",
+        "originalPreserved": true,
+        "sourceAttachmentId": "7a790ede-7d70-4bca-bf5a-cc002026173a"
+      }
+    ],
+    "nativeDomVerified": true,
+    "displayedEffectivePaidMinor": "250",
+    "currency": "XOF",
+    "snapshotReceiptUnchanged": true,
+    "serverLedgerCount": 6,
+    "cosCleanup": {
+      "cleanup": "PASS",
+      "objects": 4
+    },
+    "calls": [
+      {
+        "phase": "login-and-order",
+        "command": "issue_local_captcha",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "issue_cloud_captcha",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "online_login",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "refresh_authorization",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "issue_local_captcha",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "issue_cloud_captcha",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "online_login",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "refresh_authorization",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "save_requisition_draft",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "set_procurement_mode",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "submit_requisition_draft",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "confirm_requisition",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "start_honsen_market_execution",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "login-and-order",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "record_receipt",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "record_receipt",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "issue_local_captcha",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "issue_cloud_captcha",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "online_login",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "refresh_authorization",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "record_procurement_expenditure",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "record_procurement_expenditure",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "list_confirmed_procurement_orders",
+        "ok": true
+      },
+      {
+        "phase": "receipt-and-payments",
+        "command": "list_confirmed_procurement_orders",
+        "ok": true
+      },
+      {
+        "phase": "reversal",
+        "command": "reverse_procurement_expenditure",
+        "ok": true
+      },
+      {
+        "phase": "reversal",
+        "command": "push_pending_sync",
+        "ok": false,
+        "error": {
+          "code": "sync_transport_error"
+        }
+      },
+      {
+        "phase": "reversal",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "reversal",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "reversal",
+        "command": "list_confirmed_procurement_orders",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "issue_cloud_captcha",
+        "ok": false,
+        "error": {
+          "code": "sync_transport_error"
+        }
+      },
+      {
+        "phase": "offline-restart",
+        "command": "list_confirmed_procurement_orders",
+        "ok": false,
+        "error": {
+          "code": "reauthentication_required"
+        }
+      },
+      {
+        "phase": "offline-restart",
+        "command": "issue_local_captcha",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "offline_login",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "record_procurement_expenditure",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "issue_local_captcha",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "issue_cloud_captcha",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "online_login",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "refresh_authorization",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "offline-restart",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "record_procurement_expenditure",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "reverse_procurement_expenditure",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "reverse_procurement_expenditure",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "list_payment_sync_conflicts",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "push_pending_sync",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "list_payment_sync_conflicts",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "list_confirmed_procurement_orders",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "list_payment_sync_conflicts",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "list_confirmed_procurement_orders",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "issue_local_captcha",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "issue_cloud_captcha",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "online_login",
+        "ok": true
+      },
+      {
+        "phase": "competing-reversal-resolution",
+        "command": "refresh_authorization",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "import_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "sync_attachments",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "read_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "read_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "import_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "sync_attachments",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "read_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "read_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "import_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "sync_attachments",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "pull_sync",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "read_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "read_attachment",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "list_attachments",
+        "ok": true
+      },
+      {
+        "phase": "files",
+        "command": "read_attachment",
+        "ok": true
+      },
+      {
+        "phase": "forbidden-scope",
+        "command": "issue_local_captcha",
+        "ok": true
+      },
+      {
+        "phase": "forbidden-scope",
+        "command": "issue_cloud_captcha",
+        "ok": true
+      },
+      {
+        "phase": "forbidden-scope",
+        "command": "online_login",
+        "ok": true
+      },
+      {
+        "phase": "forbidden-scope",
+        "command": "refresh_authorization",
+        "ok": true
+      },
+      {
+        "phase": "forbidden-scope",
+        "command": "list_attachments",
+        "ok": false,
+        "error": {
+          "code": "forbidden"
+        }
+      },
+      {
+        "phase": "forbidden-scope",
+        "command": "read_attachment",
+        "ok": false,
+        "error": {
+          "code": "forbidden"
+        }
+      }
+    ]
+  },
+  "hpa": {
+    "result": "PASS",
+    "sourceClean": true,
+    "run": "native-smoke-20261104022927",
+    "localRawEvidence": ".honsen-native-qa/native-smoke-20261104022927.test.json",
+    "orderId": "67ea9377-2a8a-49b5-9e91-f9eec4989b2f",
+    "exeHashes": [
+      "5272b695f7037c3588b0763149d3d03669f5d2c16cda2813e1544cf303c13856",
+      "5272b695f7037c3588b0763149d3d03669f5d2c16cda2813e1544cf303c13856"
+    ],
+    "installations": [
+      "6c1bdab7-6d62-413c-85db-ae5414ecb966",
+      "dd2b136f-2246-44b8-9f25-e8e9453d88f2"
+    ],
+    "issue": {
+      "documentType": "HPA",
+      "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-HPA-X52KV27J-1",
+      "formalInstallationId": "dd2b136f-2246-44b8-9f25-e8e9453d88f2",
+      "formalSequence": 1
+    },
+    "pendingBeforePush": 1,
+    "pushReplayPreserved": true,
+    "formalPull": {
+      "appliedCount": 1,
+      "nextCursor": "5"
+    },
+    "restartPreserved": true,
+    "replayPreserved": true,
+    "fieldsMatched": 12,
+    "currentPriceDidNotOverwrite": true,
+    "consoleErrors": [],
+    "calls": [
+      {
+        "phase": "login",
+        "command": "issue_local_captcha",
+        "ok": true,
+        "at": "2026-11-04T02:29:47.065Z"
+      },
+      {
+        "phase": "login",
+        "command": "issue_cloud_captcha",
+        "ok": true,
+        "at": "2026-11-04T02:29:47.487Z"
+      },
+      {
+        "phase": "login",
+        "command": "online_login",
+        "ok": true,
+        "at": "2026-11-04T02:29:48.409Z"
+      },
+      {
+        "phase": "login",
+        "command": "issue_local_captcha",
+        "ok": true,
+        "at": "2026-11-04T02:29:48.419Z"
+      },
+      {
+        "phase": "login",
+        "command": "issue_cloud_captcha",
+        "ok": true,
+        "at": "2026-11-04T02:29:48.831Z"
+      },
+      {
+        "phase": "login",
+        "command": "online_login",
+        "ok": true,
+        "at": "2026-11-04T02:29:49.825Z"
+      },
+      {
+        "phase": "draft",
+        "command": "save_requisition_draft",
+        "ok": true,
+        "at": "2026-11-04T02:29:49.846Z"
+      },
+      {
+        "phase": "draft",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:50.586Z"
+      },
+      {
+        "phase": "mode",
+        "command": "set_procurement_mode",
+        "ok": true,
+        "at": "2026-11-04T02:29:50.602Z"
+      },
+      {
+        "phase": "mode",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:51.289Z"
+      },
+      {
+        "phase": "submit",
+        "command": "submit_requisition_draft",
+        "ok": true,
+        "at": "2026-11-04T02:29:51.302Z"
+      },
+      {
+        "phase": "submit",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:51.986Z"
+      },
+      {
+        "phase": "submit",
+        "command": "pull_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:53.043Z"
+      },
+      {
+        "phase": "confirm",
+        "command": "confirm_requisition",
+        "ok": true,
+        "at": "2026-11-04T02:29:53.055Z"
+      },
+      {
+        "phase": "confirm",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:53.732Z"
+      },
+      {
+        "phase": "confirm",
+        "command": "pull_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:54.789Z"
+      },
+      {
+        "phase": "confirm",
+        "command": "get_requisition_detail",
+        "ok": true,
+        "at": "2026-11-04T02:29:54.799Z"
+      },
+      {
+        "phase": "issue",
+        "command": "issue_honsen_formal_order",
+        "ok": true,
+        "at": "2026-11-04T02:29:54.822Z"
+      },
+      {
+        "phase": "issue",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:55.501Z"
+      },
+      {
+        "phase": "issue",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:55.838Z"
+      },
+      {
+        "phase": "formal-pull",
+        "command": "pull_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:56.526Z"
+      },
+      {
+        "phase": "formal-pull",
+        "command": "get_requisition_detail",
+        "ok": true,
+        "at": "2026-11-04T02:29:56.545Z"
+      },
+      {
+        "phase": "publish-material",
+        "command": "save_material",
+        "ok": true,
+        "at": "2026-11-04T02:29:56.563Z"
+      },
+      {
+        "phase": "publish-material",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:57.227Z"
+      },
+      {
+        "phase": "publish-supplier",
+        "command": "save_supplier",
+        "ok": true,
+        "at": "2026-11-04T02:29:57.239Z"
+      },
+      {
+        "phase": "publish-supplier",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:57.914Z"
+      },
+      {
+        "phase": "new-current-price",
+        "command": "add_material_price",
+        "ok": true,
+        "at": "2026-11-04T02:29:57.922Z"
+      },
+      {
+        "phase": "new-current-price",
+        "command": "push_pending_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:58.594Z"
+      },
+      {
+        "phase": "new-current-price",
+        "command": "pull_sync",
+        "ok": true,
+        "at": "2026-11-04T02:29:59.307Z"
+      },
+      {
+        "phase": "restart",
+        "command": "lock_session",
+        "ok": true,
+        "at": "2026-11-04T02:29:59.459Z"
+      },
+      {
+        "phase": "restart",
+        "command": "issue_local_captcha",
+        "ok": true,
+        "at": "2026-11-04T02:30:00.855Z"
+      },
+      {
+        "phase": "restart",
+        "command": "issue_cloud_captcha",
+        "ok": true,
+        "at": "2026-11-04T02:30:01.262Z"
+      },
+      {
+        "phase": "restart",
+        "command": "online_login",
+        "ok": true,
+        "at": "2026-11-04T02:30:02.098Z"
+      },
+      {
+        "phase": "restart",
+        "command": "get_requisition_detail",
+        "ok": true,
+        "at": "2026-11-04T02:30:02.108Z"
+      },
+      {
+        "phase": "replay",
+        "command": "pull_sync",
+        "ok": true,
+        "at": "2026-11-04T02:30:02.809Z"
+      },
+      {
+        "phase": "replay",
+        "command": "lock_session",
+        "ok": true,
+        "at": "2026-11-04T02:30:02.823Z"
+      },
+      {
+        "phase": "replay",
+        "command": "lock_session",
+        "ok": true,
+        "at": "2026-11-04T02:30:02.831Z"
+      }
+    ]
+  },
+  "limitations": [
+    "SPO native convergence remains untested; its Rust/PostgreSQL/DOM slice is separate.",
+    "Receipt attachments originate on the client containing the real receipt; remote receipt projection/arbitrary-device receipt mutation remains unaccepted.",
+    "Debug diagnostics are excluded from release. No policy bypass, production profile, release, deployment or PR merge occurred.",
+    "Historical failed runs remain in local evidence and are not relabeled PASS."
+  ],
+  "hostIntegrity": {
+    "system": false,
+    "high": true,
+    "mechanism": "Windows mandatory integrity SID checked without recording account details"
+  },
+  "cleanupVerified": {
+    "nativeListenerCount": 0,
+    "ownedCosObjectsRemoved": 4,
+    "temporaryDatabasesRemoved": true
+  }
+}

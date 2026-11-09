@@ -28,6 +28,7 @@ export type SupplierChildTermsInput = {
   orderDiscount: Adjustment
   orderFreight: Adjustment
   taxRateBasisPoints: number
+  manualStampDutyMinor?: string
 }
 
 export type SupplierChildTermsView = {
@@ -47,7 +48,9 @@ export type SupplierOrderApi = {
   saveSupplierChildTerms(
     input: SupplierChildTermsInput,
   ): Promise<SupplierChildTermsView>
-  sendSupplierOrder(orderId: string): Promise<void>
+  sendSupplierOrder(
+    orderId: string,
+  ): Promise<void | { documentType: string; formalDocumentNo: string }>
 }
 
 type TauriInvoke = <T>(command: string, args?: object) => Promise<T>
@@ -73,6 +76,9 @@ export const tauriSupplierOrderApi: SupplierOrderApi = {
       input,
     }),
   sendSupplierOrder: (orderId) =>
-    tauriInvoke()<void>('send_supplier_order', { orderId }),
+    tauriInvoke()<{ documentType: string; formalDocumentNo: string }>(
+      'send_supplier_order',
+      { orderId },
+    ),
 }
 import type { Adjustment } from '@honsen/shared'

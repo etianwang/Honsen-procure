@@ -1,0 +1,40 @@
+{
+  "applicationSource": "21491c5f4ccfbb668425b302f9be6e0523e1d1df",
+  "installerSha256": "19f4648d0fd2269ebaf46620d5ad1ef533d5061f0a41442136f62297619c1f7b",
+  "rule": {
+    "localAddress": "172.18.176.1",
+    "createdUtc": "2026-11-05T00:34:35.6727993Z",
+    "localPort": 3444,
+    "protocol": "TCP",
+    "ruleName": "HonsenProcure-QA-21491c5-3444-20261105",
+    "approved": true,
+    "program": "C:\\Users\\Administrator\\AppData\\Roaming\\fnm\\node-versions\\v24.18.0\\installation\\node.exe",
+    "remoteAddress": "172.18.187.218",
+    "interface": "vEthernet (Default Switch)"
+  },
+  "postRuleProbe": {
+    "error": "The operation has timed out.",
+    "utc": "2026-11-05T00:35:06.3030212Z",
+    "tcp": false
+  },
+  "ruleCleanup": {
+    "remaining": 0,
+    "removedUtc": "2026-11-05T00:36:35.3895816Z",
+    "outcome": "Exact approved rule did not restore guest TCP; no expansion or TLS bypass",
+    "ruleName": "HonsenProcure-QA-21491c5-3444-20261105"
+  },
+  "backendCleanup": {
+    "composeDownExit": 0,
+    "authorizationRevocationExecuted": false,
+    "scope": "Exact temporary firewall trial did not permit guest TCP; rule removed by main agent; own backend cleaned only",
+    "keeperInterrupted": true,
+    "listenersRemaining": 0,
+    "ownCertificateEntriesRemaining": 0,
+    "onlineLoginExecuted": false
+  },
+  "finalSandboxList": {
+    "WindowsSandboxEnvironments": []
+  },
+  "outcome": "BLOCKED_ENV: guest TCP/strict HTTPS remain unreachable; installed online login and revocation NOT RUN",
+  "rootCause": "Exact transport cause is not established; no rule expansion or TLS bypass"
+}

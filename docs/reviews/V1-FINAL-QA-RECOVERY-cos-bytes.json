@@ -1,0 +1,8 @@
+{
+  "byteLength": 63,
+  "put": 200,
+  "get": 200,
+  "hashMatches": true,
+  "invalidAuthorization": 403,
+  "cleanup": 204
+}

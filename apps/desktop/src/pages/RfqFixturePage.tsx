@@ -3,8 +3,13 @@ import { tauriRfqApi, type RfqApi } from '../lib/rfq-api'
 
 const fallbackApi: RfqApi = {
   async createRfq(input) {
-    return { ...input, itemCount: 1 }
+    return { ...input, itemCount: 1, status: 'draft' }
   },
+  async listRfqs() {
+    return []
+  },
+  async sendRfq() {},
+  async closeRfq() {},
 }
 
 export function RfqFixturePage() {

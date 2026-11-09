@@ -1,0 +1,71 @@
+{
+  "nativeRed": {
+    "path": ".cache/native-print-100-RED.pdf",
+    "sha256": "93addb612ac1cbb9f933312b030b21bb255096ec6f2c2b1096c05fc9d420cc9e",
+    "pageObjectCount": 4,
+    "testedApplicationSha": "100011d41383bac4a7533c388572b4ac65bb97ee",
+    "result": "FAIL",
+    "producer": "Microsoft Print To PDF (root native observation)",
+    "fixturePreparationRaw": ".honsen-native-qa/native-smoke-20261104083328-offline.test.json"
+  },
+  "implementationCheckpoint": "66c777e11fabeb446ed728200331eecea4cfd891",
+  "builder": {
+    "desktopUnit": "27/27 PASS",
+    "typecheck": "PASS",
+    "lint": "PASS with existing warnings",
+    "build": "PASS",
+    "paginationLifecycleDom": "1/1 PASS",
+    "existingPreviewDom": "1/1 PASS"
+  },
+  "supplementalHeadless": {
+    "path": ".cache\\formal-print-pagination\\22793f86-b8f7-485b-9a5b-04c34acc736c\\selected-two-line.pdf",
+    "sha256": "f69c5667853638a1b4b0e8ea63c81999ab7178e311d6b100394d5049ddb83d4c",
+    "pageObjectCount": 1,
+    "result": "PASS",
+    "scope": "Browser component fixture, not actual native system print acceptance"
+  },
+  "fixedNativeStatus": "PASS for actual two-line A4 native Microsoft Print To PDF and cancel recovery only",
+  "review": "Independent Agent C read-only diff review found no P0/P1 within this fix",
+  "limitations": [
+    "No long-document native pagination acceptance yet",
+    "No physical printer acceptance",
+    "Not installed Release-package print acceptance",
+    "Complete document language and original T12 parent gates remain open"
+  ],
+  "nativeGreen": {
+    "sourceSha": "66c777e11fabeb446ed728200331eecea4cfd891",
+    "runId": "native-smoke-20261104084850",
+    "processId": 24180,
+    "exeSha256": "fde98259b5b31c2ffab97b40a104ffa6f3ef24490a172a80973feb956221d190",
+    "frontendTreeSha256": "24f679d73eed74a24ee23ac868ed84ac8730785cb30811aeddf3389cd83fd716",
+    "readyEvidence": ".honsen-native-qa/native-smoke-20261104084850-print-ready.test.json",
+    "formalDocumentNo": "TEST-CI-TEST-OPA-20261019-SPO-GPTVXTV8-1",
+    "pdf": {
+      "path": ".cache/native-print-66c777e-GREEN.pdf",
+      "sha256": "c982f25119960fd4fa919b818c303f798469b02f59e09ad177de3f1ccd0045de",
+      "pageObjectCount": 1,
+      "producer": "Microsoft Print To PDF (actual root observation)"
+    },
+    "renderedImage": {
+      "path": ".cache/native-print-66c777e-GREEN-page1.png",
+      "sha256": "bd3f5442a6da348e0387e61a257170d28522d1692fad1cee20b264e23155d3fe"
+    },
+    "visualResult": "Root Poppler rendering/opening confirms heading at top, Chinese/French names, model, quantities, 100+100=200XOF, terms/signatures without clipping",
+    "repeatPrintCancel": "Actual second print preview one page, Cancel returns normal print button",
+    "afterprintReadOnlyObservation": {
+      "sourceSha": "66c777e11fabeb446ed728200331eecea4cfd891",
+      "nativeRun": "native-smoke-20261104084850",
+      "result": "PASS",
+      "scope": "Read-only CDP DOM observation after root actual print-save and print-cancel",
+      "printingBodyClass": false,
+      "directPrintPortalCount": 0,
+      "screenPreviewCount": 1,
+      "printControlVisible": true
+    },
+    "preparationRawEvidence": ".honsen-native-qa/native-smoke-20261104084850-offline.test.json",
+    "preparationResult": "PASS",
+    "harnessHead": "66c777e11fabeb446ed728200331eecea4cfd891",
+    "holdReleased": true,
+    "ownedCleanup": "normal finally completed; no1420/9241 listeners"
+  }
+}

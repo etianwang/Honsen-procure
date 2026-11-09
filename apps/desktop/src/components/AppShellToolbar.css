@@ -1,0 +1,85 @@
+.honsen-shell-toolbar.topbar {
+  display: grid;
+  grid-template-columns: minmax(9rem, auto) minmax(0, 1fr);
+  align-items: start;
+  padding-block: 12px;
+}
+.honsen-shell-controls {
+  display: flex;
+  align-items: start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  min-width: 0;
+  font-size: 13px;
+}
+.honsen-shell-controls label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.honsen-shell-controls select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.honsen-shell-language {
+  flex: 0 1 7rem;
+}
+.honsen-shell-scope {
+  flex: 1 1 22rem;
+  max-width: 32rem;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.honsen-shell-scope .ant-select {
+  width: 100%;
+  min-width: 0;
+}
+.honsen-shell-user {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.honsen-shell-user .signed-in-username {
+  overflow-wrap: anywhere;
+}
+.honsen-shell-user .password-online-note {
+  flex-basis: 100%;
+}
+.honsen-shell-sync {
+  flex: 1 1 18rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.honsen-shell-sync summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.honsen-shell-sync dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 6px 12px;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--honsen-border, #dce9e2);
+  border-radius: 6px;
+}
+.honsen-shell-sync dd {
+  margin: 0;
+}
+.honsen-shell-sync-warning {
+  font-weight: 600;
+}
+@media (max-width: 1366px) {
+  .honsen-shell-toolbar.topbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .honsen-shell-controls {
+    justify-content: flex-start;
+  }
+}

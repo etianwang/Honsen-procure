@@ -1,3 +1,4 @@
+import { procurementMutation } from './procurement-sync'
 export type ReceiptItemInput = {
   orderItemId: string
   quantity: string
@@ -40,7 +41,11 @@ function invoke(): TauriInvoke {
 }
 
 export const tauriReceiptApi: ReceiptApi = {
-  recordReceipt: (input) => invoke()<ReceiptView>('record_receipt', { input }),
+  recordReceipt: (input) =>
+    invoke()<ReceiptView>('record_receipt', { input }).then((value) => {
+      procurementMutation()
+      return value
+    }),
   closeSupplierOrderWithConditions: (orderId, reason) =>
     invoke()<void>('close_supplier_order_with_conditions', { orderId, reason }),
 }

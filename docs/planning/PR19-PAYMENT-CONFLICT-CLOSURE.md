@@ -1,0 +1,37 @@
+# PR19 payment conflict closure
+
+Goal: finish the approved T10 payment-conflict handling required by T09/T11, retaining original payment history and using the existing conflict, Outbox and Push/Pull framework.
+
+Baseline verified 2026-10-24: `98537d22b17853752203e11646bd1966ef6d1d03`, clean task worktree, remote equal, both quality checks successful. Procurement business chat confirmed this thread as sole owner of payment/conflict files.
+
+## Decision
+
+Only `use_server` resolves an immutable payment conflict. The administrator verifies the retained local and server records and supplies a reason. Changing financial facts uses the existing reversal/new-payment workflow after reconciliation. Never replay a losing payment as an overwrite or invent a financial reversal solely to hide a duplicate request.
+
+The existing `sync_conflicts` supplies scoped cloud discovery for an administrator other than the originating account. A strict `payment_conflict_resolution` request `{id, conflictId, eventId, action: 'use_server', reason}` is a normal owned Outbox event. The server validates current enabled account, administrator role, full authoritative order scope, preserved conflict and actual winner in the same transaction; it publishes trusted provenance and both original payloads through the normal change log. A unique append-only decision prevents concurrent or repeated adjudication from double booking.
+
+SQLite retains original ledger rows, conflict JSON, journals, attachments and rejected Outbox rows. An additive immutable decision projection chooses the canonical effective payment once; no original payment UPDATE/DELETE. Local queued resolution remains pending until server confirmation. Distinct-ID competing reversals and same-ID divergent payments both converge. Unsupported/malformed evidence fails closed without cursor loss.
+
+## Boundaries and work
+
+- [x] Shared/server builder: strict contracts; scoped existing-conflict GET; normal Push decision validation/storage/publication; structured duplicate-reversal conflicts; PG013 and reviewed grants. Role/scope rejection, other-creator administration, lost ACK, competing decisions, rollback, raw evidence and unchanged ledger have focused PostgreSQL evidence.
+- [x] Rust builder: SQLite0059; trusted cloud discovery/decision queue IPC; immutable canonical projection, effective reads, pending/confirmed state; projector/restart and origin isolation. Two real SQLite files are tested without presenting them as Windows EXE acceptance.
+- [x] Desktop builder: reuse SyncConflictPanel; compare originals, mandatory reason, safe payment action, pending and confirmed states, three-language new copy. Production-route DOM proof has no browser errors. The current branch's shell does not yet pass a selected locale; the RC business/localization owner must connect that existing prop when its locale framework is integrated.
+- [ ] Independent review: security/data-loss/silent-overwrite and double-booking boundaries, directly affected tests, commit/push/remote SHA/CI.
+- [ ] Environment: inspect existing clean Windows/Sandbox availability without security changes or repeated current-profile CredWrite failures. Execute installed dual-native chain only if feasible. Otherwise retain BLOCKED_ENV; unchanged real COS boundary reuses prior evidence.
+
+Acceptance does not close T10 or other original parents. No production migration, merge, deployment, release or main changes. E: owns task caches/build/test data. Recovery details and final exact checkpoints go in memory.md and the PR.
+
+## Agent A builder evidence — 2026-10-25
+
+Continue the existing dirty implementation rather than recreating it. Node is 24.18.0; committed npm/Cargo locks are unchanged. `E:/Honsen-build/agent-a` owns fresh temporary files, npm cache and the exclusive Cargo target. The application checkpoint is the commit containing this report; inspect its Git hash before reusing these results.
+
+- `npm run test --workspace @honsen/server -- src/sync/expenditure-postgres.test.ts`: 4 passed against disposable WSL2 PostgreSQL 16, including transactional decisions, competing reversals, retries, legacy upgrade and evidence immutability.
+- `TMPDIR=<task-temp> node tests/deploy/test-t04-grants.cjs`: restricted-role service Push/Pull/repair and reviewed migration grants/trigger checks passed. The first run failed with 42501 because its legacy fixture omitted the new country-read dependency; adding only `countries` to that fixture's existing SELECT list fixed it. No blanket grants or production permissions were added. PostgreSQL013 grants the decision table SELECT/INSERT only and rejects disabled immutability guards.
+- Fresh related PostgreSQL/API run: migration runner 4, attachment authorization/archive 7 and API/service 27 passed; the one explicitly opt-in real-COS test skipped because no live test credentials were injected. That combined run failed its first payment `beforeAll`/`afterAll` 10-second cold-migration hooks; the standalone payment rerun above passed without changing timeouts. Earlier attempts before the Docker/Compose service was ready failed with ECONNREFUSED. Those failures are retained as environment/initialization evidence, not discarded.
+- `cargo test --lib payment_conflict`: 3 passed; `cargo test --lib payment_`: 4 passed; `cargo test --lib expenditure`: 7 passed; `cargo test --lib attachment`: 5 passed. All use `--manifest-path apps/desktop/src-tauri/Cargo.toml`. These counts overlap; they are not summed as distinct tests. `cargo check --bins` and `cargo fmt --check` passed.
+- A new assertion first failed because `list_attachment_targets` omitted a canonical winning reversal kept in a decision rather than the raw ledger. The minimal repair reuses effective payment reads for target discovery and ownership checks. The same test now passes and imports a voucher against the winner, while the losing original is absent from targets and both raw ledger rows remain intact.
+- `npm run test --workspace @honsen/desktop`: 13 passed; shared package: 25 passed. `npm run e2e -- tests/e2e/payment-conflicts.spec.ts tests/e2e/payments.spec.ts --workers=1`: 2 passed through production routes, with visible pending/confirmed/reason/audit assertions and no browser errors. Their IPC fixture is presentation evidence only.
+- Workspace `npm run typecheck`, `npm run lint`, `npm run build`, `npm run format:check` passed; the existing two React effect warnings and Vite chunk advisory remain. Native harness JavaScript and PowerShell syntax checks passed. One early second Cargo invocation failed LNK1104 because the earlier test EXE still ran; sequential reruns passed.
+
+**BLOCKER for final acceptance:** final-SHA independent recheck/quality, installed dual-Windows payment/COS and revoked-session login acceptance remain open. Native runtime was not rerun this round: the fresh task target had no current application EXE, and the existing native harness requires an authorized `CosEnvFile` that was not supplied to this run. No production `.env` was read, no existing credential was removed and no protection was weakened. The 2026-10-24 credential-storage error remains historical, not a newly reproduced condition. COS signing/storage implementation is unchanged; prior COS evidence applies only to its prior exact boundary, not this new native chain. **DEFERRED:** complete original T09/T10/T11 and broader V1 release acceptance. **WARNING:** actual three-language shell wiring and installed compatibility remain unverified here.

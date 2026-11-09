@@ -2,6 +2,8 @@ export type ProcurementExecutionLine = {
   id: string
   materialName: string
   quantity: string
+  receivedQuantity: string
+  remainingQuantity: string
   unit: string
   currency: 'XOF' | 'CNY' | 'USD' | 'EUR'
 }
@@ -10,10 +12,34 @@ export type ProcurementExecutionChild = {
   id: string
   displayNo: string
   currency: string
+  workflowStatus?: string
   lines: ProcurementExecutionLine[]
+  paymentSummary: ProcurementPaymentSummary
+}
+export type ProcurementPaymentSummary = {
+  currency: string
+  payableMinor: string
+  paidMinor: string
+  remainingMinor: string
+  overpaidMinor: string
+  status: string
+  records: {
+    id: string
+    payeeName: string
+    currency: string
+    amountMinor: string
+    paymentDate: string
+    paymentType: string
+    status: string
+    correctsExpenditureId?: string | null
+    hasVoucher?: boolean
+    voucherReference?: string | null
+    notes?: string | null
+  }[]
 }
 
 export type ProcurementExecutionOrder = {
+  countryId: string
   id: string
   displayNo: string
   primaryCurrency: string
@@ -21,6 +47,7 @@ export type ProcurementExecutionOrder = {
   workflowStatus: string
   lines: ProcurementExecutionLine[]
   children: ProcurementExecutionChild[]
+  paymentSummary: ProcurementPaymentSummary
 }
 
 export type ProcurementExecutionApi = {

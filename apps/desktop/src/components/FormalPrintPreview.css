@@ -1,0 +1,306 @@
+@font-face {
+  font-family: 'Honsen Document';
+  src: url('/fonts/NotoSansSC-VF.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+.print-engine {
+  font-family: 'Honsen Document', sans-serif;
+  color: #17334f;
+  background: #fff;
+}
+.formal-print-sheet {
+  box-sizing: border-box;
+  width: var(--print-width, 180mm);
+  height: var(--print-height, 267mm);
+  margin: 8mm auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #17334f;
+  font-size: var(--print-primary, 9.5pt);
+  line-height: var(--print-line-height, 1.32);
+  overflow: visible;
+}
+.formal-document-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 5mm;
+  flex: 0 0 var(--print-header, 29mm);
+  box-sizing: border-box;
+  border-bottom: 0.6mm solid #183f70;
+  padding-bottom: 2mm;
+  align-items: flex-start;
+}
+.print-brand-block {
+  width: 52%;
+}
+.formal-company-header {
+  display: flex;
+  align-items: center;
+  gap: 2mm;
+}
+.formal-company-logo {
+  width: 13mm;
+  height: 12mm;
+  object-fit: contain;
+}
+.formal-company-name {
+  font-size: 8pt;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.formal-document-brand {
+  font-size: 13pt;
+  font-weight: 700;
+  margin: 2mm 0;
+}
+.print-document-id {
+  width: 48%;
+  text-align: right;
+  font-size: 8pt;
+  overflow-wrap: anywhere;
+}
+.print-document-id h1 {
+  font-size: var(--print-title, 17pt);
+  margin: 0 0 1mm;
+  line-height: 1.15;
+}
+.print-document-id h1 .print-secondary {
+  font-size: 9pt;
+}
+.print-page-number {
+  display: block;
+  font-size: 8pt;
+  margin-top: 1mm;
+}
+.print-pair {
+  display: block;
+}
+.print-primary {
+  display: block;
+  font-weight: 500;
+}
+.print-secondary {
+  display: block;
+  font-size: var(--print-secondary, 8pt);
+  color: #52657b;
+  font-weight: 400;
+}
+.formal-page-content {
+  flex: 1;
+  min-height: 0;
+  padding-top: var(--print-gap, 3mm);
+  box-sizing: border-box;
+}
+.print-metadata {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2mm 6mm;
+  padding-bottom: var(--print-gap, 3mm);
+  overflow-wrap: anywhere;
+}
+.print-metadata .print-primary,
+.print-notes > .print-pair {
+  font-weight: 600;
+}
+.print-materials {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.print-materials th,
+.print-materials td {
+  padding: var(--print-padding, 2mm);
+  border: 0.25mm solid #ccd7e4;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.print-materials th {
+  background: #e8eff7;
+  text-align: left;
+  font-size: 8.5pt;
+}
+.print-materials th .print-secondary {
+  font-size: 8pt;
+}
+.print-materials tbody tr:nth-child(even) {
+  background: #f5f7fa;
+}
+.print-materials td:nth-child(n + 2),
+.print-materials th:nth-child(n + 2) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.print-specification {
+  display: block;
+  font-size: 8pt;
+  color: #52657b;
+  margin-top: 0.5mm;
+}
+.print-settlement {
+  padding-top: var(--print-gap, 3mm);
+  break-inside: avoid;
+}
+.print-settlement-columns {
+  display: flex;
+  gap: 5mm;
+  align-items: flex-start;
+}
+.print-notes {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.print-notes p {
+  margin: 1mm 0;
+  white-space: pre-wrap;
+}
+.print-summary {
+  width: var(--print-summary, 52%);
+  flex-shrink: 0;
+}
+.print-summary table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  border: 0.25mm solid #ccd7e4;
+}
+.print-summary td {
+  padding: var(--print-summary-padding, 0.55mm) 2mm;
+  line-height: var(--print-summary-line-height, 1.2);
+  vertical-align: top;
+}
+.print-summary td:first-child {
+  width: 59%;
+}
+.print-summary td:last-child {
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.print-summary tr:nth-child(even) {
+  background: #f5f7fa;
+}
+.print-summary .print-total {
+  background: #e5eef8;
+  font-size: var(--print-total, 12pt);
+  font-weight: 700;
+}
+.print-amount-words {
+  background: #f0f4f9;
+  padding: 2mm;
+  margin-top: 2mm;
+  overflow-wrap: anywhere;
+}
+.print-amount-words > .print-pair {
+  font-size: 8.5pt;
+}
+.print-amount-words p {
+  margin: 1.5mm 0 0;
+}
+.print-amount-words p.print-primary {
+  font-weight: 700;
+}
+.print-signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6mm;
+  padding-top: 3mm;
+}
+.print-signatures > div {
+  border: 0.25mm solid #ccd7e4;
+  padding: 2mm;
+}
+.print-signatures p {
+  margin: 2mm 0 0;
+}
+.formal-document-footer {
+  box-sizing: border-box;
+  flex: 0 0 var(--print-footer, 9mm);
+  display: flex;
+  justify-content: space-between;
+  gap: 3mm;
+  border-top: 0.25mm solid #ccd7e4;
+  align-items: center;
+  font-size: 8pt;
+  overflow-wrap: anywhere;
+}
+.formal-document-footer span {
+  white-space: nowrap;
+}
+
+.print-dense .print-metadata {
+  gap: 1mm 5mm;
+}
+.print-dense .print-summary td {
+  padding: var(--print-summary-padding, 0.7mm) 1.5mm;
+}
+.print-dense .print-signatures {
+  padding-top: 2mm;
+}
+.print-measure {
+  position: absolute;
+  left: -100000px;
+  top: 0;
+  visibility: hidden;
+  width: var(--print-width);
+  pointer-events: none;
+}
+.print-measure .formal-print-sheet {
+  margin: 0;
+}
+.honsen-print-root {
+  display: none;
+}
+body.honsen-printing-formal > .honsen-print-root {
+  display: block;
+  position: absolute;
+  left: -100000px;
+  top: 0;
+}
+
+@media print {
+  html {
+    background: #fff !important;
+  }
+  body.honsen-printing-formal {
+    background: #fff !important;
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.honsen-printing-formal > :not(.honsen-print-root) {
+    display: none !important;
+  }
+  body.honsen-printing-formal > .honsen-print-root {
+    display: block !important;
+    page: honsen-formal;
+    background: #fff;
+    position: static;
+    left: auto;
+    top: auto;
+  }
+  .honsen-print-root .formal-print-sheet {
+    margin: 0;
+    break-after: page;
+    break-inside: avoid;
+    print-color-adjust: exact;
+  }
+  .honsen-print-root .formal-print-sheet:last-child {
+    break-after: auto;
+  }
+  .honsen-print-root thead {
+    display: table-header-group;
+  }
+  .honsen-print-root tr {
+    break-inside: avoid;
+  }
+  .print-measure {
+    display: none;
+  }
+}

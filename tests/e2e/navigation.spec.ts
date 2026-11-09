@@ -1,3 +1,7 @@
+import { mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { Workbook } from 'exceljs'
 import { expect, test } from '@playwright/test'
 
 test('development sign-in placeholder opens the workbench and navigates accessibly', async ({
@@ -35,7 +39,63 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
     Object.assign(window, {
       __TAURI__: {
         core: {
-          invoke(command: string, args?: { input?: Record<string, unknown> }) {
+          invoke(
+            command: string,
+            args?: {
+              input?: Record<string, unknown>
+              after?: string | null
+              projectId?: string
+            },
+          ) {
+            if (command === 'list_catalog_prices') {
+              Object.assign(window, { __quoteProject: args?.projectId })
+              return Promise.resolve(
+                Array.from({ length: 26 }, (_, index) => ({
+                  priceId: `quote-${index}`,
+                  supplierId: `supplier-${index}`,
+                  supplierName: `supplier ${index}`,
+                  isPreferredSupplier: false,
+                  currency: 'XOF',
+                  unitPriceMinor: '1250',
+                  unit: '件',
+                  effectiveAt: '2026-10-12',
+                })).slice(
+                  args?.after ? Number(args.after.split('-').at(-1)) + 1 : 0,
+                  args?.after ? Number(args.after.split('-').at(-1)) + 26 : 25,
+                ),
+              )
+            }
+            if (command === 'search_catalog_page')
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000901',
+                    sku: 'OWNER-FIXTURE',
+                    nameZh: '业主报价材料',
+                    nameFr: null,
+                    aliases: [],
+                    brand: null,
+                    model: 'OP-01',
+                    specification: 'fixture',
+                    unit: '件',
+                    notes: null,
+                    version: 1,
+                    prices: [
+                      {
+                        priceId: '00000000-0000-4000-8000-000000000902',
+                        supplierId: '00000000-0000-4000-8000-000000000903',
+                        supplierName: 'owner fixture supplier',
+                        isPreferredSupplier: false,
+                        currency: 'XOF',
+                        unitPriceMinor: '1250',
+                        unit: '件',
+                        effectiveAt: '2026-10-12',
+                      },
+                    ],
+                  },
+                ],
+                nextCursor: null,
+              })
             if (command === 'search_catalog')
               return Promise.resolve([
                 {
@@ -64,8 +124,9 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
                   ],
                 },
               ])
-            if (command === 'save_requisition_draft')
+            if (command === 'save_requisition_draft') {
               return Promise.resolve({ totalMinor: '0' })
+            }
             if (command === 'set_procurement_mode') {
               Object.assign(window, { __procurementMode: args?.mode })
               return Promise.resolve()
@@ -97,11 +158,10 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
   await page.getByText('业主自行采购', { exact: true }).click()
   await page.getByLabel('材料').click()
   await page.getByText('业主报价材料 · OP-01', { exact: true }).click()
+  await page.getByRole('button', { name: '加载更多报价' }).click()
   await expect(page.getByLabel('选择报价')).toHaveValue('')
   await page.getByLabel('选择报价').click()
-  await page
-    .getByText('owner fixture supplier · 1250 XOF', { exact: true })
-    .click()
+  await page.getByText(/supplier 25 ·/).click()
   await page.getByRole('textbox', { name: '加价' }).fill('1000')
   await page.getByRole('button', { name: '保存草稿' }).click()
   await expect(page.getByLabel('换算参考单价（只读）')).toHaveValue('1250')
@@ -117,7 +177,7 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
           }
         ).__ownerPricingInput?.lines?.[0]?.quoteSource?.materialPriceId,
     ),
-  ).resolves.toBe('00000000-0000-4000-8000-000000000902')
+  ).resolves.toBe('quote-25')
   await expect(browserErrors).toEqual([])
 })
 
@@ -174,6 +234,38 @@ test('regular requisition page completes owner pricing rejection and resubmissio
               reason?: string
             },
           ) {
+            if (command === 'search_catalog_page') {
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000914',
+                    sku: 'OWNER-CNY',
+                    nameZh: '跨币种业主材料',
+                    nameFr: null,
+                    aliases: [],
+                    brand: null,
+                    model: 'OPA-CNY',
+                    specification: 'fixture',
+                    unit: '件',
+                    notes: null,
+                    version: 1,
+                    prices: [
+                      {
+                        priceId: '00000000-0000-4000-8000-000000000915',
+                        supplierId: '00000000-0000-4000-8000-000000000916',
+                        supplierName: '审批报价供应商',
+                        isPreferredSupplier: true,
+                        currency: 'CNY',
+                        unitPriceMinor: '1234',
+                        unit: '件',
+                        effectiveAt: '2026-10-12',
+                      },
+                    ],
+                  },
+                ],
+                nextCursor: null,
+              })
+            }
             if (command === 'search_catalog') {
               return Promise.resolve([
                 {
@@ -275,7 +367,7 @@ test('regular requisition page completes owner pricing rejection and resubmissio
   await page.getByLabel('材料').click()
   await page.getByText('跨币种业主材料 · OPA-CNY', { exact: true }).click()
   await page.getByLabel('选择报价').click()
-  await page.getByText('审批报价供应商 · 1234 CNY', { exact: true }).click()
+  await page.getByText(/审批报价供应商 ·/).click()
   await page.getByLabel('CNY → XOF 锁定汇率').fill('76.5')
   await page.getByRole('textbox', { name: '加价', exact: true }).fill('1000')
   await page.getByRole('button', { name: '保存草稿' }).click()
@@ -290,6 +382,17 @@ test('regular requisition page completes owner pricing rejection and resubmissio
   await expect(
     page.getByText(/换算参考价：944 · 加价：.*1000.*最终价格：1038/),
   ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByText(/Final price:1038/)).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Internal pricing details' }),
+  ).not.toContainText('最终价格')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.getByText(/Prix final :1038/)).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Détails internes des prix' }),
+  ).not.toContainText('最终价格')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
   await page.getByLabel('驳回原因').fill('请调整加价。')
   await page.getByRole('button', { name: '驳回订单' }).click()
   await expect(
@@ -315,6 +418,26 @@ test('regular owner draft marks manual reference pricing as an exception', async
       __TAURI__: {
         core: {
           invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command === 'search_catalog_page')
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000921',
+                    sku: 'MANUAL',
+                    nameZh: '手工报价材料',
+                    nameFr: null,
+                    aliases: [],
+                    brand: null,
+                    model: 'OPA-MANUAL',
+                    specification: 'fixture',
+                    unit: '件',
+                    notes: null,
+                    version: 1,
+                    prices: [],
+                  },
+                ],
+                nextCursor: null,
+              })
             if (command === 'search_catalog')
               return Promise.resolve([
                 {
@@ -468,7 +591,9 @@ test('administrator changes project defaults and sees the selected project value
 
   await page.goto('/?test=master-data')
   await expect(page.getByText('Bethel2工地')).toBeVisible()
-  await expect(page.getByText('科特迪瓦 TVA 18%')).toBeVisible()
+  await expect(
+    page.getByLabel('项目默认值').getByText('科特迪瓦 TVA 18%'),
+  ).toBeVisible()
 
   await page.getByLabel('选择项目').click()
   await page.getByText('Minrex数据中心', { exact: true }).last().click()
@@ -483,7 +608,38 @@ test('administrator changes project defaults and sees the selected project value
   await page.getByLabel('页脚联系方式').fill('fixture updated contact')
   await page.getByRole('button', { name: '保存项目默认值' }).click()
   await expect(page.getByText('项目默认值已保存')).toBeVisible()
+  await page.getByLabel('页脚联系方式').fill('')
+  await expect(
+    page.getByRole('button', { name: '保存项目默认值' }),
+  ).toBeEnabled()
+  await page.getByRole('button', { name: '保存项目默认值' }).click()
+  await expect(page.getByText('项目默认值已保存')).toBeVisible()
   await expect(browserErrors).toEqual([])
+})
+
+test('project defaults offer only an eligible tax template for the selected country', async ({
+  page,
+}) => {
+  await page.goto('/?test=master-data')
+  await page.getByRole('combobox', { name: '默认税模板' }).click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('科特迪瓦 TVA 18%', { exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('选择项目').click()
+  await page.getByText('Minrex数据中心', { exact: true }).last().click()
+  await page.getByRole('combobox', { name: '默认税模板' }).click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('科特迪瓦 TVA 18%', { exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('不使用默认税模板', { exact: true }),
+  ).toBeVisible()
 })
 
 test('administrator master-data fixture adds a country', async ({ page }) => {
@@ -497,19 +653,206 @@ test('administrator master-data fixture adds a country', async ({ page }) => {
   await page.getByLabel('国家名称', { exact: true }).fill('塞内加尔')
   await page.getByLabel('国家时区', { exact: true }).fill('Africa/Dakar')
   await page.getByRole('button', { name: '新增国家' }).click()
-  await expect(page.getByText('基础资料已保存；等待同步确认')).toBeVisible()
+  await expect(
+    page
+      .getByRole('tabpanel', { name: '国家', exact: true })
+      .getByText('基础资料已保存；等待同步确认', { exact: true }),
+  ).toBeVisible()
   await expect(page.getByLabel('编辑国家名称-SN')).toHaveValue('塞内加尔')
+  await expect(browserErrors).toEqual([])
+})
+
+test('administrator can create, edit and disable a unit offline', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByRole('tab', { name: '单位' }).click()
+  await page.getByRole('button', { name: '新增单位', exact: true }).click()
+  await page.getByLabel('单位代码').fill('fixture-ea')
+  await page.getByLabel('单位名称', { exact: true }).fill('Each')
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '新增单位' })
+    .click()
+  await expect(page.getByLabel('编辑单位名称-fixture-ea')).toHaveValue('Each')
+  await page.getByLabel('编辑单位名称-fixture-ea').fill('Piece')
+  await page.getByLabel('编辑单位名称-fixture-ea').blur()
+  await expect(page.getByLabel('编辑单位名称-fixture-ea')).toHaveValue('Piece')
+  await page.getByRole('button', { name: /停\s*用/ }).click()
+  await expect(page.getByRole('button', { name: /启\s*用/ })).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('administrator can create, rename and disable a material category offline', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByRole('tab', { name: '材料分类' }).click()
+  await page.getByRole('button', { name: '新增材料分类', exact: true }).click()
+  await page.getByLabel('材料分类代码').fill('fixture-electrical')
+  await page.getByLabel('材料分类名称').fill('Electrical')
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '新增材料分类' })
+    .click()
+  await expect(
+    page.getByLabel('编辑材料分类名称-fixture-electrical'),
+  ).toHaveValue('Electrical')
+  await page
+    .getByLabel('编辑材料分类名称-fixture-electrical')
+    .fill('Electrical revised')
+  await page.getByLabel('编辑材料分类名称-fixture-electrical').blur()
+  await expect(
+    page.getByLabel('编辑材料分类名称-fixture-electrical'),
+  ).toHaveValue('Electrical revised')
+  await page.getByRole('button', { name: /停\s*用/ }).click()
+  await expect(page.getByRole('button', { name: /启\s*用/ })).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('administrator can create, rename and disable a tax template offline', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await expect(page.getByRole('button', { name: '新增税模板' })).toBeDisabled()
+  await page.getByLabel('税模板代码').fill('fixture-tax')
+  await page.getByLabel('税模板名称', { exact: true }).fill('Fixture tax')
+  await page.getByLabel('税率（基点）', { exact: true }).fill('1800')
+  await page.getByLabel('税模板生效日期').fill('2026-10-15')
+  await page.getByRole('button', { name: '新增税模板' }).click()
+  await expect(page.getByLabel('税模板名称-fixture-tax')).toHaveValue(
+    'Fixture tax',
+  )
+  await page.getByRole('combobox', { name: '默认税模板' }).click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('Fixture tax', { exact: true }),
+  ).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByLabel('税模板名称-fixture-tax').fill('Revised tax')
+  await page.getByLabel('税率（基点）-fixture-tax').fill('1900')
+  await page.getByLabel('税模板生效日期-fixture-tax').fill('2026-11-01')
+  await page.getByRole('button', { name: '保存修改' }).click()
+  await expect(page.getByLabel('税模板名称-fixture-tax')).toHaveValue(
+    'Revised tax',
+  )
+  await expect(page.getByLabel('税率（基点）-fixture-tax')).toHaveValue('1900')
+  await expect(page.getByLabel('税模板生效日期-fixture-tax')).toHaveValue(
+    '2026-11-01',
+  )
+  await page
+    .getByLabel('税模板维护')
+    .getByRole('button', { name: /停\s*用/ })
+    .click()
+  await expect(
+    page.getByLabel('税模板维护').getByRole('button', { name: /启\s*用/ }),
+  ).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('administrator archives a manual exchange rate with a reason', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByLabel('源币种').click()
+  await page.getByText('XOF', { exact: true }).last().click()
+  await page.getByLabel('目标币种').click()
+  await page.getByText('EUR', { exact: true }).last().click()
+  await page.getByLabel('汇率小数字符串').fill('0.00152449')
+  await page.getByLabel('汇率生效日期').fill('2026-10-15')
+  await expect(
+    page.getByRole('button', { name: '新增手工汇率' }),
+  ).toBeDisabled()
+  await page.getByLabel('手工汇率原因').fill('Fixture manual reference')
+  await page.getByRole('button', { name: '新增手工汇率' }).click()
+  await expect(
+    page.getByLabel('汇率历史').getByText('0.00152449'),
+  ).toBeVisible()
+  await expect(page.getByText('手工汇率已归档；等待同步确认')).toBeVisible()
+  await expect(browserErrors).toEqual([])
+})
+
+test('administrator creates a department and team with an explicit parent', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
+  await page.goto('/?test=master-data')
+  await page.getByRole('tab', { name: '部门' }).click()
+  await page.getByRole('button', { name: '新增部门', exact: true }).click()
+  await page.getByLabel('部门代码').fill('fixture-proc')
+  await page.getByLabel('部门名称', { exact: true }).fill('Procurement')
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '新增部门' })
+    .click()
+  await expect(page.getByLabel('编辑部门名称-fixture-proc')).toHaveValue(
+    'Procurement',
+  )
+
+  await page.getByRole('tab', { name: '团队' }).click()
+  await page.getByRole('button', { name: '新增团队', exact: true }).click()
+  await page.getByLabel('团队代码').fill('fixture-team')
+  await page.getByLabel('团队名称', { exact: true }).fill('Site team')
+  await expect(
+    page.getByRole('dialog').getByRole('button', { name: '新增团队' }),
+  ).toBeDisabled()
+  await page.getByLabel('团队所属部门').click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('Procurement', { exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('团队所属部门').press('ArrowDown')
+  await page.getByLabel('团队所属部门').press('Enter')
+  await expect(
+    page.getByRole('dialog').getByRole('button', { name: '新增团队' }),
+  ).toBeEnabled()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '新增团队' })
+    .click()
+  await expect(page.getByLabel('编辑团队名称-fixture-team')).toHaveValue(
+    'Site team',
+  )
+  await page.getByLabel('编辑团队名称-fixture-team').fill('Field team')
+  await page.getByLabel('编辑团队名称-fixture-team').blur()
+  await page.getByRole('button', { name: /停\s*用/ }).click()
+  await expect(page.getByRole('button', { name: /启\s*用/ })).toBeVisible()
   await expect(browserErrors).toEqual([])
 })
 
 test('administrator master-data fixture creates a project and a site', async ({
   page,
 }) => {
+  const browserErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
   await page.goto('/?test=master-data')
   await page.getByRole('tab', { name: '项目', exact: true }).click()
   await page.getByLabel('项目代码').fill('SN-P1')
   await page.getByLabel('项目名称', { exact: true }).fill('塞内加尔项目')
-  await page.getByLabel('项目国家').click()
+  await page.getByLabel('项目国家', { exact: true }).click()
   await page.getByText('科特迪瓦', { exact: true }).last().click()
   await page.getByLabel('项目默认站点').fill('达喀尔')
   await page.getByLabel('项目部门').fill('项目部')
@@ -527,6 +870,7 @@ test('administrator master-data fixture creates a project and a site', async ({
   await expect(page.getByLabel('编辑站点名称-SN-P1-DAK')).toHaveValue(
     '达喀尔现场',
   )
+  expect(browserErrors).toEqual([])
 })
 
 test('desktop project-default page uses the Tauri command adapter', async ({
@@ -559,6 +903,8 @@ test('desktop project-default page uses the Tauri command adapter', async ({
               return Promise.resolve(projects)
             if (command === 'list_reference_master_data')
               return Promise.resolve([])
+            if (command === 'list_tax_templates') return Promise.resolve([])
+            if (command === 'list_exchange_rates') return Promise.resolve([])
             if (command === 'save_project_defaults') return Promise.resolve()
             return Promise.reject(new Error('unexpected command'))
           },
@@ -573,6 +919,10 @@ test('desktop project-default page uses the Tauri command adapter', async ({
   await expect(
     page.getByRole('heading', { name: '基础资料管理' }).last(),
   ).toBeVisible()
+  await page
+    .getByRole('navigation', { name: '基础资料分类' })
+    .getByRole('button', { name: '项目默认设置', exact: true })
+    .click()
   await expect(page.getByText('Bethel2工地')).toBeVisible()
   await page.getByLabel('页脚联系方式').fill('desktop fixture contact')
   await page.getByRole('button', { name: '保存项目默认值' }).click()
@@ -593,7 +943,9 @@ test('engineer can search local catalog quotes but has no material mutation cont
   await page.getByLabel('搜索材料').fill('FX-01')
   await expect(page.getByText('测试电缆')).toBeVisible()
   await page.getByLabel('搜索材料').fill('不存在的材料')
-  await expect(page.getByRole('status')).toHaveText('未找到匹配材料')
+  await expect(
+    page.getByRole('status').filter({ hasText: /^未找到匹配材料$/ }),
+  ).toHaveText('未找到匹配材料')
   await expect(page.getByRole('button', { name: '新增材料' })).toHaveCount(0)
   await expect(
     page.getByText('工程师与查看者仅可搜索和查看材料及供应商价格。'),
@@ -615,14 +967,17 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
           invoke(
             command: string,
             args?: {
-              material?: { nameZh?: string }
+              material?: { nameZh?: string; nameEn?: string }
               image?: { squareCropBase64?: string }
             },
           ) {
+            if (command === 'search_catalog_page')
+              return Promise.resolve({ records: [], nextCursor: null })
             if (command === 'search_catalog') return Promise.resolve([])
             if (command === 'save_material') {
               Object.assign(window, {
                 __catalogSaveName: args?.material?.nameZh,
+                __catalogSaveEnglish: args?.material?.nameEn,
               })
               return Promise.resolve()
             }
@@ -644,6 +999,7 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
   await page.getByRole('button', { name: '材料库', exact: true }).click()
   await page.getByRole('button', { name: '新增材料' }).click()
   await page.getByLabel('材料名称').fill('边界测试材料')
+  await page.getByLabel('英语名称').fill('Frozen English material')
   await page.getByLabel('型号').fill('FX-02')
   await page.getByLabel('规格').fill('fixture specification')
   await page.getByLabel('单位').fill('件')
@@ -671,6 +1027,13 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
         (window as Window & { __imageSaveSquare?: string }).__imageSaveSquare,
     ),
   ).resolves.toMatch(/^iVBOR/)
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __catalogSaveEnglish?: string })
+          .__catalogSaveEnglish,
+    ),
+  ).toBe('Frozen English material')
   await expect(browserErrors).toEqual([])
 })
 
@@ -699,6 +1062,7 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
     const supplier = {
       id: '00000000-0000-4000-8000-000000000002',
       businessCode: 'SUP-001',
+      countryId: '00000000-0000-4000-8000-000000000101',
       name: 'fixture active supplier',
       contactName: null,
       address: null,
@@ -720,15 +1084,25 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
           invoke(
             command: string,
             args?: {
-              supplier?: { name?: string }
+              supplier?: { name?: string; countryId?: string }
               price?: { unitPriceMinor?: string }
+              countryId?: string
             },
           ) {
+            if (command === 'search_catalog_page')
+              return Promise.resolve({ records: [material], nextCursor: null })
             if (command === 'search_catalog') return Promise.resolve([material])
+            if (command === 'search_suppliers_page')
+              return Promise.resolve({
+                records:
+                  supplier.countryId === args?.countryId ? [supplier] : [],
+                nextCursor: null,
+              })
             if (command === 'list_suppliers') return Promise.resolve([supplier])
             if (command === 'save_supplier') {
               Object.assign(window, {
                 __supplierSaveName: args?.supplier?.name,
+                __supplierSaveCountry: args?.supplier?.countryId,
               })
               return Promise.resolve()
             }
@@ -751,18 +1125,49 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
   await page.getByRole('button', { name: '供应商管理' }).click()
   await page.getByRole('button', { name: '新增供应商' }).click()
   await page.getByLabel('供应商编码').fill('SUP-NEW')
-  await page.getByLabel('供应商名称').fill('新建测试供应商')
+  await page.getByLabel('供应商名称', { exact: true }).fill('新建测试供应商')
   await page.getByRole('button', { name: '保存供应商' }).click()
-  await expect(page.getByText('供应商已保存')).toBeVisible()
+  await expect(page.getByText('供应商已保存', { exact: true })).toBeVisible()
   await expect(
     page.evaluate(
       () =>
         (window as Window & { __supplierSaveName?: string }).__supplierSaveName,
     ),
   ).resolves.toBe('新建测试供应商')
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __supplierSaveCountry?: string })
+          .__supplierSaveCountry,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000101')
+  await page.getByRole('button', { name: '编辑供应商' }).click()
+  await page
+    .getByLabel('联系人', { exact: true })
+    .fill('Cancelled synthetic contact')
+  await page.getByRole('button', { name: /取\s*消/ }).click()
+  await page.getByRole('button', { name: '新增供应商', exact: true }).click()
+  await expect(page.getByLabel('联系人', { exact: true })).toHaveValue('')
+  await page.getByRole('button', { name: /取\s*消/ }).click()
+  await page.getByRole('button', { name: '编辑供应商' }).click()
+  await page.getByRole('button', { name: '保存供应商' }).click()
+  await expect(
+    page.evaluate(
+      () =>
+        (window as Window & { __supplierSaveCountry?: string })
+          .__supplierSaveCountry,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000101')
   await page.getByRole('button', { name: '关闭供应商管理' }).click()
 
   await page.getByRole('button', { name: '维护报价' }).click()
+  await page.getByRole('combobox', { name: /供应商/ }).click()
+  await page.getByText('SUP-001 · fixture active supplier').click()
+  await page.getByLabel('单价（最小货币单位）').fill('1250')
+  await page.getByRole('button', { name: /取\s*消/ }).click()
+  await page.getByRole('button', { name: '维护报价', exact: true }).click()
+  await expect(page.getByLabel('单价（最小货币单位）')).toHaveValue('')
+  await expect(page.getByRole('combobox', { name: /供应商/ })).toHaveValue('')
   await page.getByRole('combobox', { name: /供应商/ }).click()
   await page.getByText('SUP-001 · fixture active supplier').click()
   await page.getByLabel('单价（最小货币单位）').fill('1250')
@@ -821,6 +1226,10 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
               projectId?: string
             },
           ) {
+            if (command === 'search_catalog_page') {
+              Object.assign(window, { __catalogProjectId: args?.projectId })
+              return Promise.resolve({ records: [material], nextCursor: null })
+            }
             if (command === 'search_catalog') {
               Object.assign(window, { __catalogProjectId: args?.projectId })
               return Promise.resolve([material])
@@ -858,13 +1267,16 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
   await page.getByRole('button', { name: '采购申请单', exact: true }).click()
-  await expect(
-    page.evaluate(
-      () =>
-        (window as Window & { __catalogProjectId?: string }).__catalogProjectId,
-    ),
-  ).resolves.toMatch(/^[0-9a-f-]{36}$/)
   await page.getByLabel('材料').click()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { __catalogProjectId?: string })
+            .__catalogProjectId,
+      ),
+    )
+    .toMatch(/^[0-9a-f-]{36}$/)
   await page.getByText('请购测试电缆 · RQ-01').click()
   await page.getByLabel('数量').fill('2.5')
   await page.getByLabel('行折扣（最小货币单位）').fill('125')
@@ -1049,7 +1461,9 @@ test('purchaser reaches execution from the regular application and completes RFQ
   })
   await page.addInitScript(() => {
     let allocated = false
+    const rfqs: Array<Record<string, unknown>> = []
     const parent = {
+      countryId: '00000000-0000-4000-8000-000000000101',
       id: '00000000-0000-4000-8000-000000000801',
       displayNo: 'CI-FIXTURE-20261012-INT-0001',
       primaryCurrency: 'XOF',
@@ -1072,6 +1486,9 @@ test('purchaser reaches execution from the regular application and completes RFQ
             command: string,
             args?: {
               input?: Record<string, unknown>
+              rfqId?: string
+              sourceOrderId?: string
+              countryId?: string
               allocations?: Array<Record<string, unknown>>
             },
           ) {
@@ -1084,6 +1501,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
                         {
                           id: '00000000-0000-4000-8000-000000000803',
                           displayNo: 'CI-FIXTURE-20261012-SUP-0001',
+                          workflowStatus: 'draft',
                           currency: 'XOF',
                           lines: [
                             {
@@ -1095,7 +1513,38 @@ test('purchaser reaches execution from the regular application and completes RFQ
                       ]
                     : [],
                 },
+                {
+                  ...parent,
+                  id: '00000000-0000-4000-8000-000000000806',
+                  displayNo: 'CI-FIXTURE-20261012-INT-0002',
+                  children: [],
+                },
               ])
+            if (command === 'search_suppliers_page')
+              return Promise.resolve({
+                records: [
+                  {
+                    id: '00000000-0000-4000-8000-000000000805',
+                    countryId: parent.countryId,
+                    businessCode: 'SUP-FIXTURE',
+                    name: 'regular flow supplier',
+                    contactName: null,
+                    address: null,
+                    city: null,
+                    country: null,
+                    phone: null,
+                    whatsapp: null,
+                    email: null,
+                    paymentTerms: null,
+                    deliveryLeadTime: null,
+                    isPreferred: true,
+                    isBlacklisted: false,
+                    isActive: true,
+                    version: 1,
+                  },
+                ].filter((supplier) => supplier.countryId === args?.countryId),
+                nextCursor: null,
+              })
             if (command === 'list_suppliers')
               return Promise.resolve([
                 {
@@ -1117,8 +1566,21 @@ test('purchaser reaches execution from the regular application and completes RFQ
                   version: 1,
                 },
               ])
-            if (command === 'create_rfq')
-              return Promise.resolve({ ...args?.input, itemCount: 1 })
+            if (command === 'list_rfqs')
+              return Promise.resolve(
+                rfqs.filter((rfq) => rfq.sourceOrderId === args?.sourceOrderId),
+              )
+            if (command === 'create_rfq') {
+              const rfq = { ...args?.input, itemCount: 1, status: 'draft' }
+              rfqs.push(rfq)
+              return Promise.resolve(rfq)
+            }
+            if (command === 'send_rfq' || command === 'close_rfq') {
+              const rfq = rfqs.find((value) => value.id === args?.rfqId)
+              if (!rfq) return Promise.reject(new Error('RFQ not found'))
+              rfq.status = command === 'send_rfq' ? 'sent' : 'closed'
+              return Promise.resolve()
+            }
             if (command === 'allocate_supplier_child_orders') {
               allocated = true
               return Promise.resolve([
@@ -1156,12 +1618,35 @@ test('purchaser reaches execution from the regular application and completes RFQ
     .click()
   await expect(page.getByText('regular flow cable · 2 米 · XOF')).toBeVisible()
   await page.getByLabel('RFQ 供应商').click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('SUP-FIXTURE · regular flow supplier', { exact: true }),
+  ).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await page.getByLabel('询价单编号').fill('CI-FIXTURE-20261012-RFQ-0001')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByLabel('RFQ number')).toHaveValue(
+    'CI-FIXTURE-20261012-RFQ-0001',
+  )
+  await expect(page.getByRole('button', { name: 'Create RFQ' })).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.getByLabel('Numéro RFQ')).toHaveValue(
+    'CI-FIXTURE-20261012-RFQ-0001',
+  )
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+
   await page.getByRole('button', { name: '创建询价单' }).click()
   await expect(page.getByText(/已创建，包含 1 条无价格明细/)).toBeVisible()
+  await page.getByRole('button', { name: '发送询价单' }).click()
+  await expect(page.getByText('状态：已发送', { exact: true })).toBeVisible()
   await page.getByLabel('regular flow cable 供应商').click()
+  await expect(
+    page
+      .locator('.ant-select-dropdown:visible')
+      .getByText('SUP-FIXTURE · regular flow supplier', { exact: true }),
+  ).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await page
@@ -1169,8 +1654,42 @@ test('purchaser reaches execution from the regular application and completes RFQ
     .fill('CI-FIXTURE-20261012-SUP-0001')
   await page.getByRole('button', { name: '创建供应商子单' }).click()
   await expect(page.getByText('供应商子单条款')).toBeVisible()
+  await expect(page.getByText('状态：已发送', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '关闭询价单' }).click()
+  await expect(page.getByText('状态：已关闭')).toBeVisible()
   await page.getByRole('button', { name: '保存子单条款' }).click()
   await expect(page.getByText('子单条款已保存，含税总额 2950。')).toBeVisible()
+  await page.getByLabel('子单税率').fill('537')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByLabel('Child tax rate')).toHaveValue('537')
+  await expect(
+    page.getByRole('button', { name: 'Send to supplier' }),
+  ).toBeDisabled()
+  await expect(
+    page.getByText('Save tax, discount and freight terms first.'),
+  ).toBeVisible()
+  await page
+    .getByRole('button', { name: 'Save child terms', exact: true })
+    .click()
+  await expect(
+    page.getByText('Child terms saved; total including tax 2950.'),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.getByLabel('Taux de taxe de la sous-commande')).toHaveValue(
+    '537',
+  )
+  await expect(
+    page.getByRole('button', { name: 'Envoyer au fournisseur' }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Conditions enregistrées ; total TTC 2950.'),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+
+  await page
+    .getByRole('button', { name: 'CI-FIXTURE-20261012-INT-0002' })
+    .click()
+  await expect(page.getByText('CI-FIXTURE-20261012-RFQ-0001')).toHaveCount(0)
   await expect(browserErrors).toEqual([])
 })
 
@@ -1181,7 +1700,17 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   page.on('console', (message) => {
     if (message.type() === 'error') browserErrors.push(message.text())
   })
+  page.on('pageerror', (error) => browserErrors.push(error.message))
   await page.addInitScript(() => {
+    const payments: {
+      id: string
+      payeeName: string
+      currency: string
+      amountMinor: string
+      paymentDate: string
+      paymentType: string
+      status: string
+    }[] = []
     let status = 'confirmed'
     let receiptCount = 0
     const orderId = '00000000-0000-4000-8000-000000000811'
@@ -1190,20 +1719,48 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
         core: {
           invoke(
             command: string,
-            args?: { orderId?: string; input?: { orderId: string } },
+            args?: {
+              orderId?: string
+              input?: { orderId: string } & (typeof payments)[number]
+            },
           ) {
-            if (command === 'list_confirmed_procurement_orders')
+            if (command === 'list_confirmed_procurement_orders') {
+              const paid = payments.reduce(
+                (total, payment) => total + BigInt(payment.amountMinor),
+                0n,
+              )
               return Promise.resolve(
                 status === 'completed'
                   ? []
                   : [
                       {
+                        countryId: '00000000-0000-4000-8000-000000000101',
                         id: orderId,
                         displayNo: 'HONSEN-MARKET-1',
                         primaryCurrency: 'XOF',
                         procurementMode: 'honsen_self_purchase',
                         workflowStatus: status,
                         children: [],
+                        paymentSummary: {
+                          currency: 'XOF',
+                          payableMinor: '2000',
+                          paidMinor: paid.toString(),
+                          remainingMinor: (paid < 2000n
+                            ? 2000n - paid
+                            : 0n
+                          ).toString(),
+                          overpaidMinor: (paid > 2000n
+                            ? paid - 2000n
+                            : 0n
+                          ).toString(),
+                          status:
+                            paid === 0n
+                              ? 'unpaid'
+                              : paid < 2000n
+                                ? 'partial'
+                                : 'paid',
+                          records: [...payments],
+                        },
                         lines: [
                           {
                             id: '00000000-0000-4000-8000-000000000812',
@@ -1211,12 +1768,31 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
                             quantity: '2',
                             unit: '袋',
                             currency: 'XOF',
+                            receivedQuantity:
+                              receiptCount === 0
+                                ? '0'
+                                : receiptCount === 1
+                                  ? '1'
+                                  : '2',
+                            remainingQuantity:
+                              receiptCount === 0
+                                ? '2'
+                                : receiptCount === 1
+                                  ? '1'
+                                  : '0',
                           },
                         ],
                       },
                     ],
               )
+            }
+            if (
+              command === 'list_attachments' ||
+              command === 'list_attachment_targets'
+            )
+              return Promise.resolve([])
             if (command === 'list_suppliers') return Promise.resolve([])
+            if (command === 'list_rfqs') return Promise.resolve([])
             if (command === 'start_honsen_market_execution') {
               if (args?.orderId !== orderId)
                 return Promise.reject(new Error('wrong order'))
@@ -1235,6 +1811,13 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
                 receivedItemCount: 1,
               })
             }
+            if (command === 'record_procurement_expenditure') {
+              if (args?.input?.orderId !== orderId)
+                return Promise.reject(new Error('wrong order'))
+              Object.assign(window, { __paymentAmount: args.input.amountMinor })
+              payments.push({ ...args.input, status: 'recorded' })
+              return Promise.resolve()
+            }
             return Promise.reject(new Error(`unexpected command: ${command}`))
           },
         },
@@ -1247,9 +1830,32 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   await expect(page.getByRole('button', { name: '开始市场直采' })).toBeVisible()
   await page.getByRole('button', { name: '开始市场直采' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('采购执行中')
+  await expect(
+    page.getByRole('button', { name: '创建询价单', exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: '创建供应商子单', exact: true }),
+  ).toHaveCount(0)
+  await page.getByLabel('收款方', { exact: true }).fill('fixture cash seller')
+  await page
+    .getByLabel('实际付款金额（最小单位）', { exact: true })
+    .fill('1200')
+  await page.getByRole('button', { name: '登记实际付款', exact: true }).click()
+  await expect(page.getByText('实际付款已登记，等待同步确认。')).toBeVisible()
+  await expect(
+    page.evaluate(
+      () => (window as Window & { __paymentAmount?: string }).__paymentAmount,
+    ),
+  ).resolves.toBe('1200')
+  await expect(page.getByText('缺少付款凭证', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('listitem').filter({ hasText: 'fixture cash seller' }),
+  ).toContainText('1200 XOF')
+  await expect(page.getByText(/累计实付 1200/)).toBeVisible()
   await page.getByLabel('market cement 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('收货中')
+  await expect(page.getByText('累计实收 1 袋 · 待收 1 袋')).toBeVisible()
   await page.getByLabel('market cement 实收数量').fill('1')
   await page.getByRole('button', { name: '登记收货' }).click()
   await expect(page.getByText('没有可执行的已确认采购申请')).toBeVisible()
@@ -1264,14 +1870,18 @@ test('purchaser creates a price-free RFQ through the Tauri boundary', async ({
     if (message.type() === 'error') browserErrors.push(message.text())
   })
   await page.addInitScript(() => {
+    const rfqs: Array<Record<string, unknown>> = []
     Object.assign(window, {
       __TAURI__: {
         core: {
           invoke(command: string, args?: { input?: Record<string, unknown> }) {
+            if (command === 'list_rfqs') return Promise.resolve(rfqs)
             if (command !== 'create_rfq')
               return Promise.reject(new Error(`unexpected command: ${command}`))
             Object.assign(window, { __rfqInput: args?.input })
-            return Promise.resolve({ ...args?.input, itemCount: 2 })
+            const rfq = { ...args?.input, itemCount: 2, status: 'draft' }
+            rfqs.push(rfq)
+            return Promise.resolve(rfq)
           },
         },
       },
@@ -1330,7 +1940,7 @@ test('purchaser completes supplier-child terms before sending the order', async 
   })
 
   await page.goto('/?test=supplier-terms')
-  await page.getByRole('button', { name: '发送供应商' }).click()
+  await expect(page.getByRole('button', { name: '发送供应商' })).toBeDisabled()
   await expect(page.getByText('请先保存税、折扣和运费条款。')).toBeVisible()
   await page.getByLabel('fixture cable 行折扣').fill('125')
   await page.getByLabel('fixture cable 行运费').fill('25')
@@ -1341,7 +1951,7 @@ test('purchaser completes supplier-child terms before sending the order', async 
   await expect(page.getByText('子单条款已保存，含税总额 3511。')).toBeVisible()
   await page.getByRole('button', { name: '发送供应商' }).click()
   await expect(
-    page.getByText('供应商子单已发送，可开始登记收货。'),
+    page.getByText('供应商子单已签发 SPO 并发送，可开始登记收货。'),
   ).toBeVisible()
   await expect(
     page.evaluate(
@@ -1437,13 +2047,62 @@ test('administrator resolves a sync conflict through the accessible control', as
   page,
 }) => {
   await page.goto('/?test=sync-conflict')
-  await expect(page.getByText('云端版本 2 · upsert')).toBeVisible()
+  await expect(page.getByText('云端版本 2 · 云端更新')).toBeVisible()
+  const comparison = page.locator(
+    '.sync-conflict-panel .conflict-record details',
+  )
+  await comparison.getByText('比较本地与云端内容', { exact: true }).click()
+  await expect(comparison.locator('code')).toHaveText('material · upsert')
   await page.getByLabel('处理原因').fill('云端材料资料已核对')
   await page.getByRole('button', { name: '采用云端' }).click()
   await expect(page.getByRole('status')).toHaveText(
     '冲突已解决，并保留审计记录。',
   )
   await expect(page.getByText('没有待处理的同步冲突。')).toBeVisible()
+})
+
+test('administrator repairs a local category conflict with an explicit reason', async ({
+  page,
+}) => {
+  await page.goto('/?test=sync-conflict')
+  await expect(page.getByText('冲突分类 CAT-OLD')).toBeVisible()
+  await page.getByLabel('分类新编码').fill('CAT-NEW')
+  await page.getByLabel('分类修复原因').fill('编码重复')
+  await page.getByRole('button', { name: '修复本地分类' }).click()
+  await expect(
+    page.getByText('已保留原事件并生成新的待同步事件。'),
+  ).toBeVisible()
+  await expect(page.getByText('冲突分类 CAT-OLD')).toHaveCount(0)
+})
+
+test('administrator can retry an uncertain remote repair after reload', async ({
+  page,
+}) => {
+  await page.goto('/?test=sync-conflict&pending=1')
+  await expect(page.getByText(/待确认的云端修复/)).toBeVisible()
+  await page.getByRole('button', { name: '重试待确认修复' }).click()
+  await expect(page.getByText('云端修复已确认，桌面同步已完成。')).toBeVisible()
+  await expect(page.getByText(/待确认的云端修复/)).toHaveCount(0)
+})
+
+test('cross-account conflict resolution stays visible and gives an actionable error', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('pageerror', (error) => browserErrors.push(error.message))
+  await page.goto('/?test=sync-conflict&deny=account')
+  await page.getByLabel('处理原因').fill('核对另一账户的冲突')
+  await page.getByRole('button', { name: '保留本地' }).click()
+  await expect(page.getByRole('status')).toHaveText(
+    '该冲突属于其他账户或未归属旧事件，当前账户不能处理。',
+  )
+  await expect(page.getByText('云端版本 2 · 云端更新')).toBeVisible()
+  const comparison = page.locator(
+    '.sync-conflict-panel .conflict-record details',
+  )
+  await comparison.getByText('比较本地与云端内容', { exact: true }).click()
+  await expect(comparison.locator('code')).toHaveText('material · upsert')
+  expect(browserErrors).toEqual([])
 })
 
 test('purchaser rejects with a reason and posts an immutable internal comment', async ({
@@ -1629,6 +2288,7 @@ test('authenticated desktop switches between cached authorization scopes', async
             args?: {
               selection?: { projectId: string }
               filter?: { query?: string }
+              orderId?: string
             },
           ) {
             if (command === 'issue_local_captcha')
@@ -1637,7 +2297,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                 question: '1 + 1 = ?',
               })
             if (command === 'issue_cloud_captcha')
-              return Promise.reject(new Error('offline'))
+              return Promise.reject({ code: 'network_unavailable' })
             if (command === 'offline_login')
               return Promise.resolve({
                 user_id: '00000000-0000-4000-8000-000000000007',
@@ -1656,6 +2316,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                 ) ?? contexts[0]
               return Promise.resolve()
             }
+            if (command === 'list_order_comments') return Promise.resolve([])
             if (command === 'list_requisition_history')
               return Promise.resolve({
                 records:
@@ -1668,7 +2329,7 @@ test('authenticated desktop switches between cached authorization scopes', async
                           projectName: '项目乙',
                           site: '乙工地',
                           workflowStatus: historicalStatus,
-                          procurementMode: 'honsen_self_purchase',
+                          procurementMode: 'owner_self_purchase',
                           primaryCurrency: 'XOF',
                           totalMinor: '1200',
                           updatedAt: 1,
@@ -1676,16 +2337,59 @@ test('authenticated desktop switches between cached authorization scopes', async
                       ],
                 nextCursor: null,
               })
+            if (
+              command === 'get_formal_print_document' ||
+              command === 'get_internal_export_document'
+            )
+              return Promise.resolve({
+                formalDocumentNo: 'TEST-OPA-20261013-OPA-ABCDEFGH-1',
+                documentType: 'OPA',
+                languagePair: 'zh_fr',
+                projectId: '00000000-0000-4000-8000-000000000005',
+                site: '乙工地',
+                orderDate: '2026-10-13',
+                deliveryAddress: '乙工地',
+                expectedDeliveryDate: null,
+                notes: null,
+                currency: 'XOF',
+                subtotalMinor: '1200',
+                lineDiscountMinor: '0',
+                orderDiscountMinor: '0',
+                freightMinor: '0',
+                taxMinor: '0',
+                totalMinor: '1200',
+                taxRateBasisPoints: 0,
+                selfApproved: false,
+                supplier: null,
+                lines: [
+                  {
+                    nameZh: '测试电缆',
+                    nameFr: 'Câble électrique',
+                    model: 'FX-01',
+                    specification: '3×2.5',
+                    quantity: '1',
+                    unit: '米',
+                    currency: 'XOF',
+                    unitPriceMinor: '1200',
+                    lineTotalMinor: '1200',
+                  },
+                ],
+              })
             if (command === 'get_requisition_detail')
               return Promise.resolve({
+                countryId: '00000000-0000-4000-8000-000000000101',
                 id: '00000000-0000-4000-8000-000000000009',
+                formalDocumentNo:
+                  historicalStatus === 'formally_issued'
+                    ? 'TEST-OPA-20261013-OPA-ABCDEFGH-1'
+                    : null,
                 displayNo: 'REQ-HISTORY-1',
                 applicantId: '00000000-0000-4000-8000-000000000007',
                 projectName: '项目乙',
                 projectId: '00000000-0000-4000-8000-000000000005',
                 site: '乙工地',
                 workflowStatus: historicalStatus,
-                procurementMode: 'honsen_self_purchase',
+                procurementMode: 'owner_self_purchase',
                 orderDate: '2026-10-13',
                 deliveryAddress: '乙工地',
                 expectedDeliveryDate: null,
@@ -1729,6 +2433,14 @@ test('authenticated desktop switches between cached authorization scopes', async
               historicalStatus = 'confirmed'
               return Promise.resolve()
             }
+            if (command === 'issue_owner_formal_order') {
+              Object.assign(window, { issuedOrderId: args?.orderId })
+              historicalStatus = 'formally_issued'
+              return Promise.resolve({
+                documentType: 'OPA',
+                formalDocumentNo: 'TEST-OPA-20261013-OPA-ABCDEFGH-1',
+              })
+            }
             if (command === 'withdraw_requisition') {
               historicalStatus = 'draft'
               return Promise.resolve()
@@ -1740,35 +2452,146 @@ test('authenticated desktop switches between cached authorization scopes', async
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
+  await page.getByRole('button', { name: '使用离线登录', exact: true }).click()
   await page.getByLabel('账号').fill('fixture')
   await page.getByLabel('密码').fill('fixture-password')
-  await page.getByLabel(/本地验证码/).fill('2')
+  await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
-  await page
-    .getByLabel('当前授权范围')
-    .selectOption(
-      '00000000-0000-4000-8000-000000000005:00000000-0000-4000-8000-000000000003:00000000-0000-4000-8000-000000000006',
-    )
-  await expect(page.getByLabel('当前授权范围')).toHaveValue(
-    '00000000-0000-4000-8000-000000000005:00000000-0000-4000-8000-000000000003:00000000-0000-4000-8000-000000000006',
-  )
+  const scopePicker = page.getByRole('combobox', {
+    name: '当前授权范围',
+    exact: true,
+  })
+  await scopePicker.fill('项目乙')
+  await scopePicker.press('ArrowDown')
+  await scopePicker.press('Enter')
+  await expect(page.locator('.honsen-shell-scope')).toContainText('项目乙')
   await page.getByRole('button', { name: '采购申请单' }).click()
   await expect(page.locator('.page-heading p')).toContainText('乙工地')
-  await expect(page.getByRole('list', { name: '请购历史' })).toContainText(
+  await expect(page.getByRole('table', { name: '请购历史' })).toContainText(
     'REQ-HISTORY-1',
   )
+  await expect(
+    page.getByRole('columnheader', { name: '金额', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('table', { name: '请购历史' })).toContainText(
+    '1,200',
+  )
+  await expect(
+    page.getByRole('columnheader', { name: '最后更新' }),
+  ).toBeVisible()
+  await page.getByLabel('搜索单号、项目或工地').fill('REQ-HISTORY-1')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByLabel('Search number, project or site')).toHaveValue(
+    'REQ-HISTORY-1',
+  )
+  await expect(
+    page.getByRole('button', { name: 'Export Excel', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('table', { name: 'Requisition history' }),
+  ).toContainText('Pending confirmation')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(
+    page.getByLabel('Rechercher numéro, projet ou chantier'),
+  ).toHaveValue('REQ-HISTORY-1')
+  await expect(
+    page.getByRole('button', { name: 'Exporter Excel', exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
   await page.getByRole('button', { name: '查看详情：REQ-HISTORY-1' }).click()
+  await expect(page.getByText('审批已确认', { exact: true })).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(
+    page.getByText('Approval recorded', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Requisition details' }),
+  ).not.toContainText('confirmed')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(
+    page.getByText('Approbation enregistrée', { exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     '测试电缆',
   )
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
-    'pending_confirmation',
+    '待确认',
   )
+  await page.getByLabel('驳回原因').fill('Synthetic retained reason')
+  await page.getByLabel('留言（支持 @某人）').fill('Synthetic retained comment')
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await expect(page.getByLabel('Rejection reason')).toHaveValue(
+    'Synthetic retained reason',
+  )
+  await expect(page.getByLabel('Comment (supports @mentions)')).toHaveValue(
+    'Synthetic retained comment',
+  )
+  await expect(
+    page.getByRole('button', { name: 'Confirm order', exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await expect(page.getByLabel('Motif du rejet')).toHaveValue(
+    'Synthetic retained reason',
+  )
+  await expect(
+    page.getByLabel('Commentaire (mentions @ prises en charge)'),
+  ).toHaveValue('Synthetic retained comment')
+  await expect(
+    page.getByRole('button', { name: 'Confirmer la commande', exact: true }),
+  ).toBeVisible()
+  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
   await page.getByRole('button', { name: '确认订单' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
-    'confirmed',
+    '已批准',
   )
+  await page.getByRole('button', { name: '正式下达业主申请' }).click()
+  await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
+    '已发单',
+  )
+  await expect(
+    page.evaluate(
+      () => (window as Window & { issuedOrderId?: string }).issuedOrderId,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000009')
+  await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
+  await expect(page.getByText('Câble électrique')).toBeVisible()
+  await expect(page.locator('.formal-print-sheet')).not.toContainText(
+    'supplier',
+  )
+  await page.getByLabel('搜索单号、项目或工地').fill('REQ-HISTORY-1')
+  await page.getByRole('button', { name: '筛选', exact: true }).click()
+  const excelDownloadEvent = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出Excel', exact: true }).click()
+  const excelDownload = await excelDownloadEvent
+  const retainedExcelDir = resolve(
+    '.cache/excel-evidence-20261104',
+    randomUUID(),
+  )
+  mkdirSync(retainedExcelDir, { recursive: true })
+  await excelDownload.saveAs(
+    resolve(retainedExcelDir, 'normal-history-formal.xlsx'),
+  )
+  await page.screenshot({
+    path: resolve(retainedExcelDir, 'normal-history-export.png'),
+    fullPage: true,
+  })
+  await excelDownload.saveAs(
+    test.info().outputPath('normal-history-formal.xlsx'),
+  )
+  const excelBook = new Workbook()
+  await excelBook.xlsx.readFile((await excelDownload.path())!)
+  expect(excelBook.getWorksheet('订单')?.getCell('B2').value).toBe(
+    'TEST-OPA-20261013-OPA-ABCDEFGH-1',
+  )
+  expect(excelBook.getWorksheet('订单')?.getCell('G2').value).toBe('1200 XOF')
+  expect(excelBook.getWorksheet('明细')?.getCell('D2').value).toBe(
+    'Câble électrique',
+  )
+  await page
+    .getByRole('button', { name: '查看详情：REQ-HISTORY-1', exact: true })
+    .click()
   const originalDraftNo = await page.locator('.page-heading p').textContent()
   page.once('dialog', (dialog) => void dialog.dismiss())
   await page.getByRole('button', { name: '复制为新草稿' }).click()
@@ -1789,7 +2612,7 @@ test('authenticated desktop switches between cached authorization scopes', async
   await page.getByRole('button', { name: '查看详情：REQ-HISTORY-1' }).click()
   await page.getByRole('button', { name: '撤回历史申请' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
-    'draft',
+    '草稿',
   )
   await page.getByLabel('搜索单号、项目或工地').fill('不存在')
   await page.getByRole('button', { name: '筛选' }).click()
@@ -1800,86 +2623,351 @@ test('authenticated desktop switches between cached authorization scopes', async
 test('administrator queries and changes cloud-scoped bindings from desktop UI', async ({
   page,
 }) => {
+  const browserErrors: string[] = []
+  page.on('pageerror', (error) => browserErrors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') browserErrors.push(message.text())
+  })
   await page.addInitScript(() => {
     const accountId = '00000000-0000-4000-8000-000000000010'
+    const actorId = '00000000-0000-4000-8000-000000000011'
+    const countryId = '00000000-0000-4000-8000-000000000001'
+    const projectId = '00000000-0000-4000-8000-000000000002'
+    const departmentId = '00000000-0000-4000-8000-000000000003'
+    const oldTeamId = '00000000-0000-4000-8000-000000000004'
+    const newTeamId = '00000000-0000-4000-8000-000000000005'
+    type Scope = { projectId: string; departmentId: string; teamId: string }
     let bindings = [
+      { projectId, departmentId, teamId: oldTeamId, site: '甲工地' },
+    ]
+    const contexts = [oldTeamId, newTeamId].map((teamId) => ({
+      countryId,
+      projectId,
+      projectName: '测试项目',
+      site: '甲工地',
+      departmentId,
+      departmentName: '测试部门',
+      teamId,
+      teamName: teamId === oldTeamId ? '原班组' : '新班组',
+      currency: 'XOF',
+      primaryCurrency: 'XOF',
+      languagePair: 'zh_fr',
+    }))
+    const records = [
+      { kind: 'country', id: countryId, name: '测试国家', is_active: true },
       {
-        projectId: '00000000-0000-4000-8000-000000000002',
-        departmentId: '00000000-0000-4000-8000-000000000003',
-        teamId: '00000000-0000-4000-8000-000000000004',
-        site: '甲工地',
+        kind: 'project',
+        id: projectId,
+        country_id: countryId,
+        name: '测试项目',
+        is_active: true,
+      },
+      {
+        kind: 'department',
+        id: departmentId,
+        name: '测试部门',
+        is_active: true,
+      },
+      {
+        kind: 'team',
+        id: oldTeamId,
+        department_id: departmentId,
+        name: '原班组',
+        is_active: true,
+      },
+      {
+        kind: 'team',
+        id: newTeamId,
+        department_id: departmentId,
+        name: '新班组',
+        is_active: true,
       },
     ]
+    const mutations: object[] = []
     Object.assign(window, {
+      __authorizationMutations: mutations,
       __TAURI_INTERNALS__: {},
       __TAURI__: {
         core: {
           invoke(
             command: string,
             args?: {
+              username?: string
               accountId?: string
-              binding?: (typeof bindings)[number]
-              replacement?: { newScope: (typeof bindings)[number] }
+              binding?: Scope
+              replacement?: { oldScope: Scope; newScope: Scope }
               revoke?: boolean
             },
           ) {
-            if (command === 'issue_local_captcha')
+            if (
+              command === 'issue_local_captcha' ||
+              command === 'issue_cloud_captcha'
+            )
               return Promise.resolve({
                 id: crypto.randomUUID(),
                 question: '1 + 1 = ?',
               })
-            if (command === 'issue_cloud_captcha')
-              return Promise.reject(new Error('offline'))
-            if (command === 'offline_login')
+            if (command === 'online_login')
               return Promise.resolve({
-                user_id: accountId,
+                user_id: actorId,
                 username: 'admin',
                 roles: ['administrator'],
                 requires_password_change: false,
               })
             if (command === 'list_authorization_contexts')
-              return Promise.resolve([])
+              return Promise.resolve(contexts)
             if (command === 'get_authorization_context')
-              return Promise.reject(new Error('no local scope'))
-            if (command === 'list_managed_authorizations')
+              return Promise.resolve(contexts[0])
+            if (command === 'refresh_authorization') return Promise.resolve()
+            if (command === 'push_pending_sync')
+              return Promise.resolve({ acceptedCount: 0, pendingCount: 0 })
+            if (command === 'pull_sync')
+              return Promise.resolve({ appliedCount: 0, nextCursor: '0' })
+            if (command === 'sync_status')
+              return Promise.resolve({
+                pendingCount: 0,
+                conflictCount: 0,
+                quarantinedCount: 0,
+                lastSuccessAt: null,
+              })
+            if (command === 'sync_attachments') return Promise.resolve({})
+            if (command === 'list_requisition_history')
+              return Promise.resolve({ records: [], nextCursor: null })
+            if (command === 'list_reference_master_data')
+              return Promise.resolve(records)
+            if (command === 'find_managed_accounts')
+              return Promise.resolve(
+                args?.username === 'FixtureUser'
+                  ? [
+                      {
+                        id: accountId,
+                        username: 'FixtureUser',
+                        displayName: '受管用户',
+                      },
+                    ]
+                  : [],
+              )
+            if (
+              command === 'list_managed_authorizations' &&
+              args?.accountId === accountId
+            )
               return Promise.resolve(bindings)
             if (
               command === 'replace_managed_authorization' &&
-              args?.replacement
+              args?.accountId === accountId &&
+              args.replacement
             ) {
+              mutations.push({ command, ...args })
               bindings = [{ ...args.replacement.newScope, site: '乙工地' }]
               return Promise.resolve()
             }
-            if (command === 'change_managed_authorization' && args?.binding) {
+            if (
+              command === 'change_managed_authorization' &&
+              args?.accountId === accountId &&
+              args.binding
+            ) {
+              mutations.push({ command, ...args })
               bindings = args.revoke
                 ? []
                 : [{ ...args.binding, site: '甲工地' }]
               return Promise.resolve()
             }
-            return Promise.reject(new Error(`unexpected command: ${command}`))
+            return Promise.reject(new Error('unexpected command: ' + command))
+          },
+        },
+      },
+    })
+  })
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+
+  await page.getByLabel('账号', { exact: true }).fill('admin')
+  await page.getByLabel('密码', { exact: true }).fill('fixture-password')
+  await page.locator('#captcha').fill('2')
+  await page.getByRole('button', { name: '在线登录', exact: true }).click()
+  await page.getByRole('button', { name: '在线授权管理', exact: true }).click()
+  await page.getByRole('button', { name: '管理已有账号', exact: true }).click()
+  await page.getByLabel('查找用户名', { exact: true }).fill('FixtureUser')
+  await page.getByRole('button', { name: '查询账号授权', exact: true }).click()
+  await expect(
+    page.getByText('已读取云端授权范围。', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: '受管用户', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('list', { name: '已授权范围' })).toContainText(
+    '原班组',
+  )
+  await page.getByRole('button', { name: '修改', exact: true }).click()
+  await page
+    .getByRole('combobox', { name: '班组', exact: true })
+    .selectOption({ label: '新班组' })
+  await page.getByRole('button', { name: '保存修改', exact: true }).click()
+  await expect(
+    page.getByText('授权已分配或更新。', { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('list', { name: '已授权范围' })).toContainText(
+    '新班组',
+  )
+  await expect(
+    page.getByRole('list', { name: '已授权范围' }),
+  ).not.toContainText('原班组')
+  await page.getByRole('button', { name: '撤销', exact: true }).click()
+  await expect(page.getByText('授权已撤销。', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('list', { name: '已授权范围' }).getByRole('listitem'),
+  ).toHaveCount(0)
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __authorizationMutations: object[] })
+          .__authorizationMutations,
+    ),
+  ).toEqual([
+    {
+      command: 'replace_managed_authorization',
+      accountId: '00000000-0000-4000-8000-000000000010',
+      replacement: {
+        oldScope: {
+          projectId: '00000000-0000-4000-8000-000000000002',
+          departmentId: '00000000-0000-4000-8000-000000000003',
+          teamId: '00000000-0000-4000-8000-000000000004',
+        },
+        newScope: {
+          projectId: '00000000-0000-4000-8000-000000000002',
+          departmentId: '00000000-0000-4000-8000-000000000003',
+          teamId: '00000000-0000-4000-8000-000000000005',
+        },
+      },
+    },
+    {
+      command: 'change_managed_authorization',
+      accountId: '00000000-0000-4000-8000-000000000010',
+      binding: {
+        projectId: '00000000-0000-4000-8000-000000000002',
+        departmentId: '00000000-0000-4000-8000-000000000003',
+        teamId: '00000000-0000-4000-8000-000000000005',
+      },
+      revoke: true,
+    },
+  ])
+  expect(browserErrors).toEqual([])
+})
+
+test('catalog details and Honsen draft can reach later quote pages', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const prices = Array.from({ length: 26 }, (_, i) => ({
+      priceId: `p-${i}`,
+      supplierId: `s-${i}`,
+      supplierName: `Vendor ${i}`,
+      isPreferredSupplier: false,
+      currency: 'XOF',
+      unitPriceMinor: String(1000 + i),
+      unit: '件',
+      effectiveAt: '2026-10-12',
+    }))
+    const material = {
+      id: '00000000-0000-4000-8000-000000000901',
+      sku: null,
+      nameZh: '分页材料',
+      nameFr: null,
+      aliases: [],
+      brand: null,
+      model: 'PAGE',
+      specification: 'fixture',
+      unit: '件',
+      notes: null,
+      version: 1,
+      prices: prices.slice(0, 4),
+    }
+    Object.assign(window, {
+      __TAURI__: {
+        core: {
+          invoke(
+            command: string,
+            args?: {
+              after?: string | null
+              projectId?: string
+              draft?: unknown
+            },
+          ) {
+            if (command === 'search_catalog_page')
+              return Promise.resolve({ records: [material], nextCursor: null })
+            if (command === 'search_catalog') return Promise.resolve([material])
+            if (command === 'list_catalog_prices') {
+              Object.assign(window, { __pagedProject: args?.projectId })
+              return Promise.resolve(
+                prices.slice(
+                  args?.after ? Number(args.after.split('-').at(-1)) + 1 : 0,
+                  args?.after ? Number(args.after.split('-').at(-1)) + 26 : 25,
+                ),
+              )
+            }
+            if (command === 'get_material_square_image')
+              return Promise.resolve(null)
+            if (command === 'save_requisition_draft') {
+              Object.assign(window, { __pagedDraft: args?.draft })
+              return Promise.resolve({ totalMinor: '0' })
+            }
+            return Promise.resolve()
           },
         },
       },
     })
   })
   await page.goto('/')
-  await page.getByRole('button', { name: '获取验证码' }).click()
-  await page.getByLabel('账号').fill('admin')
-  await page.getByLabel('密码').fill('fixture-password')
-  await page.getByLabel(/本地验证码/).fill('2')
-  await page.getByRole('button', { name: '离线登录' }).click()
-  await page.getByRole('button', { name: '在线授权管理' }).click()
+  await page.getByRole('button', { name: '打开界面预览' }).click()
+  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await page.getByRole('button', { name: '查看全部报价' }).click()
+  await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
   await page
-    .getByLabel('账户 UUID')
-    .fill('00000000-0000-4000-8000-000000000010')
-  await page.getByRole('button', { name: '查询云端授权' }).click()
-  await expect(page.getByText('已读取 1 个云端授权范围。')).toBeVisible()
-  await page.getByRole('button', { name: '修改' }).click()
+    .getByRole('dialog')
+    .getByRole('button', { name: '下一页', exact: true })
+    .click()
+  await expect(page.getByText(/Vendor 25 ·/)).toBeVisible()
   await page
-    .getByLabel('班组 UUID')
-    .fill('00000000-0000-4000-8000-000000000005')
-  await page.getByRole('button', { name: '保存修改' }).click()
-  await expect(page.getByText('授权范围已原子修改。')).toBeVisible()
-  await page.getByRole('button', { name: '撤销' }).click()
-  await expect(page.getByText('授权已撤销。')).toBeVisible()
+    .getByRole('dialog')
+    .getByRole('button', { name: '上一页', exact: true })
+    .click()
+  await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
+  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByRole('button', { name: '采购申请单' }).click()
+  await page.getByLabel('材料').click()
+  await page.getByText('分页材料 · PAGE', { exact: true }).click()
+  await page.getByRole('button', { name: '加载更多报价' }).click()
+  await page.getByLabel('选择供应商报价').click()
+  await page.getByText(/Vendor 25 ·/).click()
+  await expect(page.getByLabel('单价（最小货币单位）')).toHaveValue('1025')
+  await page.getByLabel('数量').fill('3')
+  await page.getByRole('button', { name: '保存草稿' }).click()
+  await expect(
+    page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __pagedDraft?: {
+              lines: Array<{
+                supplierId: string
+                quantity: string
+                unitPriceMinor: string
+                currency: string
+              }>
+            }
+          }
+        ).__pagedDraft?.lines[0],
+    ),
+  ).resolves.toMatchObject({
+    supplierId: 's-25',
+    catalogPriceId: 'p-25',
+    priceSource: 'catalog',
+    quantity: '3',
+    unitPriceMinor: '1025',
+    currency: 'XOF',
+  })
+  await expect(
+    page.evaluate(
+      () => (window as Window & { __pagedProject?: string }).__pagedProject,
+    ),
+  ).resolves.toBe('00000000-0000-4000-8000-000000000102')
 })

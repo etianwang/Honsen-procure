@@ -1,0 +1,77 @@
+{
+  "base": "dd7bcea",
+  "candidateSha256": "4D2F17E539A1B18274FD6CA11AA77E6F92014B167A6DD71E763B1A1809D12893",
+  "candidatePath": ".cache/ui-native-build-batch1/debug/HonsenProcure.exe",
+  "native": "BLOCKED_AUTH_INTERACTION",
+  "checks": [
+    "desktop lint/typecheck/build PASS; unit76 PASS",
+    "Rust196 PASS/7 original native update probes ignored",
+    "History27; workflow and password16; reference/execution independent10; execution supplier10 scoped PASS"
+  ],
+  "sourceHashes": [
+    {
+      "path": "apps/desktop/src-tauri/src/catalog_maintenance_tests.rs",
+      "sha256": "8B8B827A71A9CB465EA00BA648DC9DE0D80881E1FE05DB211EC93E255AD8CA14"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/lib.rs",
+      "sha256": "DE53F0019797D180953928B32ECFA37136169B60E365FB49B863AC3BF8C2033C"
+    },
+    {
+      "path": "apps/desktop/src/components/AccountPasswordDialog.tsx",
+      "sha256": "AC7A8194B6093595C71C0FF37C6E1EE2C3E7C671F4349058E4607E4702A44005"
+    },
+    {
+      "path": "apps/desktop/src/components/FormField.tsx",
+      "sha256": "80BBFEC6D6FDAF39FF25AEA003B06080BC6811D738A471ABC859B2CFC4686B2D"
+    },
+    {
+      "path": "apps/desktop/src/components/MasterDataManager.tsx",
+      "sha256": "145CA292FA89EEEBB2B824B66660361E4B5C8F15B7755283AACFF888000F9B86"
+    },
+    {
+      "path": "apps/desktop/src/components/OrderWorkflowPanel.tsx",
+      "sha256": "40722C9CC3AA8D8D3AB2DD3DBB2CF58C6C268F14F4330856563F446A1B8531CB"
+    },
+    {
+      "path": "apps/desktop/src/components/RequisitionHistoryPanel.tsx",
+      "sha256": "05FECF898080DB98E46B91808C672D740DBE5D016316EB38822FC5BFE0628F11"
+    },
+    {
+      "path": "apps/desktop/src/components/RfqPanel.tsx",
+      "sha256": "12909254B810BE6355DD6DEFE23E75BEFD8AEBD51E564DA3B018BB72FABE35E8"
+    },
+    {
+      "path": "apps/desktop/src/components/SupplierAllocationPanel.tsx",
+      "sha256": "88F33498E8675F4735935B12CC5E1C2CF5937720E67106475B101CA9111A6230"
+    },
+    {
+      "path": "apps/desktop/src/components/SupplierPicker.tsx",
+      "sha256": "9761EA1124723DC9C20E916A62ED0E747B7560BB0094814D5E4CDC046B6197B2"
+    },
+    {
+      "path": "apps/desktop/src/lib/execution-messages.ts",
+      "sha256": "1CBA9F09E8D0F37B358CDF444A45E5AF5890CEF6EEACCC74861E2A135C112C34"
+    },
+    {
+      "path": "apps/desktop/src/lib/history-locale.ts",
+      "sha256": "05F5CFA9C528A3F534098251A0BE2E7934EFFB90A961AA6C45A26255AD5699BF"
+    },
+    {
+      "path": "apps/desktop/src/lib/procurement-execution-api.ts",
+      "sha256": "96AF5F82BF8CF0FCF1A20D61DAA9AB7004465170BBD6AB670FACDD0CAABC913D"
+    },
+    {
+      "path": "apps/desktop/src/lib/workflow-messages.ts",
+      "sha256": "E2A9CE1458643ACC089C4018A008923FF0576E8F3FF41300338F411B47DEF3E1"
+    },
+    {
+      "path": "apps/desktop/src/pages/ProcurementExecutionPage.tsx",
+      "sha256": "540B013EA048654D3EBC90A98CAF8AC530A86C1303135E1B724949DD10B40A44"
+    },
+    {
+      "path": "apps/desktop/src/components/ReferenceNameField.tsx",
+      "sha256": "71677CB7D6D65D66D7EB93B65DD229B7234B9DFB7DFE9F14A79F3834F6B67BF4"
+    }
+  ]
+}

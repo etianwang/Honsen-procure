@@ -3,17 +3,27 @@ import type { Role, UiLocale } from '@honsen/shared'
 export type LoginAccount = {
   id: string
   username: string
+  displayName?: string | null
   passwordHash: string
   roles: Role[]
   locale: UiLocale
   isEnabled: boolean
   lockedUntil: Date | null
   requiresPasswordChange: boolean
+  passwordChangeRecommended?: boolean
+}
+
+export type AuthenticatedAccount = LoginAccount & {
+  installationId: string
+  sessionTokenHash?: string
 }
 
 export type AuthStore = {
   findAccountByUsername(username: string): Promise<LoginAccount | null>
-  findActiveSession(tokenHash: string, now: Date): Promise<LoginAccount | null>
+  findActiveSession(
+    tokenHash: string,
+    now: Date,
+  ): Promise<AuthenticatedAccount | null>
   registerFailedLogin(accountId: string, now: Date): Promise<void>
   registerSuccessfulLogin(accountId: string): Promise<void>
   createSession(input: {
@@ -22,6 +32,7 @@ export type AuthStore = {
     tokenHash: string
     installationId: string
     expiresAt: Date
+    expectedPasswordHash?: string
   }): Promise<void>
 }
 

@@ -5,14 +5,14 @@
 - Formal Desktop/Toolbox identity is approved: Toolbox `appId` is `honsen.procure`; Tauri identifier is the distinct field `africa.honsen.procure`; display name and product directory are both `Honsen Procure`; main executable is `HonsenProcure.exe`; default release installation scope is machine. The normal mutable-data directory is `%LOCALAPPDATA%\\Honsen Program\\honsen.procure`. This approval does not authorize an installer, Runner, manifest, registry entry, catalog change or release.
 - Desktop: Tauri 2 + React + TypeScript + SQLite.
 - Remote: PostgreSQL behind HTTPS API; bidirectional incremental sync.
-- Every launch uses account/password plus local CAPTCHA; session locks at 30 minutes. A cached enabled user can sign in offline for 24 hours.
+- Every launch uses account/password plus one cloud CAPTCHA online or one local CAPTCHA offline; session locks at 30 minutes. A cached enabled user can sign in offline for 24 hours.
 - Roles: engineer, purchaser, administrator and viewer/auditor. Users can have multiple roles; administrator creates/stops/unlocks accounts.
 - Internal parent requisitions split to supplier-specific child purchase orders. Purchasers/administrators approve/reject and can view all projects.
 - Parent totals use an elected primary currency and order-locked user-entered exchange rate; children have one supplier/currency.
 - RFQs, price history, permanent audit/comments/attachments, partial receiving, Excel export, PDFs and backups are production scope.
 - WebSocket is used for change notifications that trigger cursor Pull; HTTPS Push/Pull remains authoritative.
 - Super administrator is a narrow governance role. Self-approval defaults off and is configurable only by super administrator with an immutable audit trail; retain at least two enabled super administrators.
-- Super administrator uses standard password/local-CAPTCHA login. Mobile-number last four digits are display-only recognition information, not an authentication factor.
+- Super administrator uses standard password/mode-appropriate single-CAPTCHA login. Mobile-number last four digits are display-only recognition information, not an authentication factor.
 - TOTP two-factor authentication is optional. Once a user enrolls, it is mandatory for every login and is supported during the permitted offline-login window.
 - All UI screens support Chinese, French and English. Users select one active UI language; order PDFs remain Chinese/French or Chinese/English according to the selected document language pair.
 - The approved UI direction is the Chinese desktop workbench visual draft: restrained green HONSEN accent, light/dark adaptive surfaces, compact left navigation, persistent top status bar, data-dense tables, rounded small controls and explicit text-plus-color statuses. This is the baseline for subsequent page/component implementation.
@@ -40,3 +40,32 @@
 ## Deferred
 
 Supplier API integration, inventory, approvals, accounting, OCR, AI, mobile, external supplier login.
+
+## 2026-11-04 SPO issuance boundary
+
+User selected reuse of the existing supplier-order send action: completed child terms under an approved Honsen parent issue SPO and transition draft to sent in one trusted transaction. No independent child approval is added and historical sent children are not backfilled. The implementation accepts approved/confirmed parents or executing parents with verifiable frozen HPA approval; cancelled/completed parents are excluded. Existing one-supplier/one-currency terms, ordinary integer pricing, snapshots and authorization remain enforced.
+
+## 2026-11-06 user-approved country tax and manual stamp
+
+CI rate is configured as1800 basis points and CM as1925, per explicit user approval. Stamp duty is manually entered per document in integer currency minor units, optional/default-zero for new input, with no automatic applicability or mandatory fixed1000XOF rule. It is separately displayed and added after percentage tax; signed amounts freeze. Existing user-edited tax configuration is not overwritten. These are approved operational settings, not a claim of independently verified law.
+
+### 2026-11-06 user-authorized pgcrypto removal
+
+The deployed Baota PostgreSQL16.15 lacks pgcrypto files. User explicitly authorized removal of001's extension declaration, overriding the normal historical-migration immutability rule only for this exact repair. Audit found only native gen_random_uuid SQL; Node SHA/HMAC and Argon2 security stay unchanged. Accept only the pinned original001 checksum22d91cb12793cfacd1d1ccc69fc2ab0b5bf6bbe996b3ceb32346931910905f2d with currentbc2992a3fe39c2905d1b12527d6065626dd0858953fc8aaa3d5204ce93fcea6b. Preserve old checksum/applied_at; share comparator between runner and completed-deployment verifier. Other edits still fail. No DROP EXTENSION, UUID/key/number/data rewrite or remote database operation. Existing failed first-init database should be backed up, kept, and retried through the new runner using the same connection.
+
+### 2026-11-07 user-approved username and display-name correction
+
+User's final decision supersedes earlier test username测试1: new login usernames are ASCII letters/digits only and case-insensitive globally, preserving original spelling; the Chinese name is a distinct display name. Final targets are admin(super administrator, permanent), Zhanghekai(display张和凯,administrator+purchaser),ceshi1(display测试1,engineer). Existing usernames including legacy Unicode are not automatically renamed, merged or deleted. New PostgreSQL uniqueness covers soft-deleted rows; collisions stop migration for review. Use deterministic ASCII translate folding in PostgreSQL and ASCII comparison/NOCASE in desktop, avoiding locale-dependent English-I behavior. Display metadata is nullable for existing data/API compatibility, required for new account creation. No plaintext password is recorded in this decision, source or fixture; account creation only via authenticated protected workflow.
+
+## 2026-11-08 approved lightweight transfer details
+
+User explicitly rejects a V1 group bank-account management subsystem. Preserve existing payment/reversal/attachment flow; default cash. Reuse bank_transfer for optional per-payment transfer details: recipient personal/company and name, channel SWIFT/IBAN/WesternUnion/UnionPay/other, applicable bank/account/IBAN/BIC/MTCN/recipientidentifier/transactionreference. Channel-dependent validation must not require all fields; payment confirmation remains explicit and audit-bound. Keep immutable append-only corrections, multiple mixed payments per HPA, owner-mode payment prohibition, multilingual UI and purpose-aware masking. No changes to supplier/material/order core identity. This approved scope is not implementation or acceptance evidence. Strict old server payload validation requires an additive compatible server candidate and isolated tests before rollout; no remote deployment authorized. T12 remains required and its current failures are not waived.
+
+2026-11-08 USER APPROVED: replace dual CAPTCHA login with online-first single
+cloud CAPTCHA; after bounded8sec HTTPS network failure explicitly offer local
+offline sign-in or reconnect. Offline still requires local CAPTCHA and an
+enabled previously verified cache within24h. Known
+authentication/lockout/retirement/rate-limit/TLS/protocol errors do not offer
+offline downgrade. Persist no plaintext passwords; server login CAPTCHA remains
+unchanged. This narrow approved decision supersedes prior
+local-CAPTCHA-every-launch wording only for online login.

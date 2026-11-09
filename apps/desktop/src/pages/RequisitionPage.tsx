@@ -1,14 +1,29 @@
+import { useUiLocale } from '../lib/ui-locale'
+import { documentNumber } from '../lib/document-number'
+import {
+  requisitionText,
+  type RequisitionMessage,
+} from '../lib/requisition-messages'
 import {
   calculateDraftTotals,
+  formatMoney,
   type RequisitionDraft,
   type RequisitionLine,
 } from '@honsen/shared'
 import { Alert, Button, Card, Input, Select, Space } from 'antd'
 import { Minus, Plus, Send } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { MaterialPicker } from '../components/MaterialPicker'
 import { OrderWorkflowPanel } from '../components/OrderWorkflowPanel'
-import { RequisitionHistoryPanel } from '../components/RequisitionHistoryPanel'
-import type { CatalogApi, CatalogMaterialView } from '../lib/catalog-api'
+import {
+  RequisitionHistoryPanel,
+  type HistoryEntryRequest,
+} from '../components/RequisitionHistoryPanel'
+import type {
+  CatalogApi,
+  CatalogMaterialView,
+  CatalogPriceView,
+} from '../lib/catalog-api'
 import type {
   OwnerLinePricingInput,
   RequisitionApi,
@@ -24,15 +39,20 @@ export type RequisitionContext = Omit<
   | 'orderDiscount'
   | 'orderFreight'
   | 'taxRateBasisPoints'
+  | 'manualStampDutyMinor'
 > & {
   displayNo: string
 }
 
 type RequisitionPageProps = {
   api: RequisitionApi
-  catalogApi: Pick<CatalogApi, 'searchCatalog'>
+  catalogApi: Pick<
+    CatalogApi,
+    'searchCatalog' | 'searchCatalogPage' | 'listCatalogPrices'
+  >
   context: RequisitionContext
   workflowApi?: WorkflowApi
+  historyEntry?: HistoryEntryRequest
   canApprove?: boolean
 }
 
@@ -75,6 +95,7 @@ function newLine(currency: EditorLine['currency']): EditorLine {
       specification: '',
     },
     supplierId: null,
+    priceSource: 'manual',
     supplierSnapshot: null,
     currency,
     quantity: '1',
@@ -92,11 +113,13 @@ function toOrder(
   lines: EditorLine[],
   context: RequisitionContext,
   taxRateBasisPoints: string,
+  manualStampDutyMinor: string,
 ): RequisitionDraft {
   return {
     ...context,
     id,
     lines: lines.map((line, index) => ({ ...line, sortOrder: index })),
+    manualStampDutyMinor,
     orderDiscount: { kind: 'fixed_minor', minor: '0' },
     orderFreight: { kind: 'fixed_minor', minor: '0' },
     taxRateBasisPoints:
@@ -125,6 +148,8 @@ function materialLine(
       ? { id: quote.supplierId, name: quote.supplierName }
       : null,
     supplierId: quote?.supplierId ?? null,
+    catalogPriceId: quote?.priceId ?? null,
+    priceSource: quote ? 'catalog' : 'manual',
     unit: material.unit,
     unitPriceMinor: quote?.unitPriceMinor ?? '0',
     currency: quote?.currency ?? line.currency,
@@ -148,20 +173,24 @@ function OwnerPricingFields({
   onChange: (update: Partial<OwnerPricing>) => void
   onCurrencyChange: (currency: EditorLine['currency']) => void
 }) {
+  const { locale } = useUiLocale()
+  const t = (key: RequisitionMessage) => requisitionText(locale, key)
+  const formatLocale =
+    locale === 'zh' ? 'zh-CN' : locale === 'en' ? 'en-US' : 'fr-FR'
   const price = material?.prices.find(
     ({ priceId }) => priceId === pricing.materialPriceId,
   )
   return (
     <>
       <label>
-        报价来源
+        {t('报价来源')}
         <Select
-          aria-label="报价来源"
+          aria-label={t('报价来源')}
           disabled={disabled || !line.materialId}
           value={pricing.quoteKind}
           options={[
-            { value: 'catalog_price', label: '目录报价' },
-            { value: 'manual_reference', label: '手工参考价（需原因）' },
+            { value: 'catalog_price', label: t('目录报价') },
+            { value: 'manual_reference', label: t('手工参考价（需原因）') },
           ]}
           onChange={(quoteKind: OwnerPricing['quoteKind']) =>
             onChange({
@@ -175,15 +204,16 @@ function OwnerPricingFields({
       </label>
       {pricing.quoteKind === 'catalog_price' ? (
         <label>
-          选择报价
+          {t('选择报价')}
           <Select
-            aria-label="选择报价"
+            aria-label={t('选择报价')}
+            virtual={false}
             disabled={disabled || !line.materialId}
             value={pricing.materialPriceId ?? undefined}
-            placeholder="请选择报价"
+            placeholder={t('请选择报价')}
             options={(material?.prices ?? []).map((item) => ({
               value: item.priceId,
-              label: `${item.supplierName} · ${item.unitPriceMinor} ${item.currency}`,
+              label: `${item.supplierName} · ${formatMoney({ currency: item.currency, minor: item.unitPriceMinor }, formatLocale)}`,
             }))}
             onChange={(materialPriceId: string) => {
               const selected = material?.prices.find(
@@ -197,9 +227,9 @@ function OwnerPricingFields({
       ) : (
         <>
           <label className="owner-manual-reference">
-            手工参考单价（最小货币单位）
+            {t('手工参考单价（最小货币单位）')}
             <Input
-              aria-label="手工参考单价（最小货币单位）"
+              aria-label={t('手工参考单价（最小货币单位）')}
               disabled={disabled}
               inputMode="numeric"
               value={pricing.manualPrice}
@@ -213,9 +243,9 @@ function OwnerPricingFields({
             />
           </label>
           <label className="owner-manual-reference">
-            手工参考原因
+            {t('手工参考原因')}
             <Input
-              aria-label="手工参考原因"
+              aria-label={t('手工参考原因')}
               disabled={disabled}
               value={pricing.manualReason}
               onChange={(event) =>
@@ -227,9 +257,9 @@ function OwnerPricingFields({
       )}
       {line.currency !== primaryCurrency ? (
         <label>
-          {line.currency} → {primaryCurrency} 锁定汇率
+          {line.currency} → {primaryCurrency} {t('锁定汇率')}
           <Input
-            aria-label={`${line.currency} → ${primaryCurrency} 锁定汇率`}
+            aria-label={`${line.currency} → ${primaryCurrency} ${t('锁定汇率')}`}
             disabled={disabled}
             inputMode="decimal"
             value={pricing.rate}
@@ -244,14 +274,14 @@ function OwnerPricingFields({
         </label>
       ) : null}
       <label>
-        加价方式
+        {t('加价方式')}
         <Select
-          aria-label="加价方式"
+          aria-label={t('加价方式')}
           disabled={disabled}
           value={pricing.markupKind}
           options={[
-            { value: 'percent_basis_points', label: '百分比（基点）' },
-            { value: 'fixed_minor', label: '固定每单位金额' },
+            { value: 'percent_basis_points', label: t('百分比（基点）') },
+            { value: 'fixed_minor', label: t('固定每单位金额') },
           ]}
           onChange={(markupKind: OwnerPricing['markupKind']) =>
             onChange({ markupKind, markup: '0', converted: null, final: null })
@@ -260,10 +290,18 @@ function OwnerPricingFields({
       </label>
       <label>
         {pricing.markupKind === 'percent_basis_points'
-          ? '加价（基点）'
-          : `加价（${primaryCurrency} 最小货币单位）`}
+          ? t('加价（基点）')
+          : (locale === 'zh' ? '加价' : t('加价')) +
+            ' (' +
+            primaryCurrency +
+            (locale === 'zh'
+              ? ' 最小货币单位'
+              : locale === 'en'
+                ? ' minor units'
+                : ' unités minimales') +
+            ')'}
         <Input
-          aria-label="加价"
+          aria-label={t('加价')}
           disabled={disabled}
           inputMode="numeric"
           value={pricing.markup}
@@ -277,29 +315,30 @@ function OwnerPricingFields({
         />
       </label>
       <label>
-        换算参考单价（只读）
+        {t('换算参考单价（只读）')}
         <Input
-          aria-label="换算参考单价（只读）"
+          aria-label={t('换算参考单价（只读）')}
           readOnly
           value={pricing.converted ?? '—'}
         />
       </label>
       <label>
-        最终单价（只读）
+        {t('最终单价（只读）')}
         <Input
-          aria-label="最终单价（只读）"
+          aria-label={t('最终单价（只读）')}
           readOnly
           value={pricing.final ?? '—'}
         />
       </label>
       {pricing.quoteKind === 'manual_reference' ? (
         <p className="owner-manual-reference">
-          手工参考价会被审计，且不会写回材料目录。
+          {t('手工参考价会被审计，且不会写回材料目录。')}
         </p>
       ) : null}
       {price ? (
         <output>
-          来源：{price.unitPriceMinor} {price.currency}
+          {t('来源：')}
+          {price.unitPriceMinor} {price.currency}
         </output>
       ) : null}
     </>
@@ -311,13 +350,27 @@ export function RequisitionPage({
   catalogApi,
   context,
   workflowApi,
+  historyEntry,
   canApprove = false,
 }: RequisitionPageProps) {
+  const { locale } = useUiLocale()
+  const t = (key: RequisitionMessage) => requisitionText(locale, key)
+  const formatLocale =
+    locale === 'zh' ? 'zh-CN' : locale === 'en' ? 'en-US' : 'fr-FR'
+
   const [editorContext, setEditorContext] = useState(context)
   const [lines, setLines] = useState<EditorLine[]>([newLine(context.currency)])
   const [orderId, setOrderId] = useState(() => crypto.randomUUID())
   const [taxRateBasisPoints, setTaxRateBasisPoints] = useState('0')
+  const [manualStampDutyMinor, setManualStampDutyMinor] = useState('0')
   const [materials, setMaterials] = useState<CatalogMaterialView[]>([])
+  const [quotePages, setQuotePages] = useState<
+    Record<
+      string,
+      { prices: CatalogPriceView[]; more: boolean; after: string | null }
+    >
+  >({})
+  const [loadingQuotes, setLoadingQuotes] = useState(false)
   const [mode, setMode] = useState<ProcurementMode>('honsen_self_purchase')
   const [ownerPricing, setOwnerPricing] = useState<
     Record<string, OwnerPricing>
@@ -325,18 +378,57 @@ export function RequisitionPage({
   const [pricingRevisionReason, setPricingRevisionReason] = useState('')
   const [pricingIncomplete, setPricingIncomplete] = useState(false)
   const [status, setStatus] = useState<'draft' | 'pending'>('draft')
-  const [message, setMessage] = useState<string | null>(null)
-
-  useEffect(() => {
-    catalogApi
-      .searchCatalog('', context.projectId)
-      .then(setMaterials)
-      .catch(() => setMaterials([]))
-  }, [catalogApi, context.projectId])
+  const [message, setMessage] = useState<RequisitionMessage | null>(null)
+  const messageType =
+    message &&
+    [
+      '已复制材料和数量到未保存的新草稿；请重新选择现行材料、报价、税率及其他费用后保存。',
+      '申请已驳回，可修改报价并重新提交。',
+    ].includes(message)
+      ? 'info'
+      : message &&
+          [
+            '草稿已自动保存到本机',
+            '采购申请已提交，状态：待确认',
+            '申请已撤回为草稿，审计记录已保留。',
+          ].includes(message)
+        ? 'success'
+        : 'error'
+  const manualPending = useRef(false)
+  const writeQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const writeGeneration = useRef(0)
+  const autosaveGeneration = useRef(0)
+  const lastSavedDraft = useRef('')
+  const [busy, setBusy] = useState(false)
+  useEffect(
+    () => () => {
+      writeGeneration.current += 1
+      autosaveGeneration.current += 1
+    },
+    [],
+  )
+  function serializeWrite<T>(work: () => Promise<T>): Promise<T> {
+    const generation = writeGeneration.current
+    const guarded = () => {
+      if (generation !== writeGeneration.current)
+        throw Error('Stale requisition action')
+      return work()
+    }
+    const result = writeQueue.current.then(guarded, guarded)
+    writeQueue.current = result.catch(() => undefined)
+    return result
+  }
 
   const draft = useMemo(
-    () => toOrder(orderId, lines, editorContext, taxRateBasisPoints),
-    [editorContext, lines, orderId, taxRateBasisPoints],
+    () =>
+      toOrder(
+        orderId,
+        lines,
+        editorContext,
+        taxRateBasisPoints,
+        manualStampDutyMinor,
+      ),
+    [editorContext, lines, orderId, taxRateBasisPoints, manualStampDutyMinor],
   )
   const totals = useMemo(() => {
     try {
@@ -345,17 +437,46 @@ export function RequisitionPage({
       return null
     }
   }, [draft])
+  const persistDraft = useCallback(async () => {
+    const generation = writeGeneration.current
+    const result = await api.saveRequisitionDraft(draft)
+    if (generation !== writeGeneration.current)
+      throw Error('Stale requisition action')
+    lastSavedDraft.current = JSON.stringify(draft)
+    return result
+  }, [api, draft])
 
   useEffect(() => {
-    if (mode === 'owner_self_purchase' || status === 'pending' || !totals)
+    if (
+      mode === 'owner_self_purchase' ||
+      status === 'pending' ||
+      busy ||
+      !totals
+    )
       return
+    if (lastSavedDraft.current === JSON.stringify(draft)) return
+    const generation = ++autosaveGeneration.current
     const timer = window.setTimeout(() => {
-      void api.saveRequisitionDraft(draft).catch(() => {
-        setMessage('自动保存失败；请检查授权、材料和订单内容后手动保存。')
-      })
+      if (manualPending.current) return
+      void serializeWrite(persistDraft)
+        .then(() => {
+          if (generation === autosaveGeneration.current)
+            setMessage((current) =>
+              current === '自动保存失败；请检查授权、材料和订单内容后手动保存。'
+                ? null
+                : current,
+            )
+        })
+        .catch(() => {
+          if (generation === autosaveGeneration.current)
+            setMessage('自动保存失败；请检查授权、材料和订单内容后手动保存。')
+        })
     }, 600)
-    return () => window.clearTimeout(timer)
-  }, [api, draft, mode, status, totals])
+    return () => {
+      window.clearTimeout(timer)
+      autosaveGeneration.current += 1
+    }
+  }, [persistDraft, draft, mode, status, totals, busy])
 
   function updateLine(index: number, update: Partial<EditorLine>) {
     setLines((current) =>
@@ -365,14 +486,52 @@ export function RequisitionPage({
     )
   }
 
+  async function loadQuotes(materialId: string, after: string | null) {
+    if (loadingQuotes && after !== null) return
+    setLoadingQuotes(true)
+    try {
+      const page = await catalogApi.listCatalogPrices(
+        materialId,
+        context.projectId,
+        after,
+      )
+      setQuotePages((current) => ({
+        ...current,
+        [materialId]: {
+          prices:
+            after === null
+              ? page
+              : [
+                  ...(current[materialId]?.prices ?? []),
+                  ...page.filter(
+                    (price) =>
+                      !current[materialId]?.prices.some(
+                        (old) => old.priceId === price.priceId,
+                      ),
+                  ),
+                ],
+          more: page.length === 25,
+          after: page.at(-1)?.priceId ?? after,
+        },
+      }))
+    } catch {
+      setMessage('无法读取供应商报价。')
+    } finally {
+      setLoadingQuotes(false)
+    }
+  }
+
   function copyFromHistory(detail: RequisitionDetail) {
+    if (manualPending.current) return
     if (
       detail.projectId !== context.projectId ||
       !detail.procurementMode ||
       detail.lines.length === 0
     )
       return
-    if (!window.confirm('复制会替换当前编辑区；请先保存当前草稿。是否继续？'))
+    if (
+      !window.confirm(t('复制会替换当前编辑区；请先保存当前草稿。是否继续？'))
+    )
       return
     const id = crypto.randomUUID()
     setOrderId(id)
@@ -457,8 +616,13 @@ export function RequisitionPage({
   }
 
   async function saveOwnerPricing() {
-    await api.saveRequisitionDraft(draft)
+    const generation = writeGeneration.current
+    await persistDraft()
+    if (generation !== writeGeneration.current)
+      throw Error('Stale requisition action')
     await api.setProcurementMode(orderId, mode)
+    if (generation !== writeGeneration.current)
+      throw Error('Stale requisition action')
     let result
     try {
       result = await api.saveOwnerPurchasePricing({
@@ -466,8 +630,10 @@ export function RequisitionPage({
         lines: ownerPricingInputs(),
         revisionReason: pricingRevisionReason || null,
       })
+      if (generation !== writeGeneration.current)
+        throw Error('Stale requisition action')
     } catch (error) {
-      setPricingIncomplete(true)
+      if (generation === writeGeneration.current) setPricingIncomplete(true)
       throw error
     }
     setOwnerPricing((current) => ({
@@ -488,46 +654,95 @@ export function RequisitionPage({
   }
 
   async function saveDraft() {
+    if (manualPending.current || status === 'pending') return
+    manualPending.current = true
+    autosaveGeneration.current += 1
+    setBusy(true)
+    setMessage(null)
+    const generation = writeGeneration.current
     try {
-      if (mode === 'owner_self_purchase') await saveOwnerPricing()
-      else {
-        await api.saveRequisitionDraft(draft)
-        await api.setProcurementMode(orderId, mode)
-      }
+      await serializeWrite(async () => {
+        if (mode === 'owner_self_purchase') await saveOwnerPricing()
+        else {
+          await persistDraft()
+          if (generation !== writeGeneration.current)
+            throw Error('Stale requisition action')
+          await api.setProcurementMode(orderId, mode)
+        }
+      })
+      if (generation !== writeGeneration.current) return
       setMessage('草稿已自动保存到本机')
-    } catch {
+    } catch (error) {
+      if (generation !== writeGeneration.current) return
       setMessage(
-        '基础草稿已保存，但可信定价未完成。请修正报价后再次保存；当前不能提交。',
+        isQuoteUnavailable(error)
+          ? '所选报价已失效或不可用，请重新选择；原草稿已保留。'
+          : '保存失败，请检查订单内容；原草稿已保留。',
       )
+    } finally {
+      manualPending.current = false
+      setBusy(false)
     }
   }
 
   async function submit() {
+    if (manualPending.current || status === 'pending') return
     if (!totals) {
       setMessage('请完成材料、数量和金额后再提交。')
       return
     }
+    manualPending.current = true
+    autosaveGeneration.current += 1
+    setBusy(true)
+    setMessage(null)
+    const generation = writeGeneration.current
     try {
-      if (mode === 'owner_self_purchase') await saveOwnerPricing()
-      else {
-        await api.saveRequisitionDraft(draft)
-        await api.setProcurementMode(orderId, mode)
-      }
-      await api.submitRequisitionDraft(draft.id)
+      await serializeWrite(async () => {
+        if (mode === 'owner_self_purchase') await saveOwnerPricing()
+        else {
+          await persistDraft()
+          if (generation !== writeGeneration.current)
+            throw Error('Stale requisition action')
+          await api.setProcurementMode(orderId, mode)
+        }
+        if (generation !== writeGeneration.current)
+          throw Error('Stale requisition action')
+        await api.submitRequisitionDraft(draft.id)
+      })
+      if (generation !== writeGeneration.current) return
       setStatus('pending')
       setMessage('采购申请已提交，状态：待确认')
-    } catch {
-      setMessage('提交失败，请检查订单内容。')
+    } catch (error) {
+      if (generation !== writeGeneration.current) return
+      setMessage(
+        isQuoteUnavailable(error)
+          ? '所选报价已失效或不可用，请重新选择；原草稿已保留。'
+          : '提交失败，请检查订单内容。',
+      )
+    } finally {
+      manualPending.current = false
+      setBusy(false)
     }
   }
 
   async function withdraw() {
+    if (manualPending.current || status !== 'pending') return
+    manualPending.current = true
+    autosaveGeneration.current += 1
+    setBusy(true)
+    setMessage(null)
+    const generation = writeGeneration.current
     try {
-      await api.withdrawRequisition(orderId)
+      await serializeWrite(() => api.withdrawRequisition(orderId))
+      if (generation !== writeGeneration.current) return
       setStatus('draft')
       setMessage('申请已撤回为草稿，审计记录已保留。')
     } catch {
+      if (generation !== writeGeneration.current) return
       setMessage('撤回失败：仅申请人可撤回待确认且授权有效的请购。')
+    } finally {
+      manualPending.current = false
+      setBusy(false)
     }
   }
 
@@ -535,54 +750,68 @@ export function RequisitionPage({
     <>
       <section className="page-heading">
         <div>
-          <h2>新建采购申请</h2>
+          <h2>{t('新建采购申请')}</h2>
           <p>
-            {editorContext.displayNo} · {editorContext.site} ·
-            草稿仅保存在本机，联网后再同步。
+            {documentNumber(
+              editorContext.displayNo,
+              t(status === 'pending' ? '待确认' : '草稿'),
+            )}{' '}
+            · {editorContext.site} ·{t('草稿仅保存在本机，联网后再同步。')}
           </p>
         </div>
         <span className={`status ${status === 'pending' ? 'blue' : 'yellow'}`}>
-          {status === 'pending' ? '待确认' : '草稿'}
+          {status === 'pending' ? t('待确认') : t('草稿')}
         </span>
       </section>
-      {message ? (
+      {message === '无法读取供应商报价。' ? (
         <Alert
           className="requisition-alert"
-          type="info"
-          title={message}
+          type="error"
+          role="alert"
+          title={t(message)}
           showIcon
         />
       ) : null}
-      <Card className="card" title="材料明细">
+      <Card className="card" title={t('材料明细')}>
         <label>
-          采购模式
+          {t('采购模式')}
           <Select
-            aria-label="采购模式"
-            disabled={status === 'pending'}
+            aria-label={t('采购模式')}
+            disabled={status === 'pending' || busy}
             value={mode}
             options={[
-              { value: 'owner_self_purchase', label: '业主自行采购' },
-              { value: 'honsen_self_purchase', label: '弘盛自行采购' },
+              { value: 'owner_self_purchase', label: t('业主自行采购') },
+              { value: 'honsen_self_purchase', label: t('弘盛自行采购') },
             ]}
             onChange={(value: ProcurementMode) => setMode(value)}
           />
         </label>
         <label>
-          税率（基点）
+          {t('税率（基点）')}
           <Input
-            aria-label="税率（基点）"
+            aria-label={t('税率（基点）')}
             inputMode="numeric"
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
             value={taxRateBasisPoints}
             onChange={(event) => setTaxRateBasisPoints(event.target.value)}
           />
         </label>
+        <label>
+          {t('印花税（手填，单据币种最小单位）')}
+          <Input
+            aria-label={t('印花税（手填，单据币种最小单位）')}
+            inputMode="numeric"
+            disabled={status === 'pending' || busy}
+            value={manualStampDutyMinor}
+            onChange={(event) => setManualStampDutyMinor(event.target.value)}
+          />
+        </label>
         {mode === 'owner_self_purchase' ? (
           <label>
-            价格修订原因（已有定价时必填）
+            {t('价格修订原因（已有定价时必填）')}
             <Input
-              aria-label="价格修订原因"
-              disabled={status === 'pending'}
+              aria-label={t('价格修订原因')}
+              disabled={status === 'pending' || busy}
               value={pricingRevisionReason}
               onChange={(event) => setPricingRevisionReason(event.target.value)}
             />
@@ -592,85 +821,185 @@ export function RequisitionPage({
           <Alert
             type="error"
             showIcon
-            title="基础草稿已保存，报价定价未完成"
-            description="请检查报价、汇率和修订原因后再次保存；系统已阻止提交审批。"
+            title={t('基础草稿已保存，报价定价未完成')}
+            description={t(
+              '请检查报价、汇率和修订原因后再次保存；系统已阻止提交审批。',
+            )}
           />
         ) : null}
         <div className="requisition-lines">
           {lines.map((line, index) => (
             <article className="requisition-line" key={line.id}>
               <div className="requisition-line-heading">
-                <strong>第 {index + 1} 行</strong>
+                <strong>
+                  {locale === 'zh'
+                    ? '第 '
+                    : locale === 'en'
+                      ? 'Line '
+                      : 'Ligne '}
+                  {index + 1}
+                  {locale === 'zh' ? ' 行' : ''}
+                </strong>
                 <Button
-                  aria-label={`删除第 ${index + 1} 行`}
-                  disabled={lines.length === 1 || status === 'pending'}
+                  aria-label={
+                    locale === 'zh'
+                      ? '删除第 ' + (index + 1) + ' 行'
+                      : locale === 'en'
+                        ? 'Delete line ' + (index + 1)
+                        : 'Supprimer la ligne ' + (index + 1)
+                  }
+                  disabled={lines.length === 1 || status === 'pending' || busy}
                   icon={<Minus size={15} />}
                   onClick={() =>
                     setLines((current) => current.filter((_, i) => i !== index))
                   }
                 >
-                  删除
+                  {t('删除')}
                 </Button>
               </div>
               <div className="requisition-fields">
                 <label>
-                  材料
-                  <Select
-                    aria-label="材料"
-                    disabled={status === 'pending'}
+                  {t('材料')}
+                  <MaterialPicker
+                    api={catalogApi}
+                    projectId={context.projectId}
+                    disabled={status === 'pending' || busy}
                     value={line.materialId ?? undefined}
-                    placeholder="选择材料"
-                    options={materials.map((material) => ({
-                      value: material.id,
-                      label: `${material.nameZh} · ${material.model}`,
-                    }))}
-                    onChange={(materialId) => {
-                      const material = materials.find(
-                        ({ id }) => id === materialId,
-                      )
-                      if (material)
-                        updateLine(index, materialLine(line, material, mode))
+                    valueLabel={
+                      line.materialId
+                        ? ((locale === 'fr'
+                            ? line.materialSnapshot.nameFr
+                            : null) || line.materialSnapshot.nameZh) +
+                          ' · ' +
+                          line.materialSnapshot.model
+                        : undefined
+                    }
+                    onChange={(material) => {
+                      setMaterials((current) => [
+                        ...current.filter((item) => item.id !== material.id),
+                        material,
+                      ])
+                      updateLine(index, materialLine(line, material, mode))
+                      updateOwnerPricing(line.id, {
+                        materialPriceId: null,
+                        converted: null,
+                        final: null,
+                      })
+                      void loadQuotes(material.id, null)
                     }}
                   />
                 </label>
                 {!line.materialId && line.materialSnapshot.nameZh ? (
                   <p>
-                    历史材料：{line.materialSnapshot.nameZh}
-                    ；请重新选择现行材料。
+                    {t('历史材料：')}
+                    {line.materialSnapshot.nameZh}
+                    {t('；请重新选择现行材料。')}
                   </p>
                 ) : null}
                 <label>
-                  币种
+                  {t('币种')}
                   <Select
-                    aria-label="行币种"
-                    disabled={status === 'pending'}
+                    aria-label={t('行币种')}
+                    disabled={status === 'pending' || busy}
                     value={line.currency}
                     options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({
                       value,
                     }))}
-                    onChange={(currency) => updateLine(index, { currency })}
+                    onChange={(currency) =>
+                      updateLine(index, {
+                        currency,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
+                    }
                   />
                 </label>
                 {mode === 'owner_self_purchase' ? (
                   <OwnerPricingFields
                     line={line}
-                    material={materials.find(
-                      ({ id }) => id === line.materialId,
-                    )}
+                    material={(() => {
+                      const material = materials.find(
+                        ({ id }) => id === line.materialId,
+                      )
+                      return (
+                        material && {
+                          ...material,
+                          prices:
+                            quotePages[material.id]?.prices ?? material.prices,
+                        }
+                      )
+                    })()}
                     primaryCurrency={editorContext.primaryCurrency}
                     pricing={ownerPricing[line.id] ?? newOwnerPricing()}
-                    disabled={status === 'pending'}
+                    disabled={status === 'pending' || busy}
                     onChange={(update) => updateOwnerPricing(line.id, update)}
                     onCurrencyChange={(currency) =>
                       updateLine(index, { currency })
                     }
                   />
                 ) : null}
+                {mode === 'honsen_self_purchase' && line.materialId ? (
+                  <label>
+                    {t('选择供应商报价（当前来源：')}
+                    {line.priceSource === 'catalog'
+                      ? t('目录报价')
+                      : t('手工价格')}
+                    ）
+                    <Select
+                      aria-label={t('选择供应商报价')}
+                      virtual={false}
+                      disabled={status === 'pending' || busy}
+                      value={line.catalogPriceId ?? undefined}
+                      placeholder={t('选择供应商报价')}
+                      options={(
+                        quotePages[line.materialId]?.prices ??
+                        materials.find((m) => m.id === line.materialId)
+                          ?.prices ??
+                        []
+                      ).map((price) => ({
+                        value: price.priceId,
+                        label: `${price.supplierName} · ${formatMoney({ currency: price.currency, minor: price.unitPriceMinor }, formatLocale)}`,
+                      }))}
+                      onChange={(priceId: string) => {
+                        const price = (
+                          quotePages[line.materialId!]?.prices ?? []
+                        ).find((item) => item.priceId === priceId)
+                        if (price)
+                          updateLine(index, {
+                            supplierId: price.supplierId,
+                            catalogPriceId: price.priceId,
+                            priceSource: 'catalog',
+                            supplierSnapshot: {
+                              id: price.supplierId,
+                              name: price.supplierName,
+                            },
+                            unitPriceMinor: price.unitPriceMinor,
+                            currency: price.currency,
+                            unit: price.unit,
+                          })
+                      }}
+                    />
+                  </label>
+                ) : null}
+                {line.materialId && quotePages[line.materialId]?.more ? (
+                  <Button
+                    disabled={loadingQuotes || busy}
+                    onClick={() =>
+                      void loadQuotes(
+                        line.materialId!,
+                        quotePages[line.materialId!].after,
+                      )
+                    }
+                  >
+                    {t('加载更多报价')}
+                  </Button>
+                ) : null}
                 <label>
-                  数量
+                  {t('数量')}
                   <Input
-                    aria-label="数量"
-                    disabled={status === 'pending'}
+                    aria-label={t('数量')}
+                    disabled={status === 'pending' || busy}
                     value={line.quantity}
                     inputMode="decimal"
                     onChange={(event) =>
@@ -679,33 +1008,43 @@ export function RequisitionPage({
                   />
                 </label>
                 <label>
-                  单位
+                  {t('单位')}
                   <Input
-                    aria-label="单位"
-                    disabled={status === 'pending'}
+                    aria-label={t('单位')}
+                    disabled={status === 'pending' || busy}
                     value={line.unit}
                     onChange={(event) =>
-                      updateLine(index, { unit: event.target.value })
+                      updateLine(index, {
+                        unit: event.target.value,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
                     }
                   />
                 </label>
                 <label>
-                  单价（最小货币单位）
+                  {t('单价（最小货币单位）')}
                   <Input
-                    aria-label="单价（最小货币单位）"
-                    disabled={status === 'pending'}
+                    aria-label={t('单价（最小货币单位）')}
+                    disabled={status === 'pending' || busy}
                     value={line.unitPriceMinor}
                     inputMode="numeric"
                     onChange={(event) =>
-                      updateLine(index, { unitPriceMinor: event.target.value })
+                      updateLine(index, {
+                        unitPriceMinor: event.target.value,
+                        ...(mode === 'honsen_self_purchase'
+                          ? { priceSource: 'manual', catalogPriceId: null }
+                          : {}),
+                      })
                     }
                   />
                 </label>
                 <label>
-                  行折扣（最小货币单位）
+                  {t('行折扣（最小货币单位）')}
                   <Input
-                    aria-label="行折扣（最小货币单位）"
-                    disabled={status === 'pending'}
+                    aria-label={t('行折扣（最小货币单位）')}
+                    disabled={status === 'pending' || busy}
                     value={
                       line.lineDiscount.kind === 'fixed_minor'
                         ? line.lineDiscount.minor
@@ -723,10 +1062,10 @@ export function RequisitionPage({
                   />
                 </label>
                 <label>
-                  行运费（最小货币单位）
+                  {t('行运费（最小货币单位）')}
                   <Input
-                    aria-label="行运费（最小货币单位）"
-                    disabled={status === 'pending'}
+                    aria-label={t('行运费（最小货币单位）')}
+                    disabled={status === 'pending' || busy}
                     value={
                       line.lineFreight.kind === 'fixed_minor'
                         ? line.lineFreight.minor
@@ -749,7 +1088,7 @@ export function RequisitionPage({
         </div>
         <Space className="requisition-actions" wrap>
           <Button
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
             icon={<Plus size={16} />}
             onClick={() =>
               setLines((current) => [
@@ -758,23 +1097,40 @@ export function RequisitionPage({
               ])
             }
           >
-            新增材料行
+            {t('新增材料行')}
           </Button>
           <Button
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
+            loading={busy}
+            aria-label={t('保存草稿')}
             onClick={() => void saveDraft()}
           >
-            保存草稿
+            {t('保存草稿')}
           </Button>
           <Button
             type="primary"
-            disabled={status === 'pending'}
+            disabled={status === 'pending' || busy}
             icon={<Send size={16} />}
+            loading={busy}
+            aria-label={t('提交确认')}
             onClick={() => void submit()}
           >
-            提交确认
+            {t('提交确认')}
           </Button>
         </Space>
+        {busy ? (
+          <p role="status" aria-live="polite">
+            {t('正在保存或提交，请稍候…')}
+          </p>
+        ) : null}
+        {message && message !== '无法读取供应商报价。' ? (
+          <Alert
+            role={messageType === 'error' ? 'alert' : 'status'}
+            type={messageType}
+            title={t(message)}
+            showIcon
+          />
+        ) : null}
       </Card>
       {status === 'pending' && workflowApi ? (
         <OrderWorkflowPanel
@@ -788,25 +1144,32 @@ export function RequisitionPage({
         />
       ) : null}
       {status === 'pending' ? (
-        <Button onClick={() => void withdraw()}>撤回申请</Button>
+        <Button
+          disabled={busy}
+          loading={busy}
+          aria-label={t('撤回申请')}
+          onClick={() => void withdraw()}
+        >
+          {t('撤回申请')}
+        </Button>
       ) : null}
-      <Card className="card" title="金额汇总">
-        <output aria-label="订单总金额" className="requisition-total">
+      <Card className="card" title={t('金额汇总')}>
+        <output aria-label={t('订单总金额')} className="requisition-total">
           {totals
             ? totals.sourceCurrencyTotals.length > 1
-              ? '待供应商拆单后汇总主币种'
+              ? t('待供应商拆单后汇总主币种')
               : `${totals.totalMinor} ${editorContext.currency}`
-            : '待填写'}
+            : t('待填写')}
         </output>
         <p className="muted">
-          小计 {totals?.subtotalMinor ?? '—'} · 折扣{' '}
-          {totals?.lineDiscountMinor ?? '—'} · 运费{' '}
-          {totals?.freightMinor ?? '—'} · 税额 {totals?.taxMinor ?? '—'}
+          {t('小计')} {totals?.subtotalMinor ?? '—'} · {t('折扣')}{' '}
+          {totals?.lineDiscountMinor ?? '—'} · {t('运费')}{' '}
+          {totals?.freightMinor ?? '—'} · {t('税额')} {totals?.taxMinor ?? '—'}
         </p>
         {totals?.sourceCurrencyTotals.length &&
         totals.sourceCurrencyTotals.length > 1 ? (
           <p className="muted">
-            源币种小计：
+            {t('源币种小计：')}
             {totals.sourceCurrencyTotals
               .map((item) => `${item.totalMinor} ${item.currency}`)
               .join(' · ')}
@@ -814,14 +1177,26 @@ export function RequisitionPage({
         ) : null}
       </Card>
       <RequisitionHistoryPanel
+        key={historyEntry?.requestId ?? 'default'}
+        entry={historyEntry}
         api={api}
         refreshKey={status}
         projectId={context.projectId}
         applicantId={context.applicantId}
         onCopy={copyFromHistory}
+        copyDisabled={busy}
         workflowApi={workflowApi}
         canApprove={canApprove}
       />
     </>
+  )
+}
+
+function isQuoteUnavailable(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'quote_unavailable'
   )
 }

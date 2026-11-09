@@ -8,6 +8,32 @@ import {
 const id = '00000000-0000-4000-8000-000000000001'
 
 describe('catalog contracts', () => {
+  it('keeps an optional material category without inventing it for legacy payloads', () => {
+    const base = {
+      id,
+      sku: null,
+      nameZh: '合成材料',
+      nameFr: null,
+      aliases: [],
+      brand: null,
+      model: 'M',
+      specification: 'S',
+      unit: 'pcs',
+      notes: null,
+      isActive: true,
+      version: 1,
+    }
+    expect(materialSchema.parse(base)).not.toHaveProperty('categoryId')
+    expect(materialSchema.parse({ ...base, categoryId: id }).categoryId).toBe(
+      id,
+    )
+    expect(
+      materialSchema.parse({ ...base, categoryId: null }).categoryId,
+    ).toBeNull()
+    expect(() =>
+      materialSchema.parse({ ...base, categoryId: 'invalid' }),
+    ).toThrow()
+  })
   it('requires the material name, model, specification and unit', () => {
     expect(() =>
       materialSchema.parse({
@@ -44,6 +70,7 @@ describe('catalog contracts', () => {
     expect(() =>
       supplierSchema.parse({
         id,
+        countryId: id,
         businessCode: 'SUP-001',
         name: 'fixture supplier',
         contactName: null,

@@ -1,0 +1,40 @@
+{
+  "baseline": "6fb2da1",
+  "candidate": {
+    "version": "0.1.23",
+    "sha256": "facf906da4ec18fa98bee929599ba90ab6898fdffd8e19de50f207782ff6236c",
+    "installed": true,
+    "installedExeVersion": "0.1.23",
+    "installedManifestVersion": "0.1.23"
+  },
+  "checks": {
+    "rust": {
+      "passed": 192,
+      "ignored": 7,
+      "failed": 0,
+      "log": ".cache/auth-rust.log"
+    },
+    "desktopUnit": {
+      "passed": 71
+    },
+    "domInitial": {
+      "passed": 92,
+      "failed": 1,
+      "scope": "93 login-dependent fixtures, stale API410 locator fixed afterward"
+    },
+    "domFocusedRerun": {
+      "passed": 2,
+      "failed": 0,
+      "scope": "api-upgrade.spec.ts"
+    },
+    "format": "PASS changed code",
+    "typecheck": "PASS",
+    "lint": "PASS with warnings",
+    "rustClippy": "PASS with warnings",
+    "build": "PASS",
+    "native": "PARTIAL: user completed normal Zhanghekai online login; agent observed authenticated workspace and acknowledged sync, plus one-cloud-CAPTCHA startup. Native offline/reconnect NOT_RUN",
+    "elapsedTimeout": "NOT_RUN",
+    "nativePdf023": "NATIVE_UI_PASS bounded French HPA preview/save/reader reopen; see T12-NATIVE-023-20261108.json"
+  },
+  "dataEffects": "No migrations, cloud deployment or historical/financial mutations"
+}

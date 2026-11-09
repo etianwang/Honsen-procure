@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build --bundles none",
+    "desktop:build": "tauri build --no-bundle",
+    "release:windows": "node ../../scripts/build-windows-release.mjs",
     "typecheck": "tsc -b --pretty false",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
@@ -16,6 +17,7 @@
   "dependencies": {
     "@honsen/shared": "file:../../packages/shared",
     "antd": "^6.6.5",
+    "exceljs": "4.4.0",
     "lucide-react": "^1.55.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

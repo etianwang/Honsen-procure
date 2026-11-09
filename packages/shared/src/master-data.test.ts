@@ -21,6 +21,17 @@ describe('master-data contracts', () => {
         defaultTaxTemplateId: null,
       }),
     ).toMatchObject({ defaultCurrency: 'XOF' })
+    expect(
+      projectDefaultsSchema.parse({
+        projectId,
+        departmentTitle: 'Procurement',
+        companyAddress: 'fixture address',
+        companyContact: null,
+        defaultCurrency: 'XOF',
+        defaultLanguagePair: 'zh_fr',
+        defaultTaxTemplateId: null,
+      }).companyContact,
+    ).toBeNull()
   })
 
   it('accepts only whitelisted reference master-data kinds', () => {

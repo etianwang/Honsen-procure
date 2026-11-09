@@ -1,5 +1,11 @@
 # TEST-RULES — Mandatory Quality Gates
 
+2026-11-04 latest tested production source05e84ccf78761a3c187d04fc59886f55e62ee5f3 / local0.1.12 (pushed): actual old019 publicapply replacement, same-version exact-pair cleanup, sharing-lock refusal/no restart, explicit retry and uninstall data/unknown-file retention PASS within recorded scope. Prior011 cleanup FAIL retained. Fresh012 install is BLOCKED_ENV: automatic approval review rejected both requested variants, stating only blocked by policy; neither ran. Qualified live launch/apply/worker chain and UAC cancellation remain unverified; scope3 unapproved and original V1 security/recovery/export/language gates OPEN. Owned guests stopped. See reviews/WINDOWS-CANDIDATE-012-20261104.md and RUNNER-REPLACEMENT-P1-RESULT-20261104.md; no parent checkbox or final QA readiness is closed.
+
+2026-11-04 latest source90f28043aecd74a90d3267952b922aea45845a88 (pushed): approved T15 launch scope2 implemented. Actual native choices/keyboard and installed010 readable Chinese, explicit offline Cancel/Continue plus six identity refusals PASS within recorded bounds. Exact-source Rust143 PASS/7ignored, CLI4 PASS, fmt/Clippy exit0 (warnings retained). Actual019→010 upgrade FAIL: result success but old Runner survived; separate reinstall is not upgrade acceptance. Precise RUNNER-REPLACEMENT-P1-PLAN-20261104.md awaits new approval; no NSIS repair made. Live qualified stable asset and scope3 actual Toolbox caller remain open, as do original full V1 gates. Owned guest stopped and fixtures restored. See reviews/TOOLBOX-LAUNCH-RESULT-20261104.md and WINDOWS-CANDIDATE-010-20261104.md; no parent checkbox closes.
+
+2026-11-04 affected acceptance update: source66c777e actual native two-line SPO Microsoft Print To PDF1A4page, repeat/Cancel cleanup PASS; previous100 four-page PDF remains RED evidence. This closes only the confirmed layout defect. Actual source66 local0.1.7 installed016→017 smoke PASS; debug native EXE and installedRelease EXE hashes remain distinct. Full long-document/all-language/physical printer, installed security, restored native/object consistency and Toolbox original final gates below remain unchecked. See reviews/PRINT-PAGINATION-20261104.md, WINDOWS-CANDIDATE-017-20261104.md and V1-CANDIDATE-66C777E-20261104.md.
+
 ## Test pyramid
 
 - Unit: pricing, quantity rounding, order totals, validation, search normalization, sync state machine.
@@ -82,6 +88,10 @@
 
 ## Release checklist
 
+Follow-up: user cleared Steam54329 and firewall prerequisites. Full current-candidate native acceptance is pending, not pre-granted. db2ad11 offline SPO/native preview, real-table restore and backup-retention slices have separate scoped evidence. All incomplete global release items remain unchecked.
+
+2026-11-04 candidate note: source100011d has actual dual-debug-native SPO/payment/reversal/COS/HEIC/HPA scoped PASS and fresh real-PG workspace27desktop/26shared/169server PASS,3external opt-in SKIP. Local0.1.6 setup SHA256c0b5d756a76656bbf393cc6301efe147873dfecaaa996fd4f03e362491aed639 passed actual installed015→016 apply, canonical/version checks and precise bad-hash/target/PID rejection. This does not prove running-client update, full installed business security or actual Toolbox caller. Frozen preview/XLSX/partial languages and WPS screen wrapping do not satisfy complete PDF/native-print/pagination/localization gates. Full authenticated client/object restore and Toolbox/security gates remain open. Keep every incomplete global item below unchecked; see reviews/WINDOWS-CANDIDATE-016-20261104.md, SPO-NATIVE-20261104.md, NATIVE-REGRESSION-100011D-20261104.md and current memory.
+
 [ ] All critical tests pass
 [ ] Offline create/edit/order/print verified
 [ ] Sync idempotency and conflicts verified
@@ -90,3 +100,5 @@
 [ ] Windows installation/update/uninstall verified
 [ ] Database backup and rollback plan documented
 [ ] No credentials in repo or packaged frontend
+
+Approved 2026-11-08 online-first login acceptance: exactly one cloud CAPTCHA online, one local CAPTCHA only after explicit offline selection on network unavailability; initial/retry HTTPS authentication attempts timeout after 8 seconds. Verify no automatic fallback for credentials/lockout/retired API/rate-limit/TLS/protocol errors, delayed-response isolation, no duplicate startup request, three UI languages, runtime-only credential retention and unchanged offline enabled/24-hour/lockout checks. DOM fixtures are regression evidence only; actual installed Windows login is a separate gate.

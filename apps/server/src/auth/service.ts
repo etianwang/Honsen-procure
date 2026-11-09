@@ -1,7 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { loginRequestSchema, type LoginResponse } from '@honsen/shared'
 import { CaptchaStore } from './captcha.js'
-import type { AuthStore, LoginAccount, PasswordVerifier } from './types.js'
+import type {
+  AuthStore,
+  AuthenticatedAccount,
+  PasswordVerifier,
+} from './types.js'
 
 const sessionLifetimeMilliseconds = 8 * 60 * 60 * 1000
 
@@ -56,6 +60,7 @@ export class AuthService {
       tokenHash: hashToken(accessToken),
       installationId,
       expiresAt,
+      expectedPasswordHash: account.passwordHash,
     })
 
     return {
@@ -64,9 +69,15 @@ export class AuthService {
       user: {
         id: account.id,
         username: account.username,
+        ...(account.displayName != null
+          ? { displayName: account.displayName }
+          : {}),
         roles: account.roles,
         locale: account.locale,
         requiresPasswordChange: account.requiresPasswordChange,
+        ...(account.passwordChangeRecommended
+          ? { passwordChangeRecommended: true }
+          : {}),
       },
     }
   }
@@ -74,7 +85,7 @@ export class AuthService {
   async authenticate(
     accessToken: string,
     now = new Date(),
-  ): Promise<LoginAccount> {
+  ): Promise<AuthenticatedAccount> {
     const account = await this.store.findActiveSession(
       hashToken(accessToken),
       now,
@@ -82,7 +93,7 @@ export class AuthService {
     if (!account || !account.isEnabled) {
       throw new AuthenticationError('INVALID_LOGIN')
     }
-    return account
+    return { ...account, sessionTokenHash: hashToken(accessToken) }
   }
 }
 

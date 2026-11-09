@@ -14,13 +14,30 @@ export type CatalogPriceView = {
   unitPriceMinor: string
   unit: string
   effectiveAt: string
+  isBlacklisted?: boolean
+  paymentTerms?: string | null
+  deliveryLeadTime?: string | null
+  sourceNote?: string | null
+}
+
+export type CatalogComparisonCursor = Pick<
+  CatalogPriceView,
+  'currency' | 'unit' | 'unitPriceMinor' | 'priceId'
+>
+
+export type CatalogComparisonPage = {
+  records: CatalogPriceView[]
+  nextCursor: CatalogComparisonCursor | null
 }
 
 export type CatalogMaterialView = {
   id: string
+  isActive?: boolean
+  categoryId?: string | null
   sku: string | null
   nameZh: string
   nameFr: string | null
+  nameEn?: string | null
   aliases: string[]
   brand: string | null
   model: string
@@ -33,6 +50,7 @@ export type CatalogMaterialView = {
 
 export type SupplierView = {
   id: string
+  countryId: string
   businessCode: string
   name: string
   contactName: string | null
@@ -44,10 +62,32 @@ export type SupplierView = {
   email: string | null
   paymentTerms: string | null
   deliveryLeadTime: string | null
+  notes?: string | null
   isPreferred: boolean
   isBlacklisted: boolean
   isActive: boolean
   version: number
+}
+
+export type SupplierPriceHistoryView = {
+  priceId: string
+  materialId: string
+  materialNameZh: string
+  materialNameFr: string | null
+  materialNameEn: string | null
+  materialModel: string
+  materialSpecification: string
+  materialActive: boolean
+  supplierId: string
+  supplierName: string
+  supplierActive: boolean
+  isBlacklisted: boolean
+  currency: Currency
+  unitPriceMinor: string
+  unit: string
+  effectiveAt: string
+  sourceNote: string | null
+  isActive: boolean
 }
 
 export type MaterialImageInput = {
@@ -59,13 +99,58 @@ export type MaterialImageInput = {
   cropJson: string
 }
 
+export type CatalogSearchCursor = { nameZh: string; model: string; id: string }
+export type CatalogSearchPage = {
+  records: CatalogMaterialView[]
+  nextCursor: CatalogSearchCursor | null
+}
+
+export type SupplierSearchCursor = {
+  isActive: boolean
+  name: string
+  id: string
+}
+export type SupplierSearchPage = {
+  records: SupplierView[]
+  nextCursor: SupplierSearchCursor | null
+}
+
 export type CatalogApi = {
+  searchSuppliersPage?(
+    query: string,
+    countryId: string,
+    after: SupplierSearchCursor | null,
+    selectableOnly?: boolean,
+  ): Promise<SupplierSearchPage>
+  searchCatalogPage?(
+    query: string,
+    projectId: string,
+    after: CatalogSearchCursor | null,
+    includeInactive?: boolean,
+  ): Promise<CatalogSearchPage>
   searchCatalog(
     query: string,
     projectId?: string,
+    includeInactive?: boolean,
   ): Promise<CatalogMaterialView[]>
+  listCatalogPrices(
+    materialId: string,
+    projectId: string | undefined,
+    after: string | null,
+    includeBlacklisted?: boolean,
+  ): Promise<CatalogPriceView[]>
+  listCatalogComparisonPage?(
+    materialId: string,
+    projectId: string,
+    after: CatalogComparisonCursor | null,
+  ): Promise<CatalogComparisonPage>
   saveMaterial(material: Material): Promise<void>
   listSuppliers(): Promise<SupplierView[]>
+  listSupplierPrices?(
+    supplierId: string,
+    projectId: string,
+    after: string | null,
+  ): Promise<SupplierPriceHistoryView[]>
   saveSupplier(supplier: Supplier): Promise<void>
   addMaterialPrice(price: MaterialPrice): Promise<void>
   saveMaterialImage(image: MaterialImageInput): Promise<void>
@@ -85,14 +170,53 @@ function tauriInvoke(): TauriInvoke {
 }
 
 export const tauriCatalogApi: CatalogApi = {
-  searchCatalog: (query, projectId) =>
+  searchSuppliersPage: (query, countryId, after, selectableOnly = false) =>
+    tauriInvoke()<SupplierSearchPage>('search_suppliers_page', {
+      query,
+      countryId,
+      after,
+      selectableOnly,
+    }),
+  searchCatalogPage: (query, projectId, after, includeInactive = false) =>
+    tauriInvoke()<CatalogSearchPage>('search_catalog_page', {
+      query,
+      projectId,
+      after,
+      includeInactive,
+    }),
+  searchCatalog: (query, projectId, includeInactive = false) =>
     tauriInvoke()<CatalogMaterialView[]>('search_catalog', {
       query,
       projectId,
+      includeInactive,
+    }),
+  listCatalogPrices: (
+    materialId,
+    projectId,
+    after,
+    includeBlacklisted = false,
+  ) =>
+    tauriInvoke()<CatalogPriceView[]>('list_catalog_prices', {
+      materialId,
+      projectId,
+      after,
+      includeBlacklisted,
+    }),
+  listCatalogComparisonPage: (materialId, projectId, after) =>
+    tauriInvoke()<CatalogComparisonPage>('list_catalog_comparison_page', {
+      materialId,
+      projectId,
+      after,
     }),
   saveMaterial: (material) =>
     tauriInvoke()<void>('save_material', { material }),
   listSuppliers: () => tauriInvoke()<SupplierView[]>('list_suppliers'),
+  listSupplierPrices: (supplierId, projectId, after) =>
+    tauriInvoke()<SupplierPriceHistoryView[]>('list_supplier_prices', {
+      supplierId,
+      projectId,
+      after,
+    }),
   saveSupplier: (supplier) =>
     tauriInvoke()<void>('save_supplier', { supplier }),
   addMaterialPrice: (price) =>

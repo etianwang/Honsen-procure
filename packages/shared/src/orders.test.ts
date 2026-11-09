@@ -63,6 +63,41 @@ function draft() {
 }
 
 describe('requisition calculations', () => {
+  it('adds optional manual stamp after percentage tax without rewriting legacy shapes', () => {
+    const old = draft()
+    expect(requisitionDraftSchema.parse(old)).not.toHaveProperty(
+      'manualStampDutyMinor',
+    )
+    expect(calculateDraftTotals(old)).not.toHaveProperty('manualStampDutyMinor')
+    for (const currency of ['XOF', 'XAF', 'USD'] as const) {
+      const input = {
+        ...old,
+        currency,
+        primaryCurrency: currency,
+        lines: old.lines.map((line) => ({ ...line, currency })),
+        manualStampDutyMinor: '37',
+      }
+      expect(calculateDraftTotals(input)).toMatchObject({
+        taxMinor: '501',
+        manualStampDutyMinor: '37',
+        totalMinor: '3320',
+        sourceCurrencyTotals: [{ currency, totalMinor: '3320' }],
+      })
+    }
+    expect(
+      calculateDraftTotals({ ...old, manualStampDutyMinor: '0' }).totalMinor,
+    ).toBe('3283')
+    for (const value of ['-1', '1.5', '', '01', '9223372036854775808'])
+      expect(() =>
+        calculateDraftTotals({ ...old, manualStampDutyMinor: value }),
+      ).toThrow()
+    expect(() =>
+      calculateDraftTotals({
+        ...old,
+        manualStampDutyMinor: '9223372036854775807',
+      }),
+    ).toThrow('exceeds i64')
+  })
   it('calculates a frozen owner line conversion and exactly one markup', () => {
     expect(
       calculateOwnerLinePrice({

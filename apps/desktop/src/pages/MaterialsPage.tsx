@@ -1,26 +1,30 @@
+import { SupplierPicker } from '../components/SupplierPicker'
+import './MaterialsPage.css'
 import {
-  Alert,
-  Button,
-  Card,
-  Form,
-  Input,
-  Modal,
-  Select,
-  Spin,
-  Switch,
-} from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+  SupplierFormFields,
+  PriceFormFields,
+} from '../components/CatalogMaintenanceFields'
+import {
+  supplierFromForm,
+  priceFromForm,
+  type SupplierFormValues,
+  type PriceFormValues,
+} from '../lib/catalog-maintenance'
+import { useUiLocale } from '../lib/ui-locale'
+import { catalogText, type CatalogMessage } from '../lib/catalog-messages'
+import { Alert, Button, Card, Form, Input, Modal, Spin, Switch } from 'antd'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Plus, Search, SlidersHorizontal } from 'lucide-react'
-import {
-  formatMoney,
-  type Material,
-  type MaterialPrice,
-  type Supplier,
-} from '@honsen/shared'
+import { formatMoney, type Material } from '@honsen/shared'
 import {
   tauriCatalogApi,
   type CatalogApi,
   type CatalogMaterialView,
+  type CatalogPriceView,
+  type CatalogSearchCursor,
+  type CatalogSearchPage,
+  type SupplierSearchCursor,
+  type SupplierSearchPage,
   type SupplierView,
 } from '../lib/catalog-api'
 import {
@@ -29,10 +33,17 @@ import {
 } from '../components/MaterialImageCropper'
 import { canEditMaterials, type UserRole } from '../lib/permissions'
 
-type MaterialsPageProps = { role: UserRole; api?: CatalogApi }
+type MaterialsPageProps = {
+  role: UserRole
+  countryId?: string
+  projectId?: string
+  contextNotice?: string
+  api?: CatalogApi
+}
 type MaterialFormValues = {
   sku?: string
   nameZh: string
+  nameEn?: string
   nameFr?: string
   aliases?: string
   brand?: string
@@ -42,78 +53,233 @@ type MaterialFormValues = {
   notes?: string
   isActive: boolean
 }
-type SupplierFormValues = {
-  businessCode: string
-  name: string
-  contactName?: string
-  address?: string
-  city?: string
-  country?: string
-  phone?: string
-  whatsapp?: string
-  email?: string
-  paymentTerms?: string
-  deliveryLeadTime?: string
-  isPreferred: boolean
-  isBlacklisted: boolean
-  isActive: boolean
-}
-type PriceFormValues = {
-  supplierId: string
-  currency: 'XOF' | 'CNY' | 'USD' | 'EUR'
-  unitPriceMinor: string
-  unit: string
-  effectiveAt: string
-  sourceNote?: string
-}
 
 export function MaterialsPage({
   role,
+  countryId,
+  projectId,
+  contextNotice,
   api = tauriCatalogApi,
 }: MaterialsPageProps) {
+  const { locale } = useUiLocale()
+  const t = (key: CatalogMessage) => catalogText(locale, key)
   const canEdit = canEditMaterials(role)
   const [query, setQuery] = useState('')
-  const [materials, setMaterials] = useState<CatalogMaterialView[] | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [includeInactive, setIncludeInactive] = useState(false)
+  const [pagination, setPagination] = useState<{
+    key: string
+    cursors: (CatalogSearchCursor | null)[]
+    page: number
+  }>({ key: '', cursors: [null], page: 0 })
+  const [catalogResult, setCatalogResult] = useState<
+    (CatalogSearchPage & { key: string; failed?: boolean }) | null
+  >(null)
+  const filterKey = JSON.stringify([
+    projectId,
+    query,
+    canEdit && includeInactive,
+  ])
+  const pageIndex = pagination.key === filterKey ? pagination.page : 0
+  const pageCursors = pagination.key === filterKey ? pagination.cursors : [null]
+  const pageCursor = pageCursors[pageIndex] ?? null
+  const requestKey = JSON.stringify([filterKey, pageCursor, reloadKey])
+  const currentCatalog =
+    catalogResult?.key === requestKey ? catalogResult : null
+  const loading = !!projectId && !currentCatalog
+  const materials = currentCatalog?.records ?? []
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [reloadKey, setReloadKey] = useState(0)
   const [editor, setEditor] = useState<CatalogMaterialView | 'new' | null>(null)
   const [supplierManagerOpen, setSupplierManagerOpen] = useState(false)
+  const [supplierManagerContext, setSupplierManagerContext] = useState('')
+  const [supplierQuery, setSupplierQuery] = useState('')
+  const [supplierReload, setSupplierReload] = useState(0)
+  const [supplierPagination, setSupplierPagination] = useState<{
+    key: string
+    cursors: (SupplierSearchCursor | null)[]
+    page: number
+  }>({ key: '', cursors: [null], page: 0 })
+  const [supplierResult, setSupplierResult] = useState<
+    (SupplierSearchPage & { key: string; failed?: boolean }) | null
+  >(null)
+  const [supplierCache, setSupplierCache] = useState<{
+    scope: string
+    records: Record<string, SupplierView>
+  }>({ scope: '', records: {} })
+  const [supplierEditorContext, setSupplierEditorContext] = useState('')
+  const [supplierSaveError, setSupplierSaveError] = useState(false)
+  const [supplierSavedContext, setSupplierSavedContext] = useState('')
+  const supplierSubmitting = useRef(false)
   const [supplierEditor, setSupplierEditor] = useState<
     SupplierView | 'new' | null
   >(null)
+  const [quoteContext, setQuoteContext] = useState('')
+  const currentQuoteContext = JSON.stringify([countryId, projectId])
+  const supplierSaved = supplierSavedContext === currentQuoteContext
   const [quoteMaterial, setQuoteMaterial] =
     useState<CatalogMaterialView | null>(null)
+  const [detailMaterial, setDetailMaterial] =
+    useState<CatalogMaterialView | null>(null)
+  const [detailPrices, setDetailPrices] = useState<CatalogPriceView[]>([])
+  const [detailCursors, setDetailCursors] = useState<(string | null)[]>([null])
+  const [detailPage, setDetailPage] = useState(0)
+  const [detailMore, setDetailMore] = useState(false)
+  const [detailBusy, setDetailBusy] = useState(false)
+  const detailRequest = useRef(0)
   const [imageDraft, setImageDraft] = useState<MaterialImageDraft | null>(null)
-  const [suppliers, setSuppliers] = useState<SupplierView[]>([])
+
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<MaterialFormValues>()
   const [supplierForm] = Form.useForm<SupplierFormValues>()
   const [priceForm] = Form.useForm<PriceFormValues>()
+  const selectedQuoteSupplierId = Form.useWatch<string>('supplierId', priceForm)
+  const supplierFilterKey = JSON.stringify([currentQuoteContext, supplierQuery])
+  const supplierPage =
+    supplierPagination.key === supplierFilterKey ? supplierPagination.page : 0
+  const supplierCursors =
+    supplierPagination.key === supplierFilterKey
+      ? supplierPagination.cursors
+      : [null]
+  const supplierCursor = supplierCursors[supplierPage] ?? null
+  const supplierRequestKey = JSON.stringify([
+    supplierFilterKey,
+    supplierCursor,
+    supplierReload,
+  ])
+  const currentSuppliers =
+    supplierResult?.key === supplierRequestKey ? supplierResult : null
+  const suppliers = currentSuppliers?.records ?? []
+  const supplierLoading = supplierManagerOpen && !currentSuppliers
+  const knownQuoteSupplier =
+    supplierCache.scope === currentQuoteContext
+      ? (supplierCache.records[selectedQuoteSupplierId] ??
+        suppliers.find((supplier) => supplier.id === selectedQuoteSupplierId))
+      : suppliers.find((supplier) => supplier.id === selectedQuoteSupplierId)
+
+  useEffect(() => {
+    let active = true
+    if (
+      !supplierManagerOpen ||
+      !countryId ||
+      !projectId ||
+      supplierManagerContext !== currentQuoteContext
+    )
+      return
+    const timer = window.setTimeout(() => {
+      void Promise.resolve()
+        .then(async () => {
+          if (api.searchSuppliersPage)
+            return api.searchSuppliersPage(
+              supplierQuery.trim(),
+              countryId,
+              supplierCursor,
+              false,
+            )
+          const rows = await api.listSuppliers()
+          const terms = supplierQuery
+            .trim()
+            .toLocaleLowerCase()
+            .split(/\s+/)
+            .filter(Boolean)
+          return {
+            records: rows.filter(
+              (row) =>
+                row.countryId === countryId &&
+                terms.every((term) =>
+                  [
+                    row.name,
+                    row.businessCode,
+                    row.contactName,
+                    row.address,
+                    row.city,
+                  ].some((field) => field?.toLocaleLowerCase().includes(term)),
+                ),
+            ),
+            nextCursor: null,
+          }
+        })
+        .then((page) => {
+          if (active) setSupplierResult({ ...page, key: supplierRequestKey })
+        })
+        .catch(() => {
+          if (active)
+            setSupplierResult({
+              records: [],
+              nextCursor: null,
+              key: supplierRequestKey,
+              failed: true,
+            })
+        })
+    }, 250)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [
+    api,
+    countryId,
+    projectId,
+    supplierQuery,
+    supplierCursor,
+    supplierRequestKey,
+    supplierManagerOpen,
+    supplierManagerContext,
+    currentQuoteContext,
+  ])
 
   useEffect(() => {
     let isCurrent = true
-    api
-      .searchCatalog(query)
-      .then((result) => {
-        if (!isCurrent) return
-        setError(null)
-        setMaterials(result)
-      })
-      .catch(() => isCurrent && setError('无法读取本地材料库'))
+    if (!projectId) return
+    const timer = window.setTimeout(() => {
+      const request = Promise.resolve().then(() =>
+        api.searchCatalogPage
+          ? api.searchCatalogPage(
+              query.trim(),
+              projectId,
+              pageCursor,
+              canEdit && includeInactive,
+            )
+          : api
+              .searchCatalog(
+                query.trim(),
+                projectId,
+                canEdit && includeInactive,
+              )
+              .then((records) => ({ records, nextCursor: null })),
+      )
+      void request
+        .then((result) => {
+          if (!isCurrent) return
+          setError(null)
+          setCatalogResult({ ...result, key: requestKey })
+        })
+        .catch(() => {
+          if (isCurrent)
+            setCatalogResult({
+              key: requestKey,
+              records: [],
+              nextCursor: null,
+              failed: true,
+            })
+        })
+    }, 250)
     return () => {
       isCurrent = false
+      window.clearTimeout(timer)
     }
-  }, [api, query, reloadKey])
+  }, [api, projectId, query, requestKey, pageCursor, canEdit, includeInactive])
 
   useEffect(() => {
     if (!editor) return
     const material = editor === 'new' ? undefined : editor
+    form.resetFields()
     form.setFieldsValue(
       material
         ? {
             sku: material.sku ?? undefined,
             nameZh: material.nameZh,
+            nameEn: material.nameEn ?? undefined,
             nameFr: material.nameFr ?? undefined,
             aliases: material.aliases.join(', '),
             brand: material.brand ?? undefined,
@@ -121,7 +287,7 @@ export function MaterialsPage({
             specification: material.specification,
             unit: material.unit,
             notes: material.notes ?? undefined,
-            isActive: true,
+            isActive: material.isActive ?? true,
           }
         : { isActive: true },
     )
@@ -129,6 +295,7 @@ export function MaterialsPage({
 
   useEffect(() => {
     if (!supplierEditor) return
+    supplierForm.resetFields()
     const supplier = supplierEditor === 'new' ? undefined : supplierEditor
     supplierForm.setFieldsValue(
       supplier
@@ -144,6 +311,7 @@ export function MaterialsPage({
             email: supplier.email ?? undefined,
             paymentTerms: supplier.paymentTerms ?? undefined,
             deliveryLeadTime: supplier.deliveryLeadTime ?? undefined,
+            notes: supplier.notes ?? undefined,
             isPreferred: supplier.isPreferred,
             isBlacklisted: supplier.isBlacklisted,
             isActive: supplier.isActive,
@@ -154,6 +322,7 @@ export function MaterialsPage({
 
   useEffect(() => {
     if (!quoteMaterial) return
+    priceForm.resetFields()
     priceForm.setFieldsValue({
       currency: 'XOF',
       unit: quoteMaterial.unit,
@@ -174,8 +343,10 @@ export function MaterialsPage({
     const existing = editor === 'new' ? undefined : editor
     const material: Material = {
       id: existing?.id ?? crypto.randomUUID(),
+      categoryId: existing?.categoryId ?? null,
       sku: optionalText(values.sku),
       nameZh: values.nameZh.trim(),
+      nameEn: optionalText(values.nameEn),
       nameFr: optionalText(values.nameFr),
       aliases: (values.aliases ?? '')
         .split(',')
@@ -221,78 +392,121 @@ export function MaterialsPage({
     }
   }
 
-  async function loadSuppliers() {
-    try {
-      const result = await api.listSuppliers()
-      setSuppliers(result)
-      return result
-    } catch {
-      setError('无法读取供应商')
-      return []
+  function openSupplierManager() {
+    if (!countryId || !projectId) {
+      setError('请选择有效的授权范围后再管理供应商')
+      return
     }
+    setSupplierManagerContext(currentQuoteContext)
+    setSupplierQuery('')
+    setSupplierPagination({ key: '', cursors: [null], page: 0 })
+    setSupplierReload((value) => value + 1)
+    setSupplierSavedContext('')
+    setSupplierManagerOpen(true)
   }
 
-  async function openSupplierManager() {
-    setSupplierManagerOpen(true)
-    await loadSuppliers()
+  function cacheSupplier(record: SupplierView) {
+    setSupplierCache((current) => ({
+      scope: currentQuoteContext,
+      records: {
+        ...(current.scope === currentQuoteContext ? current.records : {}),
+        [record.id]: record,
+      },
+    }))
   }
 
   function openSupplierEditor(supplier?: SupplierView) {
+    if (!canEdit || saving) return
+    if (supplier) cacheSupplier(supplier)
+    setSupplierEditorContext(currentQuoteContext)
+    setSupplierSavedContext('')
+    setSupplierSaveError(false)
     setSupplierEditor(supplier ?? 'new')
   }
 
   async function saveSupplier(values: SupplierFormValues) {
+    if (
+      !canEdit ||
+      !supplierEditor ||
+      supplierSubmitting.current ||
+      supplierEditorContext !== currentQuoteContext ||
+      !countryId ||
+      !projectId
+    )
+      return
     const existing = supplierEditor === 'new' ? undefined : supplierEditor
-    const supplier: Supplier = {
-      id: existing?.id ?? crypto.randomUUID(),
-      businessCode: values.businessCode.trim(),
-      name: values.name.trim(),
-      contactName: optionalText(values.contactName),
-      address: optionalText(values.address),
-      city: optionalText(values.city),
-      country: optionalText(values.country),
-      phone: optionalText(values.phone),
-      whatsapp: optionalText(values.whatsapp),
-      email: optionalText(values.email),
-      paymentTerms: optionalText(values.paymentTerms),
-      deliveryLeadTime: optionalText(values.deliveryLeadTime),
-      isPreferred: values.isPreferred,
-      isBlacklisted: values.isBlacklisted,
-      isActive: values.isActive,
-      version: (existing?.version ?? 0) + 1,
-    }
+    const supplier = supplierFromForm(
+      values,
+      existing,
+      existing?.countryId ?? countryId,
+    )
+    supplierSubmitting.current = true
     setSaving(true)
+    setSupplierSaveError(false)
+    let saved = false
     try {
       await api.saveSupplier(supplier)
-      setNotice('供应商已保存')
-      setSupplierEditor(null)
-      supplierForm.resetFields()
-      await loadSuppliers()
+      saved = true
     } catch {
-      setError('无法保存供应商')
+      setSupplierSaveError(true)
     } finally {
+      supplierSubmitting.current = false
       setSaving(false)
     }
+    if (!saved) return
+    cacheSupplier(supplier)
+    setNotice('供应商已保存')
+    setSupplierSavedContext(currentQuoteContext)
+    setSupplierEditor(null)
+    supplierForm.resetFields()
+    setSupplierReload((value) => value + 1)
   }
 
-  async function openPriceEditor(material: CatalogMaterialView) {
+  function openPriceEditor(material: CatalogMaterialView) {
+    if (!countryId || !projectId) {
+      setError('请选择有效的授权范围后再维护报价')
+      return
+    }
+    setQuoteContext(currentQuoteContext)
     setQuoteMaterial(material)
-    await loadSuppliers()
+  }
+
+  async function loadDetailPrices(
+    material: CatalogMaterialView,
+    after: string | null,
+    page: number,
+  ) {
+    const request = ++detailRequest.current
+    setDetailBusy(true)
+    try {
+      if (!projectId) throw new Error('missing project')
+      const prices = await api.listCatalogPrices(
+        material.id,
+        projectId,
+        after,
+        true,
+      )
+      if (request !== detailRequest.current) return
+      setDetailPrices(prices)
+      setDetailPage(page)
+      setDetailMore(prices.length === 25)
+    } catch {
+      if (request === detailRequest.current) setError('无法读取供应商报价')
+    } finally {
+      if (request === detailRequest.current) setDetailBusy(false)
+    }
   }
 
   async function savePrice(values: PriceFormValues) {
-    if (!quoteMaterial) return
-    const price: MaterialPrice = {
-      id: crypto.randomUUID(),
-      materialId: quoteMaterial.id,
-      supplierId: values.supplierId,
-      currency: values.currency,
-      unitPriceMinor: values.unitPriceMinor,
-      unit: values.unit.trim(),
-      effectiveAt: values.effectiveAt,
-      sourceNote: optionalText(values.sourceNote),
-      version: 1,
-    }
+    if (
+      !quoteMaterial ||
+      !countryId ||
+      !projectId ||
+      quoteContext !== currentQuoteContext ||
+      saving
+    )
+      return
+    const price = priceFromForm(values, quoteMaterial.id)
     setSaving(true)
     try {
       await api.addMaterialPrice(price)
@@ -311,8 +525,10 @@ export function MaterialsPage({
     <>
       <section className="page-heading">
         <div>
-          <h2>材料库总览</h2>
-          <p>每种材料最多展示四家有效供应商报价；同币种才可在订单内比较。</p>
+          <h2>{t('材料库总览')}</h2>
+          <p>
+            {t('每种材料最多展示四家有效供应商报价；同币种才可在订单内比较。')}
+          </p>
         </div>
         {canEdit && (
           <Button
@@ -320,38 +536,90 @@ export function MaterialsPage({
             icon={<Plus size={16} />}
             onClick={() => openEditor()}
           >
-            新增材料
+            {t('新增材料')}
           </Button>
         )}
       </section>
-      <section className="toolbar" aria-label="材料筛选">
-        <Input
-          className="search"
-          type="search"
-          placeholder="搜索材料名称、型号、规格或供应商"
-          aria-label="搜索材料"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          prefix={<Search size={16} aria-hidden="true" />}
-        />
-        <Button disabled icon={<SlidersHorizontal size={16} />}>
-          筛选
+      <section className="toolbar materials-toolbar" aria-label={t('材料筛选')}>
+        <label className="materials-search" htmlFor="materials-search-input">
+          <span>{t('搜索材料')}</span>
+          <Input
+            id="materials-search-input"
+            className="search"
+            type="search"
+            placeholder={t('搜索名称、编码、型号或规格；空格组合关键词')}
+            aria-label={t('搜索材料')}
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setPagination({ key: '', cursors: [null], page: 0 })
+            }}
+            prefix={<Search size={16} aria-hidden="true" />}
+          />
+        </label>
+        <Button
+          icon={<SlidersHorizontal size={16} aria-hidden="true" />}
+          aria-label={t('筛选')}
+          aria-busy={loading}
+          loading={loading}
+          disabled={!projectId || loading}
+          onClick={() => {
+            setPagination({ key: '', cursors: [null], page: 0 })
+            setReloadKey((value) => value + 1)
+          }}
+        >
+          {t('筛选')}
         </Button>
-        {canEdit && <Button onClick={openSupplierManager}>供应商管理</Button>}
+        {canEdit && (
+          <label>
+            <Switch
+              checked={includeInactive}
+              onChange={(value) => {
+                setIncludeInactive(value)
+                setPagination({ key: '', cursors: [null], page: 0 })
+              }}
+              aria-label={t('显示停用材料')}
+            />{' '}
+            {t('显示停用材料')}
+          </label>
+        )}
+        {canEdit && (
+          <Button onClick={openSupplierManager}>{t('供应商管理')}</Button>
+        )}
       </section>
       {notice && (
         <Alert
           type="success"
-          title={notice}
+          title={t(notice as CatalogMessage)}
           showIcon
           closable
           onClose={() => setNotice(null)}
         />
       )}
-      {error ? (
-        <Alert type="error" title={error} showIcon />
-      ) : materials === null ? (
-        <Spin aria-label="正在搜索材料" />
+      {!projectId ? (
+        <Alert
+          type="error"
+          title={contextNotice ?? t('请选择有效的授权项目以查看报价')}
+          showIcon
+        />
+      ) : currentCatalog?.failed || error ? (
+        <Alert
+          type="error"
+          title={t(error ? (error as CatalogMessage) : '无法读取本地材料库')}
+          showIcon
+          action={
+            <Button
+              onClick={() => {
+                setError(null)
+                setReloadKey((value) => value + 1)
+              }}
+            >
+              {t('重试')}
+            </Button>
+          }
+        />
+      ) : loading ? (
+        <Spin aria-label={t('正在搜索材料')} />
       ) : (
         <CatalogTable
           materials={materials}
@@ -359,42 +627,139 @@ export function MaterialsPage({
           canEdit={canEdit}
           onEdit={openEditor}
           onAddPrice={openPriceEditor}
+          onDetails={(material) => {
+            setDetailMaterial(material)
+            setDetailPrices([])
+            setDetailCursors([null])
+            void loadDetailPrices(material, null, 0)
+          }}
         />
+      )}
+      {projectId && (
+        <nav className="materials-pagination" aria-label={t('材料分页')}>
+          <Button
+            disabled={loading || pageIndex === 0}
+            onClick={() =>
+              setPagination({
+                key: filterKey,
+                cursors: pageCursors,
+                page: pageIndex - 1,
+              })
+            }
+          >
+            {t('上一页')}
+          </Button>
+          <span role="status">
+            {t('当前页')} {pageIndex + 1} ·{' '}
+            {loading
+              ? t('正在搜索材料')
+              : String(materials.length) + ' ' + t('项')}
+          </span>
+          <Button
+            disabled={loading || !currentCatalog?.nextCursor}
+            onClick={() => {
+              if (!currentCatalog?.nextCursor) return
+              setPagination({
+                key: filterKey,
+                cursors: [
+                  ...pageCursors.slice(0, pageIndex + 1),
+                  currentCatalog.nextCursor,
+                ],
+                page: pageIndex + 1,
+              })
+            }}
+          >
+            {t('下一页')}
+          </Button>
+        </nav>
       )}
       <p className="access-note">
         {canEdit
-          ? '采购员和管理员可新增、修改、停用材料及维护供应商价格。'
-          : '工程师与查看者仅可搜索和查看材料及供应商价格。'}
+          ? t('采购员和管理员可新增、修改、停用材料及维护供应商价格。')
+          : t('工程师与查看者仅可搜索和查看材料及供应商价格。')}
       </p>
       <Modal
-        title={editor === 'new' ? '新增材料' : '编辑材料'}
+        title={t('材料报价详情')}
+        open={detailMaterial !== null}
+        onCancel={() => {
+          detailRequest.current++
+          setDetailMaterial(null)
+        }}
+        footer={null}
+      >
+        {detailPrices.map((price) => (
+          <p key={price.priceId}>
+            {price.supplierName} ·{' '}
+            {price.isPreferredSupplier ? t('首选 · ') : ''}
+            {price.isBlacklisted ? t('黑名单 · ') : ''}
+            {formatMoney(
+              { currency: price.currency, minor: price.unitPriceMinor },
+              locale === 'zh' ? 'zh-CN' : locale === 'fr' ? 'fr-FR' : 'en-US',
+            )}{' '}
+            · {price.unit} · {price.effectiveAt} ·{' '}
+            {price.deliveryLeadTime ?? '—'} · {price.paymentTerms ?? '—'} ·{' '}
+            {price.sourceNote ?? '—'}
+          </p>
+        ))}
+        <Button
+          disabled={detailBusy || detailPage === 0}
+          onClick={() =>
+            detailMaterial &&
+            void loadDetailPrices(
+              detailMaterial,
+              detailCursors[detailPage - 1],
+              detailPage - 1,
+            )
+          }
+        >
+          {t('上一页')}
+        </Button>
+        <Button
+          disabled={detailBusy || !detailMore}
+          onClick={() =>
+            detailMaterial &&
+            (() => {
+              const after = detailPrices.at(-1)?.priceId ?? null
+              setDetailCursors((current) => [
+                ...current.slice(0, detailPage + 1),
+                after,
+              ])
+              void loadDetailPrices(detailMaterial, after, detailPage + 1)
+            })()
+          }
+        >
+          {t('下一页')}
+        </Button>
+      </Modal>
+      <Modal
+        title={editor === 'new' ? t('新增材料') : t('编辑材料')}
         open={editor !== null}
         onCancel={() => setEditor(null)}
         onOk={() => form.submit()}
-        okText="保存材料"
-        cancelText="取消"
+        okText={t('保存材料')}
+        cancelText={t('取消')}
         confirmLoading={saving}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={saveMaterial}>
           <Form.Item
-            label="材料名称"
+            label={t('材料名称')}
             name="nameZh"
-            rules={[{ required: true, message: '请填写材料名称' }]}
+            rules={[{ required: true, message: t('请填写材料名称') }]}
           >
             <Input autoFocus maxLength={255} />
           </Form.Item>
           <Form.Item
-            label="型号"
+            label={t('型号')}
             name="model"
-            rules={[{ required: true, message: '请填写型号' }]}
+            rules={[{ required: true, message: t('请填写型号') }]}
           >
             <Input maxLength={255} />
           </Form.Item>
           <Form.Item
-            label="规格"
+            label={t('规格')}
             name="specification"
-            rules={[{ required: true, message: '请填写规格' }]}
+            rules={[{ required: true, message: t('请填写规格') }]}
           >
             <Input.TextArea
               maxLength={2000}
@@ -402,241 +767,283 @@ export function MaterialsPage({
             />
           </Form.Item>
           <Form.Item
-            label="单位"
+            label={t('单位')}
             name="unit"
-            rules={[{ required: true, message: '请填写单位' }]}
+            rules={[{ required: true, message: t('请填写单位') }]}
           >
             <Input maxLength={64} />
           </Form.Item>
-          <Form.Item label="材料编码 / SKU" name="sku">
+          <Form.Item label={t('材料编码 / SKU')} name="sku">
             <Input maxLength={128} />
           </Form.Item>
-          <Form.Item label="法语名称" name="nameFr">
+          <Form.Item label={t('英语名称')} name="nameEn">
+            <Input />
+          </Form.Item>
+          <Form.Item label={t('法语名称')} name="nameFr">
             <Input maxLength={255} />
           </Form.Item>
-          <Form.Item label="别名（以逗号分隔）" name="aliases">
+          <Form.Item label={t('别名（以逗号分隔）')} name="aliases">
             <Input maxLength={1000} />
           </Form.Item>
-          <Form.Item label="品牌" name="brand">
+          <Form.Item label={t('品牌')} name="brand">
             <Input maxLength={1000} />
           </Form.Item>
-          <Form.Item label="备注" name="notes">
+          <Form.Item label={t('备注')} name="notes">
             <Input.TextArea
               maxLength={1000}
               autoSize={{ minRows: 2, maxRows: 4 }}
             />
           </Form.Item>
-          <Form.Item label="材料图片（保存前裁剪为正方形）">
+          <Form.Item label={t('材料图片（保存前裁剪为正方形）')}>
             <MaterialImageCropper onChange={onImageChange} />
           </Form.Item>
-          <Form.Item label="启用状态" name="isActive" valuePropName="checked">
-            <Switch checkedChildren="启用" unCheckedChildren="停用" />
+          <Form.Item
+            label={t('启用状态')}
+            name="isActive"
+            valuePropName="checked"
+          >
+            <Switch checkedChildren={t('启用')} unCheckedChildren={t('停用')} />
           </Form.Item>
         </Form>
       </Modal>
       <Modal
-        title="供应商管理"
-        open={supplierManagerOpen}
-        onCancel={() => setSupplierManagerOpen(false)}
+        title={t('供应商管理')}
+        open={
+          supplierManagerOpen && supplierManagerContext === currentQuoteContext
+        }
+        onCancel={() => {
+          if (!saving) setSupplierManagerOpen(false)
+        }}
         footer={
           <>
             <Button
-              aria-label="关闭供应商管理"
+              aria-label={t('关闭供应商管理')}
+              disabled={saving}
               onClick={() => setSupplierManagerOpen(false)}
             >
-              关闭
+              {t('关闭')}
             </Button>
-            <Button type="primary" onClick={() => openSupplierEditor()}>
-              新增供应商
+            <Button
+              type="primary"
+              disabled={saving}
+              onClick={() => openSupplierEditor()}
+            >
+              {t('新增供应商')}
             </Button>
           </>
         }
         width={820}
       >
-        {suppliers.length === 0 ? (
-          <p role="status">暂无供应商</p>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>编码</th>
-                <th>供应商</th>
-                <th>联系人</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers.map((supplier) => (
-                <tr key={supplier.id}>
-                  <td>{supplier.businessCode}</td>
-                  <td>{supplier.name}</td>
-                  <td>{supplier.contactName ?? '—'}</td>
-                  <td>
-                    {supplier.isBlacklisted
-                      ? '黑名单'
-                      : supplier.isActive
-                        ? '启用'
-                        : '停用'}
-                  </td>
-                  <td>
-                    <Button
-                      type="link"
-                      onClick={() => openSupplierEditor(supplier)}
-                    >
-                      编辑供应商
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <label className="materials-search" htmlFor="materials-supplier-search">
+          <span>{t('搜索供应商名称、编码或联系人')}</span>
+          <Input
+            id="materials-supplier-search"
+            aria-label={t('搜索供应商名称、编码或联系人')}
+            value={supplierQuery}
+            disabled={saving}
+            onChange={(event) => {
+              setSupplierQuery(event.target.value)
+              setSupplierPagination({ key: '', cursors: [null], page: 0 })
+            }}
+          />
+        </label>
+        {supplierSaved && (
+          <Alert
+            type="success"
+            role="status"
+            showIcon
+            title={t('供应商已保存；等待同步确认')}
+          />
         )}
+        {currentSuppliers?.failed ? (
+          <Alert
+            type={supplierSaved ? 'warning' : 'error'}
+            role="alert"
+            showIcon
+            title={t(
+              supplierSaved
+                ? '供应商已保存，但列表刷新失败；请重试读取，不要重复保存'
+                : '无法读取供应商',
+            )}
+            action={
+              <Button
+                disabled={saving}
+                onClick={() => setSupplierReload((value) => value + 1)}
+              >
+                {t('重试')}
+              </Button>
+            }
+          />
+        ) : supplierLoading ? (
+          <Spin aria-label={t('正在读取供应商')} />
+        ) : suppliers.length === 0 ? (
+          <p role="status">{t('暂无供应商')}</p>
+        ) : (
+          <div
+            className="materials-table-scroll"
+            role="region"
+            aria-label={t('供应商表格，可横向滚动')}
+            tabIndex={0}
+          >
+            <table className="data-table materials-supplier-table">
+              <thead>
+                <tr>
+                  <th>{t('编码')}</th>
+                  <th>{t('供应商')}</th>
+                  <th>{t('联系人')}</th>
+                  <th>{t('状态')}</th>
+                  <th>{t('操作')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {suppliers.map((supplier) => (
+                  <tr key={supplier.id}>
+                    <td>{supplier.businessCode}</td>
+                    <td>{supplier.name}</td>
+                    <td>{supplier.contactName ?? '—'}</td>
+                    <td>
+                      {supplier.isBlacklisted
+                        ? t('黑名单')
+                        : supplier.isActive
+                          ? t('启用')
+                          : t('停用')}
+                    </td>
+                    <td>
+                      <Button
+                        type="link"
+                        onClick={() => openSupplierEditor(supplier)}
+                      >
+                        {t('编辑供应商')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <nav className="materials-pagination" aria-label={t('供应商分页')}>
+          <Button
+            disabled={saving || supplierLoading || supplierPage === 0}
+            onClick={() =>
+              setSupplierPagination({
+                key: supplierFilterKey,
+                cursors: supplierCursors,
+                page: supplierPage - 1,
+              })
+            }
+          >
+            {t('上一页')}
+          </Button>
+          <span role="status">
+            {t('当前页')} {supplierPage + 1} ·{' '}
+            {supplierLoading
+              ? t('正在读取供应商')
+              : String(suppliers.length) + ' ' + t('项')}
+          </span>
+          <Button
+            disabled={
+              saving || supplierLoading || !currentSuppliers?.nextCursor
+            }
+            onClick={() => {
+              if (currentSuppliers?.nextCursor)
+                setSupplierPagination({
+                  key: supplierFilterKey,
+                  cursors: [
+                    ...supplierCursors.slice(0, supplierPage + 1),
+                    currentSuppliers.nextCursor,
+                  ],
+                  page: supplierPage + 1,
+                })
+            }}
+          >
+            {t('下一页')}
+          </Button>
+        </nav>
       </Modal>
       <Modal
-        title={supplierEditor === 'new' ? '新增供应商' : '编辑供应商'}
-        open={supplierEditor !== null}
-        onCancel={() => setSupplierEditor(null)}
+        title={supplierEditor === 'new' ? t('新增供应商') : t('编辑供应商')}
+        open={
+          supplierEditor !== null &&
+          supplierEditorContext === currentQuoteContext
+        }
+        onCancel={() => {
+          if (!saving) setSupplierEditor(null)
+        }}
         onOk={() => supplierForm.submit()}
-        okText="保存供应商"
-        cancelText="取消"
+        okText={t('保存供应商')}
+        okButtonProps={{
+          'aria-label': t('保存供应商'),
+          'aria-busy': saving,
+          disabled: saving,
+        }}
+        cancelText={t('取消')}
         confirmLoading={saving}
+        closable={!saving}
+        keyboard={!saving}
+        mask={{ closable: !saving }}
         destroyOnHidden
       >
-        <Form form={supplierForm} layout="vertical" onFinish={saveSupplier}>
-          <Form.Item
-            label="供应商编码"
-            name="businessCode"
-            rules={[{ required: true, message: '请填写供应商编码' }]}
-          >
-            <Input disabled={supplierEditor !== 'new'} maxLength={64} />
-          </Form.Item>
-          <Form.Item
-            label="供应商名称"
-            name="name"
-            rules={[{ required: true, message: '请填写供应商名称' }]}
-          >
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label="联系人" name="contactName">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label="地址" name="address">
-            <Input.TextArea
-              maxLength={1000}
-              autoSize={{ minRows: 2, maxRows: 4 }}
-            />
-          </Form.Item>
-          <Form.Item label="城市" name="city">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label="国家" name="country">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label="电话" name="phone">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label="WhatsApp" name="whatsapp">
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item
-            label="邮箱"
-            name="email"
-            rules={[{ type: 'email', message: '请填写有效邮箱' }]}
-          >
-            <Input maxLength={255} />
-          </Form.Item>
-          <Form.Item label="付款条件" name="paymentTerms">
-            <Input maxLength={1000} />
-          </Form.Item>
-          <Form.Item label="交货期" name="deliveryLeadTime">
-            <Input maxLength={1000} />
-          </Form.Item>
-          <Form.Item
-            label="首选供应商"
-            name="isPreferred"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            label="黑名单"
-            name="isBlacklisted"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item label="启用状态" name="isActive" valuePropName="checked">
-            <Switch checkedChildren="启用" unCheckedChildren="停用" />
-          </Form.Item>
+        {supplierSaveError && (
+          <Alert
+            type="error"
+            role="alert"
+            showIcon
+            title={t('无法保存供应商')}
+          />
+        )}
+        <Form
+          form={supplierForm}
+          layout="vertical"
+          onFinish={saveSupplier}
+          disabled={saving}
+        >
+          <SupplierFormFields editing={supplierEditor !== 'new'} />
         </Form>
       </Modal>
       <Modal
-        title={quoteMaterial ? `维护报价：${quoteMaterial.nameZh}` : '维护报价'}
-        open={quoteMaterial !== null}
-        onCancel={() => setQuoteMaterial(null)}
+        title={
+          quoteMaterial
+            ? `${t('维护报价')}：${locale === 'fr' ? quoteMaterial.nameFr || quoteMaterial.nameZh : locale === 'en' ? quoteMaterial.nameEn || quoteMaterial.nameZh : quoteMaterial.nameZh}`
+            : t('维护报价')
+        }
+        open={quoteMaterial !== null && quoteContext === currentQuoteContext}
+        onCancel={() => {
+          if (!saving) setQuoteMaterial(null)
+        }}
         onOk={() => priceForm.submit()}
-        okText="保存报价"
-        cancelText="取消"
+        okText={t('保存报价')}
+        okButtonProps={{
+          'aria-label': t('保存报价'),
+          'aria-busy': saving,
+          disabled: saving,
+        }}
+        cancelText={t('取消')}
         confirmLoading={saving}
+        closable={!saving}
+        keyboard={!saving}
+        mask={{ closable: !saving }}
         destroyOnHidden
       >
-        <Form form={priceForm} layout="vertical" onFinish={savePrice}>
-          <Form.Item
-            label="供应商"
-            name="supplierId"
-            rules={[{ required: true, message: '请选择供应商' }]}
-          >
-            <Select
-              placeholder="选择启用且非黑名单供应商"
-              options={suppliers
-                .filter(
-                  (supplier) => supplier.isActive && !supplier.isBlacklisted,
-                )
-                .map((supplier) => ({
-                  value: supplier.id,
-                  label: `${supplier.businessCode} · ${supplier.name}`,
-                }))}
-            />
-          </Form.Item>
-          <Form.Item label="货币" name="currency" rules={[{ required: true }]}>
-            <Select
-              options={['XOF', 'CNY', 'USD', 'EUR'].map((value) => ({ value }))}
-            />
-          </Form.Item>
-          <Form.Item
-            label="单价（最小货币单位）"
-            name="unitPriceMinor"
-            rules={[
-              {
-                required: true,
-                pattern: /^\d+$/,
-                message: '请输入非负整数，不可使用小数',
-              },
-            ]}
-          >
-            <Input inputMode="numeric" />
-          </Form.Item>
-          <Form.Item
-            label="单位"
-            name="unit"
-            rules={[{ required: true, message: '请填写单位' }]}
-          >
-            <Input maxLength={64} />
-          </Form.Item>
-          <Form.Item
-            label="生效日期"
-            name="effectiveAt"
-            rules={[{ required: true, message: '请选择生效日期' }]}
-          >
-            <Input type="date" />
-          </Form.Item>
-          <Form.Item label="来源备注" name="sourceNote">
-            <Input.TextArea
-              maxLength={1000}
-              autoSize={{ minRows: 2, maxRows: 4 }}
-            />
-          </Form.Item>
+        <Form
+          form={priceForm}
+          layout="vertical"
+          onFinish={savePrice}
+          disabled={saving}
+        >
+          <PriceFormFields
+            suppliers={suppliers}
+            supplierControl={
+              countryId ? (
+                <SupplierPicker
+                  api={api}
+                  countryId={countryId}
+                  knownSupplier={knownQuoteSupplier}
+                  disabled={saving}
+                />
+              ) : undefined
+            }
+          />
         </Form>
       </Modal>
     </>
@@ -649,91 +1056,124 @@ function CatalogTable({
   canEdit,
   onEdit,
   onAddPrice,
+  onDetails,
 }: {
   materials: CatalogMaterialView[]
   api: CatalogApi
   canEdit: boolean
   onEdit: (material: CatalogMaterialView) => void
   onAddPrice: (material: CatalogMaterialView) => void
+  onDetails: (material: CatalogMaterialView) => void
 }) {
+  const { locale } = useUiLocale()
+  const t = (key: CatalogMessage) => catalogText(locale, key)
   return (
     <Card
-      className="card"
+      className="card materials-catalog-card"
       title={
         <>
-          <span>全部材料</span>{' '}
-          <span className="muted">· {materials.length} 项</span>
+          <span>{t('当前页材料')}</span>{' '}
+          <span className="muted">
+            · {materials.length} {t('项')}
+          </span>
         </>
       }
-      extra={<span className="muted">数据来自本地 SQLite</span>}
+      extra={<span className="muted">{t('数据来自本地 SQLite')}</span>}
     >
       {materials.length === 0 ? (
-        <p role="status">未找到匹配材料</p>
+        <p role="status">{t('未找到匹配材料')}</p>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>材料</th>
-              <th>型号 / 规格</th>
-              <th>单位</th>
-              <th>供应商报价（最多 4 家）</th>
-              {canEdit && <th>操作</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {materials.map((material) => (
-              <tr key={material.id}>
-                <td>
-                  <div className="material-name">
-                    <MaterialThumbnail api={api} materialId={material.id} />
-                    <strong>{material.nameZh}</strong>
-                  </div>
-                </td>
-                <td>
-                  {material.model} · {material.specification}
-                </td>
-                <td>{material.unit}</td>
-                <td>
-                  <div className="quote-grid">
-                    {material.prices.map((price) => (
-                      <div
-                        className={`quote ${price.isPreferredSupplier ? 'preferred' : ''}`}
-                        key={price.priceId}
-                      >
-                        <strong>
-                          {price.supplierName}
-                          {price.isPreferredSupplier ? ' · 首选' : ''}
-                        </strong>
-                        <span>
-                          {formatMoney(
-                            {
-                              currency: price.currency,
-                              minor: price.unitPriceMinor,
-                            },
-                            'zh-CN',
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                    {material.prices.length === 0 && (
-                      <span className="muted">暂无有效报价</span>
-                    )}
-                  </div>
-                </td>
-                {canEdit && (
-                  <td>
-                    <Button type="link" onClick={() => onEdit(material)}>
-                      编辑材料
-                    </Button>
-                    <Button type="link" onClick={() => onAddPrice(material)}>
-                      维护报价
-                    </Button>
-                  </td>
-                )}
+        <div
+          className="materials-table-scroll"
+          role="region"
+          aria-label={t('材料表格，可横向滚动')}
+          tabIndex={0}
+        >
+          <table className="data-table materials-data-table">
+            <thead>
+              <tr>
+                <th>{t('材料')}</th>
+                <th>{t('型号 / 规格')}</th>
+                <th>{t('单位')}</th>
+                <th>{t('供应商报价（最多 4 家）')}</th>
+                <th>{t('操作')}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {materials.map((material) => (
+                <tr key={material.id}>
+                  <td>
+                    <div className="material-name">
+                      <MaterialThumbnail api={api} materialId={material.id} />
+                      <strong>
+                        {locale === 'fr'
+                          ? material.nameFr || material.nameZh
+                          : locale === 'en'
+                            ? material.nameEn || material.nameZh
+                            : material.nameZh}
+                      </strong>
+                      {material.isActive === false && <span>{t('停用')}</span>}
+                    </div>
+                  </td>
+                  <td>
+                    {material.model} · {material.specification}
+                  </td>
+                  <td>{material.unit}</td>
+                  <td>
+                    <div className="quote-grid">
+                      {material.prices.map((price) => (
+                        <div
+                          className={`quote ${price.isPreferredSupplier ? 'preferred' : ''}`}
+                          key={price.priceId}
+                        >
+                          <strong>
+                            {price.supplierName}
+                            {price.isPreferredSupplier ? t(' · 首选') : ''}
+                          </strong>
+                          <span>
+                            {formatMoney(
+                              {
+                                currency: price.currency,
+                                minor: price.unitPriceMinor,
+                              },
+                              locale === 'zh'
+                                ? 'zh-CN'
+                                : locale === 'fr'
+                                  ? 'fr-FR'
+                                  : 'en-US',
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                      {material.prices.length === 0 && (
+                        <span className="muted">{t('暂无有效报价')}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    <Button type="link" onClick={() => onDetails(material)}>
+                      {t('查看全部报价')}
+                    </Button>
+                    {canEdit && (
+                      <>
+                        <Button type="link" onClick={() => onEdit(material)}>
+                          {t('编辑材料')}
+                        </Button>
+                        <Button
+                          type="link"
+                          disabled={material.isActive === false}
+                          onClick={() => onAddPrice(material)}
+                        >
+                          {t('维护报价')}
+                        </Button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   )
@@ -746,6 +1186,8 @@ function MaterialThumbnail({
   api: CatalogApi
   materialId: string
 }) {
+  const { locale } = useUiLocale()
+  const t = (key: CatalogMessage) => catalogText(locale, key)
   const [source, setSource] = useState<string | null>(null)
 
   useEffect(() => {
@@ -763,7 +1205,7 @@ function MaterialThumbnail({
     <img
       className="material-image material-thumbnail"
       src={source}
-      alt="材料图片"
+      alt={t('材料图片')}
     />
   ) : (
     <span className="material-image" aria-hidden="true">
