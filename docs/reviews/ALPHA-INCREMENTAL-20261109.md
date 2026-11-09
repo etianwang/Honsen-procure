@@ -30,3 +30,9 @@ Original evidence is recorded in [remote native acceptance](V1-REMOTE-ALPHA-ACCE
 - Mobile payments and wallet configuration remain outside the accepted functionality. The tested financial operation is ledger registration and reversal.
 - Complete Windows UX, accessibility and DPI coverage remains open. Preserve the exact source and scope for screenshots and results already collected.
 - Treat any verified loss, cross-scope access, amount discrepancy or silent sync failure as a release blocker.
+
+## Post-merge recheck
+
+PR #21 passed hosted `quality` in run `42605514328`, including 356/356 browser cases. Its tested tree is identical to squash commit `29b00521cc3439f08d805e687de60b4e387d46fd`. The Windows x64 0.1.24 NSIS installer was built from that `main` commit and passed static version, identity and checksum checks. SHA-256 `31393b48c0de8a806466bd8fe848510a1ad7d1cf08733d767f4ec66e78858c0a`. It is unsigned and was not installed. Keep installed Staging smoke and prerelease open.
+
+The independent `main` run `42608334710` finished 355/356. The allocation test saw the previous RFQ dropdown during its close animation and sent keyboard input to an allocation picker before its search returned. The trace shows no active allocation option when Enter was sent, and the app correctly refused to submit without a supplier. The test now waits in the popup associated with its own combobox and verifies the chosen value before checking the exact allocation payload. The change is limited to test selection and readiness. It does not change supplier allocation or authorize a Staging mutation.
