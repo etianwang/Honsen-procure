@@ -1,3 +1,4 @@
+import { openShellAccount } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 test('switching accounts never renders the previous account authorization scope', async ({
@@ -78,6 +79,7 @@ test('switching accounts never renders the previous account authorization scope'
       await expect(page.locator('.honsen-shell-scope')).toContainText(
         '仅 A 可见的项目',
       )
+      await openShellAccount(page)
       await page.getByRole('button', { name: '锁定' }).click()
       await expect(
         page.getByRole('heading', { name: '登录 HONSEN Procure' }),
@@ -85,7 +87,9 @@ test('switching accounts never renders the previous account authorization scope'
     }
   }
   await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()
-  await expect(page.getByLabel('当前授权范围')).toHaveCount(0)
+  await expect(
+    page.getByRole('combobox', { name: '当前授权范围' }),
+  ).toHaveCount(0)
   await expect(page.getByText('仅 A 可见的项目')).toHaveCount(0)
 })
 
@@ -195,8 +199,11 @@ test('authenticated online login pushes before pull and displays pending until a
   await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
     '待同步 0',
   )
-  await page.locator('summary').filter({ hasText: '同步详情' }).click()
-  await expect(page.locator('.honsen-shell-sync details')).toContainText(
+  await expect(page.getByRole('button', { name: '同步详情' })).toHaveText(
+    '已同步',
+  )
+  await page.getByRole('button', { name: '同步详情' }).click()
+  await expect(page.getByRole('dialog', { name: '同步详情' })).toContainText(
     '上次同步成功；新操作可能待同步',
   )
   expect(browserErrors).toEqual([])
@@ -268,6 +275,7 @@ test('offline login never pushes and lock stops later reconnect work', async ({
   await expect(page.getByRole('status', { name: '同步状态' })).toContainText(
     '待归属旧事件 1',
   )
+  await openShellAccount(page)
   await page.getByRole('button', { name: '锁定' }).click()
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
   await expect(

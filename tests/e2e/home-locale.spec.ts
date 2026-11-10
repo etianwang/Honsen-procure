@@ -1,3 +1,4 @@
+import { selectShellLanguage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 test('home translates live data, errors and empty states in one chosen language', async ({
@@ -74,9 +75,8 @@ test('home translates live data, errors and empty states in one chosen language'
   await page.getByLabel('密码').fill('synthetic-password')
   await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
-  const language = page.getByLabel('界面语言 / UI language / Langue')
   await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()
-  await language.selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(
     page.getByRole('heading', { name: 'Overview today' }),
   ).toBeVisible()
@@ -84,7 +84,7 @@ test('home translates live data, errors and empty states in one chosen language'
     page.getByRole('cell', { name: 'Awaiting approval' }),
   ).toBeVisible()
   await expect(page.getByText(/EUR.*123\.45/)).toBeVisible()
-  await language.selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(page.getByRole('heading', { name: 'Vue du jour' })).toBeVisible()
   await expect(
     page.getByRole('cell', { name: 'En attente d’approbation' }),

@@ -79,18 +79,19 @@ test('manual stamp is printed separately in XAF without cents', async ({
   await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
   await expect(page.getByRole('alert')).toBeVisible()
   await page.getByRole('button', { name: '正式单据预览 / Aperçu' }).click()
+  const sheet = page.locator('[data-layout-ready="true"] .formal-print-sheet')
   await expect(
-    page.getByText('SPO · CI-P1-20261104-SPO-TEST-1', { exact: true }),
+    sheet.getByText('SPO · CI-P1-20261104-SPO-TEST-1', { exact: true }),
   ).toBeVisible()
-  await expect(page.getByText('Matériau électrique accentué')).toBeVisible()
+  await expect(sheet.getByText('Matériau électrique accentué')).toBeVisible()
   await expect(
-    page
+    sheet
       .locator('.print-summary tr')
       .filter({ hasText: 'Droit de timbre' })
       .getByText('37 XAF', { exact: true }),
   ).toBeVisible()
   await expect(
-    page.locator('.print-total').getByText('12382 XAF', { exact: true }),
+    sheet.locator('.print-total').getByText('12382 XAF', { exact: true }),
   ).toBeVisible()
   await expect(page.locator('article script')).toHaveCount(0)
   expect(errors).toEqual([])

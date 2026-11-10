@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 for (const [
   locale,
@@ -184,7 +185,7 @@ for (const [
           name: /打开界面预览|Open interface preview|Ouvrir l’aperçu/,
         })
         .click()
-      await page.getByRole('button', { name: nav, exact: true }).click()
+      await openShellPage(page, 'materials')
       await page.getByRole('button', { name: manage, exact: true }).click()
       const manager = page.getByRole('dialog', { name: manage, exact: true })
       const pager = manager.getByRole('navigation')

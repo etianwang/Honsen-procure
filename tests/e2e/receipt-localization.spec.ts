@@ -1,3 +1,4 @@
+import { selectShellLanguage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 test('receipt locale switches preserve quantities, reasons and semantic messages', async ({
   page,
@@ -13,7 +14,7 @@ test('receipt locale switches preserve quantities, reasons and semantic messages
   await expect(
     page.getByText('有条件完成原因必填。', { exact: true }),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(page.getByLabel('fixture pipe Received quantity')).toHaveValue(
     '1.5',
   )
@@ -25,7 +26,7 @@ test('receipt locale switches preserve quantities, reasons and semantic messages
       exact: true,
     }),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(page.getByLabel('fixture pipe Quantité reçue')).toHaveValue(
     '1.5',
   )

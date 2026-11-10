@@ -1,3 +1,4 @@
+import { openShellPage, selectShellLanguage } from './shell-controls'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -19,7 +20,7 @@ test('development sign-in placeholder opens the workbench and navigates accessib
   await page.getByRole('button', { name: '打开界面预览' }).click()
 
   await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()
-  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await openShellPage(page, 'materials')
   await expect(
     page.getByRole('heading', { name: '材料库总览' }).last(),
   ).toBeVisible()
@@ -153,7 +154,7 @@ test('owner purchase draft explicitly selects a quote source and saves trusted p
 
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购申请单' }).click()
+  await openShellPage(page, 'requisition')
   await page.getByLabel('采购模式').click()
   await page.getByText('业主自行采购', { exact: true }).click()
   await page.getByLabel('材料').click()
@@ -361,7 +362,7 @@ test('regular requisition page completes owner pricing rejection and resubmissio
 
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await openShellPage(page, 'requisition')
   await page.getByLabel('采购模式').click()
   await page.getByText('业主自行采购', { exact: true }).click()
   await page.getByLabel('材料').click()
@@ -382,17 +383,17 @@ test('regular requisition page completes owner pricing rejection and resubmissio
   await expect(
     page.getByText(/换算参考价：944 · 加价：.*1000.*最终价格：1038/),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(page.getByText(/Final price:1038/)).toBeVisible()
   await expect(
     page.getByRole('region', { name: 'Internal pricing details' }),
   ).not.toContainText('最终价格')
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(page.getByText(/Prix final :1038/)).toBeVisible()
   await expect(
     page.getByRole('region', { name: 'Détails internes des prix' }),
   ).not.toContainText('最终价格')
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+  await selectShellLanguage(page, 'zh')
   await page.getByLabel('驳回原因').fill('请调整加价。')
   await page.getByRole('button', { name: '驳回订单' }).click()
   await expect(
@@ -481,7 +482,7 @@ test('regular owner draft marks manual reference pricing as an exception', async
   })
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await openShellPage(page, 'requisition')
   await page.getByLabel('采购模式').click()
   await page.getByText('业主自行采购', { exact: true }).click()
   await page.getByLabel('材料').click()
@@ -915,7 +916,7 @@ test('desktop project-default page uses the Tauri command adapter', async ({
 
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '基础资料管理' }).click()
+  await openShellPage(page, 'master-data')
   await expect(
     page.getByRole('heading', { name: '基础资料管理' }).last(),
   ).toBeVisible()
@@ -996,7 +997,7 @@ test('purchaser saves a material through the Tauri catalog boundary', async ({
 
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await openShellPage(page, 'materials')
   await page.getByRole('button', { name: '新增材料' }).click()
   await page.getByLabel('材料名称').fill('边界测试材料')
   await page.getByLabel('英语名称').fill('Frozen English material')
@@ -1121,7 +1122,7 @@ test('purchaser maintains a supplier and material quote through Tauri commands',
 
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await openShellPage(page, 'materials')
   await page.getByRole('button', { name: '供应商管理' }).click()
   await page.getByRole('button', { name: '新增供应商' }).click()
   await page.getByLabel('供应商编码').fill('SUP-NEW')
@@ -1266,7 +1267,7 @@ test('purchaser creates, edits and submits a requisition through Tauri commands'
 
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购申请单', exact: true }).click()
+  await openShellPage(page, 'requisition')
   await page.getByLabel('材料').click()
   await expect
     .poll(() =>
@@ -1612,7 +1613,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
   })
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await openShellPage(page, 'execution')
   await page
     .getByRole('button', { name: 'CI-FIXTURE-20261012-INT-0001' })
     .click()
@@ -1626,16 +1627,16 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await page.getByLabel('询价单编号').fill('CI-FIXTURE-20261012-RFQ-0001')
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(page.getByLabel('RFQ number')).toHaveValue(
     'CI-FIXTURE-20261012-RFQ-0001',
   )
   await expect(page.getByRole('button', { name: 'Create RFQ' })).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(page.getByLabel('Numéro RFQ')).toHaveValue(
     'CI-FIXTURE-20261012-RFQ-0001',
   )
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+  await selectShellLanguage(page, 'zh')
 
   await page.getByRole('button', { name: '创建询价单' }).click()
   await expect(page.getByText(/已创建，包含 1 条无价格明细/)).toBeVisible()
@@ -1660,7 +1661,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await page.getByRole('button', { name: '保存子单条款' }).click()
   await expect(page.getByText('子单条款已保存，含税总额 2950。')).toBeVisible()
   await page.getByLabel('子单税率').fill('537')
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(page.getByLabel('Child tax rate')).toHaveValue('537')
   await expect(
     page.getByRole('button', { name: 'Send to supplier' }),
@@ -1674,7 +1675,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await expect(
     page.getByText('Child terms saved; total including tax 2950.'),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(page.getByLabel('Taux de taxe de la sous-commande')).toHaveValue(
     '537',
   )
@@ -1684,7 +1685,7 @@ test('purchaser reaches execution from the regular application and completes RFQ
   await expect(
     page.getByText('Conditions enregistrées ; total TTC 2950.'),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+  await selectShellLanguage(page, 'zh')
 
   await page
     .getByRole('button', { name: 'CI-FIXTURE-20261012-INT-0002' })
@@ -1826,7 +1827,7 @@ test('Honsen market purchase records partial and final receipt without RFQ or su
   })
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await openShellPage(page, 'execution')
   await expect(page.getByRole('button', { name: '开始市场直采' })).toBeVisible()
   await page.getByRole('button', { name: '开始市场直采' }).click()
   await expect(page.getByLabel('收货状态')).toHaveText('采购执行中')
@@ -2465,7 +2466,7 @@ test('authenticated desktop switches between cached authorization scopes', async
   await scopePicker.press('ArrowDown')
   await scopePicker.press('Enter')
   await expect(page.locator('.honsen-shell-scope')).toContainText('项目乙')
-  await page.getByRole('button', { name: '采购申请单' }).click()
+  await openShellPage(page, 'requisition')
   await expect(page.locator('.page-heading p')).toContainText('乙工地')
   await expect(page.getByRole('table', { name: '请购历史' })).toContainText(
     'REQ-HISTORY-1',
@@ -2480,7 +2481,7 @@ test('authenticated desktop switches between cached authorization scopes', async
     page.getByRole('columnheader', { name: '最后更新' }),
   ).toBeVisible()
   await page.getByLabel('搜索单号、项目或工地').fill('REQ-HISTORY-1')
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(page.getByLabel('Search number, project or site')).toHaveValue(
     'REQ-HISTORY-1',
   )
@@ -2490,28 +2491,28 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(
     page.getByRole('table', { name: 'Requisition history' }),
   ).toContainText('Pending confirmation')
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(
     page.getByLabel('Rechercher numéro, projet ou chantier'),
   ).toHaveValue('REQ-HISTORY-1')
   await expect(
     page.getByRole('button', { name: 'Exporter Excel', exact: true }),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+  await selectShellLanguage(page, 'zh')
   await page.getByRole('button', { name: '查看详情：REQ-HISTORY-1' }).click()
   await expect(page.getByText('审批已确认', { exact: true })).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(
     page.getByText('Approval recorded', { exact: true }),
   ).toBeVisible()
   await expect(
     page.getByRole('region', { name: 'Requisition details' }),
   ).not.toContainText('confirmed')
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(
     page.getByText('Approbation enregistrée', { exact: true }),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+  await selectShellLanguage(page, 'zh')
 
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     '测试电缆',
@@ -2521,7 +2522,7 @@ test('authenticated desktop switches between cached authorization scopes', async
   )
   await page.getByLabel('驳回原因').fill('Synthetic retained reason')
   await page.getByLabel('留言（支持 @某人）').fill('Synthetic retained comment')
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(page.getByLabel('Rejection reason')).toHaveValue(
     'Synthetic retained reason',
   )
@@ -2531,7 +2532,7 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(
     page.getByRole('button', { name: 'Confirm order', exact: true }),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(page.getByLabel('Motif du rejet')).toHaveValue(
     'Synthetic retained reason',
   )
@@ -2541,7 +2542,7 @@ test('authenticated desktop switches between cached authorization scopes', async
   await expect(
     page.getByRole('button', { name: 'Confirmer la commande', exact: true }),
   ).toBeVisible()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('zh')
+  await selectShellLanguage(page, 'zh')
   await page.getByRole('button', { name: '确认订单' }).click()
   await expect(page.getByRole('region', { name: '请购详情' })).toContainText(
     '已批准',
@@ -2784,8 +2785,11 @@ test('administrator queries and changes cloud-scoped bindings from desktop UI', 
   await page.getByLabel('密码', { exact: true }).fill('fixture-password')
   await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '在线登录', exact: true }).click()
-  await page.getByRole('button', { name: '在线授权管理', exact: true }).click()
-  await page.getByRole('button', { name: '管理已有账号', exact: true }).click()
+  await openShellPage(page, 'authorization')
+  await page
+    .locator('.content')
+    .getByRole('button', { name: '管理已有账号', exact: true })
+    .click()
   await page.getByLabel('查找用户名', { exact: true }).fill('FixtureUser')
   await page.getByRole('button', { name: '查询账号授权', exact: true }).click()
   await expect(
@@ -2918,7 +2922,7 @@ test('catalog details and Honsen draft can reach later quote pages', async ({
   })
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await openShellPage(page, 'materials')
   await page.getByRole('button', { name: '查看全部报价' }).click()
   await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
   await page
@@ -2932,7 +2936,7 @@ test('catalog details and Honsen draft can reach later quote pages', async ({
     .click()
   await expect(page.getByText(/Vendor 0 ·/)).toBeVisible()
   await page.getByRole('button', { name: '关闭', exact: true }).click()
-  await page.getByRole('button', { name: '采购申请单' }).click()
+  await openShellPage(page, 'requisition')
   await page.getByLabel('材料').click()
   await page.getByText('分页材料 · PAGE', { exact: true }).click()
   await page.getByRole('button', { name: '加载更多报价' }).click()

@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { test, expect } from '@playwright/test'
 
 test('production attachment UI imports a voucher offline and retains pending state after reload', async ({
@@ -108,7 +109,7 @@ test('production attachment UI imports a voucher offline and retains pending sta
   async function open() {
     await page.goto('/')
     await page.getByRole('button', { name: '打开界面预览' }).click()
-    await page.getByRole('button', { name: '采购执行', exact: true }).click()
+    await openShellPage(page, 'execution')
   }
   await open()
   await page.getByLabel('附件业务关联', { exact: true }).click()

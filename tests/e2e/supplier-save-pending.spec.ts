@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const [locale, add, code, name, save, success] of [
@@ -63,11 +64,7 @@ for (const [locale, add, code, name, save, success] of [
         name: /打开界面预览|Open interface preview|Ouvrir l’aperçu/,
       })
       .click()
-    await page
-      .getByRole('button', {
-        name: /^(供应商与价格|Suppliers and prices|Fournisseurs et prix)$/,
-      })
-      .click()
+    await openShellPage(page, 'suppliers')
     await page.getByRole('button', { name: add, exact: true }).click()
     const dialog = page.getByRole('dialog', { name: add, exact: true })
     await dialog.getByLabel(code, { exact: true }).fill('SYNTH-GUARDED')

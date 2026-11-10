@@ -18,6 +18,7 @@ import {
   type AppPage,
   type AuthorizationContextOption,
 } from './components/AppShell'
+import type { ShellEntry } from './components/AppNavigation'
 import { AuthFixturePage } from './pages/AuthFixturePage'
 import { CatalogFixturePage } from './pages/CatalogFixturePage'
 import { HomePage } from './pages/HomePage'
@@ -200,6 +201,9 @@ function App() {
   const isSyncConflictFixture =
     new URLSearchParams(window.location.search).get('test') === 'sync-conflict'
   const [page, setPage] = useState<AppPage>('home')
+  const [masterCategory, setMasterCategory] = useState('countries')
+  const [accountMode, setAccountMode] = useState<'create' | 'manage'>('create')
+  const [accountNavigationBusy, setAccountNavigationBusy] = useState(false)
   const [historyEntry, setHistoryEntry] = useState<
     HistoryEntryRequest & { accountId?: string }
   >()
@@ -411,6 +415,41 @@ function App() {
   const canApprove = !!session?.roles.some(
     (role) => role === 'purchaser' || role === 'administrator',
   )
+  const canReview = !session || canApprove
+  const canCreate =
+    !!requisitionContext && (canReview || !!session?.roles.includes('engineer'))
+  const canManageSystem =
+    role === 'administrator' || role === 'super_administrator'
+  const canManageReference = canReview || canManageSystem
+  const masterEntry = ['units', 'material-categories'].includes(masterCategory)
+    ? 'units'
+    : ['tax-templates', 'exchange-rates', 'project-defaults'].includes(
+          masterCategory,
+        )
+      ? 'tax-templates'
+      : 'countries'
+
+  function openHistory(workflowStatus?: string, orderId?: string) {
+    setHistoryEntry((current) => ({
+      requestId: (current?.requestId ?? 0) + 1,
+      accountId: session?.user_id,
+      filter: { projectId: authorizationContext?.projectId, workflowStatus },
+      orderId,
+    }))
+    setPage('requisition')
+  }
+
+  function navigate(destination: AppPage, entry?: ShellEntry) {
+    if (entry === 'history' || entry === 'review') {
+      openHistory(entry === 'review' ? 'pending_confirmation' : undefined)
+      return
+    }
+    if (entry === 'new') setHistoryEntry(undefined)
+    if (entry === 'countries' || entry === 'units' || entry === 'tax-templates')
+      setMasterCategory(entry)
+    if (entry === 'create' || entry === 'manage') setAccountMode(entry)
+    setPage(destination)
+  }
   const businessRole: UserRole = session?.roles.includes('administrator')
     ? 'administrator'
     : session?.roles.includes('purchaser')
@@ -462,6 +501,20 @@ function App() {
       ) : isPreviewOpen || session ? (
         <AppShell
           page={page}
+          entry={
+            page === 'master-data'
+              ? masterEntry
+              : page === 'authorization'
+                ? accountMode
+                : page === 'requisition'
+                  ? historyEntry?.filter.workflowStatus ===
+                      'pending_confirmation' && canReview
+                    ? 'review'
+                    : historyEntry || !canCreate
+                      ? 'history'
+                      : 'new'
+                  : undefined
+          }
           pageTitle={
             page === 'home'
               ? '工作台'
@@ -480,9 +533,23 @@ function App() {
                           : '基础资料管理'
           }
           role={session ? role : 'purchaser'}
+          roles={session?.roles}
           username={session?.username}
           displayName={session?.display_name}
-          onNavigate={setPage}
+          onNavigate={navigate}
+          canCreate={canCreate}
+          canReview={canReview}
+          canManageReference={canManageReference}
+          canManageSystem={!!session && canManageSystem}
+          accountNavigationBusy={
+            page === 'authorization' && accountNavigationBusy
+          }
+          scopeNotice={
+            contextError ===
+            '当前账户没有有效的离线授权范围，无法新建采购申请。'
+              ? '当前没有可用的项目业务授权。请联系授权管理员分配项目、部门和班组；修改密码不会授予这些权限。'
+              : contextError || undefined
+          }
           authorizationContexts={session ? authorizationContexts : undefined}
           selectedAuthorizationContext={
             authorizationContext
@@ -561,23 +628,13 @@ function App() {
               }
               projectId={authorizationContext?.projectId}
               onOpenMaterials={() => setPage('materials')}
-              onNewRequisition={() => {
-                setHistoryEntry(undefined)
-                setPage('requisition')
-              }}
-              onOpenHistory={(workflowStatus, orderId) => {
-                setHistoryEntry((current) => ({
-                  requestId: (current?.requestId ?? 0) + 1,
-                  accountId: session?.user_id,
-                  filter: {
-                    projectId: authorizationContext?.projectId,
-                    workflowStatus,
-                  },
-                  orderId,
-                }))
-                setPage('requisition')
-              }}
-              onOpenExecution={() => setPage('execution')}
+              onNewRequisition={
+                canCreate ? () => navigate('requisition', 'new') : undefined
+              }
+              onOpenHistory={openHistory}
+              onOpenExecution={
+                canReview ? () => navigate('execution') : undefined
+              }
             />
           ) : page === 'materials' ? (
             <MaterialsPage
@@ -683,14 +740,27 @@ function App() {
           ) : page === 'authorization' &&
             session &&
             (role === 'administrator' || role === 'super_administrator') ? (
-            <AuthorizationManagementPage role={role} />
+            <AuthorizationManagementPage
+              role={role}
+              mode={accountMode}
+              onModeChange={setAccountMode}
+              onNavigationBusyChange={setAccountNavigationBusy}
+            />
           ) : (
-            <MasterDataPage role={session ? role : 'purchaser'} />
+            <MasterDataPage
+              role={session ? role : 'purchaser'}
+              category={masterCategory}
+              onCategoryChange={setMasterCategory}
+            />
           )}
         </AppShell>
       ) : (
         <LoginPage
           onLogin={(authenticated, mode) => {
+            setPage('home')
+            setHistoryEntry(undefined)
+            setMasterCategory('countries')
+            setAccountMode('create')
             setAuthorizationContexts([])
             setAuthorizationContext(null)
             setSyncState({

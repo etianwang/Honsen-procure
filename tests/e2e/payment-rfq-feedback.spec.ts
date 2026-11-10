@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 import { supplierText } from '../../apps/desktop/src/lib/supplier-workflow-messages'
 import { paymentMessages } from '../../apps/desktop/src/lib/payment-messages'
@@ -130,12 +131,7 @@ for (const locale of ['zh', 'en', 'fr'] as const) {
         name: /打开界面预览|Open interface preview|Ouvrir/,
       })
       .click()
-    await page
-      .getByRole('button', {
-        name: executionText(locale, '采购执行'),
-        exact: true,
-      })
-      .click()
+    await openShellPage(page, 'execution')
     await expect(
       page.locator('label').filter({ hasText: t.type }),
     ).toBeVisible()

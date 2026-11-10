@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test, type Page } from '@playwright/test'
 
 async function openMaster(page: Page, role = 'administrator') {
@@ -73,7 +74,7 @@ async function openMaster(page: Page, role = 'administrator') {
   await page.getByLabel('密码', { exact: true }).fill('synthetic-password')
   await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录', exact: true }).click()
-  await page.getByRole('button', { name: '基础资料管理', exact: true }).click()
+  await openShellPage(page, 'master-data')
   await expect(
     page.getByRole('navigation', { name: '基础资料分类' }),
   ).toBeVisible()

@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 const countryA = '00000000-0000-4000-8000-000000000101'
 const countryB = '00000000-0000-4000-8000-000000000102'
@@ -202,17 +203,7 @@ async function boot(page: Page, locale: string, deferred: boolean) {
       name: /打开界面预览|Open interface preview|Ouvrir l’aperçu/,
     })
     .click()
-  await page
-    .getByRole('button', {
-      name:
-        locale === 'zh'
-          ? '采购执行'
-          : locale === 'en'
-            ? 'Purchasing execution'
-            : 'Exécution des achats',
-      exact: true,
-    })
-    .click()
+  await openShellPage(page, 'execution')
   await expect(
     page.getByRole('button', { name: 'SYNTH-EXEC-A', exact: true }),
   ).toBeVisible()

@@ -1,3 +1,4 @@
+import { openShellPage, selectShellLanguage } from './shell-controls'
 import { test, expect } from '@playwright/test'
 
 test('execution locale updates existing payment and attachment catalogs without losing input', async ({
@@ -91,12 +92,11 @@ test('execution locale updates existing payment and attachment catalogs without 
   })
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await openShellPage(page, 'execution')
   await page
     .getByLabel('收款方', { exact: true })
     .fill('Synthetic retained payee')
-  const language = page.getByLabel('界面语言 / UI language / Langue')
-  await language.selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(
     page
       .getByRole('heading', { name: 'Purchasing execution', exact: true })
@@ -111,7 +111,7 @@ test('execution locale updates existing payment and attachment catalogs without 
   await expect(
     page.getByText('Attachments and vouchers', { exact: true }),
   ).toBeVisible()
-  await language.selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(
     page
       .getByRole('heading', { name: 'Exécution des achats', exact: true })
@@ -123,7 +123,7 @@ test('execution locale updates existing payment and attachment catalogs without 
   await expect(
     page.getByRole('button', { name: 'Enregistrer le paiement', exact: true }),
   ).toBeVisible()
-  await language.selectOption('zh')
+  await selectShellLanguage(page, 'zh')
   await expect(page.getByLabel('收款方', { exact: true })).toHaveValue(
     'Synthetic retained payee',
   )

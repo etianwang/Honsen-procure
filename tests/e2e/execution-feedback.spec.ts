@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 test('market start exposes local failure then success and blocks duplicate starts', async ({
@@ -142,7 +143,7 @@ test('market start exposes local failure then success and blocks duplicate start
   })
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await openShellPage(page, 'execution')
   await expect(page.getByRole('button', { name: '开始市场直采' })).toBeVisible()
   await page.getByRole('button', { name: '开始市场直采' }).click()
   const detail = page.getByRole('region', { name: '采购执行详情' })

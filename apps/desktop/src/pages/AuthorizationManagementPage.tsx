@@ -61,13 +61,18 @@ const feedback = {
 
 export function AuthorizationManagementPage({
   role = 'administrator',
+  mode,
+  onModeChange,
+  onNavigationBusyChange,
 }: {
   role?: UserRole
+  mode: 'create' | 'manage'
+  onModeChange: (mode: 'create' | 'manage') => void
+  onNavigationBusyChange: (busy: boolean) => void
 }) {
   const { locale } = useUiLocale()
   const t = (zh: string, en: string, fr: string) =>
     locale === 'zh' ? zh : locale === 'fr' ? fr : en
-  const [mode, setMode] = useState<'create' | 'manage'>('create')
   const [account, setAccount] = useState<Account | null>(null)
   const [username, setUsername] = useState('')
   const [bindings, setBindings] = useState<Binding[]>([])
@@ -88,6 +93,10 @@ export function AuthorizationManagementPage({
   const [loading, setLoading] = useState(true)
   const [loadFailed, setLoadFailed] = useState(false)
   const [reload, setReload] = useState(0)
+  useEffect(() => {
+    onNavigationBusyChange(busy || wizardBusy)
+    return () => onNavigationBusyChange(false)
+  }, [busy, wizardBusy, onNavigationBusyChange])
   useEffect(() => {
     let active = true
     void invoke('pull_sync')
@@ -258,7 +267,7 @@ export function AuthorizationManagementPage({
           aria-pressed={mode === 'create'}
           disabled={busy || wizardBusy}
           onClick={() => {
-            setMode('create')
+            onModeChange('create')
             setMessage('')
           }}
         >
@@ -269,7 +278,7 @@ export function AuthorizationManagementPage({
           aria-pressed={mode === 'manage'}
           disabled={busy || wizardBusy}
           onClick={() => {
-            setMode('manage')
+            onModeChange('manage')
             setMessage('')
           }}
         >
@@ -325,7 +334,7 @@ export function AuthorizationManagementPage({
             canGrantPrivileged={role === 'super_administrator'}
             onAccount={assignAccount}
             onExisting={() => {
-              setMode('manage')
+              onModeChange('manage')
               void search()
             }}
           />

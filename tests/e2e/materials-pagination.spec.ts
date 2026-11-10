@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const [
@@ -183,7 +184,7 @@ for (const [
           name: /打开界面预览|Open interface preview|Ouvrir l’aperçu/,
         })
         .click()
-      await page.getByRole('button', { name: nav, exact: true }).click()
+      await openShellPage(page, 'materials')
       const search = page.getByRole('searchbox', {
         name: searchLabel,
         exact: true,

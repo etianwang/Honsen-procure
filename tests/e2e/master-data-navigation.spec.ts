@@ -1,6 +1,7 @@
+import { openShellPage, selectShellLanguage } from './shell-controls'
 import { expect, test, type Page } from '@playwright/test'
 
-async function openMaster(page: Page, role = 'administrator') {
+async function openMaster(page: Page, role = 'administrator', enter = true) {
   await page.addInitScript((role) => {
     Object.assign(window, {
       __TAURI_INTERNALS__: {},
@@ -76,7 +77,8 @@ async function openMaster(page: Page, role = 'administrator') {
   await page.getByLabel('密码', { exact: true }).fill('synthetic-password')
   await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录', exact: true }).click()
-  await page.getByRole('button', { name: '基础资料管理', exact: true }).click()
+  if (!enter) return
+  await openShellPage(page, 'master-data')
   await expect(
     page.getByRole('navigation', { name: '基础资料分类' }),
   ).toBeVisible()
@@ -191,9 +193,7 @@ test('master navigation translates without losing country draft', async ({
     ['fr', 'Catégories des données de référence', 'code : pays'],
     ['zh', '基础资料分类', '国家代码'],
   ]) {
-    await page
-      .getByRole('combobox', { name: '界面语言 / UI language / Langue' })
-      .selectOption(locale)
+    await selectShellLanguage(page, locale)
     await expect(
       page.getByRole('navigation', { name: navName }).getByRole('button'),
     ).toHaveCount(10)
@@ -203,40 +203,12 @@ test('master navigation translates without losing country draft', async ({
   }
 })
 
-test('engineer can browse all categories but cannot mutate them', async ({
+test('engineer has no master data entry because trusted reads require procurement or governance authority', async ({
   page,
 }) => {
-  await openMaster(page, 'engineer')
-  const nav = page.getByRole('navigation', { name: '基础资料分类' })
-  for (const name of [
-    '国家',
-    '项目',
-    '项目站点',
-    '部门',
-    '团队',
-    '单位',
-    '材料分类',
-    '税模板维护',
-    '汇率历史',
-    '项目默认设置',
-  ]) {
-    await nav.getByRole('button', { name, exact: true }).click()
-    const search = page.getByRole('searchbox', {
-      name: '搜索编码或名称',
-      exact: true,
-    })
-    if (await search.isVisible()) await expect(search).toBeEnabled()
-    for (const input of await page
-      .locator(
-        '.master-data-detail input:visible:not([readonly]):not([type="search"])',
-      )
-      .all())
-      await expect(input).toBeDisabled()
-    for (const button of await page
-      .locator('.master-data-detail button:visible')
-      .all())
-      await expect(button).toBeDisabled()
-  }
+  await openMaster(page, 'engineer', false)
+  await expect(page.getByRole('heading', { name: '今日概览' })).toBeVisible()
+  await expect(page.locator('[data-shell-group=master-data]')).toHaveCount(0)
 })
 
 test('purchaser sees category administrator requirement while ordinary units remain editable', async ({

@@ -1,3 +1,4 @@
+import { selectShellLanguage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const [locale, scopeLabel, emptyLabel] of [
@@ -91,13 +92,12 @@ for (const [locale, scopeLabel, emptyLabel] of [
     await page.getByLabel('密码', { exact: true }).fill('synthetic-password')
     await page.locator('#captcha').fill('2')
     await page.getByRole('button', { name: '在线登录', exact: true }).click()
-    await page
-      .getByLabel('界面语言 / UI language / Langue')
-      .selectOption(locale)
+    await selectShellLanguage(page, locale)
     const scope = page.getByRole('combobox', { name: scopeLabel, exact: true })
     const scopeDisplay = page.locator('.honsen-shell-scope')
-    await expect(scopeDisplay).toContainText(
-      'Synthetic Zone0 · Synthetic Site0 · Électricité 电气 Electrical · Synthetic team',
+    await expect(scopeDisplay).toHaveAttribute(
+      'title',
+      /Synthetic Zone0 · Synthetic Site0 · Électricité 电气 Electrical · Synthetic team/,
     )
     await expect(scopeDisplay).not.toContainText(
       '00000000-0000-4000-8000-000000001003',
@@ -121,8 +121,9 @@ for (const [locale, scopeLabel, emptyLabel] of [
     ).toBe(0)
     await scope.press('ArrowDown')
     await scope.press('Enter')
-    await expect(scopeDisplay).toContainText(
-      'Côte synthétique · Synthetic Zone259',
+    await expect(scopeDisplay).toHaveAttribute(
+      'title',
+      /Côte synthétique · Synthetic Zone259/,
     )
     await expect
       .poll(() =>

@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const [locale, materialLabel, saveLabel, submitLabel] of [
@@ -123,11 +124,7 @@ for (const [locale, materialLabel, saveLabel, submitLabel] of [
             name: /打开界面预览|Open interface preview|Ouvrir l’aperçu/,
           })
           .click()
-        await page
-          .getByRole('button', {
-            name: /^(采购申请单|Purchase requisitions|Demandes d’achat)$/,
-          })
-          .click()
+        await openShellPage(page, 'requisition')
         const picker = page.getByRole('combobox', {
           name: materialLabel,
           exact: true,

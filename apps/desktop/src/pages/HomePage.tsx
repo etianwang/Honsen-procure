@@ -10,9 +10,9 @@ type HomePageProps = {
   api: Pick<RequisitionApi, 'listRequisitionHistory'>
   projectId?: string
   onOpenMaterials: () => void
-  onNewRequisition: () => void
+  onNewRequisition?: () => void
   onOpenHistory: (workflowStatus?: string, orderId?: string) => void
-  onOpenExecution: () => void
+  onOpenExecution?: () => void
 }
 
 const statusLabels: Record<string, HomeMessage> = {
@@ -78,13 +78,15 @@ export function HomePage({
           <h2>{t('今日概览')}</h2>
           <p>{t('当前授权范围内已保存的采购申请；统计按父单计算。')}</p>
         </div>
-        <Button
-          type="primary"
-          icon={<Plus size={16} />}
-          onClick={onNewRequisition}
-        >
-          {t('新建采购申请')}
-        </Button>
+        {onNewRequisition && (
+          <Button
+            type="primary"
+            icon={<Plus size={16} />}
+            onClick={onNewRequisition}
+          >
+            {t('新建采购申请')}
+          </Button>
+        )}
         <Button
           onClick={() => setRefresh((value) => value + 1)}
           loading={!data && !failed}
@@ -205,7 +207,9 @@ export function HomePage({
         </>
       )}
       <div className="home-shortcuts">
-        <Button onClick={onOpenExecution}>{t('打开采购执行与收货')}</Button>
+        {onOpenExecution && (
+          <Button onClick={onOpenExecution}>{t('打开采购执行与收货')}</Button>
+        )}
         <Button onClick={onOpenMaterials}>{t('打开材料库')}</Button>
       </div>
     </div>

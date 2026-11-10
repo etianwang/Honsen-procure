@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test, type Page } from '@playwright/test'
 
 async function mount(
@@ -371,17 +372,24 @@ test('quote form submits XAF integer minor units without selecting a supplier im
   )
 })
 
-for (const [locale, title] of [
-  ['zh', '供应商与价格'],
-  ['en', 'Suppliers and prices'],
-  ['fr', 'Fournisseurs et prix'],
+for (const [locale, notice] of [
+  ['zh', '只读权限：可以查看资料，不能新增或修改供应商与报价。'],
+  [
+    'en',
+    'Read-only access: view data without creating or changing suppliers or quotes.',
+  ],
+  [
+    'fr',
+    'Accès en lecture seule : consultation sans création ni modification des fournisseurs ou devis.',
+  ],
 ]) {
   test(`supplier page ${locale} readonly role cannot mutate`, async ({
     page,
   }) => {
     await mount(page, 'viewer', locale)
+    await expect(page.getByRole('alert')).toHaveText(notice)
     await expect(
-      page.getByRole('heading', { name: title, exact: true }),
+      page.getByRole('button', { name: 'Synthetic supplier', exact: true }),
     ).toBeVisible()
     await expect(
       page.locator('.supplier-toolbar button').first(),
@@ -468,9 +476,7 @@ for (const mode of ['pure-super', 'combined', 'storage-error']) {
     await page.getByLabel('密码', { exact: true }).fill('synthetic-password')
     await page.locator('#captcha').fill('2')
     await page.getByRole('button', { name: '离线登录', exact: true }).click()
-    await page
-      .getByRole('button', { name: '供应商与价格', exact: true })
-      .click()
+    await openShellPage(page, 'suppliers')
     if (mode === 'combined') {
       await expect(
         page.getByRole('button', { name: '新增供应商', exact: true }),

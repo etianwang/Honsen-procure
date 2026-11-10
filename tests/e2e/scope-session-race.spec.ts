@@ -1,3 +1,4 @@
+import { openShellAccount } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const failOldRead of [false, true]) {
@@ -126,6 +127,7 @@ for (const failOldRead of [false, true]) {
         ),
       )
       .toBe('function')
+    await openShellAccount(page)
     await page.getByRole('button', { name: '锁定', exact: true }).click()
     await login('account-b')
     await expect(page.locator('.honsen-shell-scope')).toContainText(

@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 import { supplierText } from '../../apps/desktop/src/lib/supplier-workflow-messages'
 import { receiptText } from '../../apps/desktop/src/lib/receipt-messages'
@@ -183,12 +184,7 @@ for (const locale of ['zh', 'en', 'fr'] as const) {
         name: /打开界面预览|Open interface preview|Ouvrir l’aperçu/,
       })
       .click()
-    await page
-      .getByRole('button', {
-        name: executionText(locale, '采购执行'),
-        exact: true,
-      })
-      .click()
+    await openShellPage(page, 'execution')
     const child = (index: number) =>
       page.getByRole('region', {
         name: `${executionText(locale, '供应商子订单')} TEST-CHILD-${index}`,
