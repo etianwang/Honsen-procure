@@ -669,3 +669,11 @@ require frozen bilingual completeness. See
 Windows 0.1.27 has `USER_ACCEPTED` evidence for one single-page,
 French-primary HPA preview, PDF save and WPS reopen. The parent T12 remains
 open.
+
+### 0.1.27 Internal Alpha delivery record
+
+The existing package is frozen with scoped HPA `USER_ACCEPTED` evidence.
+The [delivery record](reviews/ALPHA-027-DELIVERY.md) tracks the complete
+local package and `NOT_DISTRIBUTED` status. A company-restricted channel,
+recipient list and access validation are still required for distribution.
+Original parent gates remain open.

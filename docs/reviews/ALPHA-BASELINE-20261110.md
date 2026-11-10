@@ -16,6 +16,11 @@ one installed HPA preview, PDF save and WPS reopen. See the
 The remaining native scenarios and company-restricted distribution stay
 open.
 
+The [0.1.27 Internal Alpha delivery record](ALPHA-027-DELIVERY.md) freezes
+the existing artifact and records the completed local handoff package.
+Actual distribution awaits a configured company-restricted destination,
+named recipients and verified access.
+
 ## Historical source audit
 
 The inventory compared 88 distinct divergent local or remote tips by ancestry, touched paths and current content.
