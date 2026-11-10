@@ -30,27 +30,64 @@
 .materials-data-table {
   min-width: 920px;
   width: 100%;
+  table-layout: fixed;
+}
+
+.materials-name-column {
+  width: 20%;
+}
+
+.materials-spec-column {
+  width: 24%;
+}
+
+.materials-unit-column {
+  width: 76px;
+}
+
+.materials-actions-column {
+  width: 136px;
 }
 
 .materials-data-table th,
 .materials-data-table td {
-  overflow-wrap: anywhere;
+  padding-inline: var(--honsen-space-3);
+  vertical-align: top;
+  overflow-wrap: break-word;
 }
 
-.materials-data-table th:first-child {
-  min-width: 150px;
+.materials-spec .muted {
+  color: var(--honsen-muted);
 }
 
-.materials-data-table th:nth-child(4) {
-  min-width: 260px;
+.materials-quotes {
+  display: grid;
+  gap: var(--honsen-space-1);
 }
 
-.materials-data-table th:last-child {
-  min-width: 190px;
+.materials-quote {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: var(--honsen-space-2);
+  align-items: start;
 }
 
-.materials-data-table td:last-child {
+.materials-quote-amount {
+  color: var(--honsen-text);
+  font-weight: 600;
+  white-space: nowrap;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.materials-actions .ant-btn {
+  display: flex;
+  justify-content: flex-start;
+  max-width: 100%;
+  height: auto;
+  padding-inline: 0;
   white-space: normal;
+  text-align: start;
 }
 
 .materials-pagination {

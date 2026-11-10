@@ -660,3 +660,10 @@ UI batch6 PARTIAL: history/export guard, workflow reads/password busy, name edit
 UI phase 2 batch 7: French search, scope labels, child workflow states and recovery rechecks are recorded in the design rollout. Parent gates remain open under `BLOCKED_NATIVE_CONTROL`.
 
 UI phase 2 batch 8: the quote comparison and affected supplier regression have scoped `BROWSER_PASS`, `UNIT_PASS` and `BUILD_PASS`. The design rollout records evidence and the open `NATIVE_UI_PASS` gate under `BLOCKED_NATIVE_CONTROL`.
+
+### T12 Alpha historical HPA compatibility
+
+The historical HPA view is screen-only. Formal issuance and output still
+require frozen bilingual completeness. See
+[the bounded Alpha review](reviews/T12-HISTORICAL-HPA-ALPHA.md).
+The parent T12 remains open.

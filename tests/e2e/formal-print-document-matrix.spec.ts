@@ -1,19 +1,26 @@
 import { test, expect } from '@playwright/test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { pdfGlyphs, readPdfText } from './pdf-text'
 
 for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
-  for (const languagePair of ['zh_fr', 'zh_en'] as const) {
-    test(`${kind} ${languagePair} preserves long bilingual lines in multipage PDF`, async ({
+  const cases = [
+    ['zh_fr', 'formal'],
+    ['zh_en', 'formal'],
+  ] as const
+  const historicalCase = [['zh_fr', 'historical']] as const
+  for (const [languagePair, mode] of kind === 'HPA'
+    ? [...cases, ...historicalCase]
+    : cases) {
+    test(`${kind} ${languagePair} ${mode === 'historical' ? 'shows historical preview without formal print' : 'preserves long bilingual lines in multipage PDF'}`, async ({
       page,
     }) => {
       const errors: string[] = []
       page.on('pageerror', (error) => errors.push(error.message))
       await page.goto('/')
       await page.evaluate(
-        async ({ kind, languagePair }) => {
+        async ({ kind, languagePair, mode }) => {
           const load = (path: string) => import(/* @vite-ignore */ path)
           const React = await load('/node_modules/.vite/deps/react.js')
           const ReactDOM = await load(
@@ -22,60 +29,73 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
           const { FormalPrintPreview } = await load(
             '/src/components/FormalPrintPreview.tsx',
           )
+          const fixture = {
+            formalDocumentNo: `TEST-${kind}-${languagePair}`,
+            printProfile: {
+              schemaVersion: 1,
+              profileVersion: 'v1-20261108',
+              legalNameZh: '深圳市弘盛优创机电工程设计有限公司',
+              logo: {
+                assetId: 'honsen-approved-logo-v1',
+                sha256:
+                  '0f733cc13c7086deb17668e9e7103e798d006493370f3b66340e9214e7b70751',
+                mimeType: 'image/png',
+              },
+            },
+            documentType: kind,
+            languagePair,
+            projectId: '10000000-0000-4000-8000-000000000001',
+            site: 'TEST site',
+            orderDate: '2026-11-08',
+            deliveryAddress: 'TEST delivery',
+            expectedDeliveryDate: null,
+            notes: null,
+            currency: 'XOF',
+            subtotalMinor: '6400',
+            lineDiscountMinor: '0',
+            orderDiscountMinor: '0',
+            freightMinor: '0',
+            taxMinor: '0',
+            totalMinor: '6400',
+            taxRateBasisPoints: 0,
+            selfApproved: false,
+            supplier: null,
+            lines: Array.from({ length: 64 }, (_, i) => ({
+              nameZh: `TEST 长材料名称多页验收 第${i + 1}行`,
+              nameFr:
+                languagePair === 'zh_fr'
+                  ? `TEST Matériau électrique accentué numéro ${i + 1}`
+                  : null,
+              nameEn:
+                languagePair === 'zh_en'
+                  ? `TEST long electrical material number ${i + 1}`
+                  : null,
+              model: null,
+              specification: 'TEST 100 mm',
+              quantity: '1',
+              unit: 'PCS',
+              currency: 'XOF',
+              unitPriceMinor: '100',
+              lineTotalMinor: '100',
+            })),
+          }
+          const { printProfile: _printProfile, ...legacy } = fixture
           Object.assign(window, {
             print: () => {},
             __TAURI__: {
               core: {
-                invoke: async () => ({
-                  formalDocumentNo: `TEST-${kind}-${languagePair}`,
-                  printProfile: {
-                    schemaVersion: 1,
-                    profileVersion: 'v1-20261108',
-                    legalNameZh: '深圳市弘盛优创机电工程设计有限公司',
-                    logo: {
-                      assetId: 'honsen-approved-logo-v1',
-                      sha256:
-                        '0f733cc13c7086deb17668e9e7103e798d006493370f3b66340e9214e7b70751',
-                      mimeType: 'image/png',
-                    },
-                  },
-                  documentType: kind,
-                  languagePair,
-                  projectId: '10000000-0000-4000-8000-000000000001',
-                  site: 'TEST site',
-                  orderDate: '2026-11-08',
-                  deliveryAddress: 'TEST delivery',
-                  expectedDeliveryDate: null,
-                  notes: null,
-                  currency: 'XOF',
-                  subtotalMinor: '6400',
-                  lineDiscountMinor: '0',
-                  orderDiscountMinor: '0',
-                  freightMinor: '0',
-                  taxMinor: '0',
-                  totalMinor: '6400',
-                  taxRateBasisPoints: 0,
-                  selfApproved: false,
-                  supplier: null,
-                  lines: Array.from({ length: 64 }, (_, i) => ({
-                    nameZh: `TEST 长材料名称多页验收 第${i + 1}行`,
-                    nameFr:
-                      languagePair === 'zh_fr'
-                        ? `TEST Matériau électrique accentué numéro ${i + 1}`
-                        : null,
-                    nameEn:
-                      languagePair === 'zh_en'
-                        ? `TEST long electrical material number ${i + 1}`
-                        : null,
-                    model: null,
-                    specification: 'TEST 100 mm',
-                    quantity: '1',
-                    unit: 'PCS',
-                    currency: 'XOF',
-                    unitPriceMinor: '100',
-                    lineTotalMinor: '100',
-                  })),
-                }),
+                invoke: async () =>
+                  mode === 'formal'
+                    ? fixture
+                    : {
+                        historicalHpa: {
+                          ...legacy,
+                          lines: legacy.lines.map((line) => ({
+                            ...line,
+                            nameFr: null,
+                          })),
+                        },
+                      },
               },
             },
           })
@@ -89,11 +109,25 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
             ),
           )
         },
-        { kind, languagePair },
+        { kind, languagePair, mode },
       )
       await page
         .getByRole('button', { name: '正式单据预览 / Aperçu', exact: true })
         .click()
+      if (mode === 'historical') {
+        const preview = page.locator('.historical-hpa-preview')
+        await expect(preview).toContainText('历史 HPA 预览（仅供核对）')
+        await expect(preview).toContainText('冻结译文缺失')
+        await expect(preview).toContainText('6400 XOF')
+        await expect(preview).not.toContainText('Matériau')
+        await expect(
+          page.getByRole('button', { name: '打印 / Imprimer · PDF' }),
+        ).toHaveCount(0)
+        await page.emulateMedia({ media: 'print' })
+        await expect(preview).toBeHidden()
+        expect(errors).toEqual([])
+        return
+      }
       await expect(page.locator('.print-materials tbody tr')).toHaveCount(64)
       await expect(page.locator('.formal-company-name').first()).toHaveText(
         '深圳市弘盛优创机电工程设计有限公司',
@@ -113,15 +147,18 @@ for (const kind of ['HPA', 'SPO', 'OPA'] as const) {
         `${kind}-${languagePair}`,
       )
       mkdirSync(output, { recursive: true })
+      const path = resolve(output, 'document.pdf')
       const pdf = await page.pdf({
-        path: resolve(output, 'document.pdf'),
+        path,
         preferCSSPageSize: true,
         printBackground: true,
       })
       const pageCount =
         pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)?.length ?? 0
       expect(pageCount).toBeGreaterThan(1)
-      const loadingTask = getDocument({ data: new Uint8Array(pdf) })
+      const saved = readFileSync(path)
+      expect(saved.equals(pdf)).toBe(true)
+      const loadingTask = getDocument({ data: new Uint8Array(saved) })
       const parsed = await loadingTask.promise
       expect(parsed.numPages).toBe(pageCount)
       const firstOperators = await (await parsed.getPage(1)).getOperatorList()

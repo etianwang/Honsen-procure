@@ -1701,3 +1701,18 @@ See `docs/design/ROLLOUT-20261109.md` for browser and Windows build evidence. BL
 ## 2026-11-10 — Main Alpha baseline handoff
 
 Source integration is tracked in [PR #23](https://github.com/etianwang/Honsen-procure/pull/23). See `docs/reviews/ALPHA-BASELINE-20261110.md` for the exact tested source, historical branch dispositions and delivery gates. The dirty Alpha acceptance record and staged environment worktree files remain preserved locally with independent patches. No Staging or production data changed. BLOCKER for distributing a new package is the outstanding installed Staging smoke and restricted distribution channel. DEFERRED physical Shell DPI and native checks remain `BLOCKED_NATIVE_CONTROL`, and joint Toolbox integration belongs to Beta. WARNING the historical attachment-security draft requires its own current-source review.
+
+## 2026-11-10 — Materials option A and GUI startup
+
+Checkpoint is the containing commit on `codex/materials-fixed-columns-windows-launch` from `49108667c4a3320fe4608ccf343e4c7e268b3234`. The material table protects model/specification and unit, and shows up to four prices inline. The release Windows main executable is now linked as a GUI application. No schema, data, API, installer identity or Runner contract change.
+
+Local evidence includes 25 affected Chromium cases, the final three-language column check (3/3), desktop unit tests (76/76), format, lint, typecheck, cargo fmt and Windows NSIS build. The 0.1.26 build and PE proof are in `docs/HONSEN_TOOLBOX_INTEGRATION.md`. BLOCKER for candidate distribution is pending installed smoke including normal no-console launch and native materials readback. DEFERRED complete native UX and DPI, and Toolbox Beta. WARNING inherited lint and build warnings and the unsigned installer. Original 0.1.25 package and separate Alpha evidence worktree remain preserved.
+
+### T12 Alpha historical HPA preview
+
+Selected slice B (confirmed defect). Evidence and scope are in
+[the bounded Alpha review](docs/reviews/T12-HISTORICAL-HPA-ALPHA.md).
+No schema, sync or Staging writes. BLOCKER for installed acceptance:
+native post-fix PDF save and reopen have separate evidence requirements.
+DEFERRED: other print scenarios, mobile payment, full language/DPI matrix
+and Toolbox Beta. The containing task commit is the source checkpoint.

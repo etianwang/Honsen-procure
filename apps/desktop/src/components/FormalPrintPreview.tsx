@@ -2,6 +2,8 @@ import { useUiLocale } from '../lib/ui-locale'
 import { historyText } from '../lib/history-locale'
 import {
   documentSchema,
+  historicalHpaPreviewSchema,
+  formatPrintMoney,
   verifyPrintProfileAsset,
   defaultPrintLanguage,
   permittedPrintLanguages,
@@ -19,7 +21,11 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
   const { locale } = useUiLocale()
   const t = (message: Parameters<typeof historyText>[1]) =>
     historyText(locale, message)
-  const [document, setDocument] = useState<FormalPrintDocument | null>(null)
+  const [result, setResult] = useState<{
+    kind: 'formal' | 'historical'
+    document: FormalPrintDocument
+  } | null>(null)
+  const document = result?.kind === 'formal' ? result.document : null
   const [failed, setFailed] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const previewPending = useRef(false)
@@ -104,7 +110,7 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
     if (previewPending.current) return
     previewPending.current = true
     setPreviewing(true)
-    setDocument(null)
+    setResult(null)
     setFailed(false)
     try {
       const invoke = (
@@ -115,13 +121,22 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
         }
       ).__TAURI__?.core?.invoke
       if (!invoke) throw new Error('Desktop unavailable')
-      const parsed = documentSchema.parse(
-        await invoke<unknown>('get_formal_print_document', { orderId }),
-      )
+      const response = await invoke<unknown>('get_formal_print_document', {
+        orderId,
+      })
+      const historical = historicalHpaPreviewSchema.safeParse(response)
+      if (historical.success) {
+        setResult({
+          kind: 'historical',
+          document: historical.data.historicalHpa,
+        })
+        return
+      }
+      const parsed = documentSchema.parse(response)
       if (parsed.printProfile)
         await verifyPrintProfileAsset(parsed.printProfile)
       setPrimaryLanguage(defaultPrintLanguage(parsed))
-      setDocument(parsed)
+      setResult({ kind: 'formal', document: parsed })
     } catch {
       setFailed(true)
     } finally {
@@ -154,6 +169,9 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
             type="error"
             title={t('无法预览：请检查授权、正式签发状态及冻结文档翻译。')}
           />
+        )}
+        {result?.kind === 'historical' && (
+          <HistoricalHpaPreview document={result.document} />
         )}
         {document && (
           <div>
@@ -194,5 +212,51 @@ export function FormalPrintPreview({ orderId }: { orderId: string }) {
           window.document.body,
         )}
     </>
+  )
+}
+
+function HistoricalHpaPreview({ document }: { document: FormalPrintDocument }) {
+  const { locale } = useUiLocale()
+  const t = (message: Parameters<typeof historyText>[1]) =>
+    historyText(locale, message)
+  return (
+    <div className="historical-hpa-preview">
+      <Alert
+        type="warning"
+        title={t('历史 HPA 预览（仅供核对）')}
+        description={t('冻结快照缺少译文，无法生成正式 PDF 或打印。')}
+      />
+      <p>
+        <strong>{document.formalDocumentNo}</strong> · {document.orderDate} ·{' '}
+        {document.site}
+      </p>
+      <ul>
+        {document.lines.map((line, index) => {
+          const translation =
+            document.languagePair === 'zh_fr' ? line.nameFr : line.nameEn
+          return (
+            <li key={index}>
+              <div>
+                {line.nameZh} · {translation ?? t('冻结译文缺失')}
+              </div>
+              <div>
+                {[line.model, line.specification].filter(Boolean).join(' · ')}
+              </div>
+              <div>
+                {line.quantity} {line.unit} ×{' '}
+                {formatPrintMoney(line.unitPriceMinor, line.currency)} ={' '}
+                {formatPrintMoney(line.lineTotalMinor, line.currency)}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+      <p>
+        <strong>
+          {t('历史单据总额')}{' '}
+          {formatPrintMoney(document.totalMinor, document.currency)}
+        </strong>
+      </p>
+    </div>
   )
 }

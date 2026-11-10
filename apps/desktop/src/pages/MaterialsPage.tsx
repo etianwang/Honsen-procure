@@ -1089,6 +1089,13 @@ function CatalogTable({
           tabIndex={0}
         >
           <table className="data-table materials-data-table">
+            <colgroup>
+              <col className="materials-name-column" />
+              <col className="materials-spec-column" />
+              <col className="materials-unit-column" />
+              <col />
+              <col className="materials-actions-column" />
+            </colgroup>
             <thead>
               <tr>
                 <th>{t('材料')}</th>
@@ -1114,22 +1121,23 @@ function CatalogTable({
                       {material.isActive === false && <span>{t('停用')}</span>}
                     </div>
                   </td>
-                  <td>
-                    {material.model} · {material.specification}
+                  <td className="materials-spec">
+                    {material.model && <div>{material.model}</div>}
+                    {material.specification && (
+                      <div className="muted">{material.specification}</div>
+                    )}
+                    {!material.model && !material.specification && '—'}
                   </td>
                   <td>{material.unit}</td>
                   <td>
-                    <div className="quote-grid">
+                    <div className="materials-quotes">
                       {material.prices.map((price) => (
-                        <div
-                          className={`quote ${price.isPreferredSupplier ? 'preferred' : ''}`}
-                          key={price.priceId}
-                        >
+                        <div className="materials-quote" key={price.priceId}>
                           <strong>
                             {price.supplierName}
                             {price.isPreferredSupplier ? t(' · 首选') : ''}
                           </strong>
-                          <span>
+                          <span className="materials-quote-amount">
                             {formatMoney(
                               {
                                 currency: price.currency,
@@ -1149,7 +1157,7 @@ function CatalogTable({
                       )}
                     </div>
                   </td>
-                  <td>
+                  <td className="materials-actions">
                     <Button type="link" onClick={() => onDetails(material)}>
                       {t('查看全部报价')}
                     </Button>

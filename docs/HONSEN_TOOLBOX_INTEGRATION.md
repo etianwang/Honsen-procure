@@ -277,3 +277,9 @@ T12/T14/Alpha remain OPEN; no cloud/data changes. Toolbox identity unchanged.
 save and reader reopen; left words/compact fees/clean headers, one A4 page,
 1100 XOF and immutable formal number verified. Receipt T12-NATIVE-023-20261108.json.
 No cloud/contract/data mutation; full T12/T14/Alpha and other native gates OPEN.
+
+## 0.1.26 internal Alpha candidate — 2026-11-10
+
+The existing Windows x64 NSIS packaging produced `Honsen-Procure-0.1.26-Setup.exe` with SHA-256 `CB42E052335CF158A2B448A3DDAC3C3B48336B80DA94091762826073AA58EC09`. Authenticode is `NotSigned`. The packaged x64 main EXE is version 0.1.26 and has PE subsystem 2 (Windows GUI). The independent Runner still has subsystem 3. The manifest retains `honsen.procure` and the existing executable and update contract. The original 0.1.25 installer digest is unchanged.
+
+Status is `BUILT_NOT_INSTALLED`. Actual Start Menu and direct EXE launch, installed material layout and installed smoke remain open. Upstream extra launch arguments and the missing third-party apply caller remain Beta integration gaps. This candidate does not change those interfaces or close T15.

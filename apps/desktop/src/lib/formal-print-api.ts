@@ -126,15 +126,20 @@ export const internalExportDocumentSchema = z
   })
   .strict()
 
+function hasFrozenTranslations(
+  document: z.infer<typeof internalExportDocumentSchema>,
+) {
+  return document.lines.every((line) =>
+    document.languagePair === 'zh_en'
+      ? Boolean(line.nameEn?.trim())
+      : Boolean(line.nameFr?.trim()),
+  )
+}
+
 // Internal workbooks may identify missing historical translations. Formal
 // printing remains subject to the original bilingual completeness gate.
 export const documentSchema = internalExportDocumentSchema.refine(
-  (document) =>
-    document.lines.every((line) =>
-      document.languagePair === 'zh_en'
-        ? Boolean(line.nameEn?.trim())
-        : Boolean(line.nameFr?.trim()),
-    ),
+  hasFrozenTranslations,
   { message: 'Missing frozen document translation' },
 )
 export function formatPrintMoney(value: string, currency: string): string {
@@ -146,3 +151,17 @@ export function formatPrintMoney(value: string, currency: string): string {
   const absolute = amount < 0n ? -amount : amount
   return `${amount < 0n ? '-' : ''}${absolute / 100n}.${String(absolute % 100n).padStart(2, '0')} ${currency}`
 }
+
+export const historicalHpaPreviewSchema = z
+  .object({
+    historicalHpa: internalExportDocumentSchema.refine(
+      (document) =>
+        document.documentType === 'HPA' &&
+        !document.printProfile &&
+        !hasFrozenTranslations(document) &&
+        document.lines.every(
+          (line) => currencySchema.safeParse(line.currency).success,
+        ),
+    ),
+  })
+  .strict()
