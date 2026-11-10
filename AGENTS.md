@@ -16,6 +16,12 @@ Before changing any application code, installer, update, release or publishing l
 
 Then compare the project with `docs/HONSEN_TOOLBOX_INTEGRATION.md` and report an integration-gap list before modifying anything that touches the toolbox contract. Do not invent or alter the appId, product directory, EXE name, registry paths, manifest fields, Runner arguments, result JSON or uninstall boundaries. If a conflict is found, report its effect and a proposed repair; wait for approval before changing the conflicting implementation.
 
+## Internal Alpha and Toolbox Beta
+
+Internal Alpha uses a standalone Windows candidate, existing Staging data and company-restricted distribution. Record a blocked native check with its exact scope and evidence. It can remain open during an explicitly approved source merge with green CI. Installed smoke is required before distributing a new Alpha package.
+
+Toolbox catalog enrollment, joint launch and update, stable discovery, Runner apply and registration repair belong to Beta. Keep the fixed identity and packaging contract above for every candidate. Preserve the original T15 final gate and record its open checks in the [Toolbox integration ledger](docs/HONSEN_TOOLBOX_INTEGRATION.md).
+
 ## Non-negotiable rules
 
 1. Tauri 2 + React + TypeScript + SQLite desktop; cloud TypeScript HTTPS API + PostgreSQL. Desktop must NEVER connect directly to PostgreSQL.
