@@ -10,6 +10,12 @@ The current Shell's Windows native interaction and physical DPI remain `BLOCKED_
 
 The frozen unsigned x64 **0.1.24** installer was built from `794dd6e8c05cb010462c2692bb074af521f077be` and passed its bounded installed Staging smoke. Its SHA-256 is `EF49BDA348E56FA478138812EEA708B59DFBCD07F75B8AD8B883C39FBFF142A5`. The smoke used existing data, checked the dedicated test requisition and verified restart readback and sync. Detailed evidence stays in the restricted local record. The prior test package was held for a restricted distribution channel. Carry the original SHA and scope forward when citing the [incremental Alpha evidence](ALPHA-INCREMENTAL-20261109.md).
 
+The frozen 0.1.27 x64 candidate has bounded `USER_ACCEPTED` evidence for
+one installed HPA preview, PDF save and WPS reopen. See the
+[0.1.27 review and evidence index](T12-HISTORICAL-HPA-ALPHA.md).
+The remaining native scenarios and company-restricted distribution stay
+open.
+
 ## Historical source audit
 
 The inventory compared 88 distinct divergent local or remote tips by ancestry, touched paths and current content.

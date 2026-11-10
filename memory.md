@@ -1716,3 +1716,17 @@ No schema, sync or Staging writes. BLOCKER for installed acceptance:
 native post-fix PDF save and reopen have separate evidence requirements.
 DEFERRED: other print scenarios, mobile payment, full language/DPI matrix
 and Toolbox Beta. The containing task commit is the source checkpoint.
+
+### 0.1.27 Alpha HPA user acceptance
+
+Windows 0.1.27 from `6fb38ebee355f71be0e1ccc08c6098354cac7dc3` is
+`USER_ACCEPTED` for one TEST HPA preview, single-page PDF save and WPS
+reopen. The containing docs-only task commit records the
+[evidence index](docs/reviews/T12-HISTORICAL-HPA-ALPHA.md). The screenshot
+originals and scoped delivery record stay in the ignored candidate workspace.
+Documentation formatting, evidence hashes, installed identity and package
+checksum were checked. Application tests and the same manual operation were
+not rerun for this evidence-only slice. No schema, sync or data changes.
+DEFERRED: remaining historical HPA, SPO, OPA, multipage and physical print
+coverage, mobile payments, complete language/DPI coverage and Toolbox Beta.
+WARNING: unsigned candidate and restricted distribution still pending.
