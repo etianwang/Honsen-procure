@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 test('purchaser issues HPA from approved history and can retry a rejected issue without losing the saved detail', async ({
@@ -128,7 +129,7 @@ test('purchaser issues HPA from approved history and can retry a rejected issue 
   await page.getByLabel('密码').fill('synthetic-password')
   await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
-  await page.getByRole('button', { name: '采购申请单' }).click()
+  await openShellPage(page, 'requisition')
   await page
     .getByRole('button', { name: '查看详情：HPA-APPROVED-FIXTURE' })
     .click()

@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 test('receipt submission is single flight and clears quantities only after acknowledgement', async ({
   page,
@@ -58,7 +59,7 @@ test('receipt submission is single flight and clears quantities only after ackno
   })
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: '打开界面预览', exact: true }).click()
-  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await openShellPage(page, 'execution')
   const quantity = page.getByLabel('合成材料 实收数量', { exact: true }),
     submit = page.getByRole('button', { name: '登记收货', exact: true })
   await quantity.fill('1')
@@ -152,7 +153,7 @@ test('supplier child refresh shows actual closed status and blocks further recei
   })
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: '打开界面预览', exact: true }).click()
-  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await openShellPage(page, 'execution')
   const child = page.getByRole('region', {
     name: '供应商子订单 SYNTHETIC-SPO',
     exact: true,

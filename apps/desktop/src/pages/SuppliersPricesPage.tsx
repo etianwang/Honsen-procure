@@ -435,7 +435,6 @@ export function SuppliersPricesPage({
     <section className="supplier-prices-page">
       <header className="page-heading">
         <div>
-          <h2>{t('供应商与价格')}</h2>
           <p>{t('当前授权国家的供应商，以及本地保留的供应材料和报价记录。')}</p>
         </div>
         <Button

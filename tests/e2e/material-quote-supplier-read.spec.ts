@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 for (const [locale, nav, maintain, supplierLabel, retry] of [
   ['zh', '材料库', '维护报价', '供应商', '重试'],
@@ -120,7 +121,7 @@ for (const [locale, nav, maintain, supplierLabel, retry] of [
           name: /打开界面预览|Open interface preview|Ouvrir l’aperçu/,
         })
         .click()
-      await page.getByRole('button', { name: nav, exact: true }).click()
+      await openShellPage(page, 'materials')
       await expect(
         page.getByText('Known synthetic vendor', { exact: true }),
       ).toBeVisible()

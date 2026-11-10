@@ -1,16 +1,11 @@
 import { useUiLocale, shellText, type ShellMessage } from '../lib/ui-locale'
-import type { PropsWithChildren } from 'react'
-import {
-  ClipboardPlus,
-  LayoutDashboard,
-  LibraryBig,
-  Settings,
-  Truck,
-} from 'lucide-react'
+import { useRef, useState, type PropsWithChildren } from 'react'
 import type { UserRole } from '../lib/permissions'
 import type { SyncState } from '../lib/sync-lifecycle'
 import defaultAvatar from '../assets/default-avatar.svg'
 import { AuthorizationContextSelect } from './AuthorizationContextSelect'
+import { AppNavigation, type ShellEntry } from './AppNavigation'
+import { ShellPopover } from './ShellPopover'
 import { SyncStatusDetails } from './SyncStatusDetails'
 import './AppShellToolbar.css'
 
@@ -38,10 +33,12 @@ export type AuthorizationContextOption = {
 type AppShellProps = PropsWithChildren<{
   page: AppPage
   pageTitle: ShellMessage
+  entry?: ShellEntry
   role: UserRole
+  roles?: string[]
   username?: string
   displayName?: string | null
-  onNavigate: (page: AppPage) => void
+  onNavigate: (page: AppPage, entry?: ShellEntry) => void
   onLock?: () => void
   onChangePassword?: () => void
   passwordChangeAvailable?: boolean
@@ -50,6 +47,12 @@ type AppShellProps = PropsWithChildren<{
   authorizationContexts?: AuthorizationContextOption[]
   selectedAuthorizationContext?: string
   onSelectAuthorizationContext?: (value: string) => void
+  scopeNotice?: ShellMessage
+  canCreate: boolean
+  canReview: boolean
+  canManageReference: boolean
+  canManageSystem: boolean
+  accountNavigationBusy: boolean
 }>
 
 const roleLabel: Record<UserRole, ShellMessage> = {
@@ -65,7 +68,9 @@ export function AppShell({
   passwordChangeRecommended,
   page,
   pageTitle,
+  entry,
   role,
+  roles,
   username,
   displayName,
   onNavigate,
@@ -76,102 +81,81 @@ export function AppShell({
   authorizationContexts,
   selectedAuthorizationContext,
   onSelectAuthorizationContext,
+  scopeNotice,
+  canCreate,
+  canReview,
+  canManageReference,
+  canManageSystem,
+  accountNavigationBusy,
 }: AppShellProps) {
   const { locale, setLocale } = useUiLocale()
   const t = (message: ShellMessage) => shellText(locale, message)
+  const [overlay, setOverlay] = useState<'sync' | 'user' | 'scope' | null>(null)
+  const content = useRef<HTMLDivElement>(null)
+  const shownRoles = Object.keys(roleLabel).filter(
+    (key): key is UserRole => roles?.includes(key) ?? key === role,
+  )
+  const title = t(pageTitle)
+  const accountName = displayName || username
+
+  function toggle(next: 'sync' | 'user' | 'scope', open: boolean) {
+    setOverlay((current) => (open ? next : current === next ? null : current))
+  }
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar" aria-label={t('主导航')}>
-        <div className="brand">
-          <span className="brand-mark">H</span>
-          <span>HONSEN</span>
-        </div>
-        <nav>
-          <p className="nav-label">{t('采购工作台')}</p>
-          <button
-            className={`nav-button ${page === 'home' ? 'active' : ''}`}
-            type="button"
-            onClick={() => onNavigate('home')}
-          >
-            <LayoutDashboard size={17} aria-hidden="true" />
-            {t('首页')}
-          </button>
-          <button
-            className={`nav-button ${page === 'materials' ? 'active' : ''}`}
-            type="button"
-            onClick={() => onNavigate('materials')}
-          >
-            <LibraryBig size={17} aria-hidden="true" />
-            {t('材料库')}
-          </button>
-          <button
-            className={`nav-button ${page === 'suppliers' ? 'active' : ''}`}
-            type="button"
-            onClick={() => onNavigate('suppliers')}
-          >
-            <Truck size={17} aria-hidden="true" />
-            {t('供应商与价格')}
-          </button>
-          <button
-            className={`nav-button ${page === 'requisition' ? 'active' : ''}`}
-            type="button"
-            onClick={() => onNavigate('requisition')}
-          >
-            <ClipboardPlus size={17} aria-hidden="true" />
-            {t('采购申请单')}
-          </button>
-          <button
-            className={`nav-button ${page === 'execution' ? 'active' : ''}`}
-            type="button"
-            onClick={() => onNavigate('execution')}
-          >
-            <ClipboardPlus size={17} aria-hidden="true" />
-            {t('采购执行')}
-          </button>
-          <button
-            className={`nav-button ${page === 'master-data' ? 'active' : ''}`}
-            type="button"
-            onClick={() => onNavigate('master-data')}
-          >
-            <Settings size={17} aria-hidden="true" />
-            {t('基础资料管理')}
-          </button>
-          {(role === 'administrator' || role === 'super_administrator') && (
-            <button
-              className={`nav-button ${page === 'conflicts' ? 'active' : ''}`}
-              type="button"
-              onClick={() => onNavigate('conflicts')}
-            >
-              <Settings size={17} aria-hidden="true" />
-              {t('同步冲突')}
-            </button>
-          )}
-          {(role === 'administrator' || role === 'super_administrator') && (
-            <button
-              className={`nav-button ${page === 'authorization' ? 'active' : ''}`}
-              type="button"
-              onClick={() => onNavigate('authorization')}
-            >
-              <Settings size={17} aria-hidden="true" />
-              {t('在线授权管理')}
-            </button>
-          )}
-        </nav>
-      </aside>
+    <div className="app-shell honsen-app-shell">
+      <AppNavigation
+        page={page}
+        entry={entry}
+        canCreate={canCreate}
+        canReview={canReview}
+        canManageReference={canManageReference}
+        canManageSystem={canManageSystem}
+        accountNavigationBusy={accountNavigationBusy}
+        onNavigate={(destination, target) => {
+          if (destination !== page || target === 'new')
+            content.current?.scrollTo(0, 0)
+          setOverlay(null)
+          onNavigate(destination, target)
+        }}
+      />
       <main className="workspace">
         <header className="topbar honsen-shell-toolbar">
-          <div>
-            <p className="eyebrow">
-              HONSEN Procure ·{' '}
-              {locale === 'zh'
-                ? '中文'
-                : locale === 'en'
-                  ? 'English'
-                  : 'Français'}
-            </p>
-            <h1>{shellText(locale, pageTitle) ?? pageTitle}</h1>
-          </div>
-          <div className="honsen-shell-controls">
+          <h1 title={title}>{title}</h1>
+          <AuthorizationContextSelect
+            contexts={authorizationContexts ?? []}
+            value={selectedAuthorizationContext}
+            onChange={onSelectAuthorizationContext}
+            compact={
+              page === 'master-data' ||
+              page === 'authorization' ||
+              page === 'conflicts'
+            }
+            notice={scopeNotice}
+            open={overlay === 'scope'}
+            onOpenChange={(open) => toggle('scope', open)}
+          />
+          <SyncStatusDetails
+            state={syncState}
+            open={overlay === 'sync'}
+            onOpenChange={(open) => toggle('sync', open)}
+          />
+          <ShellPopover
+            label={t('账号菜单')}
+            className="honsen-shell-user"
+            open={overlay === 'user'}
+            onOpenChange={(open) => toggle('user', open)}
+            trigger={<img src={defaultAvatar} width={26} height={26} alt="" />}
+          >
+            <div className="honsen-account-heading">
+              <strong>{accountName || t('账号菜单')}</strong>
+              {username && accountName !== username && <span>{username}</span>}
+              <span>
+                {shownRoles
+                  .map((assigned) => t(roleLabel[assigned]))
+                  .join(' · ')}
+              </span>
+            </div>
             <label className="honsen-shell-language">
               <span>
                 {locale === 'zh'
@@ -194,50 +178,35 @@ export function AppShell({
                 <option value="fr">Français</option>
               </select>
             </label>
-            {authorizationContexts && authorizationContexts.length > 0 && (
-              <AuthorizationContextSelect
-                contexts={authorizationContexts}
-                value={selectedAuthorizationContext}
-                onChange={onSelectAuthorizationContext}
-              />
+            {onChangePassword && (
+              <button
+                type="button"
+                disabled={!passwordChangeAvailable}
+                onClick={() => {
+                  setOverlay(null)
+                  onChangePassword()
+                }}
+              >
+                {t('修改密码')}
+              </button>
             )}
-            <SyncStatusDetails state={syncState} />
-            <div className="honsen-shell-user">
-              <span className="avatar" aria-hidden="true">
-                <img src={defaultAvatar} width={32} height={32} alt="" />
-              </span>
-              {username && (
-                <span className="signed-in-username">
-                  {displayName || username}
-                  {displayName && displayName !== username
-                    ? ` (${username})`
-                    : ''}
-                </span>
-              )}
-              <span>{t(roleLabel[role])}</span>
-              {onChangePassword && (
-                <button
-                  type="button"
-                  disabled={!passwordChangeAvailable}
-                  onClick={onChangePassword}
-                >
-                  {t('修改密码')}
-                </button>
-              )}
-              {onChangePassword && !passwordChangeAvailable && (
-                <span className="password-online-note">
-                  {t('修改密码需要在线登录和可用连接。')}
-                </span>
-              )}
-              {onLock && (
-                <button type="button" onClick={onLock}>
-                  {t('锁定')}
-                </button>
-              )}
-            </div>
-          </div>
+            {onChangePassword && !passwordChangeAvailable && (
+              <p>{t('修改密码需要在线登录和可用连接。')}</p>
+            )}
+            {onLock && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOverlay(null)
+                  onLock()
+                }}
+              >
+                {t('锁定')}
+              </button>
+            )}
+          </ShellPopover>
         </header>
-        <div className="content">
+        <div className="content" ref={content}>
           {passwordChangeRecommended && (
             <div className="password-recommendation">
               <p role="status">

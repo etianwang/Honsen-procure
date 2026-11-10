@@ -1,3 +1,8 @@
+import {
+  openShellAccount,
+  openShellPage,
+  selectShellLanguage,
+} from './shell-controls'
 import { expect, test, type Page } from '@playwright/test'
 
 test('existing account lookup reports pending and failures next to its controls in the active language', async ({
@@ -6,7 +11,10 @@ test('existing account lookup reports pending and failures next to its controls 
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await openAccounts(page)
-  await page.getByRole('button', { name: '管理已有账号', exact: true }).click()
+  await page
+    .locator('.content')
+    .getByRole('button', { name: '管理已有账号', exact: true })
+    .click()
   await page.evaluate(() => {
     const host = window as Window & {
       __TAURI__: {
@@ -30,10 +38,11 @@ test('existing account lookup reports pending and failures next to its controls 
   await expect(page.locator('#managed-account-search-feedback')).toContainText(
     '正在查询账号授权',
   )
+  await expect(page.locator('[data-shell-entry=create]')).toBeDisabled()
   await expect(
     page.getByRole('button', { name: '正在查询…', exact: true }),
   ).toBeDisabled()
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('en')
+  await selectShellLanguage(page, 'en')
   await expect(page.locator('#managed-account-search-feedback')).toContainText(
     'Loading account authorization',
   )
@@ -43,7 +52,7 @@ test('existing account lookup reports pending and failures next to its controls 
   await expect(page.locator('#managed-account-search-feedback')).toContainText(
     'Lookup failed',
   )
-  await page.getByLabel('界面语言 / UI language / Langue').selectOption('fr')
+  await selectShellLanguage(page, 'fr')
   await expect(page.locator('#managed-account-search-feedback')).toContainText(
     'Échec de recherche',
   )
@@ -165,8 +174,12 @@ test('display name is presented separately from the login name', async ({
   page,
 }) => {
   await openAccounts(page, false, false, false, false, false, '合成工程员')
-  await expect(page.locator('.signed-in-username')).toHaveText(
-    '合成工程员 (synthetic-admin)',
+  await openShellAccount(page)
+  await expect(page.locator('.honsen-account-heading strong')).toHaveText(
+    '合成工程员',
+  )
+  await expect(page.locator('.honsen-account-heading')).toContainText(
+    'synthetic-admin',
   )
 })
 
@@ -174,7 +187,8 @@ test('legacy session without a display name falls back to its stored username', 
   page,
 }) => {
   await openAccounts(page)
-  await expect(page.locator('.signed-in-username')).toHaveText(
+  await openShellAccount(page)
+  await expect(page.locator('.honsen-account-heading strong')).toHaveText(
     'synthetic-admin',
   )
 })
@@ -407,7 +421,7 @@ async function openAccounts(
       exact: true,
     })
     .click()
-  await page.getByRole('button', { name: '在线授权管理', exact: true }).click()
+  await openShellPage(page, 'authorization')
 }
 
 const languages = [
@@ -477,9 +491,7 @@ for (const [
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await openAccounts(page)
-    await page
-      .getByRole('combobox', { name: '界面语言 / UI language / Langue' })
-      .selectOption(locale)
+    await selectShellLanguage(page, locale)
     await page.getByLabel(user, { exact: true }).fill('SyntheticNew')
     await page
       .getByLabel(
@@ -652,8 +664,9 @@ for (const recommended of [false, true]) {
     await expect(
       page.getByText('初始密码仍在使用，建议修改密码；可继续使用系统'),
     ).toHaveCount(recommended ? 1 : 0)
+    await openShellAccount(page)
     await page
-      .locator('.topbar')
+      .getByRole('dialog', { name: '账号菜单' })
       .getByRole('button', { name: '修改密码', exact: true })
       .click()
     const dialog = page.getByRole('dialog', { name: '修改密码', exact: true })
@@ -705,8 +718,9 @@ for (const [code, message] of [
     await page.evaluate((code) => {
       ;(window as unknown as { __passwordError: string }).__passwordError = code
     }, code)
+    await openShellAccount(page)
     await page
-      .locator('.topbar')
+      .getByRole('dialog', { name: '账号菜单' })
       .getByRole('button', { name: '修改密码', exact: true })
       .click()
     const dialog = page.getByRole('dialog', { name: '修改密码', exact: true })
@@ -736,9 +750,10 @@ test('offline password change stays disabled and home preserves scope warning', 
   page,
 }) => {
   await openAccounts(page, false, false, true)
+  await openShellAccount(page)
   await expect(
     page
-      .locator('.topbar')
+      .getByRole('dialog', { name: '账号菜单' })
       .getByRole('button', { name: '修改密码', exact: true }),
   ).toBeDisabled()
   await expect(
@@ -768,9 +783,10 @@ test('super administrator governance notice does not claim password change grant
       { exact: true },
     ),
   ).toBeVisible()
+  await openShellAccount(page)
   await expect(
     page
-      .locator('.topbar')
+      .getByRole('dialog', { name: '账号菜单' })
       .getByRole('button', { name: '修改密码', exact: true }),
   ).toBeEnabled()
 })

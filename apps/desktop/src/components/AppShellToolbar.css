@@ -1,85 +1,340 @@
-.honsen-shell-toolbar.topbar {
-  display: grid;
-  grid-template-columns: minmax(9rem, auto) minmax(0, 1fr);
-  align-items: start;
-  padding-block: 12px;
+.app-shell.honsen-app-shell {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
-.honsen-shell-controls {
-  display: flex;
-  align-items: start;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 12px 16px;
-  min-width: 0;
+
+.honsen-shell-sidebar.sidebar {
+  width: 214px;
+  padding: 8px;
+}
+
+.honsen-shell-sidebar .brand {
+  min-height: 36px;
+  margin: 0 0 8px;
+  padding-inline: 4px;
+}
+
+.honsen-shell-sidebar .brand-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--honsen-radius-control);
+}
+
+.honsen-sidebar-toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-inline-start: auto;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--honsen-radius-control);
+}
+
+.honsen-shell-sidebar nav {
+  display: grid;
+  gap: 2px;
+  overflow: visible;
+}
+
+.honsen-shell-sidebar .nav-button {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 8px;
+  gap: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.honsen-shell-sidebar .nav-button svg {
+  flex-shrink: 0;
+}
+
+.honsen-nav-chevron {
+  margin-inline-start: auto;
+  transform: rotate(-90deg);
+}
+
+[aria-expanded='true'] > .honsen-nav-chevron {
+  transform: none;
+}
+
+.honsen-shell-sidebar .nav-button[aria-current='page'],
+.honsen-shell-sidebar .nav-button[data-current='true'] {
+  color: white;
+  background: #1c5a48;
+}
+
+.honsen-shell-sidebar .nav-button[aria-current='page'] {
+  box-shadow: inset 2px 0 var(--honsen-focus);
+}
+
+.honsen-shell-sidebar button:focus-visible {
+  outline: 2px solid white;
+  outline-offset: -2px;
+}
+
+.honsen-nav-children {
+  margin: 2px 0 6px 15px;
+  padding-inline-start: 4px;
+  border-inline-start: 1px solid #5b8777;
+}
+
+.honsen-shell-sidebar .honsen-nav-leaf {
+  min-height: 32px;
   font-size: 13px;
 }
-.honsen-shell-controls label {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
+
+.honsen-shell-sidebar[data-rail='true'] {
+  width: 52px;
 }
-.honsen-shell-controls select {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
+
+.honsen-shell-sidebar[data-rail='true'] .brand-mark,
+.honsen-shell-sidebar[data-rail='true'] .honsen-brand-name,
+.honsen-shell-sidebar[data-rail='true'] .nav-button span,
+.honsen-shell-sidebar[data-rail='true'] .honsen-nav-chevron {
+  display: none;
 }
-.honsen-shell-language {
-  flex: 0 1 7rem;
+
+.honsen-shell-sidebar[data-rail='true'] .brand,
+.honsen-shell-sidebar[data-rail='true'] .nav-button {
+  justify-content: center;
 }
-.honsen-shell-scope {
-  flex: 1 1 22rem;
-  max-width: 32rem;
-  display: grid;
-  gap: 4px;
-  min-width: 0;
+
+.honsen-shell-sidebar[data-rail='true'] .brand {
+  padding: 0;
 }
-.honsen-shell-scope .ant-select {
-  width: 100%;
-  min-width: 0;
-}
-.honsen-shell-user {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-}
-.honsen-shell-user .signed-in-username {
-  overflow-wrap: anywhere;
-}
-.honsen-shell-user .password-online-note {
-  flex-basis: 100%;
-}
-.honsen-shell-sync {
-  flex: 1 1 18rem;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.honsen-shell-sync summary {
-  cursor: pointer;
-  width: fit-content;
-}
-.honsen-shell-sync dl {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 6px 12px;
-  margin: 8px 0 0;
-  padding: 10px;
-  border: 1px solid var(--honsen-border, #dce9e2);
-  border-radius: 6px;
-}
-.honsen-shell-sync dd {
+
+.honsen-shell-sidebar[data-rail='true'] .honsen-sidebar-toggle {
   margin: 0;
 }
-.honsen-shell-sync-warning {
-  font-weight: 600;
+
+.honsen-nav-flyout {
+  display: grid;
+  gap: 2px;
+  width: 190px;
 }
-@media (max-width: 1366px) {
-  .honsen-shell-toolbar.topbar {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
+
+.honsen-nav-flyout .nav-button {
+  display: block;
+  padding: 5px 8px;
+  min-height: 32px;
+}
+
+.honsen-nav-flyout .nav-button[aria-current='page'] {
+  color: var(--honsen-action);
+  background: var(--honsen-subtle);
+}
+
+.honsen-shell-toolbar.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(33vw, 360px)) auto auto;
+  align-items: center;
+  flex: 0 0 52px;
+  box-sizing: border-box;
+  block-size: 52px;
+  min-block-size: 52px;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--honsen-surface);
+  border-color: var(--honsen-border);
+}
+
+.honsen-shell-toolbar.topbar h1 {
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.honsen-shell-scope {
+  min-width: 0;
+}
+
+.honsen-shell-scope .ant-select {
+  width: 100%;
+  height: 32px;
+}
+
+.honsen-shell-scope .ant-select-selection-item,
+.honsen-shell-scope .ant-select-selection-placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.honsen-scope-summary {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.honsen-scope-summary > span:not([aria-hidden]) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.honsen-scope-summary > span:last-child {
+  flex-shrink: 0;
+  max-width: 42%;
+}
+
+.honsen-scope-popup {
+  max-width: calc(100vw - 20px);
+}
+
+.honsen-scope-fields,
+.honsen-sync-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 5px 8px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.honsen-scope-fields {
+  padding: 8px;
+  border-bottom: 1px solid var(--honsen-border);
+}
+
+.honsen-scope-fields div,
+.honsen-sync-fields div {
+  display: contents;
+}
+
+.honsen-scope-fields dd,
+.honsen-sync-fields dd {
+  margin: 0;
+}
+
+.honsen-shell-toolbar > .honsen-shell-user,
+.honsen-shell-toolbar .honsen-sync-trigger,
+.honsen-shell-toolbar .honsen-scope-unavailable {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 32px;
+  min-width: 32px;
+  max-width: 100%;
+  padding: 0 7px;
+  font-size: 13px;
+  line-height: 1.25;
+  white-space: nowrap;
+  background: var(--honsen-surface);
+  border: 1px solid var(--honsen-border);
+  border-radius: var(--honsen-radius-control);
+}
+
+.honsen-shell-toolbar > .honsen-shell-user {
+  width: 32px;
+  padding: 0;
+}
+
+.honsen-shell-user img {
+  display: block;
+  border-radius: 50%;
+}
+
+.honsen-shell-toolbar .honsen-scope-unavailable {
+  width: 100%;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.honsen-scope-unavailable span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.honsen-shell-toolbar .honsen-sync-trigger[data-severity='warning'] {
+  color: #684208;
+  background: #fff4df;
+  border-color: #dfc18e;
+}
+
+.honsen-shell-toolbar .honsen-sync-trigger[data-severity='error'] {
+  color: #8b2529;
+  background: #fff0ef;
+  border-color: #e5b1b1;
+}
+
+.honsen-sync-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.honsen-shell-popover {
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100vw - 44px));
+  overflow-wrap: anywhere;
+}
+
+.honsen-shell-popover p {
+  margin: 0;
+}
+
+.honsen-account-heading,
+.honsen-shell-language {
+  display: grid;
+  gap: 4px;
+}
+
+.honsen-account-heading {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--honsen-border);
+}
+
+.honsen-shell-popover button,
+.honsen-shell-popover select {
+  min-height: 32px;
+  padding-inline: 8px;
+  color: var(--honsen-text);
+  background: var(--honsen-surface);
+  border: 1px solid var(--honsen-border);
+  border-radius: var(--honsen-radius-control);
+}
+
+.honsen-shell-popover button:disabled {
+  opacity: 0.65;
+}
+
+.honsen-shell-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .honsen-shell-sidebar.sidebar:not([data-rail='true']) {
+    width: 176px;
   }
-  .honsen-shell-controls {
-    justify-content: flex-start;
+}
+
+@media (max-width: 600px) {
+  .honsen-shell-toolbar.topbar {
+    grid-template-columns: minmax(0, 1fr) minmax(32px, 22vw) auto auto;
+    gap: 4px;
+    padding-inline: 5px;
+  }
+
+  .honsen-shell-toolbar.topbar h1 {
+    font-size: 14px;
+  }
+
+  .honsen-sync-trigger svg {
+    display: none;
   }
 }

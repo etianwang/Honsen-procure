@@ -1,3 +1,4 @@
+import { selectShellLanguage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const [locale, approval, history, statusLabel, projectLabel] of [
@@ -109,9 +110,7 @@ for (const [locale, approval, history, statusLabel, projectLabel] of [
     await page.locator('#captcha').fill('2')
     await page.getByRole('button', { name: '离线登录' }).click()
 
-    await page
-      .getByLabel('界面语言 / UI language / Langue')
-      .selectOption(locale)
+    await selectShellLanguage(page, locale)
     await expect(page.locator('.home-workbench')).not.toContainText(
       'REQ-00000000',
     )

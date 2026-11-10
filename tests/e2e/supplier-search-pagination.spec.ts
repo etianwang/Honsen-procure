@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const [
@@ -210,7 +211,7 @@ for (const [
           name: /打开界面预览|Open interface preview|Ouvrir l’aperçu/,
         })
         .click()
-      await page.getByRole('button', { name: nav, exact: true }).click()
+      await openShellPage(page, 'suppliers')
       const list = page.locator('.supplier-list')
       const pager = page.getByRole('navigation', { name: pages })
       const search = page.getByRole('textbox', {

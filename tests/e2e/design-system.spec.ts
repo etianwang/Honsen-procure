@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 test('shared desktop theme preserves readable controls and bounded workspace', async ({
@@ -22,7 +23,7 @@ test('shared desktop theme preserves readable controls and bounded workspace', a
     'background-color',
     'rgb(245, 247, 246)',
   )
-  await page.getByRole('button', { name: '材料库', exact: true }).click()
+  await openShellPage(page, 'materials')
   await expect(
     page.getByRole('heading', { name: '材料库总览' }).last(),
   ).toBeVisible()

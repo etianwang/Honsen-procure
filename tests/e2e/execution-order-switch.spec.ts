@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 test('switching approved parent orders isolates supplier allocation drafts without RFQ', async ({
   page,
@@ -85,7 +86,7 @@ test('switching approved parent orders isolates supplier allocation drafts witho
   })
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: '打开界面预览', exact: true }).click()
-  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await openShellPage(page, 'execution')
   await page.getByLabel('材料A 子单编号', { exact: true }).fill('A-DRAFT')
   await page.getByRole('button', { name: 'PARENT-B', exact: true }).click()
   await expect(page.getByLabel('材料B 子单编号', { exact: true })).toHaveValue(

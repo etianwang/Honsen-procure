@@ -525,7 +525,6 @@ export function MaterialsPage({
     <>
       <section className="page-heading">
         <div>
-          <h2>{t('材料库总览')}</h2>
           <p>
             {t('每种材料最多展示四家有效供应商报价；同币种才可在订单内比较。')}
           </p>

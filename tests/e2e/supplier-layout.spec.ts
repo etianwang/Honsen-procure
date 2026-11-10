@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const width of [1280, 1366, 1920]) {
@@ -76,9 +77,7 @@ for (const width of [1280, 1366, 1920]) {
       await page
         .getByRole('button', { name: 'Ouvrir l’aperçu', exact: true })
         .click()
-      await page
-        .getByRole('button', { name: 'Fournisseurs et prix', exact: true })
-        .click()
+      await openShellPage(page, 'suppliers')
       const suppliers = page.getByRole('region', {
         name: 'Liste des fournisseurs ; défilement horizontal',
       })

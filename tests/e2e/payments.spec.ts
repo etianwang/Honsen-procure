@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { test, expect } from '@playwright/test'
 
 test('production payment screen records three payments and reverses once with a reason', async ({
@@ -94,7 +95,7 @@ test('production payment screen records three payments and reverses once with a 
   })
   await page.goto('/')
   await page.getByRole('button', { name: '打开界面预览' }).click()
-  await page.getByRole('button', { name: '采购执行', exact: true }).click()
+  await openShellPage(page, 'execution')
   for (const amount of ['100', '200', '300']) {
     await page.getByLabel('收款方', { exact: true }).fill('Synthetic payee')
     await page

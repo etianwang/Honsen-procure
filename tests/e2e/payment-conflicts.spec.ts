@@ -1,3 +1,4 @@
+import { openShellPage } from './shell-controls'
 import { expect, test } from '@playwright/test'
 
 for (const explicitLocale of [undefined, 'fr-FR'] as const) {
@@ -143,7 +144,7 @@ for (const previouslyLoaded of [false, true]) {
     await page.getByLabel('密码', { exact: true }).fill('synthetic-password')
     await page.locator('#captcha').fill('2')
     await page.getByRole('button', { name: '离线登录', exact: true }).click()
-    await page.getByRole('button', { name: '同步冲突', exact: true }).click()
+    await openShellPage(page, 'conflicts')
     if (previouslyLoaded) {
       await expect(page.locator('.conflict-record')).toBeVisible()
       await page.evaluate(() => {
@@ -275,7 +276,7 @@ test('administrator reconciles immutable payments through the production conflic
   await page.getByLabel('密码').fill('fixture-password')
   await page.locator('#captcha').fill('2')
   await page.getByRole('button', { name: '离线登录' }).click()
-  await page.getByRole('button', { name: '同步冲突', exact: true }).click()
+  await openShellPage(page, 'conflicts')
   await page.getByText('比较本地与云端内容').click()
   await expect(page.getByText(/synthetic-local/)).toBeVisible()
   await expect(page.getByText(/synthetic-server/)).toBeVisible()

@@ -142,7 +142,6 @@ export function ProcurementExecutionPage({
     <>
       <section className="page-heading">
         <div>
-          <h2>{t('采购执行')}</h2>
           <p>
             {t(
               '选择已批准的 Honsen 采购申请；市场直采无需 RFQ 或供应商子订单。',

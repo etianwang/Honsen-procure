@@ -14,9 +14,16 @@ import {
 } from '../lib/master-data-api'
 import type { UserRole } from '../lib/permissions'
 
-export function MasterDataPage({ role }: { role: UserRole }) {
+export function MasterDataPage({
+  role,
+  category,
+  onCategoryChange,
+}: {
+  role: UserRole
+  category: string
+  onCategoryChange: (category: string) => void
+}) {
   const t = useMasterText()
-  const [category, setCategory] = useState('countries')
   const [projects, setProjects] = useState<ProjectDefaultsView[] | null>(null)
   const [referenceData, setReferenceData] = useState<
     ReferenceMasterDataView[] | null
@@ -109,7 +116,7 @@ export function MasterDataPage({ role }: { role: UserRole }) {
                     ? 'master-data-' + key + '-panel'
                     : 'master-data-reference-panel'
                 }
-                onClick={() => setCategory(key)}
+                onClick={() => onCategoryChange(key)}
               >
                 {t(label)}
               </button>
