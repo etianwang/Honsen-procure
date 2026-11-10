@@ -24,6 +24,8 @@ The inventory compared 88 distinct divergent local or remote tips by ancestry, t
 
 ## Delivery gates
 
+The first handoff PR run passed 360 of 361 browser cases. The sidebar test sampled its former width before the media-query listener updated the React render. The test now waits for the same exact width at each viewport. The application and acceptance dimensions are unchanged.
+
 - Clone `main` from GitHub and use [the repository bootstrap](../../README.md#develop-from-a-fresh-clone). Record the tested commit and distinguish browser, unit, PostgreSQL and native scope. Existing ignored worktree evidence and credentials stay local.
 - Build the next standalone Windows Alpha from verified `main` in a new output directory. Record version, exact source, checksum, signing status and the installed smoke state. Use existing Staging data and leave the 0.1.24 package intact. Distribute only after the new package passes its installed smoke and an authorized restricted channel is available.
 - Toolbox catalog, stable update discovery, joint launch and Runner apply are Beta gates. The approved identity, packaging contract and original T15 final requirements remain in force. The upstream extra launch arguments and missing third-party apply call remain open. See the [Toolbox integration ledger](../HONSEN_TOOLBOX_INTEGRATION.md).
