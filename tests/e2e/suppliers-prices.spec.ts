@@ -347,7 +347,19 @@ test('quote form submits XAF integer minor units without selecting a supplier im
   ).toContainText('SYNTH · Synthetic supplier')
   const currency = dialog.getByRole('combobox', { name: /货币$/ })
   await currency.click()
-  await page.getByRole('option', { name: 'XAF', exact: true }).click()
+  const xaf = page
+    .locator('.ant-select-dropdown:visible')
+    .getByRole('option', { name: 'XAF', exact: true })
+  await expect(xaf).toBeVisible()
+  const optionId = await xaf.getAttribute('id')
+  expect(optionId).toBeTruthy()
+  await currency.press('Home')
+  await currency.press('ArrowDown')
+  await expect(currency).toHaveAttribute(
+    'aria-activedescendant',
+    optionId ?? '',
+  )
+  await currency.press('Enter')
   await expect(currency).toHaveAttribute('aria-expanded', 'false')
   await expect(
     dialog

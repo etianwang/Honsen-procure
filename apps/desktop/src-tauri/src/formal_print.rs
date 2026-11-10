@@ -1,5 +1,11 @@
 use super::*;
 
+enum ExportView {
+    Formal,
+    Preview,
+    Internal,
+}
+
 impl LocalAuthService {
     /// A read-only, allowlisted view; never expose the raw owner pricing bundle.
     pub fn get_formal_print_document(
@@ -7,20 +13,27 @@ impl LocalAuthService {
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<serde_json::Value, AuthError> {
-        self.read_export_document(order_id, now, true)
+        self.read_export_document(order_id, now, ExportView::Formal)
+    }
+    pub fn get_print_preview(
+        &self,
+        order_id: Uuid,
+        now: SystemTime,
+    ) -> Result<serde_json::Value, AuthError> {
+        self.read_export_document(order_id, now, ExportView::Preview)
     }
     pub fn get_internal_export_document(
         &self,
         order_id: Uuid,
         now: SystemTime,
     ) -> Result<serde_json::Value, AuthError> {
-        self.read_export_document(order_id, now, false)
+        self.read_export_document(order_id, now, ExportView::Internal)
     }
     fn read_export_document(
         &self,
         order_id: Uuid,
         now: SystemTime,
-        strict_translation: bool,
+        view: ExportView,
     ) -> Result<serde_json::Value, AuthError> {
         let mut connection = self.historical_order_connection(order_id, now)?;
         let transaction = connection.transaction().map_err(|_| AuthError::Database)?;
@@ -34,7 +47,25 @@ impl LocalAuthService {
         let raw = current
             .formal_snapshot_json
             .ok_or(AuthError::InvalidInput)?;
-        project_for_export(&number, &kind, &raw, strict_translation)
+        match view {
+            ExportView::Formal => project(&number, &kind, &raw),
+            ExportView::Preview => project_preview(&number, &kind, &raw),
+            ExportView::Internal => project_for_export(&number, &kind, &raw, false),
+        }
+    }
+}
+
+fn project_preview(number: &str, kind: &str, raw: &str) -> Result<serde_json::Value, AuthError> {
+    match project(number, kind, raw) {
+        Err(AuthError::MissingDocumentTranslation) if kind == "HPA" => {
+            let document = project_for_export(number, kind, raw, false)?;
+            // The compatibility view is for pre-profile HPA only.
+            if document.get("printProfile").is_some() {
+                return Err(AuthError::MissingDocumentTranslation);
+            }
+            Ok(serde_json::json!({ "historicalHpa": document }))
+        }
+        result => result,
     }
 }
 
@@ -180,8 +211,14 @@ fn project_for_export(
     };
     let lines = snapshot.lines.iter().enumerate().map(|(index,line)| {
         let material: serde_json::Value = serde_json::from_str(&line.material_snapshot_json).map_err(|_| AuthError::InvalidInput)?;
-        let required = |key| material.get(key).and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned).ok_or(AuthError::InvalidInput);
-        Ok(serde_json::json!({"nameZh":required("nameZh")?, "nameFr": if snapshot.language_pair == "zh_fr" { if strict_translation { Some(required("nameFr")?) } else { material.get("nameFr").and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned) } } else { None }, "nameEn": if snapshot.language_pair == "zh_en" { if strict_translation { Some(required("nameEn")?) } else { material.get("nameEn").and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_owned) } } else { None }, "model":material.get("model"), "specification":material.get("specification"), "quantity":line.quantity, "unit":line.unit, "currency":if kind == "OPA" { &snapshot.primary_currency } else { &snapshot.currency }, "unitPriceMinor":if kind == "OPA" { line.owner_final_unit_price_minor.as_ref().ok_or(AuthError::InvalidInput)? } else { &line.unit_price_minor }, "lineTotalMinor":owner_totals.as_ref().map(|v| &v.0[index]).unwrap_or(&line.line_total_minor)}))
+        let name = |key| material.get(key).and_then(serde_json::Value::as_str).filter(|s| !s.trim().is_empty());
+        let name_zh = name("nameZh").ok_or(AuthError::InvalidInput)?;
+        let name_fr = (snapshot.language_pair == "zh_fr").then(|| name("nameFr")).flatten();
+        let name_en = (snapshot.language_pair == "zh_en").then(|| name("nameEn")).flatten();
+        if strict_translation && name_fr.is_none() && name_en.is_none() {
+            return Err(AuthError::MissingDocumentTranslation);
+        }
+        Ok(serde_json::json!({"nameZh":name_zh, "nameFr":name_fr, "nameEn":name_en, "model":material.get("model"), "specification":material.get("specification"), "quantity":line.quantity, "unit":line.unit, "currency":if kind == "OPA" { &snapshot.primary_currency } else { &snapshot.currency }, "unitPriceMinor":if kind == "OPA" { line.owner_final_unit_price_minor.as_ref().ok_or(AuthError::InvalidInput)? } else { &line.unit_price_minor }, "lineTotalMinor":owner_totals.as_ref().map(|v| &v.0[index]).unwrap_or(&line.line_total_minor)}))
     }).collect::<Result<Vec<_>,AuthError>>()?;
     if let Some(profile) = &snapshot.print_profile {
         profile.validate()?;
@@ -254,8 +291,27 @@ mod tests {
             );
             assert_eq!(
                 project("TEST-HPA", "HPA", &missing.to_string()),
-                Err(AuthError::InvalidInput)
+                Err(AuthError::MissingDocumentTranslation)
             );
+            assert_eq!(
+                project_preview("TEST-HPA", "HPA", &missing.to_string()),
+                Err(AuthError::MissingDocumentTranslation)
+            );
+            let mut legacy = missing.clone();
+            legacy.as_object_mut().unwrap().remove("printProfile");
+            let frozen = legacy.to_string();
+            let view = project_preview("TEST-HPA", "HPA", &frozen).unwrap();
+            let history = &view["historicalHpa"];
+            assert_eq!(history["formalDocumentNo"], "TEST-HPA");
+            assert_eq!(history["totalMinor"], "250");
+            assert_eq!(history["lines"][0]["nameZh"], "Frozen source");
+            assert!(history["lines"][0]["nameFr"].is_null());
+            assert!(history["lines"][0]["nameEn"].is_null());
+            assert_eq!(
+                project_preview("TEST-SPO", "SPO", &frozen),
+                Err(AuthError::MissingDocumentTranslation)
+            );
+            assert_eq!(legacy.to_string(), frozen);
             let internal =
                 project_for_export("TEST-HPA", "HPA", &missing.to_string(), false).unwrap();
             assert!(internal["lines"][0]["nameFr"].is_null());
@@ -288,7 +344,7 @@ mod tests {
             let frozen_missing = missing_owner.to_string();
             assert_eq!(
                 project("TEST-OPA-1", "OPA", &frozen_missing),
-                Err(AuthError::InvalidInput)
+                Err(AuthError::MissingDocumentTranslation)
             );
             let internal = project_for_export("TEST-OPA-1", "OPA", &frozen_missing, false).unwrap();
             assert!(internal["lines"][0]["nameFr"].is_null());
@@ -314,7 +370,7 @@ mod tests {
             serde_json::json!("{\"nameZh\":\"冻结材料\",\"nameFr\":\"Matériau\"}");
         assert_eq!(
             project("TEST-SPO-1", "SPO", &raw.to_string()),
-            Err(AuthError::InvalidInput)
+            Err(AuthError::MissingDocumentTranslation)
         );
     }
 }

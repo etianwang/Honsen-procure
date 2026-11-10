@@ -7997,7 +7997,7 @@ pub mod commands {
         auth: State<'_, LocalAuthService>,
         order_id: Uuid,
     ) -> Result<serde_json::Value, CommandError> {
-        auth.get_formal_print_document(order_id, SystemTime::now())
+        auth.get_print_preview(order_id, SystemTime::now())
             .map_err(Into::into)
     }
     #[tauri::command]
@@ -17450,9 +17450,14 @@ mod tests {
             assert_eq!(payload["formalSnapshotJson"], before.0);
             let approved_snapshot: serde_json::Value = serde_json::from_str(&before.0).unwrap();
             assert_eq!(payload["printProfile"], approved_snapshot["printProfile"]);
+            let formal_print = service.get_formal_print_document(parent, now).unwrap();
             assert_eq!(
-                service.get_formal_print_document(parent, now).unwrap()["printProfile"],
+                formal_print["printProfile"],
                 approved_snapshot["printProfile"]
+            );
+            assert_eq!(
+                service.get_print_preview(parent, now).unwrap(),
+                formal_print
             );
             assert_eq!(after.1.0, before.1.0 + 1);
             assert_eq!(after.1.1, before.1.1 + 1);

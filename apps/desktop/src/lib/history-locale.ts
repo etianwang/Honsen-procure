@@ -116,6 +116,16 @@ const messages = {
     'Preview formal document',
     'Aperçu du document officiel',
   ],
+  '历史 HPA 预览（仅供核对）': [
+    'Historical HPA preview (for reference)',
+    'Aperçu HPA historique (pour vérification)',
+  ],
+  '冻结快照缺少译文，无法生成正式 PDF 或打印。': [
+    'The frozen record is missing a translation. Official PDF and printing are unavailable.',
+    'La version figée ne contient pas la traduction requise. Le PDF officiel et l’impression sont indisponibles.',
+  ],
+  冻结译文缺失: ['Frozen translation missing', 'Traduction figée manquante'],
+  历史单据总额: ['Historical document total', 'Total du document historique'],
   '无法预览：请检查授权、正式签发状态及冻结文档翻译。': [
     'Preview unavailable; check authorization, formal issue and frozen document translations.',
     'Aperçu indisponible ; vérifiez autorisation, émission et traductions documentaires figées.',

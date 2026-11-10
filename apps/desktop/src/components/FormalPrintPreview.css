@@ -304,3 +304,8 @@ body.honsen-printing-formal > .honsen-print-root {
     display: none;
   }
 }
+@media print {
+  .historical-hpa-preview {
+    display: none;
+  }
+}
