@@ -78,13 +78,26 @@ for (const [
             nameEn: 'Synthetic material ' + i,
             aliases: [],
             brand: null,
-            model: 'MODEL',
-            specification: 'Synthetic specification',
-            unit: 'pcs',
+            model: i === 0 ? 'TEST-MODEL-01' : 'MODEL',
+            specification: i === 0 ? 'TEST 100 mm' : 'Synthetic specification',
+            unit: 'PCS',
             notes: null,
             version: 1,
             isActive: active,
-            prices: [],
+            prices:
+              i === 0
+                ? Array.from({ length: 4 }, (_, index) => ({
+                    priceId: 'synthetic-price-' + index,
+                    supplierId: 'synthetic-supplier-' + index,
+                    supplierName:
+                      'Fournisseur de fournitures industrielles ' + index,
+                    currency: 'XOF',
+                    unitPriceMinor: String(1100 + index * 100),
+                    unit: 'PCS',
+                    isPreferredSupplier: index === 0,
+                    effectiveAt: '2026-11-10',
+                  }))
+                : [],
           })
           Object.assign(window, {
             __materialsRequests: requests,
@@ -202,6 +215,36 @@ for (const [
             : '合成材料' + i
       await expect(region.getByRole('row')).toHaveCount(51)
       await expect(region.getByText(name(0), { exact: true })).toBeVisible()
+      const first = region.getByRole('row').nth(1)
+      const model = first.getByText('TEST-MODEL-01', { exact: true })
+      const unit = first.getByRole('cell', { name: 'PCS', exact: true })
+      await expect(
+        first.getByText('TEST 100 mm', { exact: true }),
+      ).toBeInViewport()
+      for (const field of [model, unit]) {
+        await expect(field).toBeInViewport()
+        expect(
+          await field.evaluate((el) => {
+            const range = document.createRange()
+            range.selectNodeContents(el)
+            return range.getClientRects().length
+          }),
+        ).toBe(1)
+      }
+      const quotes = first.locator('.materials-quote-amount')
+      await expect(quotes).toHaveCount(4)
+      for (let index = 0; index < 4; index++) {
+        await expect(quotes.nth(index)).toHaveText(
+          new RegExp(`1[,\\s]?${100 + index * 100}`),
+        )
+        await expect(quotes.nth(index)).toBeInViewport({ ratio: 1 })
+      }
+      await expect(first.getByRole('button').first()).toBeInViewport({
+        ratio: 1,
+      })
+      await page.screenshot({
+        path: '.cache/materials-fixed-columns-' + locale + '-1280.png',
+      })
       await expect(pager.getByRole('status')).toContainText('50')
       await expect(
         pager.getByRole('button', { name: previous, exact: true }),
@@ -320,6 +363,10 @@ for (const [
               .__materialsRequests.length,
         ),
       ).toBe(before + 1)
+      await page.setViewportSize({ width: 1024, height: 680 })
+      await expect
+        .poll(() => region.evaluate((el) => el.scrollWidth - el.clientWidth))
+        .toBeGreaterThan(0)
       await region.evaluate((el) => {
         el.scrollLeft = el.scrollWidth
       })
@@ -332,7 +379,7 @@ for (const [
         ),
       ).toBe(true)
       await page.screenshot({
-        path: '.cache/materials-page-' + locale + '-720.png',
+        path: '.cache/materials-fixed-columns-' + locale + '-1024.png',
       })
       const requests = await page.evaluate(
         () =>
