@@ -4,6 +4,8 @@
 
 # Honsen Toolbox Integration
 
+**Delivery stage.** Joint Toolbox acceptance, catalog enrollment and stable update delivery are Beta work. A standalone internal Alpha candidate still follows the approved installer identity and packaging contract and requires its own installed smoke. The cross-product gaps and original T15 acceptance remain open.
+
 ## Current approved launch scope2 — 2026-11-04
 
 User explicitly approved reviews/TOOLBOX-LAUNCH-IMPLEMENTATION-20261104.md and its offline/404/failure policy after candidate66c777e. Re-read upstream README, Windows standard, desktop update protocol, integration contract and schema in that order before implementation. Current gaps remain: incomplete launch identity validation, no native stable-update selection or skipped-version preference; actual Toolbox scope3 caller and qualified stable assets remain separate. The first three gaps are now authorized only within that exact proposal. No Manifest/public argument/result/data/installation boundary change is approved. New private launch identity validation must not silently alter existing apply validation behavior. Implementation/test evidence is pending; approval is not PASS or automatic catalog eligibility.

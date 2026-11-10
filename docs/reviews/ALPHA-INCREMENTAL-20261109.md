@@ -1,5 +1,7 @@
 # Internal Alpha incremental acceptance
 
+For the frozen 0.1.24 installed smoke outcome and post-Alpha development baseline, see the [current Alpha handoff](ALPHA-BASELINE-20261110.md). The entries below retain their original source and test scope.
+
 The integration candidate is [PR #21](https://github.com/etianwang/Honsen-procure/pull/21). The application delta for this review is pinned at `787c92e02eec4b860cd659ccc4e26a46d7eb5e20`. The later `6f36a3a` commit changes whitespace in four documents. Compare the final `main` tree with this candidate again before building the installer or carrying forward any evidence.
 
 ## Retained evidence and affected paths

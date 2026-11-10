@@ -147,9 +147,10 @@ for (const [locale, details, failureCode, roles = ['administrator']] of [
     ]) {
       await page.setViewportSize({ width, height })
       expect((await toolbar.boundingBox())?.height).toBe(52)
-      expect(
-        (await page.locator('.honsen-shell-sidebar').boundingBox())?.width,
-      ).toBe(width <= 900 ? 52 : width <= 1100 ? 176 : 214)
+      await expect(page.locator('.honsen-shell-sidebar')).toHaveCSS(
+        'width',
+        width <= 900 ? '52px' : width <= 1100 ? '176px' : '214px',
+      )
       await expect(page.locator('.honsen-shell-scope')).toBeVisible()
       const account = page.locator('.honsen-shell-user')
       await expect(account).toBeVisible()

@@ -2,7 +2,7 @@
 
 Honsen采购管理系统（HONSEN Procure）是一套面向海外机电项目的本地优先 Windows 采购桌面应用。每次启动都需要认证；已认证用户可在规定时限内离线继续处理其所属项目的采购工作。同步通过已认证账号会话安全增量进行，不提供公开设备注册流程。
 
-This repository currently contains the engineering specification set. It is intentionally not yet an application scaffold.
+The monorepo contains the Windows Tauri desktop application, HTTPS API, shared contracts and verification suites. Use the latest verified `main` as the development baseline.
 
 **Source repository:** <https://github.com/etianwang/Honsen-procure.git>
 
@@ -44,6 +44,24 @@ For any Windows installation, update, release or publishing work, also read [Too
 | `docs/BUILD-TASKS.md`                | Ordered implementation tasks and mandatory code/DOM acceptance gates            |
 | `memory.md`                          | Persistent progress, verification evidence and regression-prevention notes      |
 
-## Recommended first implementation task
+## Develop from a fresh clone
 
-Implement Milestone 0 only: establish the monorepo, strict TypeScript shared contracts, SQLite migration harness, Tauri boundary validation, and CI quality gates. Do not scaffold supplier integration, cloud synchronization, update machinery, or a login page until the corresponding decisions and contracts are reviewed.
+Use the Node.js version in `.nvmrc`. For the Windows native build, use the Rust MSVC toolchain, Visual Studio C++ build tools and the WebView2 runtime. Run these commands at the repository root.
+
+```powershell
+git clone --branch main https://github.com/etianwang/Honsen-procure.git
+cd Honsen-procure
+npm ci
+npm run format:check
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+npx playwright install chromium
+npm run e2e
+npm run desktop:build --workspace @honsen/desktop -- --debug
+```
+
+The browser suite uses synthetic fixtures. Local server tests requiring PostgreSQL are skipped without `TEST_DATABASE_URL`. Use the disposable PostgreSQL 16 setup documented in [AGENTS.md](AGENTS.md) for those tests. Use `npm run desktop:dev --workspace @honsen/desktop` for normal desktop development.
+
+Read the [Alpha baseline handoff](docs/reviews/ALPHA-BASELINE-20261110.md) for the integrated source, retained evidence and open gates. Installer builds are separate from local development and require the Toolbox preflight above.
