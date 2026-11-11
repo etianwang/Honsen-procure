@@ -38,10 +38,34 @@ integer amount assertions. The original full run remains recorded as failed.
   The focused isolated SQLite HPA issuance test also passed with the
   strict print projection and preview return checked for equality.
 
+## Installed 0.1.27 user acceptance
+
+`USER_ACCEPTED` applies to one previously issued TEST HPA on Windows x64
+0.1.27, built from `6fb38ebee355f71be0e1ccc08c6098354cac7dc3`.
+The user verified formal preview in Procure, saved the PDF, and opened it
+in WPS PDF. The A4 single-page output used French as the primary language
+and Chinese as the secondary language. The user checked the material,
+formal number, total, right-side fee summary with zero-value items, and
+`Page 1 / 1`.
+
+Windows registration and the installed executable report 0.1.27. The
+installed executable differs from the recorded build payload only by
+the three-byte Tauri NSIS marker (`UNK` to `NSS`). The unchanged candidate
+installer SHA-256 is
+`64F6430C4563285079CBD6DB74E462208E13CD9139C29F903248D185C3E402E4`.
+
+The two user-supplied screenshots are attached to the restricted local
+handoff at `.cache/alpha-0.1.27-hpa-preview/user-acceptance/` in the
+candidate workspace. The public evidence index records their fingerprints.
+
+| Screenshot                    | SHA-256                                                            |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `hpa-preview-windows.png`     | `32CD26D721DA610C43D898EC99A08873C0DB3E8240834C181F4CA6F36F43F5AA` |
+| `hpa-pdf-reopened-in-wps.png` | `1FD2C482C9A37C1202E2CE877D97FA2FC2EE4FA4008B96ED6EE7424E332014C3` |
+
 ## Known issues
 
-The historical compatibility view does not offer formal PDF or print.
-Windows installed PDF save and reopen need separate acceptance from the
-browser PDF tests. Physical printing combinations, mobile payments,
-complete three-language coverage and the native DPI matrix remain open.
-Toolbox remains Beta.
+The historical compatibility view remains screen-only. The single accepted
+HPA does not close other historical HPA cases, SPO, OPA, multipage native
+PDF, physical printing, mobile payments, complete three-language coverage
+or the native DPI matrix. Toolbox remains Beta.
