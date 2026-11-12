@@ -677,3 +677,17 @@ The [delivery record](reviews/ALPHA-027-DELIVERY.md) tracks the complete
 local package and `NOT_DISTRIBUTED` status. A company-restricted channel,
 recipient list and access validation are still required for distribution.
 Original parent gates remain open.
+
+### 2026-11-12 — bounded macOS candidate
+
+User-approved T15 local Apple Silicon package/startup slice (D/B), not a new
+parent task or acceptance system. macOS data-path/Keychain defects repaired;
+local 0.1.27 app/DMG, strict ad-hoc signature, read-only contents/version/hash
+and exact-path native login/single-cloud-CAPTCHA startup verified. Desktop76,
+Rust188, platform3, Keychain1 and package1 tests PASS; affected quality gates
+PASS. [Exact evidence](reviews/MACOS-PACKAGE-20261112.md).
+No schema/sync/server/Windows Toolbox contract change. Original parent gates
+stay unchecked. BLOCKER none for this bounded slice; PR quality/main sync
+pending. DEFERRED complete authenticated/installed Mac workflows and original
+Windows/Toolbox gates. WARNING ad-hoc/no notarization, preserved intermediate
+installed copy needs replacement using final DMG, inherited warnings.

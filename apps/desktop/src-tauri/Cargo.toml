@@ -37,7 +37,7 @@ isolated-api-override = []
 [dependencies]
 argon2 = "0.5.3"
 base64 = "0.22.1"
-keyring = { version = "3.6.3", features = ["windows-native"] }
+keyring = { version = "3.6.3", features = ["windows-native", "apple-native"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 heic-rs = { version = "=0.1.4", default-features = false }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
