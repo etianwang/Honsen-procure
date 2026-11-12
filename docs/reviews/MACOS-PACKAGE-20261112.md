@@ -99,10 +99,12 @@ login. No CAPTCHA was solved and no login or business write was performed.
 The final app remains at its login page for the user. This is startup proof,
 not authenticated workflow or installed-final-package acceptance.
 
-The final build uses the containing task commit's production file contents.
+The final build uses production checkpoint
+`3627f32dd76c5955d3c536778e4a34e22f38ac1d` file contents.
 Documentation updates after artifact creation do not change those inputs.
 Local logs and DMG remain ignored; exact source/evidence checkpoint is the
-containing commit, with CI/main outcome reported separately.
+production commit above; later record commits change documentation only.
+PR #27 owns the subsequent CI/main integration outcome.
 
 ## Remaining issues
 

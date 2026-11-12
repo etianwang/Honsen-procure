@@ -1761,15 +1761,18 @@ typecheck/lint/build/fmt/Clippy and original Windows manifest regressions9 PASS.
 Final DMG integrity, read-only contents/signature/version and exact-path native
 startup/single-cloud-CAPTCHA checks PASS. No account credentials entered.
 
-Checkpoint is the containing task commit; source remains local pending
-commit/Push/PR and green quality before the user-authorized squash/main sync.
-Selected dirty files are this task's platform paths, Cargo feature/lock,
-macOS config/icons/build scripts/regressions and these progress records.
+Production checkpoint `3627f32dd76c5955d3c536778e4a34e22f38ac1d` is committed
+and pushed on the task branch; PR #27 is open. This containing follow-up
+checkpoint changes records only. The final GitHub quality/main outcome is
+reported separately after checking the exact PR head. No production inputs
+changed after package/startup acceptance. Selected tracked dirt is expected
+zero after this record checkpoint; no unrelated changes are included.
 Ignored toolchains/logs/artifacts remain in `.cache` or Tauri target. No test
 container/daemon was started; owned DMG mount detached and synthetic Keychain
 entry removed. Final generated app remains at its login page.
 
-BLOCKER: none for bounded package/startup; CI/main integration still pending.
+BLOCKER: none for bounded package/startup. PR #27 quality/main integration
+is a subsequent workflow gate; do not infer its outcome from local evidence.
 DEFERRED: authenticated macOS offline/online/sync/print/language/DPI/security
 acceptance, final installed Mac acceptance and original Windows/Toolbox Beta
 parent gates. No local PG/API/DOM business suite was rerun: no affected
