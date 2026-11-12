@@ -1747,3 +1747,38 @@ language/accessibility/DPI coverage, mobile payment and Toolbox Beta.
 WARNING: unsigned installer. No application, schema, Staging or snapshot
 changes. This task branch is to be pushed and integrated through normal
 repository checks under the user's explicit merge authorization.
+
+## 2026-11-12 — macOS Apple Silicon local candidate
+
+User-authorized bounded T15 package/startup slice; baseline `dd46489`, branch
+`codex/macos-package-20261112`. See
+[macOS evidence](docs/reviews/MACOS-PACKAGE-20261112.md) for actual environment,
+commands, initial failures, final DMG and main-binary hashes. macOS uses
+Application Support plus native Keychain; Windows identity/data/Runner
+contracts are preserved. No schema/sync/server/business change. Desktop
+76, Rust library188, platform3, real Keychain1 and package regression1 PASS;
+typecheck/lint/build/fmt/Clippy and original Windows manifest regressions9 PASS.
+Final DMG integrity, read-only contents/signature/version and exact-path native
+startup/single-cloud-CAPTCHA checks PASS. No account credentials entered.
+
+Production checkpoint `3627f32dd76c5955d3c536778e4a34e22f38ac1d` is committed
+and pushed on the task branch; PR #27 is open. This containing follow-up
+checkpoint changes records only. The final GitHub quality/main outcome is
+reported separately after checking the exact PR head. No production inputs
+changed after package/startup acceptance. Selected tracked dirt is expected
+zero after this record checkpoint; no unrelated changes are included.
+Ignored toolchains/logs/artifacts remain in `.cache` or Tauri target. No test
+container/daemon was started; owned DMG mount detached and synthetic Keychain
+entry removed. Final generated app remains at its login page.
+
+BLOCKER: none for bounded package/startup. PR #27 quality/main integration
+is a subsequent workflow gate; do not infer its outcome from local evidence.
+DEFERRED: authenticated macOS offline/online/sync/print/language/DPI/security
+acceptance, final installed Mac acceptance and original Windows/Toolbox Beta
+parent gates. No local PG/API/DOM business suite was rerun: no affected
+server/shared/schema/UI boundary, and full PG/DOM remains required in CI.
+WARNING: `/Applications` contains a preserved intermediate build with helper
+tools and different hash; use the final DMG to replace it before normal use.
+WARNING: ad-hoc only, no Developer ID/notarization; existing lint/chunk/Rust
+warnings and four npm advisories retained. Next: complete this PR/CI/main
+handoff, then user login on the final package for bounded macOS business QA.

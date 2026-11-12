@@ -69,3 +69,14 @@ authentication/lockout/retirement/rate-limit/TLS/protocol errors do not offer
 offline downgrade. Persist no plaintext passwords; server login CAPTCHA remains
 unchanged. This narrow approved decision supersedes prior
 local-CAPTCHA-every-launch wording only for online login.
+
+## 2026-11-12 — user-requested local macOS candidate
+
+The user's explicit macOS packaging/main-integration request authorizes a
+bounded Apple Silicon local candidate and necessary platform startup/Keychain
+repairs. It does not redefine the original Windows Alpha, Toolbox contracts
+or final release gates. Keep Tauri identifier africa.honsen.procure; use the
+current user's Library/Application Support under that identifier and Apple
+Keychain. Use local ad-hoc signing while Developer ID is unavailable. Do not
+publish the DMG into the Windows Toolbox stable release assets. See
+[the evidence report](reviews/MACOS-PACKAGE-20261112.md).

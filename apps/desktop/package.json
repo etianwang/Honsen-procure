@@ -8,6 +8,7 @@
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build --no-bundle",
     "release:windows": "node ../../scripts/build-windows-release.mjs",
+    "release:macos": "node ../../scripts/build-macos-release.mjs",
     "typecheck": "tsc -b --pretty false",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

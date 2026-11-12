@@ -19,6 +19,8 @@ use std::{thread, time::Duration};
 use tauri::Manager;
 use uuid::Uuid;
 
+mod profile_directory;
+
 #[cfg(debug_assertions)]
 fn profile_path() -> Result<(PathBuf, bool), String> {
     match env::var("HONSEN_PROCURE_PROFILE").as_deref() {
@@ -33,32 +35,14 @@ fn profile_path() -> Result<(PathBuf, bool), String> {
             }
             Ok((path, true))
         }
-        Ok("") | Err(_) => {
-            let root = env::var_os("LOCALAPPDATA")
-                .map(PathBuf::from)
-                .ok_or_else(|| "LOCALAPPDATA is unavailable".to_owned())?;
-            Ok((
-                root.join("Honsen Program")
-                    .join("honsen.procure")
-                    .join("honsen.procure.sqlite"),
-                false,
-            ))
-        }
+        Ok("") | Err(_) => Ok((profile_directory::database_path()?, false)),
         Ok(_) => Err("HONSEN_PROCURE_PROFILE must be omitted or set to test".to_owned()),
     }
 }
 
 #[cfg(not(debug_assertions))]
 fn profile_path() -> Result<(PathBuf, bool), String> {
-    let root = env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .ok_or_else(|| "LOCALAPPDATA is unavailable".to_owned())?;
-    Ok((
-        root.join("Honsen Program")
-            .join("honsen.procure")
-            .join("honsen.procure.sqlite"),
-        false,
-    ))
+    Ok((profile_directory::database_path()?, false))
 }
 
 fn main() {
